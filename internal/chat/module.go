@@ -3,12 +3,15 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,18 +43,16 @@ func New(pool *pgxpool.Pool, options ...Options) *Module {
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/projects/{projectId}/chat-roles", m.handle(m.createRole))
-	mux.HandleFunc("POST /api/projects/{projectId}/chat-threads/resolve", m.handle(m.resolveThread))
-	mux.HandleFunc("GET /api/chat-threads/{id}", m.handle(m.getThread))
-	mux.HandleFunc("POST /api/chat-threads/{id}/binding", m.handle(m.bindThread))
-	mux.HandleFunc("POST /api/chat-deliveries/binding/resolve", m.handle(m.resolveWorker))
+	mux.HandleFunc("POST /api/projects/{projectId}/chat-roles", handle(m, m.createRole))
+	mux.HandleFunc("POST /api/projects/{projectId}/chat-threads/resolve", handle(m, m.resolveThread))
+	mux.HandleFunc("GET /api/chat-threads/{id}", handle(m, m.getThread))
+	mux.HandleFunc("POST /api/chat-threads/{id}/binding", handle(m, m.bindThread))
+	mux.HandleFunc("POST /api/chat-deliveries/binding/resolve", handle(m, m.resolveWorker))
 }
-
-type operation func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 
 func unavailable() error { return workorders.Fail(404, "chat binding unavailable") }
 
-func (m *Module) handle(op operation) http.HandlerFunc {
+func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principal, Input) (any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if !m.enabled {
@@ -63,16 +64,28 @@ func (m *Module) handle(op operation) http.HandlerFunc {
 			httpapi.WriteError(w, 401, "unauthorized")
 			return
 		}
-		// Decode fully before acquiring any locks. No unbounded request/network work
-		// takes place while the final access fence is held.
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
 		ctx, cancel := context.WithTimeout(tenant.WithPrincipal(r.Context(), p), 3*time.Second)
 		defer cancel()
 		r = r.WithContext(ctx)
+		// Both network reading and typed decoding finish before acquiring a
+		// database connection. The same budget covers the final transaction.
+		var in Input
+		if r.Method != http.MethodGet {
+			raw, err := readBody(ctx, w, r)
+			if err != nil {
+				workorders.WriteError(w, err)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			if err := workorders.Decode(r, &in); err != nil {
+				workorders.WriteError(w, err)
+				return
+			}
+		}
 		var out any
 		err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 			var err error
-			out, err = op(r, tx, p)
+			out, err = op(r, tx, p, in)
 			return err
 		})
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, authz.ErrForbidden) {
@@ -83,6 +96,46 @@ func (m *Module) handle(op operation) http.HandlerFunc {
 			return
 		}
 		httpapi.WriteJSON(w, 200, out)
+	}
+}
+
+func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	controller := http.NewResponseController(w)
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := controller.SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return nil, workorders.Fail(http.StatusRequestTimeout, "request body deadline unavailable")
+		}
+	}
+	body := http.MaxBytesReader(w, r.Body, 8192)
+	type result struct {
+		raw []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		raw, err := io.ReadAll(body)
+		done <- result{raw, err}
+	}()
+	select {
+	case got := <-done:
+		// Clear the connection deadline only after a complete body. An
+		// incomplete/timed-out request must not resume keep-alive reads.
+		if got.err == nil && ctx.Err() == nil {
+			_ = controller.SetReadDeadline(time.Time{})
+			return got.raw, nil
+		}
+		var tooLarge *http.MaxBytesError
+		if errors.As(got.err, &tooLarge) {
+			return nil, workorders.Fail(http.StatusBadRequest, "request body too large")
+		}
+		return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
+	case <-ctx.Done():
+		// An explicit socket deadline also interrupts a read when the
+		// caller cancels before the three-second deadline. Closing releases
+		// cancellable bodies used by middleware and isolated transports.
+		_ = controller.SetReadDeadline(time.Now())
+		_ = body.Close()
+		return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
 	}
 }
 
@@ -106,14 +159,7 @@ func personID(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, error
 
 var slotPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:/-]*$`)
 
-func (m *Module) createRole(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in struct {
-		Kind    string `json:"kind"`
-		SlotKey string `json:"slot_key"`
-	}
-	if err := workorders.Decode(r, &in); err != nil {
-		return nil, err
-	}
+func (m *Module) createRole(r *http.Request, tx pgx.Tx, p tenant.Principal, in RoleCreate) (any, error) {
 	if len(in.SlotKey) < 1 || len(in.SlotKey) > 128 || !slotPattern.MatchString(in.SlotKey) ||
 		!(in.Kind == "lead" && in.SlotKey == "lead" || in.Kind == "worker" && in.SlotKey != "lead" && in.SlotKey != "worker") {
 		return nil, workorders.Fail(400, "invalid role kind or assignment slot")
@@ -153,13 +199,7 @@ func (m *Module) createRole(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	return out, nil
 }
 
-func (m *Module) resolveThread(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in struct {
-		RoleID string `json:"role_id"`
-	}
-	if err := workorders.Decode(r, &in); err != nil {
-		return nil, err
-	}
+func (m *Module) resolveThread(r *http.Request, tx pgx.Tx, p tenant.Principal, in ThreadResolve) (any, error) {
 	project := r.PathValue("projectId")
 	if !workorders.UUID(project) || !workorders.UUID(in.RoleID) {
 		return nil, unavailable()
@@ -210,7 +250,7 @@ func loadThread(ctx context.Context, tx pgx.Tx, id string) (Thread, error) {
 	return out, err
 }
 
-func (m *Module) getThread(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) getThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _ struct{}) (any, error) {
 	id := r.PathValue("id")
 	if !workorders.UUID(id) {
 		return nil, unavailable()
@@ -248,14 +288,7 @@ func position(value string) (int64, error) {
 	return v, nil
 }
 
-func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in struct {
-		ExpectedEpoch string `json:"expected_epoch"`
-		SessionID     string `json:"session_id"`
-	}
-	if err := workorders.Decode(r, &in); err != nil {
-		return nil, err
-	}
+func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal, in BindingWrite) (any, error) {
 	expected, err := position(in.ExpectedEpoch)
 	if err != nil {
 		return nil, err
@@ -304,6 +337,9 @@ func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if incompatible {
 		return nil, workorders.Fail(409, "session belongs to another chat role")
 	}
+	if err = claimNativeContext(r.Context(), tx, p, s, role); err != nil {
+		return nil, err
+	}
 	var current string
 	err = tx.QueryRow(r.Context(), `SELECT session_id::text FROM chat_session_bindings WHERE role_id=$1 AND valid_to IS NULL`, role).Scan(&current)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -312,7 +348,7 @@ func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if current == s.ID {
 		return loadThread(r.Context(), tx, id)
 	}
-	if _, err = tx.Exec(r.Context(), `INSERT INTO chat_session_contexts(tenant_id,session_id,role_id,owner_person_id,project_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT (tenant_id,session_id) DO NOTHING`, p.TenantID, s.ID, role, person, project); err != nil {
+	if _, err = tx.Exec(r.Context(), `INSERT INTO chat_session_contexts(tenant_id,session_id,role_id,owner_person_id,project_id,harness,ref_digest,vendor_ref_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (tenant_id,session_id) DO NOTHING`, p.TenantID, s.ID, role, person, project, s.Harness, s.RefDigest, s.VendorRefDigest); err != nil {
 		return nil, err
 	}
 	var sameContext bool
@@ -341,11 +377,7 @@ func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	return loadThread(r.Context(), tx, id)
 }
 
-func (m *Module) resolveWorker(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in WorkerBindingRequest
-	if err := workorders.Decode(r, &in); err != nil {
-		return nil, err
-	}
+func (m *Module) resolveWorker(r *http.Request, tx pgx.Tx, p tenant.Principal, in WorkerBindingRequest) (any, error) {
 	if err := accessFence(r.Context(), tx, p); err != nil {
 		return nil, err
 	}
@@ -413,10 +445,54 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 	if err = workerKeyTx(ctx, tx, r, p); err != nil {
 		return s, err
 	}
+	if err = verifyNativeContext(ctx, tx, s, role); err != nil {
+		return s, err
+	}
 	if _, err = tx.Exec(ctx, `SELECT set_config('aeon.chat_conversation_id',$1,true)`, id); err != nil {
 		return s, err
 	}
 	return s, nil
+}
+
+// The tenant access fence serializes context claims. Role/thread and the
+// registration are already locked; aliases use one sorted digest namespace.
+// No event counter or network work precedes these final record writes.
+func nativeReferences(s harness.ExternalRegistration) [][]byte {
+	refs := [][]byte{s.RefDigest}
+	if len(s.VendorRefDigest) != 0 && !bytes.Equal(s.RefDigest, s.VendorRefDigest) {
+		refs = append(refs, s.VendorRefDigest)
+	}
+	slices.SortFunc(refs, bytes.Compare)
+	return refs
+}
+
+func claimNativeContext(ctx context.Context, tx pgx.Tx, p tenant.Principal, s harness.ExternalRegistration, role string) error {
+	for _, ref := range nativeReferences(s) {
+		if len(ref) != sha256.Size {
+			return unavailable()
+		}
+		// ON CONFLICT also sees a previous owner's RLS-hidden key. Never
+		// overwrite it; the subsequent participant read fails closed.
+		if _, err := tx.Exec(ctx, `INSERT INTO chat_native_contexts(tenant_id,harness,ref_digest,role_id,owner_person_id,project_id)
+ VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,harness,ref_digest) DO NOTHING`, p.TenantID, s.Harness, ref, role, s.OwnerPersonID, s.ProjectID); err != nil {
+			return err
+		}
+	}
+	return verifyNativeContext(ctx, tx, s, role)
+}
+
+func verifyNativeContext(ctx context.Context, tx pgx.Tx, s harness.ExternalRegistration, role string) error {
+	for _, ref := range nativeReferences(s) {
+		var same bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chat_native_contexts WHERE harness=$1 AND ref_digest=$2
+ AND role_id=$3 AND owner_person_id=$4 AND project_id=$5)`, s.Harness, ref, role, s.OwnerPersonID, s.ProjectID).Scan(&same); err != nil {
+			return err
+		}
+		if !same {
+			return unavailable()
+		}
+	}
+	return nil
 }
 
 func workerKeyTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) error {

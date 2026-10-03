@@ -84,6 +84,10 @@ func TestNativeContextSurvivesRegistrationGenerations(t *testing.T) {
 			if unchanged.BindingEpoch != "0" || unchanged.Revision != "1" {
 				t.Fatal("failed binding changed the target")
 			}
+			var claimed int
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM chat_native_contexts WHERE role_id=$1`, target.Role.ID).Scan(&claimed); err != nil || claimed != 0 {
+				t.Fatalf("rejected binding retained native aliases: count=%d err=%v", claimed, err)
+			}
 			if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped' WHERE id=$1`, second); err != nil {
 				t.Fatal(err)
 			}

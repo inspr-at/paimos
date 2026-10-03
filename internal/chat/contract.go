@@ -4,6 +4,20 @@
 // History, delivery and receiver qualification are separate later packages.
 package chat
 
+type RoleCreate struct {
+	Kind    string `json:"kind"`
+	SlotKey string `json:"slot_key"`
+}
+
+type ThreadResolve struct {
+	RoleID string `json:"role_id"`
+}
+
+type BindingWrite struct {
+	ExpectedEpoch string `json:"expected_epoch"`
+	SessionID     string `json:"session_id"`
+}
+
 type Role struct {
 	Contract          string `json:"contract"`
 	ID                string `json:"role_id"`

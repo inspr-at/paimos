@@ -6,6 +6,35 @@ info:
 servers:
   - url: /api
 paths:
+  /chat/offline-wait-policy:
+    get:
+      operationId: getChatOfflineWaitPolicy
+      x-aeon-package: R3
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Read the current person's effective policy or workspace default. A person's override takes precedence over the workspace default, then the built-in one-hour default. Workspace reads require settings.read; person reads never expose another person's policy. Legacy delivery deadlines are unchanged."
+      parameters:
+        - {name: scope, in: query, required: false, schema: {type: string, enum: [person, workspace], default: person}}
+      responses:
+        '200': {description: Effective offline-wait policy, content: {application/json: {schema: {$ref: '#/components/schemas/ChatOfflineWaitPolicy'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putChatOfflineWaitPolicy
+      x-aeon-package: R3
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Update only the current person's override or the workspace default with revision CAS and final transaction authorization. Workspace writes require settings.manage. At most 4 KiB body, with a three-second body/work deadline. Changes apply only to messages accepted afterward; they never extend or reset an accepted delivery deadline, resend expired/uncertain messages, or change legacy settings."
+      parameters:
+        - {name: scope, in: query, required: false, schema: {type: string, enum: [person, workspace], default: person}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatOfflineWaitPolicyWrite'}
+      responses:
+        '200': {description: Saved policy for future messages, content: {application/json: {schema: {$ref: '#/components/schemas/ChatOfflineWaitPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive before the deadline}
+        '409': {description: Policy revision conflict}
   /chat-threads/{id}/messages:
     get:
       operationId: "listChatMessages"
@@ -30,7 +59,7 @@ paths:
     post:
       operationId: "sendChatMessage"
       x-aeon-package: "R3"
-      description: "Reserved chat-v1 contract for R3; not mounted by R1. Accept at most 512 KiB wire bytes, 4 KiB decoded metadata and 64 KiB valid UTF-8 body without NUL. Underlying inbox keys use chat/<conversation>/<client-id> and fit the existing 128-character bound. Same client ID and digest replays; a different payload conflicts. Sender is derived. Message, membership, intent and private event commit atomically under current participant/project authorization. Normal input never interrupts or grants execution authority. 30 sends/minute with burst 10. Invalid oversized body returns 413 without any writes."
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Accept at most 512 KiB wire bytes, 4 KiB decoded metadata and 64 KiB valid UTF-8 body without NUL. Underlying inbox keys use chat/<conversation>/<client-id> and fit the existing 128-character bound. Same client ID and digest replays; a different payload conflicts. Sender is derived. Message, membership, intent and private event commit atomically under current participant/project authorization. Capture delivery_deadline as server acceptance time plus the person's effective offline-wait policy (workspace fallback; default 3600 seconds, 600–86400). Retries replay the original deadline; policy changes, reconnect and handover never reset it. Only never-offered input may wait until it; expiry preserves history as Not delivered and requires an explicit new send. Uncertain offers are never automatically resent. Legacy deadlines are unchanged. Normal input never interrupts or grants execution authority. 30 sends/minute with burst 10. Invalid oversized body returns 413 without any writes."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
       responses:
         '200':
@@ -245,7 +274,7 @@ paths:
   /projects/{projectId}/chat-roles:
     post:
       operationId: createChatRole
-      description: chat-v1, disabled by default. A person creates only their own authorized project role. Lead uses the stored person_project scope and the fixed lead slot; workers need a distinct assignment slot. No session is started or controlled.
+      description: chat-v1, disabled by default. A person creates only their own authorized project role. Lead uses the stored person_project scope and the fixed lead slot; workers need a distinct assignment slot. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No session is started or controlled.
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -256,12 +285,13 @@ paths:
       responses:
         '200': {description: Created or existing own role, content: {application/json: {schema: {$ref: '#/components/schemas/ChatRole'}}}}
         '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unauthorized target}
         '409': {description: Slot belongs to a different role kind}
   /projects/{projectId}/chat-threads/resolve:
     post:
       operationId: resolveChatThread
-      description: chat-v1. Idempotently resolve the person's durable thread for an already authorized role. No newest-session selection or principal-wide fallback.
+      description: chat-v1. Idempotently resolve the person's durable thread for an already authorized role. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No newest-session selection or principal-wide fallback.
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -277,6 +307,7 @@ paths:
       responses:
         '200': {description: Durable conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
         '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unauthorized target}
   /chat-threads/{id}:
     get:
@@ -290,7 +321,7 @@ paths:
   /chat-threads/{id}/binding:
     post:
       operationId: bindChatThread
-      description: chat-v1. Person participant compare-and-swap handover. Validate owner, tenant, project, external registration, live lease state and role under the final access fence. Session ID is a candidate, never proof. No automation delegation is implemented in R1.
+      description: chat-v1. Person participant compare-and-swap handover. Validate owner, tenant, project, external registration, live lease state and role under the final access fence. Registered native-reference digests retain private person/role/project ownership across replacement generations, including vendor aliases. Session ID is a candidate, never proof. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No automation delegation is implemented in R1.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -301,12 +332,13 @@ paths:
       responses:
         '200': {description: New binding epoch and unchanged conversation identity, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
         '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unauthorized target}
         '409': {description: Stale epoch or session already used by another role}
   /chat-deliveries/binding/resolve:
     post:
       operationId: resolveChatWorkerBinding
-      description: chat-v1. Authenticate an existing external registration with the principal and its private worker lease, then verify exact current conversation and binding epoch. A reference, label, X-session-id or shared principal alone never suffices. This read does not claim, ACK, extend a lease or alter native execution authority.
+      description: chat-v1. Authenticate an existing external registration with the principal and its private worker lease, then verify exact current conversation, binding epoch and lasting native-context ownership. A reference, label, X-session-id or shared principal alone never suffices. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. This read does not claim, ACK, extend a lease or alter native execution authority.
       parameters:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: Private existing registration proof; never returned or logged}
       requestBody:
@@ -317,6 +349,7 @@ paths:
       responses:
         '200': {description: Verified exact binding, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
         '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unavailable proof/binding}
   /reviews/github:
     post:
@@ -9933,12 +9966,35 @@ components:
       type: object
       additionalProperties: false
       description: Future evidence projection; fetch/queue/legacy ACK never means agent_confirmed. Preview receipt cannot confirm the full body. No legacy receipt enum is extended.
-      required: [message_id, binding_epoch, state, payload_mode]
+      required: [message_id, binding_epoch, state, payload_mode, delivery_deadline]
       properties:
         message_id: {type: string, format: uuid}
         binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
         state: {type: string, enum: [pending, queued, offered, handed_off, preview_received, agent_confirmed, replying, replied, failed, uncertain, cancelled]}
         payload_mode: {type: string, enum: [inline, preview]}
+        delivery_deadline:
+          type: string
+          format: date-time
+          readOnly: true
+          x-aeon-immutable: true
+          description: "Immutable server-accepted deadline for never-offered input, calculated once from acceptance time and the effective offline-wait policy. Retained on every receipt, including expiry, cancellation and uncertainty. Reconnect, retries, binding epochs and later policy changes cannot extend it; it does not fabricate failure or resend after a possible offer."
+    ChatOfflineWaitPolicy:
+      type: object
+      additionalProperties: false
+      required: [contract, scope, source, revision, offline_wait_seconds]
+      properties:
+        contract: {type: string, const: chat-v1}
+        scope: {type: string, enum: [person, workspace]}
+        source: {type: string, enum: [person, workspace, built_in]}
+        revision: {$ref: '#/components/schemas/ChatPosition'}
+        offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600, description: "Wait for never-offered new chat input only. Person override, then workspace default, then one hour. Accepted deadlines and legacy delivery settings remain unchanged."}
+    ChatOfflineWaitPolicyWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, offline_wait_seconds]
+      properties:
+        expected_revision: {$ref: '#/components/schemas/ChatPosition'}
+        offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600}
     QuestionOption:
       type: object
       additionalProperties: false

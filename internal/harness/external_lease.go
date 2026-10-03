@@ -14,16 +14,19 @@ import (
 )
 
 // ExternalRegistration is a private authorization input, never a response DTO.
+// Native identities are server-stored digests, never raw references or DTOs.
 // It deliberately omits account, vendor reference, path and model metadata.
 type ExternalRegistration struct {
 	ID, ProjectID, AgentPrincipalID, OwnerPersonID, Role string
+	Harness                                              string
+	RefDigest, VendorRefDigest                           []byte
 }
 
 // ExternalRegistrationTx validates an existing live external inbox registration.
 // Callers hold their access/role/thread fences before asking for a session lock.
 func ExternalRegistrationTx(ctx context.Context, tx pgx.Tx, sessionID string, lock bool) (ExternalRegistration, error) {
 	var out ExternalRegistration
-	q := `SELECT id::text,project_id::text,agent_principal_id::text,owner_principal_id::text,role FROM harness_sessions
+	q := `SELECT id::text,project_id::text,agent_principal_id::text,owner_principal_id::text,role,harness,ref_digest,vendor_ref_digest FROM harness_sessions
  WHERE id=$1::uuid AND management='unmanaged' AND harness IN ('claude','codex','pi','cursor','grok')
  AND capabilities @> ARRAY['inbox']::text[] AND owner_principal_id IS NOT NULL
  AND stopped_at IS NULL AND archived_at IS NULL AND phase NOT IN ('stopping','stopped')
@@ -31,7 +34,7 @@ func ExternalRegistrationTx(ctx context.Context, tx pgx.Tx, sessionID string, lo
 	if lock {
 		q += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, q, sessionID).Scan(&out.ID, &out.ProjectID, &out.AgentPrincipalID, &out.OwnerPersonID, &out.Role)
+	err := tx.QueryRow(ctx, q, sessionID).Scan(&out.ID, &out.ProjectID, &out.AgentPrincipalID, &out.OwnerPersonID, &out.Role, &out.Harness, &out.RefDigest, &out.VendorRefDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, workorders.Fail(404, "chat binding unavailable")
 	}

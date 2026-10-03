@@ -51,19 +51,48 @@ CREATE UNIQUE INDEX chat_binding_active_role ON chat_session_bindings(tenant_id,
 CREATE UNIQUE INDEX chat_binding_active_session ON chat_session_bindings(tenant_id,session_id) WHERE valid_to IS NULL;
 CREATE INDEX chat_binding_session_history ON chat_session_bindings(tenant_id,session_id,binding_epoch);
 
--- A native context never changes its private conversation identity, even
--- after handover or a change of registration ownership. The unique session
--- key also fences bindings whose previous owner is hidden by RLS.
+-- Native identity is tenant + harness + digest of either registered reference,
+-- independent of registration UUID, host, project, principal and generation.
+-- Both reference aliases share this namespace; a replacement cannot escape
+-- ownership by moving the old reference into the vendor-reference field.
+CREATE TABLE chat_native_contexts (
+    tenant_id uuid NOT NULL REFERENCES tenants(id),
+    harness text NOT NULL CHECK (harness IN ('claude','codex','pi','cursor','grok')),
+    ref_digest bytea NOT NULL CHECK (octet_length(ref_digest)=32),
+    role_id uuid NOT NULL,
+    owner_person_id uuid NOT NULL,
+    project_id uuid NOT NULL,
+    PRIMARY KEY (tenant_id,harness,ref_digest),
+    UNIQUE (tenant_id,harness,ref_digest,role_id,owner_person_id,project_id),
+    FOREIGN KEY (tenant_id,role_id,project_id,owner_person_id) REFERENCES chat_roles(tenant_id,id,project_id,owner_person_id)
+);
+ALTER TABLE chat_native_contexts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_native_contexts FORCE ROW LEVEL SECURITY;
+CREATE POLICY chat_native_contexts_tenant ON chat_native_contexts USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY chat_native_contexts_participant ON chat_native_contexts AS RESTRICTIVE USING (
+    owner_person_id=ANY((SELECT aeon_current_principals())::uuid[])
+    OR EXISTS(SELECT 1 FROM harness_sessions s WHERE s.tenant_id=chat_native_contexts.tenant_id
+      AND s.id=NULLIF(current_setting('aeon.chat_session_id',true),'')::uuid
+      AND s.harness=chat_native_contexts.harness
+      AND chat_native_contexts.ref_digest IN (s.ref_digest,s.vendor_ref_digest)));
+
+-- Per-registration history refers to the lasting native-context ownership.
+-- Unique keys fence contexts whose previous owner is hidden by RLS.
 CREATE TABLE chat_session_contexts (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
     session_id uuid NOT NULL,
     role_id uuid NOT NULL,
     owner_person_id uuid NOT NULL,
     project_id uuid NOT NULL,
+    harness text NOT NULL,
+    ref_digest bytea NOT NULL,
+    vendor_ref_digest bytea,
     PRIMARY KEY (tenant_id,session_id),
     UNIQUE (tenant_id,session_id,role_id,owner_person_id),
     FOREIGN KEY (tenant_id,project_id,session_id) REFERENCES harness_sessions(tenant_id,project_id,id),
-    FOREIGN KEY (tenant_id,role_id,project_id,owner_person_id) REFERENCES chat_roles(tenant_id,id,project_id,owner_person_id)
+    FOREIGN KEY (tenant_id,role_id,project_id,owner_person_id) REFERENCES chat_roles(tenant_id,id,project_id,owner_person_id),
+    FOREIGN KEY (tenant_id,harness,ref_digest,role_id,owner_person_id,project_id) REFERENCES chat_native_contexts(tenant_id,harness,ref_digest,role_id,owner_person_id,project_id),
+    FOREIGN KEY (tenant_id,harness,vendor_ref_digest,role_id,owner_person_id,project_id) REFERENCES chat_native_contexts(tenant_id,harness,ref_digest,role_id,owner_person_id,project_id)
 );
 ALTER TABLE chat_session_bindings ADD CONSTRAINT chat_binding_native_context
     FOREIGN KEY (tenant_id,session_id,role_id,owner_person_id) REFERENCES chat_session_contexts(tenant_id,session_id,role_id,owner_person_id);
@@ -86,6 +115,7 @@ $$;
 CREATE TRIGGER chat_roles_identity BEFORE UPDATE OR DELETE ON chat_roles FOR EACH ROW EXECUTE FUNCTION aeon_chat_identity_immutable();
 CREATE TRIGGER chat_threads_identity BEFORE UPDATE OR DELETE ON chat_threads FOR EACH ROW EXECUTE FUNCTION aeon_chat_identity_immutable();
 CREATE TRIGGER chat_contexts_identity BEFORE UPDATE OR DELETE ON chat_session_contexts FOR EACH ROW EXECUTE FUNCTION aeon_chat_identity_immutable();
+CREATE TRIGGER chat_native_contexts_identity BEFORE UPDATE OR DELETE ON chat_native_contexts FOR EACH ROW EXECUTE FUNCTION aeon_chat_identity_immutable();
 CREATE TRIGGER chat_bindings_identity BEFORE UPDATE OR DELETE ON chat_session_bindings FOR EACH ROW EXECUTE FUNCTION aeon_chat_identity_immutable();
 
 ALTER TABLE chat_roles ENABLE ROW LEVEL SECURITY;
