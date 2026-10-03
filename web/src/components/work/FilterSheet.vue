@@ -8,11 +8,12 @@ import { plural, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
 import DisplayPanel from './DisplayPanel.vue'
+import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
 // Phones and small tablets share every filter and display preference with the toolbar.
 const props = withDefaults(defineProps<{
   filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
-  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean
+  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean; projectHeader?: boolean
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
 }>(), { view: 'list' })
 const emit = defineEmits<{
@@ -70,13 +71,17 @@ defineExpose({ open, close })
           <h3 id="sheet-display-title" class="eyebrow">Display</h3>
           <DisplayPanel
             sheet :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns"
-            :grouped="view === 'list' && filters.group !== 'none'" :header-graph="headerGraph"
+            :grouped="view === 'list' && filters.group !== 'none'" :header-graph="headerGraph" :project-header="projectHeader"
             @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
             @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
             @header-graph="value => emit('headerGraph', value)"
             @expand-all="emit('expandAll'); close()" @collapse-all="emit('collapseAll'); close()"
             @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
           />
+        </section>
+        <section v-else-if="projectHeader" class="sheet-section" aria-labelledby="graph-sheet-display-title">
+          <h3 id="graph-sheet-display-title" class="eyebrow">Display</h3>
+          <HeaderRoomyChoice class="graph-header-choice" />
         </section>
         <section v-for="dimension in dimensions" :key="dimension.key" class="sheet-section">
           <p class="eyebrow">{{ dimension.title }}</p>
@@ -119,6 +124,7 @@ header .btn { height: 44px; }
 .sheet-row .switch { min-height: 44px; font-size: 14.5px; color: var(--ink); }
 .sheet-section { padding: 14px 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-section .eyebrow { padding: 0 8px 8px; }
+.graph-header-choice { padding: 6px 8px 8px; }
 .sheet-section :deep(.facet-options) { grid-template-columns: minmax(0, 1fr); }
 .sheet-section :deep(.facet-option) { min-height: 44px; }
 .sheet-section :deep(.facet-main) { font-size: 15px; }

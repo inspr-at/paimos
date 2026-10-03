@@ -27,6 +27,10 @@ import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
 import AccountMenu from './header/AccountMenu.vue'
 import AppMenu from './header/AppMenu.vue'
+import HeaderDensitySwitch from './work/HeaderDensitySwitch.vue'
+import { projectSection } from './work/projectNavigation'
+import { headerShortcut } from '../lib/projectHeader'
+import { useProjectHeader } from '../lib/useProjectHeader'
 
 const session = useSession()
 const projects = useProjects()
@@ -38,6 +42,12 @@ const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
 const palette = ref<InstanceType<typeof CommandPalette>>()
+const { headerDensity, toggleHeader } = useProjectHeader()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const headerTickets = computed(() => !!projectKey.value && projectSection(route) === 'tickets' && !fullTicket.value && route.query.panel !== 'full')
+function headerKeys(event: KeyboardEvent) {
+  if (headerTickets.value && session.identity && !fatal.value && headerShortcut(event, mac)) { event.preventDefault(); toggleHeader() }
+}
 const writable = computed(() => can('nodes.write', project.value?.id))
 // AEON-431: the workspace's logo and short name replace the product mark when
 // set. A logo that fails to load falls back to the name, or to the product mark.
@@ -209,12 +219,12 @@ onMounted(() => {
   fonts?.addEventListener('loadingdone', remeasure)
   void fonts?.ready.then(remeasure)
   refit()
-  window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
+  window.addEventListener('keydown', headerKeys, true); window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
   window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
   doctrinePoller.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
 </script>
 
 <template>
@@ -246,7 +256,12 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
     <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
-        <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket || projectKnowledge ? undefined : 'page'">
+        <button v-if="headerTickets" type="button" class="phone-header-fold" :aria-expanded="headerDensity !== 'collapsed'" aria-controls="project-header-fold"
+          :aria-label="`${project?.routeKey ?? projectKey}: project header, ${headerDensity === 'collapsed' ? 'collapsed' : 'expanded'}`"
+          :data-tip="headerDensity === 'collapsed' ? 'Show project header' : 'Hide project header'" @click="toggleHeader()">
+          <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span><AppIcon :name="headerDensity === 'collapsed' ? 'chevron' : 'chevron-up'" :size="14" />
+        </button>
+        <RouterLink class="crumb project-crumb" :class="{ 'has-fold': headerTickets }" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket || projectKnowledge ? undefined : 'page'">
           <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span>
           <span class="crumb-name">{{ project?.title ?? '' }}</span>
         </RouterLink>
@@ -288,6 +303,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
       <span v-else class="crumb current" aria-current="page">{{ pageTitle }}</span>
     </nav>
     <span class="spacer" />
+    <HeaderDensitySwitch v-if="headerTickets && session.identity && !fatal" class="app-density" />
+    <span v-if="headerTickets" class="spacer density-spacer" />
     <button v-if="globalSearch" class="search-pill" type="button" aria-label="Search everything" aria-keyshortcuts="Control+K Meta+K" @click="palette?.open()">
       <AppIcon name="search" :size="15" />
       <span class="pill-text">Search</span>
@@ -309,6 +326,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   background: var(--glass-2); border-bottom: 1px solid var(--glass-edge); box-shadow: 0 1px 0 var(--line);
   -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
 }
+.phone-header-fold { display: none; }
 .lockup { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding-right: 4px; color: var(--ink); flex-shrink: 0; border-radius: 10px; }
 .lockup:focus-visible { box-shadow: var(--focus-ring); }
 .mark-backing { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim); }
@@ -386,6 +404,10 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 }
 @media (max-width: 600px) {
   .app-header { gap: 4px; padding: 0 10px; }
+  .app-density, .density-spacer { display: none; }
+  .app-header .crumbs > .phone-header-fold { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 44px; flex: none; padding: 0 4px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); }
+  .phone-header-fold:focus-visible { box-shadow: var(--focus-ring); }
+  .crumbs > .project-crumb.has-fold { display: none; }
   .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
   /* Signed in, the Projects place is home and the footer carries the name: the lockup steps aside for the places. */
   .app-header:has(.places) .lockup { display: none; }
