@@ -45,11 +45,11 @@
 // People read with account.read; only the linked owning person (account.manage)
 // or the connected paired host's bound runtime key (account.probe) may write.
 // An unpaired registering key, workspace admin or key creator is not implicitly
-// an owner. Writes recheck live permissions under tenant -> pairing -> account
-// locks and append account.residency_evidence_updated as the final operation.
-// Readiness, residency and pairing lifecycle writers share the tenant -> pairing
-// -> account lock order. The tenant fence uses NO KEY UPDATE so FK share locks
-// remain compatible; authorization is rechecked inside that fenced transaction.
+// an owner. Writes share the tenant -> pairing -> account lock order with
+// readiness and pairing lifecycle operations, rechecking live permissions inside
+// the final transaction. The tenant fence uses NO KEY UPDATE so FK share locks
+// remain compatible. Writes append account.residency_evidence_updated last;
+// advisory GETs avoid write fences.
 // Evidence names covered profiles, inference/storage/log country sets, explicit
 // local execution, verification/expiry times and an opaque proof reference;
 // optional retention days and training opt-out are retained as declarations.
