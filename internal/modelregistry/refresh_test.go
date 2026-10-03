@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -307,15 +308,33 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	seedEvidenceSession(t, p, agent, "codex", "gpt-6.1-sol", "high")
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	sol := profileBySlug(profiles, "codex-6-1-sol-high")
-	until := time.Now().Add(time.Hour)
+	var until time.Time
 	inRegistry(t, p, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='fixture' WHERE id=$1`, account); err != nil {
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '2 days','requests',1000,'unrestricted')`, p.TenantID, account); err != nil {
+		until = now.Add(time.Hour)
+		windowEnd := now.Add(48 * time.Hour)
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=true,last_daemon_generation='fixture',capacity_owner=$3 WHERE id=$1`, account, now, p.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='owner override',valid_until=$2 WHERE profile_id=$1`, sol.ID, until)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,$3,$4,'requests',1000,'unrestricted')`, p.TenantID, account, now.Add(-time.Hour), windowEnd); err != nil {
+			return err
+		}
+		// Isolate model expiry from the owner's work hours and Keep for you.
+		// A manual allowance alone still follows the default weekday schedule.
+		schedule := capacity.DefaultSchedule()
+		schedule.Override, schedule.OverrideUntil = "sprint", &windowEnd
+		schedule.Reserve = capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='owner override',valid_until=$2 WHERE profile_id=$1`, sol.ID, until)
 		return err
 	})
 	if got := send(agent, o, 200); got.Recorded != 1 {
@@ -335,24 +354,48 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		out, err := resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, now)
-		if err != nil {
+		var failedAt, suppressedUntil time.Time
+		var failures int
+		if err := tx.QueryRow(t.Context(), `SELECT last_failing_at,suppressed_until,failures FROM model_observations WHERE harness=$1 AND model=$2 AND effort=$3`, o.Harness, o.Model, o.Effort).Scan(&failedAt, &suppressedUntil, &failures); err != nil {
 			return err
 		}
-		if len(out.Ladder[0].SkipReasons) < 2 {
-			t.Fatalf("lost independent override/suppression: %+v", out.Ladder)
+		if failures != 2 || suppressedUntil.Sub(failedAt) != 24*time.Hour {
+			t.Fatalf("second independent failure must suppress for 24 hours: failures=%d, failed=%s, until=%s", failures, failedAt, suppressedUntil)
 		}
-		// Account readiness is independent of model health. Keep the account's
-		// probe current at the simulated horizon to test only suppression expiry.
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2 WHERE id=$1`, account, now.Add(25*time.Hour)); err != nil {
-			return err
-		}
-		out, err = resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, now.Add(25*time.Hour))
-		if err != nil {
-			return err
-		}
-		if out.Profile == nil || out.Profile.ID != sol.ID {
-			t.Fatalf("suppression/override did not expire: %+v", out)
+		for _, tc := range []struct {
+			name                 string
+			at                   time.Time
+			suppressed, override bool
+		}{
+			{"both active", now, true, true},
+			{"before override expiry", until.Add(-time.Microsecond), true, true},
+			{"at override expiry", until, true, false},
+			{"before suppression expiry", suppressedUntil.Add(-time.Microsecond), true, false},
+			{"at suppression expiry", suppressedUntil, false, false},
+			{"after both expiries", now.Add(25 * time.Hour), false, false},
+		} {
+			// Refresh the independent account heartbeat at the controlled instant.
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2 WHERE id=$1`, account, tc.at); err != nil {
+				return err
+			}
+			out, err := resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, tc.at)
+			if err != nil {
+				return err
+			}
+			wantReasons := []string{}
+			if tc.suppressed {
+				wantReasons = append(wantReasons, "model invalid until "+suppressedUntil.UTC().Format(time.RFC3339))
+			}
+			if tc.override {
+				wantReasons = append(wantReasons, "conserved until "+until.UTC().Format(time.RFC3339)+": owner override")
+			}
+			selectSol := len(wantReasons) == 0
+			if len(out.Ladder) == 0 || out.Ladder[0].ProfileID != sol.ID || !reflect.DeepEqual(out.Ladder[0].SkipReasons, wantReasons) || out.Ladder[0].Selected != selectSol {
+				t.Fatalf("%s: lost independent override/suppression; want reasons %v: %+v", tc.name, wantReasons, out)
+			}
+			if out.Profile == nil || (out.Profile.ID == sol.ID) != selectSol {
+				t.Fatalf("%s: suppression/override expiry selected the wrong profile: %+v", tc.name, out)
+			}
 		}
 		return nil
 	})
