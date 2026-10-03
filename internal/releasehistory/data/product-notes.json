@@ -4432,6 +4432,55 @@
           "group": "features"
         }
       ]
+    },
+    "261003095616.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 122,
+      "snapshot_sha256": "829e1c2413dd9a0f5afdebbb7469573672ffafadb2cce2b2e621ef45e5539686",
+      "captured_at": "2026-10-03T18:24:35Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-611",
+          "pill_en": "Newest decisions first",
+          "pill_de": "Neueste Entscheidungen zuerst",
+          "benefit_en": "The Decided view shows the most recently answered questions first, so a fresh answer stays easy to find after a refresh.",
+          "benefit_de": "Die Ansicht Entschieden zeigt zuletzt beantwortete Fragen zuerst, damit eine neue Antwort nach dem Aktualisieren leicht zu finden bleibt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-612",
+          "pill_en": "Clearer tier costs",
+          "pill_de": "Klarere Kosten je Stufe",
+          "benefit_en": "Where tier evidence is available, session cost estimates show the service tier and price multiplier; session details also show tier-change history.",
+          "benefit_de": "Wenn Nachweise zur Service-Stufe vorliegen, zeigen die Kostenschätzungen der Sitzung die Stufe und den Preisfaktor; die Sitzungsdetails zeigen auch den Verlauf von Stufenwechseln.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-613",
+          "pill_en": "Low quota warnings",
+          "pill_de": "Kontingent wird knapp",
+          "benefit_en": "Fresh account readings can trigger low-quota notices for active Aeon runs. Workspace admins can adjust the early and urgent thresholds.",
+          "benefit_de": "Aktuelle Kontingentmessungen können Hinweise auf knappes Kontingent für aktive Aeon-Läufe auslösen. Workspace-Admins können die frühe und die dringende Warnschwelle anpassen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-628",
+          "pill_en": "List controls on phones",
+          "pill_de": "Listen-Steuerung am Telefon",
+          "benefit_en": "On a phone or small tablet you can sort, choose columns and row height, select matching tickets in bulk and compare two screenshots.",
+          "benefit_de": "Auf Telefon oder kleinem Tablet kannst du sortieren, Spalten und Zeilenhöhe wählen, passende Tickets gesammelt auswählen und zwei Screenshots vergleichen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-635",
+          "pill_en": "Calmer releases page",
+          "pill_de": "Ruhigere Release-Seite",
+          "benefit_en": "The releases page keeps its controls steady while you switch views. List names can wrap across two lines, and displayed changes are grouped into features, fixes and other changes.",
+          "benefit_de": "Die Bedienelemente der Release-Seite bleiben beim Umschalten an ihrem Platz. Namen in der Liste können zweizeilig umbrechen; angezeigte Änderungen sind nach Funktionen, Fehlerbehebungen und Sonstigem gruppiert.",
+          "group": "features"
+        }
+      ]
     }
   }
 }

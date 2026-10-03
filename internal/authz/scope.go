@@ -53,6 +53,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"POST /api/harness-sessions/pause":            true,
 	"POST /api/harness-sessions/resume":           true,
 	"GET /api/usage/dashboard":                    true,
+	"GET /api/usage/model-estimates":              true,
 	"GET /api/settings/status-autopilot":          true,
 	"GET /api/status-autopilot/changes":           true,
 	"GET /api/status-autopilot/proposals":         true,
@@ -133,6 +134,7 @@ var ProjectDecidedRoutes = map[string]bool{
 // Product release notes are the same for everyone; they are not tenant data.
 var publicProductRoutes = map[string]bool{
 	"GET /api/releases":           true,
+	"GET /api/releases/pending":   true,
 	"GET /api/releases/{version}": true,
 }
 

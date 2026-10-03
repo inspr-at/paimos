@@ -139,7 +139,8 @@ func planningFixtureProjection(t *testing.T, body []byte) map[string]any {
 	projection := map[string]any{}
 	for _, item := range page.Items {
 		planning := item["planning"].(map[string]any)
-		for _, model := range planning["models"].([]any) {
+		models, _ := planning["models"].([]any) // Absent on a ticket with no sessions; absence stays in the raw comparison.
+		for _, model := range models {
 			sessions := model.(map[string]any)["sessions"].([]any)
 			for _, session := range sessions {
 				session.(map[string]any)["id"] = "session"

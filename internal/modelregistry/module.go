@@ -19,7 +19,9 @@ import (
 
 // Module serves /api/models.
 type Module struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	vaultKey  []byte
+	discovery *http.Client
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -43,6 +45,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/work-kinds/{kindId}/restore", boundedPreferenceHandler(m.writeWorkKind))
 	mux.HandleFunc("POST /api/models/{id}/retire", boundedPreferenceHandler(m.retirement))
 	mux.HandleFunc("DELETE /api/models/{id}/retire", boundedPreferenceHandler(m.retirement))
+	mux.HandleFunc("POST /api/models/proposals/accept", m.acceptProposal)
+	mux.HandleFunc("GET /api/models/refresh", m.refreshStatus)
+	mux.HandleFunc("POST /api/models/refresh", m.refresh)
+	mux.HandleFunc("POST /api/models/reports", m.reports)
+	mux.HandleFunc("PUT /api/models/refresh/settings", m.putSettings)
+	mux.HandleFunc("PUT /api/models/refresh/credentials/{accountId}", m.putCredential)
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)

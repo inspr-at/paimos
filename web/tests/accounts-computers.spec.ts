@@ -78,48 +78,66 @@ test('one card per computer: offline says why and the fix, and never calls an ac
   await shot(page, 'desktop-offline-readings')
 })
 
-test('no reading yet is said once, with Check now; an offline computer has no reading', async ({ page }) => {
+test('no reading yet is said once, with Check now; unsupported limits and offline computers stay honest', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  await setup(page, { unmeasured: true, unread: true })
+  await setup(page, { unmeasured: true, unread: true, unreadCodex: true })
   await open(page)
-  // Every vendor without a reading, Pi and Cursor included: "No reading yet" and Check now (Ready.dc.html).
+  // Codex can report a quota: show the empty state once and let the person refresh it.
+  const codex = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Spare' })
+  await expect.poll(async () => (await codex.innerText()).split('No reading yet').length - 1).toBe(1)
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeVisible()
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(codex.getByRole('meter')).toHaveCount(0)
+  // AEON-623: Pi has no quota reader; a refresh or a run cannot produce its limit.
   const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
-  await expect(pi).toContainText('No reading yet')
+  await expect(pi.getByText("Pi doesn't show its limit · one run at a time by day", { exact: true })).toHaveCount(1)
+  await expect(pi).not.toContainText('No reading yet')
   await expect(pi).not.toContainText('usage limit')
-  await expect(pi.getByRole('button', { name: 'Check now' })).toBeVisible()
-  await expect(computer(page, 'studio').getByRole('row').first()).toContainText('No reading while the computer is offline')
+  await expect(pi.getByRole('button', { name: 'Check now' })).toHaveCount(0)
+  await expect(pi.getByRole('meter')).toHaveCount(0)
+  const offline = computer(page, 'studio').getByRole('row').first()
+  await expect(offline.getByText('No reading while the computer is offline', { exact: true })).toHaveCount(1)
+  await expect(offline.getByRole('button', { name: 'Check now' })).toHaveCount(0)
+  await expect(offline.getByRole('meter')).toHaveCount(0)
   await shot(page, 'desktop-unmeasured')
 })
 
 // AEON-499 review: refresh() never rejected, so a failed read said "No reading yet".
 test('Check now says what came back: a failure as a failure, still nothing, then the reading', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  const { capacity } = await setup(page, { unread: true })
+  const { capacity } = await setup(page, { unreadCodex: true })
   await open(page)
-  const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
+  const codex = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Spare' })
   const toasts = page.locator('.toast')
   let mode: 'fail' | 'empty' | 'read' = 'fail'
   await page.route('**/api/agent-accounts/capacity', async route => {
     if (route.request().method() !== 'GET' || mode === 'empty') return route.fallback()
     if (mode === 'fail') return route.fulfill({ status: 500, json: { error: 'internal error' } })
     const answer = capacity.handle('/api/agent-accounts/capacity', 'GET', undefined)!.json as { account_id: string; windows: unknown[] }[]
-    const spare = answer.find(a => a.windows.length)!
-    return route.fulfill({ json: answer.map(a => (a.account_id === ACCOUNTS.pi ? { ...a, windows: spare.windows } : a)) })
+    const main = answer.find(a => a.account_id === ACCOUNTS.main)!
+    return route.fulfill({ json: answer.map(a => (a.account_id === ACCOUNTS.spare ? { ...a, windows: main.windows } : a)) })
   })
   // Failed: a 500 is an error with the server's answer, never the reassuring "no reading yet".
-  await pi.getByRole('button', { name: 'Check now' }).click()
+  await codex.getByRole('button', { name: 'Check now' }).click()
   await expect(toasts.filter({ hasText: /^Capacity could not be read: The server answered .internal error. \(500\)\. Please try again\./ })).toBeVisible()
-  await expect(toasts.filter({ hasText: 'No reading yet for Pi' })).toHaveCount(0)
-  await expect(pi.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(toasts.filter({ hasText: 'No reading yet' })).toHaveCount(0)
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(codex.getByRole('meter')).toHaveCount(0)
   // Empty: the read worked and still has no reading.
   mode = 'empty'
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'No reading yet for Pi on mbp2607. It arrives with its next run.' })).toBeVisible()
+  await codex.getByRole('button', { name: 'Check now' }).click()
+  await expect(toasts.filter({ hasText: 'No reading yet — readings need a managed run.' })).toBeVisible()
+  await expect(codex.getByText('No reading yet', { exact: true })).toHaveCount(1)
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(codex.getByRole('meter')).toHaveCount(0)
   // Successful: the reading arrives and replaces the button with the bar.
   mode = 'read'
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'Pi on mbp2607: reading updated.' })).toBeVisible()
-  await expect(pi.getByRole('meter')).toHaveCount(1)
+  await codex.getByRole('button', { name: 'Check now' }).click()
+  await expect(toasts.filter({ hasText: 'Codex on mbp2607: reading updated.' })).toBeVisible()
+  await expect(codex.getByRole('meter')).toHaveCount(1)
+  await expect(codex).toContainText('42% left')
+  await expect(codex.getByRole('button', { name: 'Check now' })).toHaveCount(0)
+  await expect(codex.getByText('No reading yet', { exact: true })).toHaveCount(0)
 })
 
 // AEON-499 review: --gold-ink on the 17% gold tint was about 4.04:1 in light.
