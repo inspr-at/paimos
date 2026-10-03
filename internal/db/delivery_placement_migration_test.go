@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -256,6 +257,9 @@ func assertDeliveryDSARInventory(t *testing.T, d *dbtest.DB, b []byte) {
 	}
 	byTable := make(map[string]map[string]string)
 	for _, e := range entries {
+		if !slices.Contains(deliveryTables, e.Table) {
+			continue
+		}
 		columns := make(map[string]string)
 		for class, list := range map[string]string{"personal": e.Export, "review": e.Review, "secret": e.Secret, "metadata": e.Metadata} {
 			for _, col := range strings.Fields(list) {
