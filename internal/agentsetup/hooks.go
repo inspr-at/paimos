@@ -24,8 +24,16 @@ type HookInstaller struct {
 	Scope        string
 	Harness      string
 	qualify      func(string, string, string) string
+	ownerHome    func() (string, error)
 	authenticate func(context.Context, string, string) error
 	beforeCommit func()
+}
+
+func (e *Engine) hookHome() (string, error) {
+	if e.Hooks != nil && e.Hooks.ownerHome != nil {
+		return e.Hooks.ownerHome()
+	}
+	return hookOwnerHome()
 }
 
 func hookOwnerHome() (string, error) {
@@ -276,7 +284,7 @@ func (e *Engine) setupHooks(ctx context.Context, s *snapshot, uninstall bool) er
 	home := ""
 	if e.Hooks != nil && e.Hooks.Enabled {
 		var err error
-		home, err = hookOwnerHome()
+		home, err = e.hookHome()
 		if err != nil {
 			return err
 		}
@@ -332,7 +340,7 @@ func (e *Engine) removeUserHook(ctx context.Context, s *snapshot, harness string
 	if s.HookHome == "" {
 		return
 	}
-	home, err := hookOwnerHome()
+	home, err := e.hookHome()
 	if err != nil || home != s.HookHome {
 		return
 	}

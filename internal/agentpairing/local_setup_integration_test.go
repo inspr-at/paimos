@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -264,5 +265,95 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 	}
 	if _, _, err = agentsetup.ReadRuntime(store.Path()); err == nil {
 		t.Fatal("disconnected computer retained runtime authority")
+	}
+}
+
+func TestLocalSetupHTTPHookReportsSurviveSameHarnessReenrollmentAndFences(t *testing.T) {
+	f := newFixture(t)
+	home := physicalSetupTemp(t)
+	store, err := agentsetup.OpenStore(filepath.Join(home, "setup-state"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	executable := filepath.Join(home, "agentd-fixture")
+	if err := os.WriteFile(executable, []byte("fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	local := &localSetupDaemon{root: store.Path(), active: map[string]bool{}, fenced: map[string]bool{}}
+	now := time.Now().UTC()
+	e := &agentsetup.Engine{
+		Store: store, API: agentsetup.HTTPClient{Origin: origin, HTTP: &http.Client{Transport: handlerTransport{f.h}}}, Local: local,
+		Services: &agentsetup.ServiceManager{Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Home: home, UID: os.Getuid(), Executable: executable, Executor: localSetupExecutor{executable}},
+		Now:      func() time.Time { return now },
+	}
+	first := setupAccount(t, f, "codex", home)
+	options := agentsetup.Options{Origin: origin, ComputerName: "hook integration fixture", Workspace: physicalSetupTemp(t), Platform: agentsetup.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Candidates: []agentsetup.Candidate{first}}
+	p, err := e.Begin(t.Context(), options)
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatalf("initial pairing request: stage=%s err=%v", p.Stage, err)
+	}
+	approve := func(p agentsetup.Progress, connected int) agentsetup.Progress {
+		t.Helper()
+		var review agentpairing.View
+		decodeResult(t, f.call("POST", "/api/agent-pairing/lookup", map[string]string{"user_code": p.UserCode}, true, "", 200), &review)
+		if len(review.Requested) != 1 || review.Requested[0].Harness != "codex" {
+			t.Fatal("person review lost exact requested account")
+		}
+		decodeResult(t, f.call("POST", "/api/agent-pairing/requests/"+p.RequestID+"/approve", map[string]any{"request_digest": review.Digest, "verification": "connect_only", "selected_account_keys": []string{review.Requested[0].AccountKey}}, true, "", 200), &review)
+		now = now.Add(time.Minute)
+		p, err := e.Step(t.Context())
+		if err != nil || p.Stage != "connected" {
+			t.Fatalf("same-harness pairing failed reconciliation: stage=%s err=%v", p.Stage, err)
+		}
+		for i := 0; i < 2; i++ {
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatalf("persisted hook reports broke fence synchronization: %v", err)
+			}
+		}
+		var computer agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+p.ComputerID, nil, true, "", 200), &computer)
+		if len(computer.HookCapabilities) != 1 || computer.HookCapabilities[0].Harness != "codex" || computer.HookCapabilities[0].Version != first.Version || computer.HookCapabilities[0].Verified || computer.HookCapabilities[0].Blocker != "feature_disabled" {
+			t.Fatal("server did not retain one conservative harness report", computer.HookCapabilities)
+		}
+		config, _, err := agentsetup.ReadRuntime(store.Path())
+		if err != nil || len(config.Accounts) != connected {
+			t.Fatalf("wrong number of connected runtime accounts: %d want %d, err=%v", len(config.Accounts), connected, err)
+		}
+		return p
+	}
+	p = approve(p, 1)
+	initial, key, err := agentsetup.ReadRuntime(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.Label, second.Identity = "second codex account", "second@example.test"
+	p, err = e.AddHarness(t.Context(), []agentsetup.Candidate{second})
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatalf("second account request: stage=%s err=%v", p.Stage, err)
+	}
+	p = approve(p, 2)
+	if _, err := e.Disconnect(t.Context(), initial.Accounts[0].AccountID); err != nil {
+		t.Fatal(err)
+	}
+	p, err = e.AddHarness(t.Context(), []agentsetup.Candidate{first})
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatalf("re-enrollment request: stage=%s err=%v", p.Stage, err)
+	}
+	p = approve(p, 2)
+	final, sameKey, err := agentsetup.ReadRuntime(store.Path())
+	if err != nil || final.ComputerID != initial.ComputerID || string(sameKey) != string(key) {
+		t.Fatal("re-enrollment changed shared computer authority", err)
+	}
+	assertNoRuntimeKey(t, string(key), p)
+	// A server-side account revocation must still reach the local dispatch fence
+	// after re-enrollment; a successful HTTP call alone does not prove that.
+	var computer agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+final.ComputerID, nil, true, "", 200), &computer)
+	account := final.Accounts[0].AccountID
+	f.call("POST", "/api/agent-pairing/computers/"+final.ComputerID+"/enrollments/"+account+"/disconnect", map[string]any{"mode": "revoke_now", "expected_revision": computer.Revision}, true, "", 200)
+	if err := e.SyncFences(t.Context()); err != nil || !local.fenced[account] {
+		t.Fatal("re-enrollment prevented actual revoked-account fence synchronization", err)
 	}
 }

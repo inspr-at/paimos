@@ -8,11 +8,15 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/hookcap"
 )
 
 const hookCanary = "fixture-private-canary-NOT-A-CREDENTIAL-391"
@@ -417,5 +421,243 @@ func TestPairedHooksEscapedOverrideAndMissingReceipt(t *testing.T) {
 	_ = os.WriteFile(g.settings, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"aeon hook claude Stop --paired # aeon-inbox-hook-v2"}]}]}}`), 0600)
 	if got := g.apply(t, false); got != "ownership_unknown" {
 		t.Fatal("marker claimed ownership", got)
+	}
+}
+
+func TestPairedHookUninstallRetiresReceiptForNewComputer(t *testing.T) {
+	f := newHookFixture(t)
+	original, err := os.ReadFile(f.settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.apply(t, false); got != "" {
+		t.Fatal(got)
+	}
+	if got := f.apply(t, true); got != "repair_required" {
+		t.Fatal(got)
+	}
+	after, err := os.ReadFile(f.settings)
+	if err != nil || !sameHookJSON(original, after) {
+		t.Fatal("uninstall failed to preserve unrelated settings", err)
+	}
+	receiptPath := filepath.Join(f.home, ".local", "share", "aeon", "hooks", "claude.json")
+	if _, err := os.Stat(receiptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("successful uninstall retained old computer ownership", err)
+	}
+	c := f.installer.apply(t.Context(), f.home, f.workspace, "66666666-6666-4666-8666-666666666666", "claude", "2.fixture", runtime.GOOS, false, nil)
+	if !c.Verified || c.Blocker != "" {
+		t.Fatal("fresh approved computer could not install after uninstall", c)
+	}
+	raw, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt HookReceipt
+	if json.Unmarshal(raw, &receipt) != nil || receipt.ComputerID != "66666666-6666-4666-8666-666666666666" {
+		t.Fatal("fresh installation did not record the new computer")
+	}
+}
+
+func TestPairedHookUninstallConflictsPreserveReceipt(t *testing.T) {
+	for _, conflict := range []string{"changed group", "concurrent settings", "concurrent receipt"} {
+		t.Run(conflict, func(t *testing.T) {
+			f := newHookFixture(t)
+			if got := f.apply(t, false); got != "" {
+				t.Fatal(got)
+			}
+			receiptPath := filepath.Join(f.home, ".local", "share", "aeon", "hooks", "claude.json")
+			receipt, err := os.ReadFile(receiptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings, err := os.ReadFile(f.settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBlocker := "settings_changed"
+			switch conflict {
+			case "changed group":
+				settings = bytes.Replace(settings, []byte(`"timeout": 3`), []byte(`"timeout": 30`), 1)
+				if err := os.WriteFile(f.settings, settings, 0640); err != nil {
+					t.Fatal(err)
+				}
+				wantBlocker = "ownership_unknown"
+			case "concurrent settings":
+				settings = []byte(`{"editor":"concurrent"}`)
+				f.installer.beforeCommit = func() {
+					if err := os.WriteFile(f.settings, settings, 0640); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "concurrent receipt":
+				receipt = append(receipt, '\n')
+				f.installer.beforeCommit = func() {
+					if err := os.WriteFile(receiptPath, receipt, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if got := f.apply(t, true); got != wantBlocker {
+				t.Fatalf("conflicted uninstall returned %q, want %q", got, wantBlocker)
+			}
+			afterReceipt, err := os.ReadFile(receiptPath)
+			if err != nil || !bytes.Equal(receipt, afterReceipt) {
+				t.Fatal("conflicted uninstall changed the ownership receipt", err)
+			}
+			if conflict != "concurrent receipt" {
+				afterSettings, err := os.ReadFile(f.settings)
+				if err != nil || !bytes.Equal(settings, afterSettings) {
+					t.Fatal("conflicted uninstall changed user settings", err)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectiveDisconnectKeepsSharedHookUntilLastAccountCleanup(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		t.Run(map[bool]string{false: "other connected", true: "other draining"}[active], func(t *testing.T) {
+			e, api, local, options, _ := engineFixture(t)
+			second := options.Candidates[0]
+			second.Label, second.Identity = "second@example.test", "second@example.test"
+			approveFixture(t, e, api, options)
+			if _, err := e.AddHarness(t.Context(), []Candidate{second}); err != nil {
+				t.Fatal(err)
+			}
+			e.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+			if p, err := e.Step(t.Context()); err != nil || p.Stage != "connected" {
+				t.Fatalf("second account approval failed: %s %v", p.Stage, err)
+			}
+			f := newHookFixture(t)
+			f.settings = filepath.Join(f.home, ".codex", "hooks.json")
+			original := []byte(`{"editor":"preserve"}`)
+			if err := os.Mkdir(filepath.Dir(f.settings), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(f.settings, original, 0640); err != nil {
+				t.Fatal(err)
+			}
+			c := f.installer.apply(t.Context(), f.home, f.workspace, testComputer, "codex", options.Candidates[0].Version, runtime.GOOS, false, nil)
+			if !c.Verified || c.Blocker != "" {
+				t.Fatal("shared hook fixture installation failed", c)
+			}
+			f.installer.ownerHome = func() (string, error) { return f.home, nil }
+			e.Hooks = f.installer
+			s, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.HookHome = f.home
+			s.HookCapabilities = []hookcap.Capability{{Harness: "codex", Version: options.Candidates[0].Version, OS: runtime.GOOS, Blocker: "qualification_pending"}}
+			if err := e.save(s, false); err != nil {
+				t.Fatal(err)
+			}
+			installed, err := os.ReadFile(f.settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receiptPath := filepath.Join(f.home, ".local", "share", "aeon", "hooks", "codex.json")
+			receipt, err := os.ReadFile(receiptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if active {
+				local.states[otherAccount] = LocalStatus{DaemonID: "paired-daemon", State: "running"}
+				if p, err := e.Disconnect(t.Context(), otherAccount); err != nil || p.Stage != "draining" {
+					t.Fatalf("other account did not remain draining: %s %v", p.Stage, err)
+				}
+			}
+			p, err := e.Disconnect(t.Context(), testAccount)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(f.settings)
+			if err != nil || !bytes.Equal(installed, after) {
+				t.Fatal("selective disconnect removed another account's shared hook", err)
+			}
+			afterReceipt, err := os.ReadFile(receiptPath)
+			if err != nil || !bytes.Equal(receipt, afterReceipt) {
+				t.Fatal("selective disconnect changed shared hook ownership", err)
+			}
+			if len(p.HookCapabilities) != 1 || p.HookCapabilities[0].Blocker != "qualification_pending" {
+				t.Fatal("selective disconnect changed the surviving hook report", p.HookCapabilities)
+			}
+			config, _, err := ReadRuntime(e.Store.Path())
+			if err != nil || len(config.Accounts) != 1 || config.Accounts[0].AccountID != otherAccount {
+				t.Fatal("selective disconnect removed the other runtime account", err)
+			}
+			local.states[otherAccount] = LocalStatus{DaemonID: "paired-daemon", State: "drained"}
+			if _, err := e.Disconnect(t.Context(), otherAccount); err != nil {
+				t.Fatal(err)
+			}
+			after, err = os.ReadFile(f.settings)
+			if err != nil || !sameHookJSON(original, after) {
+				t.Fatal("last account cleanup did not remove the shared integration", err)
+			}
+			if _, err := os.Stat(receiptPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("last account cleanup retained hook ownership", err)
+			}
+		})
+	}
+}
+
+func TestPairedHookReportsMatchActiveAccountIdentity(t *testing.T) {
+	e, api, _, options, _ := engineFixture(t)
+	approveFixture(t, e, api, options)
+	s, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := s.Candidates[0]
+	old.Candidate.Key, old.Candidate.Label, old.Version = "old-account", "old@example.test", "99.old"
+	s.Candidates = append([]LocalCandidate{old}, s.Candidates...)
+	s.View.Enrollments = append(s.View.Enrollments, Enrollment{AccountID: otherAccount, AccountKey: old.Candidate.Key, Harness: old.Candidate.Harness, Label: old.Candidate.Label, State: "revoked"})
+	if err := e.setupHooks(t.Context(), s, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.HookCapabilities) != 1 || s.HookCapabilities[0].Version != options.Candidates[0].Version || s.HookCapabilities[0].Verified || s.HookCapabilities[0].Blocker != "feature_disabled" {
+		t.Fatal("inactive account candidate contaminated the active harness report", s.HookCapabilities)
+	}
+}
+
+func TestPairedHookReportsAggregateDifferentActiveVersionsConservatively(t *testing.T) {
+	e, api, _, options, _ := engineFixture(t)
+	approveFixture(t, e, api, options)
+	s, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := s.Candidates[0]
+	second.Candidate.Key, second.Candidate.Label, second.Version = "second-account", "second@example.test", "2.other"
+	s.Candidates = append(s.Candidates, second)
+	s.View.Enrollments = append(s.View.Enrollments, Enrollment{AccountID: otherAccount, AccountKey: second.Candidate.Key, Harness: second.Candidate.Harness, Label: second.Candidate.Label, State: "connected"})
+	if err := e.setupHooks(t.Context(), s, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.HookCapabilities) != 1 || s.HookCapabilities[0].Version != "" || s.HookCapabilities[0].Verified || s.HookCapabilities[0].Blocker != "unsupported_version" {
+		t.Fatal("different active versions claimed one qualified harness", s.HookCapabilities)
+	}
+}
+
+func TestPairedHookProofRepairsPersistedDuplicateReports(t *testing.T) {
+	e, api, _, options, _ := engineFixture(t)
+	approveFixture(t, e, api, options)
+	s, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.HookCapabilities = append(s.HookCapabilities, s.HookCapabilities[0])
+	if err := e.save(s, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SyncFences(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	s, err = e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.HookCapabilities) != 1 || s.HookCapabilities[0].Verified || s.HookCapabilities[0].Blocker != "feature_disabled" {
+		t.Fatal("fence synchronization retained invalid duplicate reports", s.HookCapabilities)
 	}
 }
