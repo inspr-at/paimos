@@ -4,7 +4,7 @@
 
 Use through the approved remote-test.sh runner with:
   -json -race -count=30 -timeout=30m
-  -exec 'python3 scripts/test-harness-sigterm-race.py' ./internal/cli
+  -exec 'python3 ../../scripts/test-harness-sigterm-race.py' ./internal/cli
 The overlay changes only temporary copies; no tracked source is mutated.
 """
 
@@ -20,7 +20,8 @@ import tempfile
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("expected a Go test binary and its arguments")
-    root = Path.cwd()
+    # Go starts -exec wrappers in the package directory, not the repo root.
+    root = Path(__file__).resolve().parents[1]
     # Only omit the detector's post-exit delay, including in helper processes.
     test_env = os.environ.copy()
     test_env["GORACE"] = "atexit_sleep_ms=0"
@@ -69,7 +70,7 @@ def main():
             for iteration in range(1, 4):
                 result = subprocess.run(
                     command, env=test_env, stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT, text=True, timeout=180,
+                    stderr=subprocess.STDOUT, text=True, timeout=180, cwd=root,
                 )
                 print(result.stdout, end="", flush=True)
                 events = []
