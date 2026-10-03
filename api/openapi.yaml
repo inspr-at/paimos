@@ -16389,6 +16389,14 @@ components:
             label: {type: string, const: Queued}
             meaning: {type: string}
             is_status: {type: boolean, const: false}
+        recurring:
+          type: object
+          description: The loop marker denotes occurrence tickets, not a ticket status.
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Recurring}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
         autopilot:
           type: object
           required: [enabled, effective_enabled, project_mode, rules]
@@ -16417,6 +16425,10 @@ components:
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
         queued: {$ref: '#/components/schemas/QueuedTicket'}
+        recurrence:
+          $ref: '#/components/schemas/NodeRecurrence'
+          readOnly: true
+          description: Read-only provenance on node GET and list responses, derived from a visible recurrence_occurrences receipt, never editable fields. Absent for ordinary tickets or an inaccessible source recurrence. Loaded once per bounded page, with no per-row HTTP requests. Retained after recurrence retirement.
         id:
           type: string
           format: uuid
@@ -16519,6 +16531,16 @@ components:
         complexity_by: {type: [string, 'null'], format: uuid, readOnly: true}
         complexity_at: {type: [string, 'null'], format: date-time, readOnly: true}
         complexity_confirmed: {type: boolean, readOnly: true}
+    NodeRecurrence:
+      type: object
+      required: [id, project_id, project_key, number, trigger, retired]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, description: Source recurrence project; may differ from a moved ticket's project.}
+        project_key: {type: string, description: Source project's current key for its settings route.}
+        number: {type: integer, minimum: 1, description: Receipt occurrence number, including skipped attempts.}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
+        retired: {type: boolean, description: Retired sources retain their marker but cannot be managed.}
     NodeCreate:
       type: object
       required: [kind_id, title]

@@ -119,6 +119,18 @@ describe('RowStore: revisions only move forward', () => {
     expect(row.kind_slug).toBe('ticket')
   })
 
+  it('keeps recurring provenance through a save and clears it when a fresh list withholds the source', () => {
+    const rows = new RowStore()
+    const recurrence = { id: 'r-1', project_id: PROJECT.id, project_key: PROJECT.key, number: 4, retired: false, trigger: { kind: 'time' as const, rrule: 'FREQ=WEEKLY;BYDAY=MO' } }
+    const row = rows.adopt(item('n1', 1, { recurrence }), rows.mark(), { show: true })!
+    rows.wrote(node('n1', 2, { title: 'Saved title' }), rows.mark())
+    expect(row.recurrence).toEqual(recurrence)
+    rows.adopt(item('n1', 2, { title: 'Saved title' }), rows.mark(), { show: true })
+    expect(row.recurrence).toBeUndefined()
+    expect(rows.latest('n1')?.recurrence).toBeUndefined()
+    expect(row.title).toBe('Saved title')
+  })
+
   it('a replayed event older than what the store knows is older', () => {
     const rows = new RowStore()
     rows.adopt(item('n1', 5), rows.mark())

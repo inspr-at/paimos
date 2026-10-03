@@ -77,7 +77,7 @@ interface Entry {
 
 // List attributes a list page may leave out (an older server): a newer page
 // without them clears them.
-const OPTIONAL = ['epic', 'eta', 'lead_worker', 'estimate'] as const
+const OPTIONAL = ['epic', 'eta', 'lead_worker', 'estimate', 'recurrence'] as const
 const OWN_PER_NODE = 8
 const CHILDREN_PER_NODE = 64
 const LIMIT = 4000

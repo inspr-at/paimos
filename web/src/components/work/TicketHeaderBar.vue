@@ -122,6 +122,7 @@ void props
       <button v-if="backLabel" type="button" class="btn sm ghost" @click="emit('close')"><AppIcon name="arrow-left" :size="14" />{{ backLabel }}</button>
       <button v-if="openInProject" type="button" class="btn sm" @click="emit('openInProject')"><AppIcon name="folder" :size="14" />Open in project</button>
     </div>
+    <div v-if="$slots.marker" class="header-marker"><slot name="marker" /></div>
   </header>
 </template>
 
@@ -133,6 +134,7 @@ void props
 .peek-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 8px; }
 .peek-actions .btn { min-width: 0; }
 .peek-actions .btn svg { flex: none; }
+.header-marker { display: flex; align-items: center; padding: 0 0 8px; }
 .key-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 26px; white-space: nowrap; padding: 0 9px 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
 .key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .key-chip:active { filter: brightness(.97); }

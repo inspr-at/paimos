@@ -239,8 +239,15 @@ produce tenant/project-scoped `release.published` events; the same project and
 version are deduplicated across sources. Newly configured schedules ignore
 publications from before their creation. Occurrence tickets and their node,
 queue and recurrence audit events use the keyless system actor **Recurring
-work**. Occurrence receipts link each ticket back to its recurrence. Management
-requires `recurrences.manage`; agents need an explicit custom-role grant plus
+work**. Occurrence receipts link each ticket back to its recurrence. Lists show
+a gold loop badge on the type icon, in a fixed 22 px slot; its accessible tooltip
+describes the schedule and occurrence number in English or German. The ticket
+header shows a Recurring pill linking to the source recurrence only with
+management permission. Node GET and list responses carry read-only `recurrence`
+provenance from visible occurrence receipts, enriched once per bounded page;
+editable fields do not create a marker. Retired sources keep their markers.
+Status help and `aeon status help --json` share the same marker definition.
+Management requires `recurrences.manage`; agents need an explicit custom-role grant plus
 a key scope, even when bound to Owner/Admin. Saving a definition also requires
 `nodes.write`; `queue_each` adds `run.create` and `work_orders.write`.
 

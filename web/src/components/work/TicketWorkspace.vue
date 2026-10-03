@@ -55,6 +55,7 @@ import { usePoller } from '../../lib/usePolledData'
 import { useSession } from '../../stores/session'
 import RecurrenceEditor from '../recurrences/RecurrenceEditor.vue'
 import RecurrenceProvenance from '../recurrences/RecurrenceProvenance.vue'
+import RecurringPill from '../recurrences/RecurringPill.vue'
 import { criteriaText, recurrenceName, type Recurrence } from '../../lib/recurrences'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 
@@ -565,6 +566,7 @@ defineExpose({
       @edit-recurrence="editRecurrence"
     >
       <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
+      <template v-if="item?.recurrence" #marker><RecurringPill :recurrence="item.recurrence" /></template>
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
     <RecurrenceEditor v-if="repeatSource" :project="project" :source="repeatSource" @close="repeatSource = null" @saved="recurrenceSaved" />

@@ -125,6 +125,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  recurrence?: NodeRecurrence
   human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
@@ -132,6 +133,11 @@ export interface WorkNode {
   position: string; created_at: string; updated_at: string; deleted_at?: string | null
 }
 export interface Page<T> { items: T[]; next_cursor: string | null }
+export interface NodeRecurrence {
+  id: string; project_id: string; project_key: string; number: number
+  trigger: import('./recurrences').RecurrenceTrigger
+  retired: boolean
+}
 export interface SearchHit { node: WorkNode; score: number }
 export interface NodeCreate {
   human_check?: string | null
