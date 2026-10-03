@@ -6719,13 +6719,14 @@ paths:
   /models/resolve:
     get:
       operationId: resolveModelRole
-      description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
+      description: Replaces classic paimos model resolve. role with optional project_id preserves the CLI role ladder and adds residency evidence only. Placement resolution is enabled by mode=placement or the placement-specific ticket, area, complexity or person_id parameters; managed reviews then enforce qualification and approved-account requirements. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
         - {name: role, in: query, description: 'Required unless ticket supplies its route role. review-gate-security requires placement resolution; unavailable security ladders return owner_required with their explanation.', schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: "Required for review-gate and review-gate-security. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}

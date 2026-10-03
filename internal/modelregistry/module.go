@@ -205,7 +205,18 @@ func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permissi
 }
 
 func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
-	for _, name := range []string{"ticket", "area", "complexity", "project_id", "person_id"} {
+	params := r.URL.Query()
+	if params.Has("mode") {
+		if params.Get("mode") != "placement" {
+			writeErr(w, fail(http.StatusBadRequest, "invalid resolution mode"))
+			return
+		}
+		boundedPreferenceHandler(m.resolvePreferences)(w, r)
+		return
+	}
+	// project_id predates placement resolution: it adds residency evidence to
+	// the CLI ladder without changing review ordering or account requirements.
+	for _, name := range []string{"ticket", "area", "complexity", "person_id"} {
 		if r.URL.Query().Has(name) {
 			boundedPreferenceHandler(m.resolvePreferences)(w, r)
 			return

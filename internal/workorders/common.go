@@ -3,6 +3,7 @@
 package workorders
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,10 +92,15 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 				return
 			}
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		r = r.WithContext(ctx)
+		// Ordinary handlers decode inside fn; replay bounded memory there,
+		// never transport input while holding tenant/tree/resource fences.
+		if err := bufferEndpointBody(w, r); err != nil {
+			WriteError(w, err)
+			return
+		}
 		if prepare != nil {
 			var err error
 			r, err = prepare(r, p)
@@ -150,6 +157,59 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 			result = page.Items
 		}
 		httpapi.WriteJSON(w, status, result)
+	}
+}
+
+// bufferEndpointBody finishes all network reads before preparation or a database
+// transaction. A transport deadline interrupts HTTP reads; the context bound
+// also protects callers whose ResponseWriter cannot set transport deadlines.
+func bufferEndpointBody(w http.ResponseWriter, r *http.Request) error {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil
+	}
+	controller := http.NewResponseController(w)
+	if deadline, ok := r.Context().Deadline(); ok {
+		if err := controller.SetReadDeadline(deadline); err == nil {
+			defer controller.SetReadDeadline(time.Time{})
+		}
+	}
+	body := http.MaxBytesReader(w, r.Body, 1<<20)
+	type bodyResult struct {
+		raw []byte
+		err error
+	}
+	done := make(chan bodyResult, 1)
+	go func() {
+		raw, err := io.ReadAll(body)
+		done <- bodyResult{raw, err}
+	}()
+	select {
+	case <-r.Context().Done():
+		// Interrupt transport input immediately on cancellation too, rather
+		// than waiting for the original deadline while Close drains the body.
+		_ = controller.SetReadDeadline(time.Unix(1, 0))
+		_ = body.Close()
+		// HTTP request bodies must unblock a concurrent Read on Close. Join
+		// that read before writing a response or clearing its transport deadline.
+		<-done
+		return Fail(http.StatusRequestTimeout, "request body did not arrive in time")
+	case got := <-done:
+		if got.err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(got.err, &tooLarge) {
+				return Fail(http.StatusRequestEntityTooLarge, "request body too large")
+			}
+			var timedOut net.Error
+			if r.Context().Err() != nil || errors.As(got.err, &timedOut) && timedOut.Timeout() {
+				return Fail(http.StatusRequestTimeout, "request body did not arrive in time")
+			}
+			return Fail(http.StatusBadRequest, "could not read request body")
+		}
+		if r.Context().Err() != nil {
+			return Fail(http.StatusRequestTimeout, "request body did not arrive in time")
+		}
+		r.Body = io.NopCloser(bytes.NewReader(got.raw))
+		return nil
 	}
 }
 

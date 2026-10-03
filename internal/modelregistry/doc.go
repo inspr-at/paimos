@@ -32,6 +32,8 @@
 // selects that project's override. The trace retains every loosened lock.
 // This endpoint keeps its role-dispatch ladder; qualified review requests use
 // ResolveReviewFor and persist the complete preference trace with the review.
+// project_id alone does not enable placement resolution. mode=placement opts
+// in explicitly, as do ticket, area, complexity and person_id placement inputs.
 // A harness query skips other harnesses and is rejected
 // when the ladder has none of that harness. When the tenant already has an
 // account for a harness, candidates of that harness are also skipped for a
