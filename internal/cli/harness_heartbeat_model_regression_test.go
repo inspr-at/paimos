@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -131,6 +132,89 @@ func TestHeartbeatAppliedModelRequestFencesHistoricalTranscript(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestHeartbeatAppliedEffortSurvivesModelOnlyObservationAndRestart(t *testing.T) {
+	for _, source := range []string{"claude", "codex"} {
+		t.Run(source, func(t *testing.T) {
+			dir := t.TempDir()
+			path := claudeUsagePath(t, dir, "session.jsonl")
+			o := heartbeatOptions{Harness: source, Model: "original-model", Effort: "low", Transcript: path}
+			line := func(effort string) string {
+				if source == "codex" {
+					return `{"type":"turn_context","payload":{"model":"original-model","effort":"` + effort + `"}}` + "\n"
+				}
+				return `{"type":"assistant","message":{"model":"original-model","reasoning_effort":"` + effort + `"}}` + "\n"
+			}
+			if source == "codex" {
+				path = filepath.Join(dir, "sessions", "rollout-test.jsonl")
+				o.Transcript, o.UsageFile, o.UsageID = "", path, transcriptSessionID
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			history := line("low")
+			if err := os.WriteFile(path, []byte(history), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s := heartbeatSession{id: transcriptSessionID, disk: heartbeatDisk{ModelSent: true, SentModel: "original-model", SentEffort: "low"}}
+			request := heartbeatRequestFixture("model_request", "completed", "applied", 1)
+			request.Payload.Model = "original-model"
+			applyHeartbeatRequests(o, heartbeatDeps{}, &s, []heartbeatControl{request}, context.Background())
+			body := map[string]any{}
+			putHeartbeatModel(context.Background(), o, &s, body)
+			if len(body) != 1 || body["reasoning_effort"] != "high" {
+				t.Fatalf("applied effort-only change missing: %#v", body)
+			}
+			acceptHeartbeatModel(&s, body)
+			history += line("")
+			if err := os.WriteFile(path, []byte(history), 0600); err != nil {
+				t.Fatal(err)
+			}
+			body = map[string]any{}
+			putHeartbeatModel(context.Background(), o, &s, body)
+			if len(body) != 0 {
+				t.Fatalf("model-only observation changed accepted effort: %#v", body)
+			}
+			acceptHeartbeatModel(&s, body)
+
+			hold, err := openHeartbeatHold(filepath.Join(dir, "state"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer hold.release()
+			s.hold, s.lease = hold, strings.Repeat("a", 40)
+			if err := hold.writeFile("lease.key", []byte(s.lease+"\n")); err != nil {
+				t.Fatal(err)
+			}
+			if err := saveHeartbeatSession(&s); err != nil {
+				t.Fatal(err)
+			}
+			resumed, ok, err := loadHeartbeatSession(&hold)
+			if err != nil || !ok {
+				t.Fatalf("resume: %v %v", ok, err)
+			}
+			for beat := range 2 {
+				body = map[string]any{}
+				putHeartbeatModel(context.Background(), o, &resumed, body)
+				if len(body) != 0 {
+					t.Fatalf("heartbeat %d after restart replayed historical effort: %#v", beat+1, body)
+				}
+				acceptHeartbeatModel(&resumed, body)
+				if resumed.disk.SentModel != "original-model" || resumed.disk.SentEffort != "high" {
+					t.Fatal("accepted identity lost after restart")
+				}
+			}
+			if err := os.WriteFile(path, []byte(history+line("max")), 0600); err != nil {
+				t.Fatal(err)
+			}
+			body = map[string]any{}
+			putHeartbeatModel(context.Background(), o, &resumed, body)
+			if len(body) != 1 || body["reasoning_effort"] != "max" {
+				t.Fatalf("new effort evidence failed to supersede applied effort: %#v", body)
+			}
+		})
 	}
 }
 
