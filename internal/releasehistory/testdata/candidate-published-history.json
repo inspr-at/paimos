@@ -1,0 +1,225 @@
+[
+  {
+    "notes": {
+      "source": "unavailable",
+      "fallback": "historical-tag-headline",
+      "snapshot_sha256": "",
+      "captured_at": null,
+      "release_revision": 0,
+      "items": [],
+      "gaps": [
+        "Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership."
+      ],
+      "hidden": 0
+    },
+    "version": "260923143005.0.0",
+    "tag": "v260923143005.0.0",
+    "release_channel": "stable",
+    "release_sequence": 2,
+    "codename": "Blue Bot",
+    "state": "published",
+    "reserved_at": "2026-09-23T14:30:05Z",
+    "tagged_at": "2026-09-23T14:30:05Z",
+    "published_at": null,
+    "headline": "R1 tracker core (AEON-15)",
+    "tickets": [
+      "AEON-15"
+    ],
+    "changes": [
+      {
+        "commit": "b07f9b5b37d7444f09243ab399fc224de382030d",
+        "subject": "release: v260923143005.0.0",
+        "type": "release",
+        "scope": "",
+        "tickets": [],
+        "at": "2026-09-23T14:30:00Z"
+      },
+      {
+        "commit": "55a31e7f3c3206f050f135485e81651a32e6ccfe",
+        "subject": "B1: tracker core AEON-15",
+        "type": "other",
+        "scope": "",
+        "tickets": [
+          "AEON-15"
+        ],
+        "at": "2026-09-23T14:02:00Z"
+      },
+      {
+        "commit": "6a92a9dc04689af5353df87775490b48ba645d7f",
+        "subject": "test: cover the header",
+        "type": "test",
+        "scope": "",
+        "tickets": [],
+        "at": "2026-09-23T14:01:00Z"
+      },
+      {
+        "commit": "5cc7ef47dc5df143a31fd1a36915faec9497f5c4",
+        "subject": "fix(AEON-15): header mark",
+        "type": "fix",
+        "scope": "AEON-15",
+        "tickets": [
+          "AEON-15"
+        ],
+        "at": "2026-09-23T14:00:00Z"
+      }
+    ],
+    "changes_omitted": 0,
+    "evidence": {
+      "source_commit": "b07f9b5b37d7444f09243ab399fc224de382030d",
+      "source_url": "https://github.com/inspr-at/paimos/commit/b07f9b5b37d7444f09243ab399fc224de382030d",
+      "image": null,
+      "ci": null,
+      "release_run": null,
+      "release_url": "",
+      "unavailable": [
+        "GitHub was not consulted for this build, so the publication time, image digest and CI runs are not recorded."
+      ]
+    }
+  },
+  {
+    "notes": {
+      "source": "unavailable",
+      "fallback": "historical-tag-headline",
+      "snapshot_sha256": "",
+      "captured_at": null,
+      "release_revision": 0,
+      "items": [],
+      "gaps": [
+        "Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership."
+      ],
+      "hidden": 0
+    },
+    "version": "260923140000.0.0",
+    "tag": "",
+    "release_channel": "stable",
+    "release_sequence": 0,
+    "state": "reserved",
+    "reserved_at": "2026-09-23T14:00:00Z",
+    "tagged_at": null,
+    "published_at": null,
+    "headline": "",
+    "tickets": [],
+    "changes": [],
+    "changes_omitted": 0,
+    "evidence": {
+      "source_commit": "",
+      "source_url": "",
+      "image": null,
+      "ci": null,
+      "release_run": null,
+      "release_url": "",
+      "unavailable": [
+        "This version was reserved but never tagged or published."
+      ]
+    }
+  },
+  {
+    "notes": {
+      "source": "unavailable",
+      "fallback": "historical-tag-headline",
+      "snapshot_sha256": "",
+      "captured_at": null,
+      "release_revision": 0,
+      "items": [],
+      "gaps": [
+        "Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership."
+      ],
+      "hidden": 0
+    },
+    "version": "260923134631.0.0",
+    "tag": "v260923134631.0.0",
+    "release_channel": "stable",
+    "release_sequence": 1,
+    "codename": "Avid Axle",
+    "state": "published",
+    "reserved_at": "2026-09-23T13:46:31Z",
+    "tagged_at": "2026-09-23T13:46:31Z",
+    "published_at": null,
+    "headline": "R0 live shell (AEON-13)",
+    "tickets": [
+      "AEON-13"
+    ],
+    "changes": [
+      {
+        "commit": "9d90286d690b7e85730867360f360585260c40a0",
+        "subject": "release: v260923134631.0.0",
+        "type": "release",
+        "scope": "",
+        "tickets": [],
+        "at": "2026-09-23T13:46:00Z"
+      },
+      {
+        "commit": "973459199c7e44cbe02293906466cd91ad506db7",
+        "subject": "feat(AEON-13): live shell",
+        "type": "feat",
+        "scope": "AEON-13",
+        "tickets": [
+          "AEON-13"
+        ],
+        "at": "2026-09-23T13:40:00Z"
+      }
+    ],
+    "changes_omitted": 0,
+    "evidence": {
+      "source_commit": "9d90286d690b7e85730867360f360585260c40a0",
+      "source_url": "https://github.com/inspr-at/paimos/commit/9d90286d690b7e85730867360f360585260c40a0",
+      "image": null,
+      "ci": null,
+      "release_run": null,
+      "release_url": "",
+      "unavailable": [
+        "GitHub was not consulted for this build, so the publication time, image digest and CI runs are not recorded."
+      ]
+    }
+  },
+  {
+    "notes": {
+      "source": "unavailable",
+      "fallback": "historical-tag-headline",
+      "snapshot_sha256": "",
+      "captured_at": null,
+      "release_revision": 0,
+      "items": [],
+      "gaps": [
+        "Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership."
+      ],
+      "hidden": 0
+    },
+    "version": "260923134337.0.0",
+    "tag": "v260923134337.0.0",
+    "release_channel": "stable",
+    "release_sequence": 1,
+    "state": "reserved",
+    "reserved_at": "2026-09-23T13:43:37Z",
+    "tagged_at": "2026-09-23T13:43:37Z",
+    "published_at": null,
+    "headline": "R0 live shell (AEON-13)",
+    "tickets": [
+      "AEON-13"
+    ],
+    "changes": [
+      {
+        "commit": "973459199c7e44cbe02293906466cd91ad506db7",
+        "subject": "feat(AEON-13): live shell",
+        "type": "feat",
+        "scope": "AEON-13",
+        "tickets": [
+          "AEON-13"
+        ],
+        "at": "2026-09-23T13:40:00Z"
+      }
+    ],
+    "changes_omitted": 0,
+    "evidence": {
+      "source_commit": "973459199c7e44cbe02293906466cd91ad506db7",
+      "source_url": "https://github.com/inspr-at/paimos/commit/973459199c7e44cbe02293906466cd91ad506db7",
+      "image": null,
+      "ci": null,
+      "release_run": null,
+      "release_url": "",
+      "unavailable": [
+        "GitHub was not consulted for this build, so the publication time, image digest and CI runs are not recorded."
+      ]
+    }
+  }
+]

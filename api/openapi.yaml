@@ -6,6 +6,114 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/quota-warnings:
+    get:
+      summary: Workspace low-quota warning thresholds
+      operationId: getQuotaWarningSettings
+      security: [{session: []}, {agentKey: []}]
+      tags: [Agents]
+      responses:
+        '200':
+          description: Thresholds in percent remaining; defaults are 10 and 3.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+        '403': {description: Settings management permission required}
+    put:
+      summary: Configure workspace low-quota warning thresholds
+      operationId: putQuotaWarningSettings
+      security: [{session: []}]
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+      responses:
+        '200':
+          description: Saved thresholds. urgent_percent must be lower than early_percent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+        '400': {description: Both integer thresholds must be 1–50 and urgent must be lower than early}
+        '403': {description: Person with settings management permission required}
+  /agent-accounts/quota-warnings:
+    get:
+      summary: Affected active sessions with fresh measured low-quota warnings
+      operationId: listQuotaWarningSessions
+      security: [{session: []}, {agentKey: []}]
+      tags: [Agents]
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Project-filtered session warnings. Unshared peers see limited availability only, without severity, thresholds, windows, or numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuotaWarningSession'}}
+                  next_after: {type: [string, 'null'], format: uuid}
+        '400': {description: Invalid cursor or limit}
+        '403': {description: Account read permission required}
+
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the server-authored confirmation through the paired daemon
+      description: >-
+        AEON-580 implements this endpoint; AEON-581 consumes it. Requires the paired
+        runtime bearer and that computer's lifecycle proof. The computer must be
+        the workstation bound to the challenged key, with a pinned confirmation key.
+        Never return nonce, digest or summary through the agent's 428 response.
+        Refuse expired, consumed, revoked, foreign-computer and foreign-tenant challenges.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string}, description: 'Pairing lifecycle proof, daemon only; never log'}
+      responses:
+        '200':
+          description: Private daemon challenge; Cache-Control no-store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentdStepUpChallenge'}
+        '403': {description: Pairing or challenge refused}
+        '410': {description: Challenge expired or already consumed}
+  /reviews/github:
+    post:
+      operationId: receiveReviewPullChange
+      description: Host-configured GitHub webhook. Requires an HMAC-SHA256 signature over the original bounded body, the configured installation and repository, and a pull_request edited, synchronize or reopened event. Immediately revokes stale review bindings independently of publication retries. Replays can never approve or revive a review. Missing host configuration disables this route.
+      security: []
+      parameters:
+        - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
+        - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, const: pull_request}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, installation, repository, pull_request]
+              properties:
+                action: {type: string, enum: [edited, synchronize, reopened]}
+                installation: {type: object, required: [id], properties: {id: {type: integer}}}
+                repository: {type: object, required: [full_name], properties: {full_name: {type: string}}}
+                pull_request: {type: object, required: [number, head, base], properties: {number: {type: integer, minimum: 1}, head: {type: object, required: [sha], properties: {sha: {type: string}}}, base: {type: object, required: [sha, repo], properties: {sha: {type: string}, repo: {type: object, required: [full_name], properties: {full_name: {type: string}}}}}}}
+      responses:
+        '204': {description: Authenticated signal processed; no approval is published}
+        '400': {description: Unsupported or invalid event}
+        '401': {description: Invalid signature or installation/repository binding}
+        '404': {description: Host webhook configuration absent}
+        '413': {description: Body exceeds 2 MiB}
+        '502': {description: Revocation incomplete; delivery may be retried and the reporter also retries}
   /recurrences:
     get:
       operationId: listRecurrences
@@ -139,14 +247,17 @@ paths:
         '413': {description: Body exceeds 64 KiB}
     get:
       operationId: listQuestions
-      description: Questions in this project with current questions.read permission. Stable oldest-first order; agents see only questions they asked and only their own membership.
+      description: Questions in this project with current questions.read permission. Defaults to stable oldest-first creation order. For state=answered, order=desc uses newest current answer first (answer created_at, then question ID), with bounded keyset pagination via next_cursor. Agents see only questions they asked and only their own membership.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
         - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: desc requires state=answered and offset=0.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}, description: 'Opaque next_cursor from order=desc. Bound to tenant, principal and project; permissions are rechecked on every page. Requires state=answered and order=desc.'}
       responses:
         '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /questions/{questionId}:
     parameters:
@@ -197,14 +308,41 @@ paths:
     get:
       operationId: listDecisionDeskQuestions
       security: [{session: []}, {agentKey: []}]
-      description: P1 question-only projection, filtered by questions.read per project and asker for agents. No counts or content from inaccessible projects. Later packages add other item types and held-work ordering.
+      description: P1 question-only projection, filtered by questions.read per project and asker for agents. No counts or content from inaccessible projects. Defaults to oldest-first creation order; state=answered with order=desc lists newest current answers first (answer created_at, then question ID) using bounded keyset pagination via next_cursor. Later packages add other item types and held-work ordering.
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
         - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: desc requires state=answered and offset=0.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}, description: 'Opaque next_cursor from order=desc. Bound to tenant, principal and project; permissions are rechecked on every page. Requires state=answered and order=desc.'}
       responses:
         '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /decision-desk/projection:
+    get:
+      operationId: decisionDeskProjection
+      security: [{session: []}]
+      description: >-
+        Person-only canonical open desk pointers and exact counts, reauthorized per source and project.
+        Held approvals sort by expiry, then other held items by creation time, then other items by creation time;
+        stable source ID breaks ties. Merged askers count once and a question replaces its linked held request.
+        Answered questions (including grace/corrections), decided/expired approvals and resolved requests are excluded.
+        A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
+        Key trim proposals require keys.manage and remain quiet; their own protected approval API rechecks scopes and recent use. Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
+        Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
+        counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
+        The existing question-only decision-desk endpoint remains available.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      responses:
+        '200': {description: Canonically ordered visible sources, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskProjection'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/Error'}
   /queue:
     get:
       operationId: listWorkQueue
@@ -2613,7 +2751,9 @@ paths:
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
         Owner diagnostics are additive: errors retain their existing code and error fields
         and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
-        or code_expired). Registration authenticates the computer lifecycle proof before
+        code_expired, draining, or enrollment_unavailable). Draining or removed enrollments
+        refuse new attachment authority, including status-only attachment of a running process.
+        Registration authenticates the computer lifecycle proof before
         reporting version mismatch; later operations authenticate the registered poll key
         and computer principal before reporting a cause. Unauthenticated and foreign callers
         receive generic refusals without attach_refusal. Revoked bearer credentials remain
@@ -3121,6 +3261,24 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Agent key requires the releases.read scope}
         '500': {description: Stored release notes could not be read}
+  /releases/pending:
+    get:
+      operationId: listPendingReleaseChanges
+      summary: Changes on main since the running release
+      description: "AEON-635. Same authentication as the release history: people need a session and agent keys need releases.read. Compares the running published release's exact source commit with a pinned GitHub main head, never ticket status or timestamps. Merge and release/version-bump commits are excluded, as in displayed release groups. The public GitHub lookup is bounded to 250 commits, 4 MiB and six seconds, and cached for two minutes. Ticket classification reads at most 1000 keys from the caller's tenant per page; live ticket benefit text is never returned. A truncated comparison or incomplete classification reports partial, total null and known_total as a lower bound. Missing source evidence or a failed upstream lookup reports unavailable with total null, never zero. Pagination uses the last commit key within a pinned snapshot; a changed snapshot answers 409 and callers restart without a cursor."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque continuation returned by the previous page}
+      responses:
+        '200':
+          description: Exact, partial or explicitly unavailable pending changes
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PendingReleaseChanges'}
+        '400': {description: Invalid page limit or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
+        '409': {description: The pinned main snapshot changed; restart pagination}
   /releases/{version}:
     get:
       operationId: getRelease
@@ -3411,7 +3569,7 @@ paths:
                   type: [array, "null"]
                   maxItems: 256
                   items: {type: string}
-                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. A workspace role caps workspace grants; project-only agents keep their project ceiling. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. For shared roles, that ceiling combines workspace-role permissions with project-grantable and self-service permissions from the agent's project roles, restricted to agent_grantable permissions. Generated private workspace roles (non-builtin agent_<principal hex> roles) additionally cap rotation at their configured workspace permissions; project grants cannot restore scopes removed from that role. The coordinator rules.read exception remains derived from live project access. Project permissions remain confined to the agent's bound projects on requests. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label
@@ -3456,6 +3614,133 @@ paths:
           description: Agent or rotation key not found in this tenant
         "409":
           description: Rotation key was already revoked or rotated, or the agent is deactivated (reactivate it first)
+  /agent-keys/{id}/trim-proposals:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: proposeAgentKeyTrim
+      summary: Propose a scope reduction without changing the key
+      description: >-
+        Requires approvals.request; agents may propose. The expected scope set must
+        match the live set. Candidates must be a strict subset. Every dropped scope
+        needs evidence and a plain-language risk. Recent use is checked under the
+        key usage fence; a one-minute conservative margin covers debounce. No usage
+        record means unknown, never proof of non-use. OPS confirmation is a process
+        prerequisite for ops proposals. Exact request_id replay is idempotent.
+        No key credential, prefix or credential hash is returned or audited.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_scopes, candidate_scopes, evidence, expires_at]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_scopes: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                candidate_scopes: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                evidence: {$ref: '#/components/schemas/KeyTrimEvidence'}
+                expires_at: {type: string, format: date-time, description: Future timestamp within seven days}
+      responses:
+        '201':
+          description: Proposal recorded; scopes unchanged (also exact replay)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid or oversized input}
+        '403': {description: Permission denied}
+        '404': {description: Key not found in this tenant}
+        '409': {description: 'Live scopes changed, key inactive, recent scope use, or conflicting replay'}
+  /key-trim-proposals:
+    get:
+      operationId: listKeyTrimProposals
+      summary: Read protected key trim approval memos
+      description: Person only, keys.manage. Reads recheck current scopes and recent use and expose blocked_reason. Bounded keyset pagination; no key material.
+      security: [{session: []}]
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [pending, decided], default: pending}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: A page of approval memos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, has_more]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/KeyTrimProposal'}}
+                  has_more: {type: boolean}
+                  next_cursor: {type: string, format: uuid}
+        '400': {description: Invalid query}
+        '403': {description: Signed-in person with key management rights required}
+  /key-trim-proposals/{proposalId}/decision:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: decideKeyTrimProposal
+      summary: Approve or decline a key trim as a person
+      description: >-
+        Person only, keys.manage rechecked in the final tenant-fenced transaction.
+        Approval rechecks expiry, key activity, live editor/agent/creator ceilings,
+        snapshot digest and recent use, atomically applies the candidate set and
+        retains the original set. Decline closes without changing scopes. Exact
+        actor/request_id/decision/digest replay never reapplies or audits twice.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_digest, decision]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Scope snapshot digest, never a credential hash'}
+                decision: {type: string, enum: [approve, decline]}
+      responses:
+        '200':
+          description: Decision recorded or replayed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid input}
+        '403': {description: Person key-management or live grant authority denied}
+        '404': {description: Proposal not found in this tenant}
+        '409': {description: 'Proposal expired, scopes changed, key inactive, recent use, or conflicting decision'}
+  /key-trim-proposals/{proposalId}/restore:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: restoreKeyTrimProposal
+      summary: Restore the previous scope set for thirty days
+      description: Person only, keys.manage and live editor/agent/original-creator ceilings. CAS against the applied candidate digest; never overwrites intervening edits. Exact replay does not reapply. Audits agent_key.scopes_changed with the original set and no key material.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_digest]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: Previous scopes restored or exact replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid input}
+        '403': {description: Person key-management or live grant authority denied}
+        '404': {description: Proposal not found in this tenant}
+        '409': {description: 'Restore window closed, scopes changed, key inactive, or conflicting replay'}
   /agent-keys/{id}/scopes:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3486,8 +3771,8 @@ paths:
         '409': {description: Key is revoked or expired}
     patch:
       operationId: changeAgentKeyScopes
-      summary: Add or remove scopes without rotating the key
-      description: Requires a person with keys.manage. Applies add/remove atomically to the latest scopes; overlapping deltas are invalid. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after, any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      summary: Edit scopes and expiry without rotating the key
+      description: Requires a person with keys.manage. Applies add/remove and optional expires_at atomically to the latest key; overlapping deltas are invalid. Omitted expires_at preserves the current expiry, null means Never, and a timestamp must be in the future. At least one of add, remove or expires_at is required. Revoked or expired keys cannot be edited. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling, including expiry-only changes. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after (including expiry), any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
       security: [{session: []}]
       requestBody:
         required: true
@@ -3497,9 +3782,14 @@ paths:
               type: object
               additionalProperties: false
               minProperties: 1
+              anyOf:
+                - {required: [add]}
+                - {required: [remove]}
+                - {required: [expires_at]}
               properties:
                 add: {type: array, maxItems: 256, items: {type: string}}
                 remove: {type: array, maxItems: 256, items: {type: string}}
+                expires_at: {type: [string, 'null'], format: date-time, description: 'Omit to preserve expiry; null means Never; a timestamp must be in the future.'}
                 role_extension:
                   type: object
                   additionalProperties: false
@@ -3513,7 +3803,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AgentKey'}
-        '400': {description: Invalid scopes}
+        '400': {description: Invalid scopes or expiry}
         '401': {description: Not signed in}
         '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
         '404': {description: Key not found in this tenant}
@@ -4872,21 +5162,67 @@ paths:
           $ref: '#/components/responses/View'
         '400':
           $ref: '#/components/responses/Error'
+  /agents/plan:
+    get:
+      operationId: getAgentsPlan
+      security: *auth
+      description: >-
+        Read the calling person's agents.working plan, or the plan of an agent
+        key's live person creator. Requires agents.plan.read in the key ceiling
+        and live role grants; no person or tenant selector is accepted.
+        Plan ownership and principal_id resolve to the canonical person, as do
+        running counts. A linked alias's saved plan is used when the canonical
+        row is absent. Conflicting effective plans across linked rows fail closed.
+        An unset plan defaults to total 15 and no harness limits. Legacy cap
+        maps to total; legacy area/model reservations are ignored.
+        Running counts include all unended, unarchived sessions owned by this
+        person across projects, including starting, waiting, idle, throttled and
+        stopping sessions. Silence alone never frees a slot. Legacy sessions
+        without an owner count only when a key creator unambiguously identifies
+        this person. Counts disclose no session or project details.
+        This is a snapshot, not a start reservation; launchers must serialize
+        starts and check account capacity separately. Lowering a plan never
+        pauses or stops existing work.
+      responses:
+        '200':
+          description: Personal plan and running counts
+          content: {application/json: {schema: {$ref: '#/components/schemas/AgentsPlanSnapshot'}}}
+        '401': {description: Authentication required}
+        '403': {description: 'Missing scope, live role permission or person creator'}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
   /preferences/{key}:
     parameters:
       - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_.:-]{0,127}$'}}
     get:
       operationId: getPreference
-      description: The calling person's own UI preference (for example list columns and widths). A key never written returns value null.
+      description: >-
+        The calling person's own UI preference (for example list columns and
+        widths). A key never written returns value null. For agents.working,
+        read the canonical person's row, falling back to a linked alias's row
+        when absent; invalid or conflicting effective plans fail closed.
       responses:
         '200':
           description: Preference
           content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
         '400': {description: Invalid key}
         '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
     put:
       operationId: putPreference
-      description: Replace the calling person's preference. The value is a JSON object of at most 16 KiB. Private to the principal; no event is appended.
+      description: >-
+        Replace the calling person's preference. The value is a JSON object of
+        at most 16 KiB. Private to the principal; no event is appended.
+        For agents.working, validate AgentsPlan or the legacy cap/view/area/model
+        shape (cap 1–12, optional). Preserve the legacy shape for existing UI
+        clients; its reservations do not become limits. Plan reads for enforcers
+        use GET /agents/plan. Agents cannot write this plan.
+        Plan writes belong to the active canonical person and reconcile existing
+        linked alias copies to the saved value; other preferences remain private
+        to the calling principal. For agents.working, optional expected_updated_at
+        is the exact updated_at from GET /agents/plan (null means no saved plan).
+        The check and save are atomic across linked aliases; a stale revision
+        returns 409 without changing the plan. Omission preserves legacy writes.
       requestBody:
         required: true
         content:
@@ -4897,12 +5233,18 @@ paths:
               required: [value]
               properties:
                 value: {type: object}
+                expected_updated_at:
+                  type: [string, 'null']
+                  format: date-time
+                  description: 'Optional agents.working precondition; null requires an unset plan. Not accepted for other preferences.'
       responses:
         '200':
           description: Stored preference
           content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
         '400': {description: Invalid key or value}
         '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
+        '409': {description: Agents plan changed since expected_updated_at; re-read before retrying}
         '413': {description: Value too large}
   /views/{viewId}:
     parameters: [{$ref: '#/components/parameters/ViewId'}]
@@ -5477,6 +5819,103 @@ paths:
         '400': {description: Invalid settlement}
         '409': {description: Lease cursor mismatch or released lease}
         '410': {description: Archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      security: *auth
+      operationId: getSessionServiceTier
+      description: Read active/reported tier, pending change, adapter provenance and agent requests. Unmanaged and ended sessions are read-only.
+      responses:
+        '200': {description: Session service tier, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
+        '403': {description: Project harness.read required}
+        '404': {description: Session not visible in this tenant/project}
+    post:
+      security: *auth
+      operationId: setSessionServiceTier
+      description: Person-only project harness.control; live exact process ownership and tier revision required. Returns a pending control; the daemon confirms at the next safe point. Undo is another change. A request for the active tier cancels an unclaimed pending change; a claimed change must finish before undo. Request IDs are bound to the person and full body, including when the requested tier is already active.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ServiceTierChange'}}}
+      responses:
+        '201': {description: Pending change or cancelled pending change, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
+        '400': {description: Invalid tier or missing price}
+        '403': {description: Person with harness.control required}
+        '409': {description: 'Read-only session, changed revision/ownership or request ID reused with a different body'}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier/report:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Exact generation worker proof}
+    post:
+      security: *auth
+      operationId: reportSessionServiceTiers
+      description: Session-bound agent worker lease reports vendor capability facts per exact model. Offered tiers and multipliers must match the pinned vendor catalog; paid tiers require a cited vendor price and mechanism with checked-at provenance. Unpublished factors remain null. Only unmanaged sessions may report their active tier here; managed tier changes require a person control and daemon completion. No secrets or vendor credentials.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reports]
+              properties:
+                reports: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/ServiceTierReport'}}
+                active_tier: {$ref: '#/components/schemas/ServiceTier'}
+      responses:
+        '200': {description: Stored report}
+        '400': {description: Invalid capability report or factors differing from the pinned vendor catalog}
+        '403': {description: Worker proof rejected}
+        '409': {description: Managed active tier cannot be self-escalated}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier/ask:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: *auth
+      operationId: askSessionServiceTier
+      description: The session's own agent asks for a tier; its daemon lease is not required. No switch is performed. Requests are exposed on the tier read for the Decision Desk.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, tier, reason]
+              properties:
+                request_id: {type: string, format: uuid}
+                tier: {$ref: '#/components/schemas/ServiceTier'}
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        '201': {description: Pending person decision, content: {application/json: {schema: {$ref: '#/components/schemas/ServiceTierRequest'}}}}
+        '403': {description: Session-bound agent required}
+        '409': {description: Read-only or outstanding request}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: *auth
+      operationId: decideSessionServiceTier
+      description: Person with project harness.control approves or declines an agent request. Approval creates a fenced pending tier control atomically; a direct set to the requested tier also approves it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/ServiceTierChange'}
+                - type: object
+                  required: [decision]
+                  properties:
+                    decision: {type: string, enum: [approve, decline]}
+      responses:
+        '201': {description: Recorded decision and tier state, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
+        '403': {description: Person with harness.control required}
+        '409': {description: Decided request or stale/read-only session}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -5747,6 +6186,9 @@ paths:
         report. Subscription metadata is self-reported and never reduces the list-price estimate.
         No run telemetry, budgets or account settlement are modified. Consumers must not add managed
         run totals to reported session totals. reported_at is observation time, not token spend time.
+        Positive output supplies model-health evidence only for an available account owned by the
+        caller on this harness, while the session is live and the model and effort match its stored
+        identity. Usage for another model remains accounting data and cannot clear model suppression.
       parameters:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
@@ -5816,7 +6258,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. Model and effort reports update the current generation without re-registration; omitted values preserve the accepted identity. The current generation's worker lease is required. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
       requestBody:
         required: true
         content:
@@ -5847,6 +6289,7 @@ paths:
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
                 account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+                model_reports: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}
                 harness_version: {$ref: '#/components/schemas/HarnessVersion'}
                 brief: {$ref: '#/components/schemas/HarnessBrief'}
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
@@ -5860,6 +6303,20 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/model-reports:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: reportHarnessModels
+      description: Existing harness.worker authority plus the exact live worker lease reports only this session's harness. Agent evidence also requires an available account owned by the caller on this harness; registering a session does not enroll an account. Health evidence must match this exact session's stored model and effort or its managed run pin; usage for another model is insufficient. No extra key grant is needed. Failures must be five minutes apart to suppress routing, and receipt retention and rate limits also apply here. Evidence is validated, idempotent and content-free; discovered pins remain disabled until person acceptance, and no profile metadata or ladder writes are accepted.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
+      responses:
+        '200': {description: Evidence recorded}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/harness-sessions/{sessionId}/stop:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6332,6 +6789,26 @@ paths:
                   truncated: {type: boolean, description: More sessions were live than one answer holds; the freshest are listed}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /usage/model-estimates:
+    get:
+      security: *auth
+      operationId: modelEstimateHistory
+      summary: Read calibrated model history for a kind and complexity bucket
+      parameters:
+        - {name: profile_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: kind, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+        - {name: bucket, in: query, required: true, schema: {type: string, enum: [normal, complex]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Visible completed-ticket history; numeric hints are null below five samples. Requires harness.read.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelEstimateHistory'}
+        '400': {description: Invalid or overly broad query}
+        '401': {description: Unauthorized}
+        '403': {description: Permission denied}
+        '404': {description: Model profile not found}
   /usage/dashboard:
     get:
       operationId: getUsageDashboard
@@ -6504,7 +6981,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity is revalidated against current admission; a resource-scoped recovery permit is required only while a recoverable stop remains. Manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6514,6 +6991,7 @@ paths:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
@@ -6563,6 +7041,179 @@ paths:
         '200': {description: Revoked grant, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /model-preferences:
+    get:
+      operationId: getModelPreferences
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}:
+    put:
+      operationId: replaceModelPreferenceLevel
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceLevel
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}/rows/{kindId}:
+    put:
+      operationId: setModelPreferenceRow
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceRowWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceRow
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds:
+    get:
+      operationId: listWorkKinds
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}, description: Last ID from the preceding page.}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createWorkKind
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindWrite'}}}}
+      responses:
+        '201': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}:
+    patch:
+      operationId: updateWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPatch'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: archiveWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}/restore:
+    post:
+      operationId: restoreWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /models/{id}/retire:
+    post:
+      operationId: retireModelProfile
+      security: *auth
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirementWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: restoreModelProfile
+      security: *auth
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /models:
     get:
       operationId: listModelProfiles
@@ -6578,6 +7229,84 @@ paths:
         '201': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfile'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /models/refresh:
+    get:
+      operationId: getModelRefreshStatus
+      security: *auth
+      responses:
+        '200': {description: 'Settings, last refresh result, pending models and observations; no credentials', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
+    post:
+      operationId: refreshModelCatalog
+      description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. All callers and the scheduler share interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.
+      security: *auth
+      responses:
+        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /models/reports:
+    post:
+      operationId: reportModelObservations
+      description: Requires models.report. Every agent observation requires an available account owned by the caller on the reported harness; registering a session does not enroll an account. Health evidence also requires an active caller-owned session with the exact stored model and effort or its managed run pin; usage for another model is insufficient. Two invalid-model failures at least five minutes apart suppress routing for 24 hours independently of person overrides. Replayed report ids remain idempotent for seven days; at most 1000 receipts per principal and 200 new receipts per hour are accepted. New profiles are auto-added disabled by default and require person acceptance before dispatch; no reports reorder ladders. Unknown families are proposed for person acceptance.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
+      responses:
+        '200': {description: Report result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /models/proposals/accept:
+    post:
+      operationId: acceptModelProposal
+      description: Person with models.manage accepts and enables a previously observed model using its declared conservative mapping. Unmapped families require explicit person-managed profile creation. No ladder changes.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness, model, effort]
+              properties:
+                harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+                model: {type: string, maxLength: 128}
+                effort: {type: string, maxLength: 32}
+      responses:
+        '200': {description: Accepted profile, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfile'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /models/refresh/settings:
+    put:
+      operationId: setModelRefreshSettings
+      description: Person with models.manage configures reporting, profile acceptance and optional API discovery. Ladders are never automatically reordered by discovery.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshSettings'}}}}
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /models/refresh/credentials/{accountId}:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: setModelDiscoveryCredential
+      description: Person with models.manage stores a vendor model-list key encrypted and bound to this tenant/account. Empty key revokes it. Secrets never enter responses or audit events. Only fixed vendor model-list endpoints are used; redirects are refused.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [vendor, api_key]
+              properties:
+                vendor: {type: string, enum: [openai, anthropic, xai, openrouter]}
+                api_key: {type: string, maxLength: 4096, writeOnly: true}
+      responses:
+        '200': {description: Credential configured or revoked; no key material}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /models/routes:
     put:
       operationId: replaceModelRoutes
@@ -6593,17 +7322,24 @@ paths:
       description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
-        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: project_id, in: query, description: Optional project for model preference placement and the starter's residency trace., schema: {type: string, format: uuid}}
+        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
+        - {name: area, in: query, schema: {type: string, maxLength: 48}}
+        - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
+        - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts:
     get:
       operationId: listAgentAccounts
-      description: Admin view of opaque local accounts and allowance windows; no credential material.
+      description: Opaque local accounts. Details require ownership or owner sharing; otherwise allowance windows are empty and quota fields are masked. include_checks is enrolling-daemon-only and adds pending revision/generation-bound checks and resource memberships. No credential material.
+      parameters: [{name: include_checks, in: query, schema: {type: boolean, default: false}}]
       security: [{session: []}]
       responses:
         '200': {description: Accounts, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentAccount'}}}}}
@@ -6615,6 +7351,57 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/readiness:
+    get:
+      operationId: listAgentAccountReadiness
+      summary: Availability and nullable measurements, never launch authority
+      description: Requires account.read. Unknown usage never throttles and carries usage_unknown_reserve_not_enforceable. Model/project admission remains authoritative. Owners and the enrolling daemon see details; teammates see availability only unless the owner shares. No administrator bypass. Keyset paginated, at most 100 accounts per page.
+      security: *auth
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Readiness page, content: {application/json: {schema: {$ref: '#/components/schemas/AccountReadinessPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/check:
+    post:
+      operationId: requestAgentAccountCheck
+      summary: Request one revision-bound refresh
+      description: Person owner plus account.manage only. Idempotency keys are persisted; changing a key while pending coalesces to the same check. A persisted 60-second minimum gap applies across callers and restarts. Check now may request one early recovery for an unnamed or provider-confirmed money stop, deduplicated with automatic recovery; this endpoint never grants launch authority or clears a stop. Revocation, relinking and daemon-generation changes invalidate pending checks. Audits contain actor, account/revision and check ID, never vendor diagnostics.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckWrite'}}}}
+      responses:
+        '202': {description: Accepted or idempotently reused check, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheck'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Binding/revision stale or conflicting idempotency key, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '410': {description: Enrollment revoked; outstanding checks are invalidated}
+        '429': {description: Minimum gap, headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckRetry'}}}}
+  /agent-accounts/{accountId}/sharing:
+    put:
+      operationId: setAgentAccountUsageSharing
+      summary: Owner opts quota details into workspace sharing
+      description: Person owner plus account.manage only, revision checked under the access fence and audited. Defaults to false. Relinking resets sharing. Owners retain sharing control after computer or ongoing-use revocation; sharing never grants execution authority. Sharing covers quota detail, credits, reset times and bounded check errors on accounts, capacity, history, advice and events/SSE. It does not delegate checks.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision, share_usage]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+                share_usage: {type: boolean}
+      responses:
+        '204': {description: Sharing saved}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /agent-accounts/capacity:
     get:
       operationId: listAccountCapacity
@@ -6841,7 +7628,7 @@ paths:
       description: Tenant-scoped host → harness → account → model → effort cascade derived from enrolled accounts, owner probes, allowance windows and the existing model registry. Availability is advisory; routing reserves atomically. Legacy null account profile policy inherits the tenant harness catalog, not provider entitlements. Empty explicit grants offer no models.
       security: [{session: []}]
       parameters:
-        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}}
       responses:
         '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
@@ -6910,6 +7697,30 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/residency-evidence:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAgentAccountResidencyEvidence
+      summary: Read the account's recorded residency evidence
+      description: Requires account.read. People can inspect workspace evidence; agent keys must be the account's paired host identity. Missing evidence returns 404. Expired or superseded evidence remains inspectable but does not qualify a route.
+      security: *auth
+      responses:
+        '200': {description: Recorded evidence, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidenceRecord'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putAgentAccountResidencyEvidence
+      summary: Replace host-owned account residency evidence
+      description: Requires account.manage for the linked owning person, or account.probe for the connected paired host's bound runtime key. Workspace admins and agent key creators are not owners by implication. Authorization is repeated under the tenant and pairing locks in the write transaction. Each write emits account.residency_evidence_updated. Evidence covers only the listed model profiles and current account binding; a host, owner, provider or model change invalidates it. No proof reference is fetched by the server.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidence'}}}}
+      responses:
+        '200': {description: Saved evidence, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidenceRecord'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/metadata:
     put:
       operationId: replaceAgentAccountMetadata
@@ -7041,6 +7852,13 @@ paths:
         '200': {description: Account availability, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: 'Stale readiness check or binding. On the first report after a daemon generation change, the heartbeat commits and the stale check and its facts are rejected; refresh pending work before retrying.'
+          headers:
+            X-Aeon-Write-Committed:
+              schema: {type: boolean}
+              description: 'True only when the heartbeat committed despite rejecting the old-generation readiness completion.'
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
@@ -8839,7 +9657,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.4']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.6']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -8852,6 +9670,24 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    StepUpRequired:
+      type: object
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+    AgentdStepUpChallenge:
+      type: object
+      additionalProperties: false
+      required: [summary, nonce, action_digest, expires_at, computer_id]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 256, description: Server-generated plain summary; bounded to 256 UTF-8 bytes without control or format characters}
+        nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+        action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        expires_at: {type: string, format: date-time, description: At most five minutes after issue}
+        computer_id: {type: string, format: uuid}
     QuestionOption:
       type: object
       additionalProperties: false
@@ -8953,8 +9789,38 @@ components:
       type: object
       required: [items, has_more]
       properties:
-        items: {type: array, items: {$ref: '#/components/schemas/Question'}}
+        next_cursor: {type: string, maxLength: 512, description: Present only when order=desc has another page. Continue with the same scope and filters; concurrent new decisions appear after refreshing from the first page.}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
         has_more: {type: boolean}
+    DecisionDeskItem:
+      type: object
+      required: [id, kind, revision, title, created_at, held, href, source]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim]}
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        title: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        held: {type: boolean}
+        href: {type: string, description: App review link to the exact source}
+        source: {type: string, description: Authorized app route or API link to the exact source}
+    DecisionDeskProjection:
+      type: object
+      required: [items, counts, has_more, as_of]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DecisionDeskItem'}}
+        counts:
+          type: object
+          required: [open, held, chores]
+          properties:
+            open: {type: integer, minimum: 0}
+            held: {type: integer, minimum: 0}
+            chores: {type: integer, minimum: 0}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+        as_of: {type: string, format: date-time}
     RecurrenceTrigger:
       type: object
       additionalProperties: false
@@ -9338,7 +10204,7 @@ components:
         error: {type: string}
         attach_refusal:
           type: string
-          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired]
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable]
           description: Optional fixed cause, disclosed only after authenticating this computer's proof and principal. Includes no identifiers or request contents.
     AttachDeviceRequest:
       type: object
@@ -10356,15 +11222,15 @@ components:
     PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 7, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
-    PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions."}
-    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. No local diagnostics or paths. A ready harness may include attention_accounts naming a proper subset of enrolled accounts that still need a fix, so a healthy account cannot erase a sibling's block. attention_count is the full size of that subset. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that still need a fix while this harness stays ready because another of its accounts can work. Only a proper subset is kept, at most 32 entries, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}}}}
+    PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart", "permissions"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions. permissions: make the default Claude profile private; only offered for that fixed diagnostic."}
+    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. Only allowlisted reason_detail sentences cross the host boundary; no raw diagnostics or paths. A ready, blocked or login_required harness may include attention_accounts naming enrolled accounts that need a fix. A ready harness requires a proper subset; blocked and login_required may name every enrollment. Diagnostics are scoped by account id, never copied from a harness summary to multiple accounts. attention_count is the full size of that set. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that need a fix, including when every account is blocked. A ready harness requires a proper subset; blocked and login_required reports may include every enrollment. At most 32 entries are kept, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check or a confirmed sign-out in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check or a confirmed sign-out in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}
     PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}}}}}
     PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
     PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
-    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
     PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     ClassicBatchAliasResponse:
       type: object
@@ -10560,12 +11426,26 @@ components:
         usage_provisional_sessions: {type: integer, minimum: 0, description: Sessions with a provisional usage report; their figures may still change.}
     UsageAllowance:
       type: object
-      description: Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
+      description: Windows are withheld unless current account privacy permits quota detail; accounts retain labels and state only. At most 1024 active windows are considered; truncated marks omitted windows and their accounts. Partial means visible windows are incomplete because others were withheld or truncated. Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
       required: [state, windows]
       properties:
-        state: {type: string, enum: [visible, withheld, none]}
+        state: {type: string, enum: [visible, partial, withheld, none]}
+        truncated: {type: boolean, description: 'More than 1024 active windows exist; returned windows and account identities are bounded and incomplete. Independent of privacy withholding.'}
+        accounts:
+          type: array
+          maxItems: 1024
+          description: Availability-only account identities, including accounts whose windows are withheld.
+          items:
+            type: object
+            required: [account_id, label, harness, account_state]
+            properties:
+              account_id: {type: string, format: uuid}
+              label: {type: string}
+              harness: {type: string}
+              account_state: {type: string}
         windows:
           type: array
+          maxItems: 1024
           items:
             type: object
             required: [account_id, label, harness, account_state, window_id, unit, allowance, used, reserved, pace_model, burst_ratio, starts_at, ends_at, provisional, pace_cap, headroom, hard_remaining]
@@ -10977,6 +11857,21 @@ components:
         changed: {type: boolean}
         before: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
         after: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
+    PendingReleaseChanges:
+      type: object
+      required: [live_version, base_commit, head_commit, checked_at, source, status, total, known_total, changes, next_cursor, unavailable]
+      properties:
+        live_version: {type: string, description: The running build version used as the baseline}
+        base_commit: {type: string, description: "The running published release's exact source commit, empty when unavailable"}
+        head_commit: {type: string, description: "The pinned GitHub main head, empty when unavailable"}
+        checked_at: {type: string, format: date-time, description: When the cached main comparison was checked}
+        source: {type: string, enum: [github-main]}
+        status: {type: string, enum: [available, partial, unavailable]}
+        total: {type: [integer, 'null'], minimum: 0, description: "Exact non-merge, non-release change count; null for partial or unavailable evidence"}
+        known_total: {type: integer, minimum: 0, description: "Number of confirmed changes in the bounded snapshot, independent of the page limit; a lower bound when partial"}
+        changes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Release/properties/changes/items'}}
+        next_cursor: {type: [string, 'null'], description: "Continuation for the next page of this snapshot, null at the end of the bounded list"}
+        unavailable: {type: array, items: {type: string}, description: Plain-language evidence gaps or reasons for a partial or unavailable result}
     ReleaseHistory:
       description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
       type: object
@@ -11000,7 +11895,7 @@ components:
         release_channel: {type: string}
         release_sequence: {type: integer}
         codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
-        state: {type: string, enum: [published, reserved]}
+        state: {type: string, enum: [published, reserved, candidate]}
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}
         published_at: {type: [string, 'null'], format: date-time}
@@ -11047,6 +11942,10 @@ components:
             ci: {$ref: '#/components/schemas/ReleaseRun'}
             release_run: {$ref: '#/components/schemas/ReleaseRun'}
             release_url: {type: string}
+            pending:
+              type: array
+              description: 'Candidate evidence not yet established. Corresponding fields stay empty or null until a later tagged build records them.'
+              items: {type: string, enum: [tag_message, tagged_at, published_at, image, ci, release_run, release_url]}
             unavailable: {type: array, items: {type: string}, description: 'What could not be established, in plain words'}
     ReleaseRun:
       type: [object, 'null']
@@ -12920,6 +13819,31 @@ components:
               project_id: {type: string, format: uuid}
               group_id: {type: [string, 'null'], format: uuid}
         event_id: {type: [integer, 'null'], format: int64}
+    AgentsPlan:
+      type: object
+      additionalProperties: false
+      required: [total]
+      properties:
+        total: {type: integer, minimum: 0, maximum: 30, description: Planned maximum running agents; zero starts nothing new.}
+        limits:
+          type: object
+          propertyNames: {enum: [claude, codex, cursor, gemini, grok, opencode, pi]}
+          additionalProperties:
+            oneOf:
+              - {type: integer, minimum: 0, maximum: 30, description: At most this many; numeric zero allows no starts.}
+              - {type: string, enum: [no_limit, off]}
+          description: Missing harnesses have no limit. Off explicitly disables a harness. Limits may sum above total.
+    AgentsPlanSnapshot:
+      type: object
+      required: [total, limits, principal_id, running, running_total, source, updated_at]
+      properties:
+        total: {$ref: '#/components/schemas/AgentsPlan/properties/total'}
+        limits: {$ref: '#/components/schemas/AgentsPlan/properties/limits'}
+        principal_id: {type: string, format: uuid, description: Canonical person whose plan and running counts are read.}
+        running: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        running_total: {type: integer, minimum: 0}
+        source: {type: string, enum: [default, legacy, plan]}
+        updated_at: {type: [string, 'null'], format: date-time}
     Preference:
       type: object
       required: [key, value, updated_at]
@@ -12953,6 +13877,7 @@ components:
         model: {$ref: '#/components/schemas/HarnessModel'}
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        model_reports: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
         brief: {$ref: '#/components/schemas/HarnessBrief'}
         worktree: {$ref: '#/components/schemas/HarnessWorktree'}
@@ -12964,7 +13889,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, rename, model, effort, service_tier_v1]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
@@ -12990,7 +13915,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
-        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
+        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort, tier]}
         value: {type: string, description: Public setting value; absent for steering and process controls}
         state: {type: string, enum: [pending, claimed, completed]}
         sequence: {type: integer, format: int64}
@@ -13020,7 +13945,7 @@ components:
             note: {type: string, maxLength: 2000}
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
-        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, force_stop, rename_request or model_request.'}
+        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, tier, force_stop, rename_request or model_request.'}
         value: {type: string, description: Public setting value. Absent for steering and process controls.}
         text: {type: string, description: 'Steer text for this claim only. It is not stored and is omitted for every other kind.'}
         state: {type: string, enum: [claimed]}
@@ -13129,6 +14054,8 @@ components:
       additionalProperties: false
       required: [report_id, model, sequence, provisional, billing_mode]
       properties:
+        service_tier: {$ref: '#/components/schemas/ServiceTier'}
+        model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
         report_id: {type: string, format: uuid}
         model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
         sequence: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
@@ -13145,6 +14072,21 @@ components:
       type: object
       required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
       properties:
+        service_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+        model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
+        tier_segments:
+          type: array
+          items:
+            type: object
+            properties:
+              tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+              price_multiplier: {type: [number, 'null']}
+              speed_factor: {type: [number, 'null'], exclusiveMinimum: 0}
+              model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000}
+              usage_multiplier: {type: [number, 'null']}
+              input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+              output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+              cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         session_id: {type: string, format: uuid}
         model: {type: string, maxLength: 128}
         sequence: {type: integer, format: int64}
@@ -13154,7 +14096,7 @@ components:
         reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: 'Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.'}
         provisional: {type: boolean, description: 'True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.'}
         price_version: {type: [integer, 'null'], format: int64, description: Null unless billing_mode is api.}
-        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Sum of exact tier segment token estimates at their frozen price multiplier; legacy reports use list price, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
         cost_status: {type: string, enum: [estimated, unknown]}
         currency: {type: string, const: USD}
         account_id: {type: [string, 'null'], format: uuid}
@@ -13218,6 +14160,116 @@ components:
         agent_principal_id: {type: string, format: uuid}
         stopped_at: {type: [string, 'null'], format: date-time}
         archived_at: {type: [string, 'null'], format: date-time}
+    ServiceTier:
+      type: string
+      enum: [default, fast, fastest]
+    ServiceTierCapability:
+      type: object
+      required: [tier, name, offered, speed_factor, price_multiplier, usage_multiplier, mechanism]
+      properties:
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        name: {type: string, enum: [Default, Fast, Fastest]}
+        offered: {type: boolean, description: True only when the pinned catalog has a supported mechanism and a cited vendor price with checked-at provenance.}
+        speed_factor: {type: [number, 'null'], exclusiveMinimum: 0}
+        price_multiplier: {type: [number, 'null'], exclusiveMinimum: 0}
+        usage_multiplier: {type: [number, 'null'], exclusiveMinimum: 0, description: 'Subscription capacity consumption, separate from token price.'}
+        mechanism: {type: string}
+        reason: {type: string}
+    ServiceTierReport:
+      type: object
+      required: [harness, model, harness_version, adapter_version, checked_at, source, applies, change_instructions, tiers]
+      properties:
+        harness: {type: string}
+        model: {type: string}
+        harness_version: {type: string}
+        adapter_version: {type: string}
+        checked_at: {type: string, format: date-time}
+        source: {type: string}
+        applies: {type: string, enum: [next_run, next_turn]}
+        change_instructions: {type: string}
+        tiers: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/ServiceTierCapability'}}
+    ServiceTierChange:
+      type: object
+      required: [request_id, tier, expected_revision, expected_ownership]
+      properties:
+        request_id: {type: string, format: uuid}
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        undo_of_control_id: {type: string, format: uuid, description: Exact completed or pending tier control being undone.}
+        expected_revision: {type: integer, minimum: 0}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+    ServiceTierRequest:
+      type: object
+      required: [id, session_id, tier, reason, requested_by_principal_id, state, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        reason: {type: string}
+        requested_by_principal_id: {type: string, format: uuid}
+        state: {type: string, enum: [pending, approved, declined]}
+        decided_by_principal_id: {type: [string, 'null'], format: uuid}
+        created_at: {type: string, format: date-time}
+        decided_at: {type: [string, 'null'], format: date-time}
+        control_id: {type: [string, 'null'], format: uuid}
+    SessionServiceTier:
+      type: object
+      required: [session_id, revision, active_tier, pending, read_only, reports, requests]
+      properties:
+        session_id: {type: string, format: uuid}
+        revision: {type: integer}
+        active_tier: {type: [string, 'null'], enum: [default, fast, fastest, null], description: Null until reported or confirmed.}
+        pending: {oneOf: [{$ref: '#/components/schemas/HarnessManagedControl'}, {type: 'null'}]}
+        last_change: {oneOf: [{$ref: '#/components/schemas/HarnessManagedControl'}, {type: 'null'}], description: Most recently completed tier control including its outcome and reason.}
+        read_only: {type: boolean}
+        read_only_reason: {type: string}
+        reports: {type: array, items: {$ref: '#/components/schemas/ServiceTierReport'}}
+        history: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ServiceTierHistory'}}
+        history_truncated: {type: boolean}
+        run_cost: {oneOf: [{$ref: '#/components/schemas/ServiceTierRunCost'}, {type: 'null'}]}
+        estimates: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/ServiceTierEstimate'}}
+        requests: {type: array, items: {$ref: '#/components/schemas/ServiceTierRequest'}}
+    ServiceTierHistory:
+      type: object
+      required: [id, action, from_tier, to_tier, actor_id, actor_name, at, asked_by_name]
+      properties:
+        id: {type: integer, format: int64}
+        action: {type: string, enum: [requested, switch_requested, approved, declined, changed, cancelled, undo_requested, undone, rejected]}
+        from_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+        to_tier: {$ref: '#/components/schemas/ServiceTier'}
+        actor_id: {type: string, format: uuid}
+        actor_name: {type: string}
+        reason: {type: string, description: Completed control reason when available.}
+        asked_by_name: {type: [string, 'null']}
+        at: {type: string, format: date-time}
+    ServiceTierRunCost:
+      type: object
+      required: [model, run_id, cost_usd, default_cost_usd, segments, provisional]
+      properties:
+        model: {type: string}
+        run_id: {type: string, format: uuid}
+        cost_usd: {type: string, description: Frozen token-price estimate; never billed cost.}
+        default_cost_usd: {type: string}
+        provisional: {type: boolean}
+        segments:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            required: [tier, price_multiplier]
+            properties:
+              tier: {$ref: '#/components/schemas/ServiceTier'}
+              price_multiplier: {type: number, exclusiveMinimum: 0}
+    ServiceTierEstimate:
+      type: object
+      required: [tier, n, basis, run_id, cost_usd, duration_ms]
+      properties:
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        n: {type: integer, minimum: 0, maximum: 1, description: 'One last completed matching run, never a sample average.'}
+        basis: {type: string}
+        actual: {type: boolean, description: True for the sample's single measured tier; false or absent for projections.}
+        run_id: {type: [string, 'null'], format: uuid}
+        cost_usd: {type: [string, 'null']}
+        duration_ms: {type: [number, 'null'], minimum: 0, description: Only reported model time scales; all other elapsed time stays unchanged.}
     HarnessPauseLevel:
       type: string
       enum: [stop_now, pause_quickly, pause, wrap_up]
@@ -13370,6 +14422,10 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        service_tier: {$ref: '#/components/schemas/ServiceTier'}
+        service_tier_revision: {type: integer, minimum: 0}
+        service_tier_request: {type: [string, 'null'], enum: [default, fast, fastest, null], description: Pending agent-requested tier available on session list rows without opening the panel.}
+        service_tier_reports: {type: array, items: {$ref: '#/components/schemas/ServiceTierReport'}}
         supported_pause_levels: {type: array, items: {$ref: '#/components/schemas/HarnessPauseLevel'}, description: Without a cooperative inbox only stop_now is supported.}
         pause_can_interrupt: {type: boolean, description: 'Harness advertises cooperative interrupt support. Fresh pause_progress.interrupt describes the current operation; false means it reacts after the command.'}
         pause_progress: {$ref: '#/components/schemas/HarnessPauseProgress'}
@@ -13380,8 +14436,8 @@ components:
           description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
           items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
-        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
-        limit_resets_at: {type: string, format: date-time}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
+        limit_resets_at: {type: string, format: date-time, description: Omitted unless current account owner sharing permits reset details.}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -13451,13 +14507,24 @@ components:
         inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
         inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
         has_vendor_session_ref: {type: boolean, description: 'True when a vendor session reference is stored. The reference itself is never returned.'}
+    ModelEstimateHistory:
+      type: object
+      required: [state, basis, tickets, hours, tokens, speed_factor, speed_tickets]
+      properties:
+        state: {type: string, enum: [calibrated, uncalibrated]}
+        basis: {type: string, description: Sample cell and versions used; always includes n. Truncated or unavailable history is explicitly uncalibrated.}
+        tickets: {type: integer, minimum: 0}
+        hours: {type: [number, 'null'], description: Median measured active hours in history; model-adjusted estimate hours in planning. Null below five samples.}
+        tokens: {type: [integer, 'null'], description: Median reported input plus output tokens; null below five samples.}
+        speed_factor: {type: [number, 'null'], description: 'Median active hours divided by frozen estimate hours, exact cell only; null below five valid estimates.'}
+        speed_tickets: {type: integer, minimum: 0}
     TicketPlanning:
       description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Live model names come from the registry at read time. Work-start estimate snapshots freeze the planned route and rates separately. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
       type: object
       required: [route, tokens]
       properties:
         route:
-          description: The registry resolution of route_role and area. Null for epics and when unresolved.
+          description: The placement resolution of project, canonical assignee (or viewer), kind of work, complexity and route_role. Null for epics and when unresolved.
           type: [object, 'null']
           required: [label, profile, harness, model, effort, revision]
           properties:
@@ -13472,6 +14539,9 @@ components:
             model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
             effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5}
             revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
+            set_by: {type: string, enum: [default, person, project], description: Level supplying the model preference.}
+            follows_latest: {type: boolean, description: The effective selector follows a model line.}
+            pinned: {type: boolean, description: The effective selector pins a profile.}
         route_gap:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
           type: string
@@ -13515,13 +14585,15 @@ components:
             sessions: {type: integer, minimum: 0}
             running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
-            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour; an epic sums its open and done children. Null without an estimate.'}
+            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. Ticket and task rows also return default-rate figures with calibration.basis=default; clients must label or hide these uncalibrated figures. An epic sums only calibrated open and done children; excluded default estimates are counted in children.uncalibrated. Null without a contributing estimate.'}
             calibration:
               description: The rate behind a ticket's estimate.
               type: object
               required: [basis, tickets, tokens_per_hour]
               properties:
                 basis: {type: string, enum: [median, default], description: 'median of the last 30 eligible finished tickets (all sessions stopped and fully reported, at least one minute of session time) whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
+                basis_text: {type: string, description: Backoff level and sample count; uncalibrated for the documented default. A history truncation or availability issue may accompany an independently calibrated legacy route.}
+                level: {type: string, enum: [cell, line, profile, route, default]}
                 tickets: {type: integer, minimum: 0}
                 tokens_per_hour: {type: integer, minimum: 0}
                 any_route: {type: boolean}
@@ -13531,7 +14603,7 @@ components:
           required: [list_spent, list_estimated, list_unpriced, paid_spent, paid_estimated, paid_unknown, plans]
           properties:
             list_spent: {type: [string, 'null'], description: 'Spent tokens at API list prices, whatever the billing.'}
-            list_estimated: {type: [string, 'null'], description: 'The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
+            list_estimated: {type: [string, 'null'], description: 'Ticket and task rows also return uncalibrated default-rate figures when tokens.calibration.basis=default; clients must label or hide them. Epics include only calibrated children. The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
             list_unpriced: {type: boolean, description: 'Some reported usage or the route''s model has no list price. A session without a usage row does not set this flag.'}
             paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
             paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
@@ -13540,14 +14612,16 @@ components:
             billing_modes: {type: array, items: {type: string, enum: [api, subscription, unknown]}, description: Billing modes of actual visible usage only; requires harness.read on source and row projects.}
             list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
             paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
+        model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
-          description: 'Epics only: open and done ticket and task children, and how many are estimated.'
+          description: 'Epics only: open and done ticket and task children, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
           type: object
           required: [total, estimated]
           properties:
             total: {type: integer, minimum: 0}
-            estimated: {type: integer, minimum: 0}
+            estimated: {type: integer, minimum: 0, description: Children contributing calibrated estimates to the sum.}
+            uncalibrated: {type: integer, minimum: 0, description: Children with size estimates excluded from the sum because their rates are uncalibrated.}
     TicketEstimateSnapshot:
       type: object
       description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into the in-progress work bucket in a work episode. Kind state categories take precedence over fixed spellings, as in project work counts. Later estimates, QA, blocked and open transitions do not overwrite or close it. Only done, cancelled or archived work buckets close the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
@@ -13557,6 +14631,7 @@ components:
         started_at: {type: string, format: date-time}
         source: {type: string, enum: [session, status]}
         estimate_hours: {type: [number, 'null']}
+        model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimated_tokens: {type: [integer, 'null']}
         estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}
         route: {$ref: '#/components/schemas/TicketPlanning/properties/route'}
@@ -13568,8 +14643,11 @@ components:
             tickets: {type: integer, minimum: 0}
             tokens_per_hour: {type: integer, minimum: 0}
             any_route: {type: boolean}
-            tokens_per_hour_exact: {type: string, description: Unrounded tokens per hour used for the snapshot calculation.}
-            list_per_hour: {type: [string, 'null'], description: USD per hour frozen at start; omitted without harness.read.}
+            basis_text: {type: string}
+            level: {type: string, enum: [cell, line, profile, route, default]}
+            speed: {type: number, exclusiveMinimum: 0, description: Exact-cell speed factor frozen at start; defaults to 1 in older snapshots. Estimated tokens are rounded estimate_hours × tokens_per_hour_exact × speed.}
+            tokens_per_hour_exact: {type: string, description: Unrounded token rate before applying the frozen speed factor.}
+            list_per_hour: {type: [string, 'null'], description: Speed-scaled USD per size hour frozen at start; estimated cost is estimate_hours × list_per_hour. Omitted without harness.read.}
             price_version: {type: [integer, 'null']}
             input_usd_per_million: {type: [string, 'null']}
             output_usd_per_million: {type: [string, 'null']}
@@ -13786,8 +14864,8 @@ components:
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at, finished]
       properties:
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
-        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
-        limit_resets_at: {type: string, format: date-time}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
+        limit_resets_at: {type: string, format: date-time, description: Omitted unless current account owner sharing permits reset details.}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -13950,6 +15028,7 @@ components:
       type: object
       required: [sequence, kind]
       properties:
+        service_tier: {$ref: '#/components/schemas/ServiceTier'}
         sequence: {type: integer, format: int64, minimum: 1}
         kind: {type: string, enum: [started, heartbeat, turn, tool, usage, status, finished]}
         status: {type: string, enum: [starting, running, waiting, completed, failed, cancelled, ownership_lost]}
@@ -14031,8 +15110,192 @@ components:
             decision: {type: [string, 'null'], enum: [approved, denied, null]}
             decided_by_principal_id: {type: [string, 'null'], format: uuid}
             target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
+    ModelSelector:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
+      oneOf:
+        - properties: {mode: {const: auto}}
+          not: {anyOf: [{required: [profile_id]}, {required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: pinned}}
+          required: [profile_id]
+          not: {anyOf: [{required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: latest}}
+          required: [family, line, effort]
+          not: {required: [profile_id]}
+      properties:
+        mode: {type: string, enum: [auto, latest, pinned]}
+        profile_id: {type: string, format: uuid}
+        family: {type: string, maxLength: 32}
+        line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        effort: {type: string, maxLength: 32}
+        harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    ModelPreferenceRow:
+      type: object
+      required: [kind_id, locked, normal, complex]
+      properties:
+        kind_id: {type: string, format: uuid}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceRowWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      description: Both selectors required unless locked=true requests copy-on-lock; project locks are forbidden.
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceLevelWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+    ModelPreferenceLevel:
+      type: object
+      required: [revision, residency, residency_locked, prefs_locked, rows, updated_by, updated_at]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+        updated_by: {type: [string, 'null'], format: uuid}
+        updated_at: {type: [string, 'null'], format: date-time}
+    ModelPreferenceEffective:
+      type: object
+      required: [selector, profile, label, brand, follows_latest, pinned, today_version]
+      properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
+        label: {type: string}
+        brand: {type: string}
+        follows_latest: {type: boolean}
+        pinned: {type: boolean}
+        today_version: {type: string}
+        unavailable_reason: {type: string}
+    ModelPreferenceView:
+      type: object
+      required: [residency, rows, changes]
+      properties:
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - {type: object, properties: {qualifying_routes: {type: integer, minimum: 0}}}
+        rows:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [kind_id, set_by, locked_by, changed_here, reset_to, warnings, normal, complex]
+            properties:
+              kind_id: {type: string, format: uuid}
+              set_by: {type: string}
+              locked_by: {type: string}
+              changed_here: {type: boolean}
+              reset_to: {type: string}
+              warnings: {type: array, items: {type: string}}
+              normal: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+              complex: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+        changes: {type: integer, minimum: 0}
+    ModelPreferences:
+      description: The document revision sums the included level revisions; writes compare the target level revision.
+      type: object
+      required: [revision, person_id, kinds, levels, views, can, residency_lock_mode]
+      properties:
+        revision: {type: integer, format: int64}
+        person_id: {type: [string, 'null'], format: uuid}
+        kinds: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
+        levels:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            person: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceLevel'}, {type: 'null'}]}
+        views:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceView'}
+            person: {$ref: '#/components/schemas/ModelPreferenceView'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceView'}, {type: 'null'}]}
+        can:
+          type: object
+          required: [edit_default, edit_person, edit_project, add_default_kind, add_project_kind]
+          properties:
+            edit_default: {type: boolean}
+            edit_person: {type: boolean}
+            edit_project: {type: boolean}
+            add_default_kind: {type: boolean}
+            add_project_kind: {type: boolean}
+        residency_lock_mode: {type: string, const: warn}
+    ModelPreferenceWriteResult:
+      type: object
+      required: [level, revision, running_outside, residency]
+      properties:
+        level: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+        revision: {type: integer, format: int64}
+        running_outside: {type: array, items: {type: string, format: uuid}}
+        residency: {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+    WorkKind:
+      type: object
+      required: [id, slug, label, hint, position]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string, maxLength: 48}
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+        system: {type: string, enum: [review, security, other]}
+        position: {type: integer}
+        archived_at: {type: string, format: date-time}
+    WorkKindWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+    WorkKindPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        position: {type: integer, minimum: -1000000, maximum: 1000000}
+    WorkKindPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkKind'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    ModelRetirementWrite:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 200}
+    ModelRetirement:
+      type: object
+      required: [profile_id, retired]
+      properties:
+        profile_id: {type: string, format: uuid}
+        retired: {type: boolean}
+        reason: {type: string, maxLength: 200}
     ModelProfileWrite:
       type: object
+      description: Family must match the fixed harness provider or an explicitly supported provider/model binding. Ambiguous multi-provider pins may use unknown and cannot perform independent review. Existing inconsistent immutable profiles are excluded from routing and review approval.
       required: [slug, version, harness, family, model, effort, tier]
       properties:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
@@ -14045,6 +15308,34 @@ components:
         display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
         short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
         model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+    ModelObservationWrite:
+      type: object
+      additionalProperties: false
+      required: [report_id, harness, model, effort, status]
+      properties:
+        report_id: {type: string, format: uuid, description: Stable evidence id. Retrying the same evidence never counts another failure.}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        model: {type: string, minLength: 1, maxLength: 128}
+        effort: {type: string, minLength: 1, maxLength: 32}
+        status: {type: string, enum: [advertised, working, invalid], description: 'Invalid means an explicit model-not-found or unsupported-model failure, never a generic HTTP 400.'}
+    ModelRefreshSettings:
+      type: object
+      additionalProperties: false
+      required: [agent_reports_enabled, auto_add_profiles, api_enabled, interval_minutes]
+      properties:
+        agent_reports_enabled: {type: boolean, default: true}
+        auto_add_profiles: {type: boolean, default: true}
+        api_enabled: {type: boolean, default: false}
+        interval_minutes: {type: integer, minimum: 60, maximum: 43200, default: 1440}
+    ModelRefreshStatus:
+      type: object
+      required: [settings, sources, observations, last_result]
+      properties:
+        settings: {$ref: '#/components/schemas/ModelRefreshSettings'}
+        last_run_at: {type: [string, 'null'], format: date-time}
+        last_result: {type: object, additionalProperties: true}
+        sources: {type: array, items: {type: object, required: [account_id, vendor], properties: {account_id: {type: string, format: uuid}, vendor: {type: string, enum: [openai, anthropic, xai, openrouter]}}}}
+        observations: {type: array, items: {type: object, additionalProperties: true}}
     ModelProfile:
       allOf:
         - {$ref: '#/components/schemas/ModelProfileWrite'}
@@ -14060,7 +15351,7 @@ components:
       type: object
       required: [role, priority, profile_id, state]
       properties:
-        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
         priority: {type: integer, minimum: 1}
         profile_id: {type: string, format: uuid}
         state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
@@ -14078,10 +15369,51 @@ components:
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        preference: {$ref: '#/components/schemas/ModelPreferenceDecision'}
+        residency: {type: string, enum: [any, eu, local]}
+    ModelPreferenceDecision:
+      type: object
+      description: Additive resolution evidence returned only when preference placement parameters are supplied.
+      required: [kind, complexity, role, person_id, project_id, cell, residency, fallback, blocked, hard_rules]
+      properties:
+        kind:
+          type: object
+          required: [slug, source]
+          properties: {slug: {type: string}, source: {type: string}}
+        complexity:
+          type: object
+          required: [value, bucket, source]
+          properties: {value: {type: string}, bucket: {type: string, enum: [normal, complex]}, source: {type: string}}
+        role: {type: string}
+        person_id: {type: [string, 'null'], format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        cell:
+          type: object
+          required: [set_by, selector]
+          properties:
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            selector: {$ref: '#/components/schemas/ModelSelector'}
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - type: object
+              required: [ticket_requirement, qualifying_account_ids]
+              properties:
+                ticket_requirement: {type: string, enum: [any, eu, local]}
+                qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
+        blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
+        hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
     ModelPreferenceTrace:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        role: {type: string}
+        project_id: {type: string, format: uuid}
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        ticket_requirement: {type: string, enum: [any, eu, local]}
         person_id: {type: [string, 'null'], format: uuid}
         residency:
           type: object
@@ -14104,7 +15436,7 @@ components:
         locked_by: {type: string}
         mode: {type: string, enum: [auto, latest, pinned]}
         prefs_revision: {type: integer, format: int64}
-        qualifying_account_ids: {type: array, items: {type: string, format: uuid}}
+        qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
         preferred_candidates: {type: array, items: {type: object, properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
         latest_resolved_to: {type: string, format: uuid}
         fallback: {type: string}
@@ -14302,6 +15634,7 @@ components:
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
         awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
+        details_redacted: {type: boolean, description: True when the owner has not shared quota detail; ignore the placeholder schedule.}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
         group_id: {type: string, format: uuid}
@@ -14387,12 +15720,41 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         label: {type: string, minLength: 1, maxLength: 128}
         max_parallel_runs: {type: integer, minimum: 1}
+    AccountResidencyEvidence:
+      type: object
+      additionalProperties: false
+      required: [model_profile_ids, inference_countries, storage_countries, log_countries, local_execution, verified_at, expires_at, proof_ref]
+      description: Host attestation, not an automated compliance certification. Country sets use uppercase ISO 3166-1 alpha-2 codes. EU and local require all three nonempty sets to contain only EU member countries; local additionally requires explicit operator-local execution. Both classes require a covered profile, a proof reference, verified_at no later than now and expires_at strictly after now. The validity interval from verified_at to expires_at must be positive and at most 400 days. Optional retention and training declarations are recorded without changing the residency class.
+      properties:
+        model_profile_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+        inference_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        storage_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        log_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        local_execution: {type: boolean}
+        retention_days: {type: [integer, 'null'], minimum: 0, maximum: 36500}
+        training_opt_out: {type: [boolean, 'null']}
+        verified_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        proof_ref: {type: string, minLength: 1, maxLength: 1024, description: Opaque reference to proof documents; never credentials or signed access URLs.}
+    AccountResidencyEvidenceRecord:
+      type: object
+      required: [account_id, evidence, recorded_by, recorded_at, binding_current]
+      properties:
+        account_id: {type: string, format: uuid}
+        evidence: {$ref: '#/components/schemas/AccountResidencyEvidence'}
+        recorded_by: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        binding_current: {type: boolean, description: False after the account's ownership or provider route changes; such evidence never qualifies a route.}
     AgentAccount:
       allOf:
         - {$ref: '#/components/schemas/AgentAccountWrite'}
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+            pending_check: {$ref: "#/components/schemas/AccountCheck"}
+            readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
+            share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}
+            details_redacted: {type: boolean}
             owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
             owner_person_name: {type: string}
             linked_at: {type: string, format: date-time}
@@ -14424,6 +15786,128 @@ components:
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
               items: {type: string, format: uuid}
             windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AccountReadinessPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountReadiness'}}
+        next_after: {type: [string, 'null'], format: uuid}
+    QuotaWarningSettings:
+      type: object
+      additionalProperties: false
+      required: [early_percent, urgent_percent]
+      properties:
+        early_percent: {type: integer, minimum: 1, maximum: 50, default: 10}
+        urgent_percent: {type: integer, minimum: 1, maximum: 50, default: 3}
+    QuotaWarningSession:
+      type: object
+      required: [session_id, project_id, account_id, availability, details_redacted]
+      properties:
+        session_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        availability: {type: string, const: limited}
+        details_redacted: {type: boolean}
+        severity: {type: string, enum: [early, urgent]}
+        remaining_percent: {type: number, minimum: 0, maximum: 50}
+        threshold_percent: {type: integer, minimum: 1, maximum: 50}
+        window_key: {type: string, maxLength: 128}
+        resets_at: {type: [string, 'null'], format: date-time}
+    AccountReadiness:
+      type: object
+      required: [account_id, state, can_try, reason_codes, display_reason, checked_at, next_attempt_at, measured_usage, details_redacted]
+      properties:
+        account_id: {type: string, format: uuid}
+        state: {type: string, enum: [ready, unknown, blocked]}
+        can_try: {type: boolean, description: Advisory; reserve and claim recheck all model/project gates.}
+        reason_codes: {type: array, items: {type: string}, description: Stable ordered reasons; usage_unknown_reserve_not_enforceable never means Ready. Unshared peers receive only available/unavailable.}
+        display_reason: {type: string}
+        checked_at: {type: [string, 'null'], format: date-time}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        check_result: {allOf: [{$ref: "#/components/schemas/ReadinessCheckResult"}], description: The account owner and registering daemon may see their own capture result even when pooled quota measurements remain withheld.}
+        measured_usage: {type: [array, 'null'], maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFact'}}
+        details_redacted: {type: boolean}
+    AccountCheckWrite:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, idempotency_key]
+      properties:
+        binding_revision: {type: integer, minimum: 0}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+    AccountCheck:
+      type: object
+      required: [id, account_id, actor_principal_id, binding_revision, daemon_generation, state, requested_at, retry_at, early_recovery_requested]
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        actor_principal_id: {type: string, format: uuid}
+        binding_revision: {type: integer, minimum: 0}
+        daemon_generation: {type: [string, 'null'], maxLength: 128}
+        state: {type: string, enum: [pending, completed, invalidated]}
+        requested_at: {type: string, format: date-time}
+        retry_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time, description: Pending captures expire five minutes after requested_at; expired captures are not polled or accepted and a new idempotency key requests a fresh capture.}
+        early_recovery_requested: {type: boolean, description: Intent only; package B consumes a resource/wait permit atomically with automatic recovery.}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+    AccountCheckRetry:
+      type: object
+      required: [error, code, retry_at]
+      properties:
+        error: {type: string}
+        code: {type: string, const: check_gap}
+        retry_at: {type: string, format: date-time}
+    ReadinessCheckResult:
+      type: string
+      description: Identity mismatch blocks work and is distinct from confirmed sign-out (authentication_failed). Timeout, protocol and launch_failed are measurement failures; they do not establish sign-out or clear an earlier identity failure.
+      enum: [success, unsupported, timeout, protocol, launch_failed, identity_mismatch, authentication_failed]
+    ReadinessReport:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, result]
+      description: Automatic reports without check_id may replay durable observations older than 24 hours while their binding and resource membership remain current. Original observation and reading times are preserved; replay does not renew freshness or replace newer facts. Manual reports retain the 24-hour observation bound and their check generation and expiry fences.
+      properties:
+        check_id: {type: string, format: uuid, description: Omitted for automatic captures including daemon restart; a supplied check ID remains fenced to its original generation and expiry.}
+        binding_revision: {type: integer, minimum: 0}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+        facts: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFactWrite'}}
+    ReadinessResource:
+      type: object
+      required: [id, kind, binding_revision]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [subscription_quota, key_cap, shared_balance, endpoint_concurrency]}
+        binding_revision: {type: integer, minimum: 0}
+    ReadinessFactWrite:
+      allOf: [{$ref: "#/components/schemas/ReadinessFactFields"}]
+      unevaluatedProperties: false
+    ReadinessFactFields:
+      type: object
+      required: [resource_id, window_key, source, observed_at, credit_state]
+      properties:
+        resource_id: {type: string, format: uuid, description: Must already be a current resource membership; daemon reports cannot invent shared identities.}
+        window_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+        source: {type: string, enum: [agentd, harness, provider]}
+        observed_at: {type: string, format: date-time, description: Observation of this fact. A null check cannot move the retained hard stop's evidence time or postpone acceptance of a newer same-window room reading.}
+        resets_at: {type: [string, 'null'], format: date-time}
+        reading_at: {type: [string, 'null'], format: date-time}
+        used_percent: {type: [number, 'null'], minimum: 0, maximum: 100}
+        credit_state: {type: string, enum: [unknown, available, exhausted], default: unknown}
+        remaining: {type: [number, 'null'], minimum: 0, description: Measured remaining amount for this resource. A declared zero key cap is exhausted even if the provider omits remaining; a null key cap does not describe total balance.}
+        stop_kind: {type: string, enum: [none, named_reset, unnamed, money_402], default: none}
+        denial_reason: {type: string, enum: ['', vendor_denied, quota_exhausted, key_cap_exhausted, money_exhausted]}
+    ReadinessFact:
+      allOf:
+        - {$ref: '#/components/schemas/ReadinessFactFields'}
+        - type: object
+          properties:
+            reading_error: {$ref: '#/components/schemas/ReadinessCheckResult'}
+            reading_age_seconds: {type: [integer, 'null'], minimum: 0}
+            backoff_step: {type: integer, minimum: 0, maximum: 3}
+            next_attempt_at: {type: [string, 'null'], format: date-time}
+            wait_id: {type: [string, 'null'], format: uuid}
+            early_recovery_used: {type: boolean}
+            failure_count: {type: integer, minimum: 0}
+            check_next_attempt_at: {type: [string, "null"], format: date-time}
     AccountSignals:
       type: object
       additionalProperties: false
@@ -14528,6 +16012,8 @@ components:
       type: object
       required: [daemon_id, daemon_generation, available]
       properties:
+        readiness: {$ref: "#/components/schemas/ReadinessReport"}
+        measurement_only: {type: boolean, default: false, description: 'Scoped daemon measurement or generation heartbeat. Preserves last_probe_at, last_probe_ok, failure and legacy credit snapshot under the account write fence. Readiness reports require the generation already established by a measurement-only heartbeat without readiness; available and failure remain compatibility fields and do not update health in this mode.'}
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
@@ -14828,6 +16314,56 @@ components:
           oneOf:
             - {$ref: "#/components/schemas/Identity"}
             - {type: "null"}
+    KeyTrimEvidence:
+      type: object
+      additionalProperties: false
+      required: [summary, observed_at, risks]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 2000}
+        observed_at: {type: string, format: date-time}
+        risks:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            additionalProperties: false
+            required: [scope, evidence, risk_if_dropped]
+            properties:
+              scope: {type: string, maxLength: 128}
+              evidence: {type: string, minLength: 1, maxLength: 2000}
+              risk_if_dropped: {type: string, minLength: 1, maxLength: 1000}
+    KeyTrimProposal:
+      type: object
+      description: Protected approval memo; metadata only. Usage timestamps have at most a one-minute debounce lag. Unknown use is not evidence of safety.
+      required: [id, key_id, key_name, owner_id, owner_name, previous_scopes, snapshot_digest, candidate_scopes, candidate_digest, evidence, usage, created_by, created_at, expires_at, state, revision]
+      properties:
+        id: {type: string, format: uuid}
+        key_id: {type: string, format: uuid}
+        key_name: {type: string}
+        owner_id: {type: string, format: uuid, description: Agent principal owning this key}
+        owner_name: {type: string}
+        previous_scopes: {type: array, items: {type: string}}
+        snapshot_digest: {type: string}
+        candidate_scopes: {type: array, items: {type: string}}
+        candidate_digest: {type: string}
+        evidence: {$ref: '#/components/schemas/KeyTrimEvidence'}
+        usage:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [scope, last_used_at]
+            properties:
+              scope: {type: string}
+              last_used_at: {type: [string, 'null'], format: date-time}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        state: {type: string, enum: [pending, applied, declined, restored, expired]}
+        revision: {type: integer, minimum: 1}
+        applied_at: {type: [string, 'null'], format: date-time}
+        restore_until: {type: [string, 'null'], format: date-time}
+        blocked_reason: {type: string, description: 'Non-actionable source, rechecked during reads and writes'}
     AgentKey:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
@@ -15398,12 +16934,12 @@ components:
         Complexity is S for up to 2 hours, M for up to 8, L above 8; build-hard promotes S to M and M to L. Only unconfirmed server-derived complexity follows estimate/role changes.
         Null clears a classification and provenance, but a valid estimate causes missing classifications to be suggested again. Existing tickets are not backfilled.
       properties:
-        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, null]}
+        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security, null]}
         route_role_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
         route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
         route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}
         route_role_confirmed: {type: boolean, readOnly: true}
-        area: {type: [string, 'null'], enum: [backend, frontend, full-stack, infra, design, docs, null]}
+        area: {type: [string, 'null'], maxLength: 48, description: 'Active default or project work-kind slug, excluding review and other. security is valid.'}
         area_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
         area_by: {type: [string, 'null'], format: uuid, readOnly: true}
         area_at: {type: [string, 'null'], format: date-time, readOnly: true}

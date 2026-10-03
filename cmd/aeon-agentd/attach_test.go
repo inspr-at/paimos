@@ -205,11 +205,30 @@ func TestAttachConfirmFailureNeverOpensBrowser(t *testing.T) {
 
 func TestAttachOwnerFailuresKeepTheirCauseInGerman(t *testing.T) {
 	for code, word := range map[string]string{
-		"attach_version_mismatch":   "Aktualisiere Aeon",
-		"attach_pairing_revoked":    "gekoppelten Computer",
-		"attach_ticket_not_visible": "Projektzugriff",
-		"attach_code_expired":       "abgelaufen",
-		"attach_live_limit":         "Freigabe",
+		"attach_version_mismatch":       "Aktualisiere Aeon",
+		"attach_pairing_revoked":        "gekoppelten Computer",
+		"attach_ticket_not_visible":     "Projektzugriff",
+		"attach_code_expired":           "abgelaufen",
+		"attach_live_limit":             "Freigabe",
+		"attach_draining":               "getrennt",
+		"attach_enrollment_unavailable": "add-harness",
+		"attach_registration_lost":      "Serverneustart",
+		"attach_pairing_unavailable":    "Kontoberechtigungen",
+		"attach_scope_changed":          "Projektzuordnung",
+		"attach_computer_limit":         "8",
+		"attach_attempt_limit":          "10 Minuten",
+		"attach_registration_limit":     "Kapazität",
+		"attach_poll_limit":             "Reihenfolge",
+		"attach_rate_limit":             "Warte",
+		"attach_snapshot_changed":       "Prozess",
+		"attach_consent_required":       "Touch ID",
+		"attach_ended":                  "genehmige",
+		"attach_invalid_request":        "Anfrageformat",
+		"attach_offline":                "Verbindung",
+		"attach_server_unavailable":     "Serverprotokolle",
+		"attach_unknown":                "Serverprotokollen",
+		"attach_local_unavailable":      "agentd-Protokoll",
+		"attach_pairing_mismatch":       "Arbeitsordner",
 	} {
 		original := &agentd.AttachLocalError{Code: code, Hint: "English repair"}
 		if attachLocalizedFailure(original, "en") != original {

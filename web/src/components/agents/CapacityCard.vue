@@ -402,7 +402,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <p v-if="sameAccountCopy(row.hosts)" class="same-quota">{{ sameAccountCopy(row.hosts) }}</p>
           </div>
           <div class="gauge-cell">
-            <CapacityGauge v-if="!row.sharedQuotaName && (row.primary || !row.learning)"
+            <CapacityGauge v-if="!row.sharedQuotaName && row.primary"
               :gauge="row.primary ? gaugeOf(row, planOf(row)) : null" :left="row.primary?.remaining_percent" :value="figure(row)" :used="modeOf(row) === 'used'"
               :estimated="row.primary?.reading.source === 'estimate'" :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
             />

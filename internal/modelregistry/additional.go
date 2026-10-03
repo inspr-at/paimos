@@ -35,7 +35,7 @@ func ensureAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal)
 			continue
 		}
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version=$2)`, profile.Slug, profile.Version).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version IN ('2',$2) AND harness=$3 AND family=$4 AND model=$5 AND effort=$6 AND tier=$7 AND enabled)`, profile.Slug, profile.Version, profile.Harness, profile.Family, profile.Model, profile.Effort, profile.Tier).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {

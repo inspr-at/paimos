@@ -107,7 +107,9 @@ func (rt *runtime) api() (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.New(inst.URL, inst.APIKey), nil
+	c := client.New(inst.URL, inst.APIKey)
+	c.ConfirmStepUp = localStepUp(inst.URL, inst.AgentdStateRoot)
+	return c, nil
 }
 
 func (rt *runtime) do(method, path string, body, dest any) error {

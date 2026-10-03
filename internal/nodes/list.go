@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
@@ -138,11 +139,12 @@ type listQuery struct {
 	IDs []string `json:"ids,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
-	seen       assigneeSeen
-	leadYellow int
-	leadRed    int
-	modelNames json.RawMessage
-	planRates  json.RawMessage
+	seen        assigneeSeen
+	leadYellow  int
+	leadRed     int
+	modelNames  json.RawMessage
+	planRates   json.RawMessage
+	planPlanner *planner
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -462,6 +464,8 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	}
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		ctx = modelprefs.WithChainCache(ctx)
+		ctx = context.WithValue(ctx, planRouteCacheKey{}, map[string]*planRoute{})
 		var anchor any
 		if mark != nil {
 			anchor = mark.ID
@@ -627,7 +631,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
 				page.Items[i].Queued = queued[page.Items[i].ID]
 			}
-			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money)
+			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money, q.planPlanner)
 			if err != nil {
 				return dbErr("list planning", err)
 			}
