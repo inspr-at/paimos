@@ -103,6 +103,10 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	if s.stepUps != nil {
+		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+	}
 	mux.HandleFunc("POST /v1/account-link", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", 401)

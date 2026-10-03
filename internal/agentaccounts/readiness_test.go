@@ -60,6 +60,11 @@ func TestReadinessProjectionUnknownAndHardFacts(t *testing.T) {
 			t.Fatalf("measurement error is not sign-out: %+v", out)
 		}
 	}
+	cap := 10.0
+	input.Facts = []ReadinessFact{{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "ordinary_key", ReadingAt: &now, Remaining: &cap, CreditState: "unknown"}}}
+	if out = ProjectReadiness(input); out.State != "unknown" || !out.CanTry || out.DisplayReason != UsageUnknownReason {
+		t.Fatalf("cap alias implied known total balance: %+v", out)
+	}
 }
 
 func readinessWorld(t *testing.T, slug string, now time.Time) limitFixture {
@@ -761,4 +766,50 @@ func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
 	if !committed || w.Code != 503 || w.Header().Get("X-Aeon-Write-Committed") != "true" || !strings.Contains(w.Body.String(), "write committed") {
 		t.Fatalf("committed mutation reported as failed: %d %s", w.Code, w.Body.String())
 	}
+}
+
+func TestBRestartHeartbeatSurvivesOldCheckFence(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-restart-check", now)
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	f.token = issueKey(t, f.runner, f.runner.Scopes)
+	path := "/api/agent-accounts/" + f.account.ID
+	var c AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("old", 0), 202, &c)
+	resource := bResource(t, f)
+	used := 10.0
+	reset := now.Add(time.Hour)
+	body := encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "old_capture", Source: "harness", ObservedAt: now, ReadingAt: &now, ResetsAt: &reset, UsedPercent: &used, CreditState: "unknown"}}}})
+	mux := http.NewServeMux()
+	f.mod.Mount(mux)
+	req := httptest.NewRequest("POST", path+"/probe", strings.NewReader(body))
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), f.runner))
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, req)
+	if response.Code != 409 || response.Header().Get("X-Aeon-Write-Committed") != "true" || !strings.Contains(response.Body.String(), "stale_binding") {
+		t.Fatalf("restart partial result not explicit: %d %s", response.Code, response.Body.String())
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_daemon_generation='g2' AND last_probe_at=$2 AND last_probe_ok`, f.account.ID, now) != 1 {
+		t.Fatal("old-check fence rolled back valid restart heartbeat")
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated'`, c.ID) != 1 || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='old_capture'`, resource) != 0 {
+		t.Fatal("restart accepted stale check facts or retained pending work")
+	}
+	var rows []Account
+	callStatus(t, f.mod, &f.runner, f.token, "GET", "/api/agent-accounts?include_checks=true", "", 200, &rows)
+	if len(rows) != 1 || rows[0].PendingCheck != nil {
+		t.Fatalf("poll repeated old check after restart: %+v", rows)
+	}
+	replay := encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}})
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", replay, 409, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_daemon_generation='g2'`, f.account.ID) != 1 {
+		t.Fatal("old check replay moved daemon generation backwards")
+	}
+	later := fixedClockModule{Module: New(appPool), at: now.Add(CheckGap)}
+	callStatus(t, later, &f.admin, "", "POST", path+"/check", requestBody("new", 0), 202, &c)
+	if c.DaemonGeneration == nil || *c.DaemonGeneration != "g2" {
+		t.Fatalf("fresh check bound to obsolete generation: %+v", c)
+	}
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 200, nil)
 }
