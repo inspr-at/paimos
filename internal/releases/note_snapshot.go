@@ -47,6 +47,15 @@ func (m *module) noteSnapshot(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Aeon-Notes-Waiting", strconv.Itoa(len(result.Waiting)))
 		w.Header().Set("Aeon-Notes-Carried-Forward", strconv.Itoa(len(result.CarriedForward)))
+		if result.Historical {
+			// The journey route encodes this typed shape, including UTC timestamp
+			// formatting. Keep that wire representation after adoption too;
+			// the store retains the original database bytes and provenance.
+			var snapshot releasehistory.NoteSnapshot
+			err = json.Unmarshal(result.Raw, &snapshot)
+			respond(w, snapshot, err)
+			return
+		}
 		_, _ = w.Write(result.Raw)
 		return
 	}

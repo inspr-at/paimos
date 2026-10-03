@@ -24,6 +24,7 @@ var ErrNotesTooLarge = &Conflict{"notes_too_large", "Release notes exceed 12 MiB
 
 type SnapshotResult struct {
 	Raw            json.RawMessage
+	Historical     bool // Journey capture: retain the legacy HTTP serialization.
 	Unavailable    bool
 	Waiting        []string
 	CarriedForward []string
@@ -235,6 +236,7 @@ func (s *Store) NoteSnapshot(ctx context.Context, p tenant.Principal, project, r
 		// never relabel their membership source or read current ticket fields.
 		err = tx.QueryRow(ctx, `SELECT snapshot FROM journey_release_note_snapshots WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3`, p.TenantID, project, release).Scan(&out.Raw)
 		if err == nil {
+			out.Historical = true
 			_, err = releasehistory.ProjectNotesFromSnapshot(out.Raw, releasehistory.ProjectSnapshotBinding{TenantID: p.TenantID, ProjectID: project, ReleaseID: release, VersionScheme: r.VersionScheme, Version: r.Version}, "database-snapshot")
 			return err
 		}
