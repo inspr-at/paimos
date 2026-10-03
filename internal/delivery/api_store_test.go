@@ -109,6 +109,20 @@ func TestCumulativeCaptureCutWindowCarryForwardAndReopenedWait(t *testing.T) {
 		t.Fatalf("next capture missed carried reopened/cut-gap work: %s", next.Raw)
 	}
 }
+
+func TestAdoptedReleasedNotesWithoutCaptureStayUnavailable(t *testing.T) {
+	f := newStoreFixture(t)
+	id := f.item(t, "task", "TSK-1", "done", f.release, "V")
+	f.exec(t, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, id, benefitFields)
+	f.exec(t, `UPDATE project_releases SET state='released',released_at=$2,origin='adopted_released' WHERE release_node_id=$1`, f.release, f.clock)
+	result, err := f.store.NoteSnapshot(t.Context(), f.person, f.project, f.release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Unavailable || len(result.Raw) != 0 {
+		t.Fatalf("historical notes rebuilt from current fields: %+v", result)
+	}
+}
 func TestInternalOnlyCaptureAndReservationGates(t *testing.T) {
 	for _, schemeVersion := range [][2]string{{"legacy", "1.2.3-rc.1"}, {"inspr-calendar-v1", "26.10.03"}, {"inspr-calver-3", "261003120000.0.0"}} {
 		t.Run(schemeVersion[0], func(t *testing.T) {

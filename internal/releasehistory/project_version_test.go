@@ -81,3 +81,47 @@ func TestActualTaskKeySurvivesProductPacking(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectDecoderBindsPreservedJourneyCaptures(t *testing.T) {
+	for _, pair := range [][2]string{{"", ""}, {"legacy", "1.2.3-rc.1"}, {"inspr-calendar-v1", "26.10.03"}, {"inspr-calendar-v2", notesVersion}} {
+		t.Run(pair[0]+pair[1], func(t *testing.T) {
+			s := noteFixture()
+			s.Frozen = true
+			s.VersionScheme, s.Version = pair[0], pair[1]
+			raw, err := json.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding := ProjectSnapshotBinding{s.TenantID, s.ProjectID, s.ReleaseID, s.VersionScheme, s.Version}
+			notes, err := ProjectNotesFromSnapshot(raw, binding, "preserved-journey")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(notes.Items) != 1 || notes.Items[0].Key != s.Tickets[0].Key || notes.Source != "preserved-journey" || notes.Revision != s.Revision || notes.CapturedAt == nil || !notes.CapturedAt.Equal(s.CapturedAt) {
+				t.Fatalf("historical provenance changed: %+v", notes)
+			}
+			for _, mutate := range []func(*ProjectSnapshotBinding){
+				func(b *ProjectSnapshotBinding) { b.TenantID = s.ProjectID },
+				func(b *ProjectSnapshotBinding) { b.ProjectID = s.ReleaseID },
+				func(b *ProjectSnapshotBinding) { b.ReleaseID = s.TenantID },
+				func(b *ProjectSnapshotBinding) { b.Version += "x" },
+				func(b *ProjectSnapshotBinding) { b.VersionScheme = "unknown" },
+			} {
+				bad := binding
+				mutate(&bad)
+				if _, err := ProjectNotesFromSnapshot(raw, bad, "wrong-binding"); err == nil || !strings.Contains(err.Error(), "authorized release identity and version pair") {
+					t.Fatalf("historical binding rejection: %v", err)
+				}
+			}
+			unknown := strings.Replace(string(raw), `"schema":`, `"unknown":1,"schema":`, 1)
+			if _, err := ProjectNotesFromSnapshot([]byte(unknown), binding, "unknown-field"); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("historical unknown field rejection: %v", err)
+			}
+			if pair[0] == "legacy" || pair[0] == "inspr-calendar-v1" {
+				if _, err := NotesFromSnapshot(raw, s.Version, "product"); err == nil {
+					t.Fatal("historical project scheme crossed the product boundary")
+				}
+			}
+		})
+	}
+}
