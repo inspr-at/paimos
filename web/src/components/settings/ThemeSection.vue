@@ -65,7 +65,7 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
       </div>
     </SettingsCard>
     <ThemeColoursCard v-if="draft" :draft="draft" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
-    <ThemeAgentsCard v-if="draft" :draft="draft" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
+    <ThemeAgentsCard v-if="draft" :draft="draft" :read-only="!editor.editable(draft)" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
     <Teleport to="body">
       <div v-if="dirty && draft" class="theme-savebar" role="region" aria-label="Unsaved theme changes" @keydown="keys">
         <p>Unsaved changes to <strong>{{ draft.name || 'Untitled theme' }}</strong><span v-if="!valid"> · Enter a name of up to 80 characters.</span></p>
@@ -76,7 +76,7 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
 </template>
 <style scoped>
 .theme-section { display: grid; gap: 16px; container-type: inline-size; padding-bottom: 100px; }
-.theme-status { min-height: 3em; font-size: 12px; color: var(--ink-2); padding-bottom: 12px; }.theme-status.error { color: var(--danger); }
+.theme-status { height: calc(4.5em + 12px); overflow-y: auto; font-size: 12px; color: var(--ink-2); padding-bottom: 12px; }.theme-status.error { color: var(--danger); }
 .theme-list { max-height: 288px; overflow-y: auto; scrollbar-gutter: stable; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .theme-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; height: 96px; padding: 12px; border-bottom: 1px solid var(--line); }.theme-row:last-child { border-bottom: 0; }.theme-row.selected { background: var(--row-selected); }
 .theme-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 60px; padding: 0 4px; border: 0; background: transparent; color: var(--teal-ink); }

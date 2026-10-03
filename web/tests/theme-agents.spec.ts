@@ -40,6 +40,18 @@ async function mock(page: Page, admin = true) {
   return { state, data }
 }
 
+async function captureAgents(page: Page, width: number, mode: string) {
+  const card = page.locator('#agents')
+  mkdirSync(shots, { recursive: true })
+  // The app scrolls inside main. A card taller than that scrollport cannot be
+  // captured as one element without clipping; capture visible sections instead.
+  for (const [part, selector] of Object.entries({ avatars: '.avatar-field', motion: '.motion-field', palettes: '.palette-field', previews: '.previews' })) {
+    await card.locator(selector).screenshot({ path: resolve(shots, `agents-${width}-${mode}-${part}.png`), animations: 'disabled' })
+  }
+  await card.locator('.card-head').scrollIntoViewIfNeeded()
+  await page.screenshot({ path: resolve(shots, `agents-${width}-${mode}.png`), animations: 'disabled' })
+}
+
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
   test(`${width} ${mode}: nine avatars, stable controls, isolated state previews and saved appearance`, async ({ page }) => {
     const { state, data } = await mock(page)
@@ -93,12 +105,12 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     expect(state.theme.values.agents).toMatchObject({ avatar: 'robot-5', palette: 'tritan', hover: true, ring: null, size: null })
     await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-5')
     mkdirSync(shots, { recursive: true })
-    await card.screenshot({ path: resolve(shots, `agents-${width}-${mode}.png`) })
+    await captureAgents(page, width, mode)
     // Long text stays readable and is captured in each target viewport/mode.
     state.theme.name = 'Agentendarstellung für den gemeinsamen Arbeitsbereich und die persönliche Ansicht'
     await page.reload()
     await expect(card.getByRole('heading')).toContainText(state.theme.name)
-    await card.screenshot({ path: resolve(shots, `agents-long-${width}-${mode}.png`) })
+    await card.locator('.card-head').screenshot({ path: resolve(shots, `agents-long-${width}-${mode}.png`), animations: 'disabled' })
     await page.goto('/settings/personal#agents')
     await expect(page.locator('#agents').getByRole('slider')).toHaveCount(0)
     await expect(page.getByRole('spinbutton', { name: 'Yellow after (minutes)' })).toHaveValue('7')
@@ -133,4 +145,41 @@ test('members can preview a workspace theme but cannot change it; reduced motion
   await expect(card).toContainText('read-only')
   await expect(card.locator('.avatar-tile .agent-indicator-art')).toHaveCount(9)
   expect(await card.evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
+})
+
+
+test('visible screenshots and Personal agent behaviour controls stay stable in all viewport modes', async ({ page }) => {
+  const { state, data } = await mock(page)
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: mode, reducedMotion: 'reduce' })
+    data.preferences.theme = { choice: mode }
+    state.theme.name = 'Porcelain'
+    state.theme.values.agents = { avatar: 'robot-5', ring: null, size: null, hover: true, palette: 'tritan' }
+    await page.goto('/settings/theme#agents')
+    const card = page.locator('#agents')
+    await expect(card.locator('.avatar-tile .agent-indicator-art')).toHaveCount(9)
+    await expect(card.locator('.states .agent-indicator-art')).toHaveCount(10)
+    await captureAgents(page, width, mode)
+    state.theme.name = 'Agentendarstellung für den gemeinsamen Arbeitsbereich und die persönliche Ansicht'
+    await page.reload()
+    await expect(card.getByRole('heading')).toContainText(state.theme.name)
+    await card.locator('.card-head').screenshot({ path: resolve(shots, `agents-long-${width}-${mode}.png`), animations: 'disabled' })
+    await page.goto('/settings/personal#agents')
+    const personal = page.locator('#agents')
+    const yellow = personal.getByRole('spinbutton', { name: 'Yellow after (minutes)' })
+    const red = personal.getByRole('spinbutton', { name: 'Red after (minutes)' })
+    const estimates = personal.getByRole('radiogroup', { name: 'Estimates show as' })
+    const relative = estimates.getByRole('radio', { name: 'Relative', exact: true })
+    await expectStableControls({
+      controls: { yellow, red, estimates, relative, appearanceLink: personal.getByRole('link', { name: 'Avatar, motion, size and state colours in Theme' }) },
+      scrollAreas: { personal },
+      interactions: [
+        { name: 'yellow threshold', run: async () => { await yellow.fill('8'); await yellow.blur(); await expect(yellow).toHaveValue('8') } },
+        { name: 'red threshold', run: async () => { await red.fill('20'); await red.blur(); await expect(red).toHaveValue('20') } },
+        ...['Clock', 'Both', 'Relative'].map(name => ({ name: `estimates ${name}`, run: async () => { await estimates.getByRole('radio', { name, exact: true }).click(); await expect(estimates.getByRole('radio', { name, exact: true })).toBeChecked() } })),
+      ],
+    })
+    await personal.screenshot({ path: resolve(shots, `personal-${width}-${mode}.png`), animations: 'disabled' })
+  }
 })

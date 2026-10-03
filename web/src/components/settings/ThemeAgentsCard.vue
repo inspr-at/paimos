@@ -9,7 +9,7 @@ import type { AgentState } from '../../lib/agentSignals'
 import LiveBot, { availableVariants } from '../projects/LiveBot.vue'
 import SettingsCard from './SettingsCard.vue'
 
-const props = defineProps<{ draft: ThemeRecord; editable: boolean }>()
+const props = defineProps<{ draft: ThemeRecord; editable: boolean; readOnly?: boolean }>()
 const emit = defineEmits<{ change: [draft: ThemeRecord] }>()
 const id = useId(), avatarGrid = ref<HTMLElement>()
 const appearance = computed(() => props.draft.values.agents)
@@ -58,7 +58,7 @@ function radioKeys(event: KeyboardEvent, options: readonly string[], current: st
 <template>
   <SettingsCard :title="`Agents · ${draft.name || 'Untitled theme'}`" icon="agent" anchor="agents">
     <template #lead>How every agent looks: avatar, motion, size and state colours. Agents move only while they work.</template>
-    <p class="permission-note">{{ editable ? 'Changes stay in these previews until Save.' : 'This theme is read-only. Duplicate it above to make your own.' }}</p>
+    <p class="permission-note">{{ readOnly ? 'This theme is read-only. Duplicate it above to make your own.' : 'Changes stay in these previews until Save.' }}</p>
     <div class="agents-editor">
       <div class="controls">
         <fieldset class="avatar-field">
@@ -89,10 +89,10 @@ function radioKeys(event: KeyboardEvent, options: readonly string[], current: st
               <button v-for="option in rings" :key="option" type="button" role="radio" :aria-checked="ring === option" :tabindex="ring === option ? 0 : -1" :disabled="!editable" @click="change({ ring: option })">{{ option[0]!.toUpperCase() + option.slice(1) }}</button>
             </div>
           </div>
-          <div class="control-row"><label :for="`${id}-hover`">Hover</label><label class="switch"><input :id="`${id}-hover`" type="checkbox" role="switch" :checked="appearance.hover" :disabled="!editable" @change="change({ hover: ($event.target as HTMLInputElement).checked })" /><span>{{ appearance.hover ? 'On' : 'Off' }}</span></label></div>
+          <div class="control-row"><label :for="`${id}-hover`">Hover</label><label class="switch"><input :id="`${id}-hover`" type="checkbox" role="switch" aria-label="Hover" :checked="appearance.hover" :disabled="!editable" @change="change({ hover: ($event.target as HTMLInputElement).checked })" /><span>{{ appearance.hover ? 'On' : 'Off' }}</span></label></div>
           <div class="control-row"><label :for="`${id}-size`">Size</label><div class="range-control"><input :id="`${id}-size`" type="range" :min="ICON_SIZE.min" :max="ICON_SIZE.max" :step="ICON_SIZE.step" :value="size" :disabled="!editable" :aria-valuetext="`${size}%, ${appearance.size === null ? 'as drawn' : 'chosen size'}`" @input="change({ size: Number(($event.target as HTMLInputElement).value) })" /><output :for="`${id}-size`">{{ size }}%</output></div></div>
           <div class="drawn-row"><button type="button" class="text-link" :disabled="!editable || (appearance.ring === null && appearance.size === null)" @click="change({ ring: null, size: null })">Use drawn ring and sizes</button></div>
-          <div class="control-row"><label :for="`${id}-dim`">Dim inactive</label><label class="switch"><input :id="`${id}-dim`" type="checkbox" role="switch" :checked="dim" :disabled="!editable" @change="change({ dim_inactive: ($event.target as HTMLInputElement).checked })" /><span>{{ dim ? 'On' : 'Off' }}</span></label></div>
+          <div class="control-row"><label :for="`${id}-dim`">Dim inactive</label><label class="switch"><input :id="`${id}-dim`" type="checkbox" role="switch" aria-label="Dim inactive" :checked="dim" :disabled="!editable" @change="change({ dim_inactive: ($event.target as HTMLInputElement).checked })" /><span>{{ dim ? 'On' : 'Off' }}</span></label></div>
           <div class="control-row"><label :for="`${id}-opacity`">Opacity</label><div class="range-control"><input :id="`${id}-opacity`" type="range" min="40" max="80" :value="opacity" :disabled="!editable || !dim" @input="change({ inactive_opacity: Number(($event.target as HTMLInputElement).value) })" /><output :for="`${id}-opacity`">{{ opacity }}%</output></div></div>
         </fieldset>
         <fieldset class="palette-field">
