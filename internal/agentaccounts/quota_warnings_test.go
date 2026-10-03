@@ -419,8 +419,9 @@ func TestQuotaWarningsReporterWithoutProjectAccess(t *testing.T) {
 	}
 }
 
-// The first report holds the actual tenant row lock. The second is observed
-// waiting for that backend in pg_blocking_pids before releasing the first.
+// The first report holds the actual tenant row lock after taking the shared
+// pairing/tree fences. The second is observed waiting at the pairing fence
+// for that backend in pg_blocking_pids before releasing the first.
 // The timeout guards against hangs; no sleep or elapsed-time assertion proves
 // concurrency.
 type quotaFenceTrace struct {
@@ -431,8 +432,10 @@ type quotaFenceTrace struct {
 type quotaFenceContext struct{}
 
 func (q *quotaFenceTrace) TraceQueryStart(ctx context.Context, c *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(data.SQL, "SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE") {
+	switch data.SQL {
+	case `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`:
 		q.started <- c.PgConn().PID()
+	case `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`:
 		return context.WithValue(ctx, quotaFenceContext{}, !q.first.Swap(true))
 	}
 	return ctx
@@ -497,7 +500,7 @@ func TestQuotaWarningsConcurrentComputersDeduplicate(t *testing.T) {
 	select {
 	case secondPID = <-trace.started:
 	case <-ctx.Done():
-		t.Fatal("second report did not reach tenant fence")
+		t.Fatal("second report did not reach pairing fence")
 	}
 	for {
 		var blocked bool
