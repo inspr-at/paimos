@@ -4,7 +4,8 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, mockWork, watchErrors, liveAgent } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { PORCELAIN, deriveDark, inkOn, type ThemeValues } from '../src/lib/themeValues'
+import { contrastRatio, DARK_CARD, LIGHT_CARD, PORCELAIN, deriveDark, inkOn, type ThemeValues } from '../src/lib/themeValues'
+import { mockSettings, settingsData } from './settings-fixtures'
 
 const shots = join(process.cwd(), 'test-results', 'aeon-644')
 const values = (): ThemeValues => ({ ...structuredClone(PORCELAIN), agents: { ...PORCELAIN.agents, palette: 'tritan' }, primary: { light: '#8547b0', dark: null }, secondary: { light: '#bf3d6d', dark: '#f08db1' } })
@@ -32,6 +33,31 @@ async function markerColours(page: Page) {
   return page.locator('#row-n-1 .recurrence-dot').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color, width: el.getBoundingClientRect().width }))
 }
 const cssRgb = (hex: string) => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
+
+test('extreme saved accents keep personal appearance links readable in both modes', async ({ page }) => {
+  await setup(page)
+  await mockSettings(page, settingsData())
+  const chosen = values()
+  chosen.primary = { light: '#ffffff', dark: '#000000' }
+  chosen.secondary = { light: '#fefefe', dark: '#010101' }
+  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }))
+  await page.goto('/settings/personal#agents')
+  const link = page.getByRole('link', { name: 'Avatar, motion, size and state colours in Theme' })
+  await expect(link).toBeVisible()
+  await expectStableControls({
+    controls: { link, yellow: page.getByRole('spinbutton', { name: 'Yellow after (minutes)' }), red: page.getByRole('spinbutton', { name: 'Red after (minutes)' }) },
+    interactions: (['light', 'dark'] as const).map(mode => ({ name: `extreme ${mode} accent`, run: async () => {
+      await modeChoice(page, mode)
+      const tokens = await page.locator('html').evaluate(el => {
+        const style = getComputedStyle(el)
+        return ['--teal', '--teal-ink', '--gold-ink', '--warn'].map(name => style.getPropertyValue(name).trim())
+      })
+      expect(tokens[0]).toBe(mode === 'light' ? '#ffffff' : '#000000')
+      for (const text of tokens.slice(1)) expect(contrastRatio(text!, mode === 'light' ? LIGHT_CARD : DARK_CARD)).toBeGreaterThanOrEqual(4.5)
+      expect(await link.evaluate(el => getComputedStyle(el).color)).toBe(cssRgb(tokens[1]!))
+    } })),
+  })
+})
 
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
   test(`theme colours and filled ink stay stable at ${width}px in ${mode}`, async ({ page }) => {

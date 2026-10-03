@@ -54,7 +54,10 @@ view first renders. Saved primary/secondary accents, semantic tints and recurrin
 marker colours become root CSS tokens; changing Light, Dark or System preserves
 the chosen theme. A missing dark accent uses the accepted HSL lightness lift to
 6:1 on dark cards. Filled controls and marks use the higher-contrast white or dark
-ink for their actual fill; recurring row badges are 12 px. Theme responses are
+ink for their actual fill; recurring row badges are 12 px. Text accents move
+inward from near-white or near-black until they reach 4.5:1
+against the card, while the chosen fill and hand-set dark values stay unchanged.
+Theme responses are
 size/time bounded and discarded after an identity change. A failed read shows
 an explicit default-colour notice. No theme values are kept in browser storage.
 

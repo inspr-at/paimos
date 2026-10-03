@@ -49,7 +49,11 @@ export function deriveDark(hex: string) {
 export function textOn(hex: string, surface: string) {
   const [h, s, lightness] = toHsl(hex), dark = luminance(surface) < .2
   let l = lightness, out = hex
-  while (contrastRatio(out, surface) < 4.5 && l > .05 && l < .95) { l += dark ? .02 : -.02; out = fromHsl(h, s, l) }
+  // Only the destination bound matters: an extreme shade must move inward.
+  while (contrastRatio(out, surface) < 4.5 && (dark ? l < .95 : l > .05)) {
+    l = dark ? Math.min(.95, l + .02) : Math.max(.05, l - .02)
+    out = fromHsl(h, s, l)
+  }
   return out
 }
 export function themeTokens(values: ThemeValues, dark: boolean): Record<string, string> {
