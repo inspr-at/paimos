@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { contentUrl, isImage, listAttachments, type Attachment } from '../../lib/attachments'
 import { hours, type WalkerTicket } from '../../lib/journey'
@@ -10,6 +10,7 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import WalkerBar from './WalkerBar.vue'
+import { vClipTip } from '../../lib/clipTip'
 
 // The release walker: every ticket of the release (and, while planning, the
 // backlog) with its screens, one at a time. The screens are the ticket's image
@@ -24,6 +25,9 @@ const index = ref(Math.max(0, order.value.findIndex(t => t.key === props.startKe
 const ticket = computed<WalkerTicket | undefined>(() => order.value[index.value])
 const item = computed(() => ticket.value ? props.workById.get(ticket.value.ticket_node_id) : undefined)
 const details = ref(window.innerWidth > 900)
+const descriptionId = useId(), descriptionExpanded = ref(false), descriptionClipped = ref(false)
+function measureDescription(clipped: boolean) { descriptionClipped.value = clipped }
+watch(() => [ticket.value?.ticket_node_id, item.value?.body], () => { descriptionExpanded.value = false; descriptionClipped.value = false })
 const sheet = ref(false)
 const searching = ref(false)
 const term = ref('')
@@ -241,7 +245,8 @@ const touch = window.matchMedia('(hover: none)').matches
         </template>
         <template v-if="item?.body">
           <p class="eyebrow">Description</p>
-          <MarkdownBody class="info-md clamp" :body="item.body" />
+          <MarkdownBody :id="descriptionId" v-clip-tip="{ text: '', onClip: measureDescription }" class="info-md description" :class="{ clamp: !descriptionExpanded, revealed: descriptionExpanded }" :body="item.body" :tabindex="descriptionExpanded ? 0 : undefined" aria-label="Ticket description" />
+          <button v-if="descriptionClipped" type="button" class="description-toggle" :aria-expanded="descriptionExpanded" :aria-controls="descriptionId" @click="descriptionExpanded = !descriptionExpanded">{{ descriptionExpanded ? 'Show preview' : 'Show full description' }}</button>
         </template>
         <p class="eyebrow">Screens · {{ current.length }}</p>
         <div v-if="current.length" class="thumbs">
@@ -332,7 +337,13 @@ const touch = window.matchMedia('(hover: none)').matches
 .info-text { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
 .info-text b { color: var(--gold-ink); font-weight: 500; font-size: 11px; }
 .info-md { font-size: 13px; }
-.info-md.clamp { max-height: 180px; overflow: hidden; -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent); mask-image: linear-gradient(180deg, #000 70%, transparent); }
+.description { max-height: 180px; overflow: hidden; scrollbar-gutter: stable; }
+.info-md.clamp { -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent); mask-image: linear-gradient(180deg, #000 70%, transparent); }
+/* A long description scrolls in place once revealed, keeping its toggle and
+   the controls below still. Short descriptions retain their natural height. */
+.description.revealed { overflow: auto; }
+.description-toggle { width: 170px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.description-toggle:focus-visible, .description:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .info-faint { font-size: 12.5px; color: var(--ink-3); }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
 .thumb { width: 58px; height: 44px; padding: 0; border: 0; border-radius: 7px; overflow: hidden; background: var(--surface-2); box-shadow: 0 0 0 1px var(--line); cursor: pointer; }

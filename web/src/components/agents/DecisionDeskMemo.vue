@@ -8,6 +8,7 @@ import AttachmentLightbox from '../work/AttachmentLightbox.vue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import { outcomeLine } from '../../lib/ticketOutcomes'
+import { vClipTip } from '../../lib/clipTip'
 
 const props = defineProps<{
   items: DeskItem[]; round: string[]; start: string; arrivalsCount: number; allowed: (item: DeskItem) => boolean
@@ -21,6 +22,9 @@ const drafts = ref<Record<string, DeskDraft>>({}), skipped = ref(new Set<string>
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>(), viewing = ref(false), brokenThumbs = ref(new Set<string>())
 const item = computed(() => props.items.find(item => item.id === props.round[index.value]))
 const draft = computed(() => item.value ? drafts.value[item.value.id] : undefined)
+const selectedChoice = computed(() => item.value?.choices.find(choice => choice.id === draft.value?.optionId))
+const titleClipped = ref(false)
+function measureTitle(clipped: boolean) { titleClipped.value = clipped }
 const counts = computed(() => roundCounts(props.items, props.round, skipped.value))
 const mac = macPlatform(navigator.platform), submitKey = mac ? 'Cmd+Enter' : 'Ctrl+Enter'
 const outcomes: DeskOutcome[] = ['once', 'always', 'requirement', 'doctrine']
@@ -193,7 +197,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
       <article ref="memo" class="desk-paper" tabindex="-1" data-testid="desk-paper">
         <template v-if="item && draft">
           <header class="memo-heading">
-            <div><p class="eyebrow">{{ item.projectName }}</p><h2 :title="item.title">{{ item.title }}</h2></div>
+            <div><p class="eyebrow">{{ item.projectName }}</p><h2 v-clip-tip="{ text: item.title, onClip: measureTitle }">{{ item.title }}</h2></div>
             <div class="heading-side"><span class="waiting">{{ expired ? 'Expired' : item.decided ? 'Decided' : item.held ? 'Holding work' : 'Waiting' }}</span><strong class="large-stamp" :class="[{ slam }, `stamp-${draft.outcome}`]" @animationend="slam = false">{{ outcomeLabels[draft.outcome] }}</strong></div>
           </header>
           <div class="stamp-line" data-testid="desk-stamps" role="group" aria-label="Stamp it as">
@@ -210,13 +214,18 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
                   <input v-if="choice.field" v-model="draft.answer" data-field="answer" class="answer-field" :class="{ editing: editing === 'answer', set: editing !== 'answer' && !!draft.answer }" :aria-label="choice.title" maxlength="8000" :disabled="blocked || !canEdit || draft.optionId !== choice.id" placeholder="The answer in your own words" @input="touch" @focus="editing = 'answer'" />
                 </div>
               </div>
-              <p class="answer-slot" data-testid="desk-answer-summary">{{ editing === 'answer' ? `Editing · Enter finishes · ${submitKey} decides` : answerFor(item, draft) || 'Choose an answer above.' }}</p>
+              <div class="answer-slot" data-testid="desk-answer-summary" tabindex="0" aria-label="Selected answer details">
+                <template v-if="selectedChoice"><strong>{{ selectedChoice.title }}</strong><p v-if="selectedChoice.description">{{ selectedChoice.description }}</p></template>
+                <p>{{ answerFor(item, draft) || 'Choose an answer above.' }}</p>
+                <p v-if="editing === 'answer'">Editing · Enter finishes · {{ submitKey }} decides</p>
+              </div>
               <label class="ps-line"><span>{{ item.kind === 'approval' || item.kind === 'rule' ? 'Reason' : 'P.S.' }}</span><input v-model="draft.reason" data-field="reason" :aria-label="item.kind === 'approval' || item.kind === 'rule' ? 'Reason' : 'P.S. for the agent'" maxlength="2000" :disabled="blocked || !canEdit" :class="{ editing: editing === 'reason' }" placeholder="A note for the agent" @input="touch" @focus="editing = 'reason'" /></label>
               <p class="editing-slot">{{ editing === 'reason' ? `Enter finishes · ${submitKey} decides` : item.fromRecord || (item.decided ? 'Changing an answer records a replacement through its native workflow.' : 'A decision is recorded only when Decide is pressed.') }}</p>
               <p v-if="item.why" class="recommend-why"><strong>Why this recommendation</strong>{{ item.why }}</p>
               <p v-if="item.decided && !canEdit" class="native-restriction">This protected decision keeps its native restrictions. <RouterLink v-if="item.kind === 'approval'" to="/agents">Open approvals to revoke an active grant</RouterLink></p>
             </section>
             <aside class="context-column" aria-label="Background and destination">
+              <section v-if="titleClipped" data-testid="desk-full-title"><h3>Question in full</h3><p>{{ item.title }}</p></section>
               <section><h3>Meanwhile</h3><p>{{ item.meanwhile }}</p></section>
               <section v-if="item.prUrl"><h3>Rule proposal</h3><a :href="item.prUrl" target="_blank" rel="noopener noreferrer">Open the doctrine pull request<AppIcon name="external" :size="12" /></a></section>
               <section><h3>Background</h3><p>{{ item.context || 'No background supplied by the source.' }}</p></section>
@@ -255,7 +264,7 @@ button { cursor: pointer; } button:disabled { cursor: default; } button:focus-vi
 .desk-paper::before { content: ''; position: absolute; top: 0; left: 249px; right: 12px; height: 1px; background: var(--line-2); }
 .memo-heading { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 20px; height: 92px; }
 .eyebrow { font-size: 11px; color: var(--ink-3); margin: 0 0 6px; }
-h2 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 550; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+h2 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 550; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }h2:focus-visible, .answer-slot:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .heading-side { display: grid; align-content: start; justify-items: end; gap: 14px; }
 .waiting { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .large-stamp { font-size: 19px; line-height: 1; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; }
@@ -272,6 +281,7 @@ h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacin
 .answer-field { display: block; height: 23px; width: calc(100% - 48px); margin-left: 36px; padding: 0 4px; font-size: 12px; color: var(--ink); border: 0; border-bottom: 1px solid var(--line-2); border-radius: 0; background: transparent; }.answer-field.set { font-weight: 650; }.answer-field.editing, .ps-line input.editing { background: var(--row-selected); border-bottom-color: var(--teal); }.answer-field:disabled { opacity: .45; }
 .answer-slot { height: 54px; margin: 10px 0; overflow: auto; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }.ps-line { display: flex; align-items: center; gap: 12px; height: 34px; border-bottom: 1px solid var(--line); font-size: 12px; }.ps-line input { min-width: 0; width: 100%; height: 28px; border: 0; background: transparent; color: var(--ink); font: inherit; }.editing-slot { height: 42px; overflow: auto; font-size: 11px; color: var(--ink-3); margin: 8px 0; }.recommend-why { font-size: 12px; line-height: 1.5; }.recommend-why strong { display: block; margin-bottom: 6px; }.native-restriction { font-size: 12px; }
 .context-column section { margin-bottom: 22px; }.context-column p { font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }.context-column a { font-size: 12px; color: var(--teal-ink); text-decoration: none; overflow-wrap: anywhere; }.context-column dl { font-size: 12px; margin-bottom: 0; }.context-column dl>div { display: grid; grid-template-columns: 75px minmax(0,1fr); gap: 8px; margin: 6px 0; }.context-column dt { color: var(--ink-3); }.context-column dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }.related-link { display: block; margin: 5px 0; }.context-warning { color: var(--warn-ink); }
+.answer-slot p { margin: 4px 0; white-space: pre-wrap; }
 .attachments { display: flex; flex-wrap: wrap; gap: 10px; }.attachment { width: 88px; border: 0; background: transparent; color: var(--ink); padding: 0; }.attachment img, .attachment>span { width: 88px; height: 58px; object-fit: cover; background: var(--surface-2); display: grid; place-items: center; border-radius: 4px; }.attachment small { display: block; font-size: 10px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jump-popover { position: absolute; z-index: 5; left: 0; top: 46px; width: min(480px, calc(100vw - 48px)); padding: 14px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-pop); }.jump-popover p { margin: 0 0 10px; font-size: 12px; color: var(--ink-3); }.jump-popover ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }.jump-popover li { display: grid; grid-template-columns: 20px minmax(0, 1fr) 55px; align-items: center; gap: 8px; height: 40px; padding: 0 8px; font-size: 12px; cursor: pointer; }.jump-popover li[aria-selected=true] { background: var(--row-selected); }.jump-popover li>span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.jump-popover small { font-size: 10px; color: var(--ink-3); }
 @media (prefers-reduced-motion: no-preference) { .slam { animation: stamp-slam .28s ease-out; } @keyframes stamp-slam { from { transform: scale(1.18); } to { transform: scale(1); } } }
