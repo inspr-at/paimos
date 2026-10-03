@@ -41,6 +41,22 @@
 // PUT {id}/label (person account.manage) renames only, so Settings' inline
 // rename never turns a legacy null grant into an explicit one.
 //
+// GET/PUT {id}/residency-evidence reads/replaces a bounded host attestation.
+// People read with account.read; only the linked owning person (account.manage)
+// or the connected paired host's bound runtime key (account.probe) may write.
+// An unpaired registering key, workspace admin or key creator is not implicitly
+// an owner. Writes recheck live permissions under tenant -> pairing -> account
+// locks and append account.residency_evidence_updated as the final operation.
+// Evidence names covered profiles, inference/storage/log country sets, explicit
+// local execution, verification/expiry times and an opaque proof reference;
+// optional retention days and training opt-out are retained as declarations.
+// EU needs three nonempty EU-only sets; local needs explicit local execution.
+// Neither class qualifies without unexpired proof for that profile. Evidence
+// is loaded with accounts and evaluated using the routing transaction's clock.
+// A host/owner/provider/model binding change invalidates prior evidence. GET
+// keeps it inspectable with binding_current=false; history lives in events.
+// Evidence is an attestation, not automated verification of proof documents.
+//
 // Agentd's local account enrollment accepts an optional metadata object with
 // exactly those four fields and publishes it once on daemon startup. Owner
 // probes can fill a missing host label; configured labels take precedence.

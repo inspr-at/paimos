@@ -28,6 +28,10 @@ type WorkQuery struct {
 	TicketResidency  string
 }
 type PreferenceTrace struct {
+	Selector             *modelprefs.Cell           `json:"selector,omitempty"`
+	Role                 string                     `json:"role,omitempty"`
+	ProjectID            string                     `json:"project_id,omitempty"`
+	TicketRequirement    string                     `json:"ticket_requirement,omitempty"`
 	Kind                 string                     `json:"kind"`
 	KindSource           string                     `json:"kind_source"`
 	Complexity           string                     `json:"complexity"`
@@ -85,6 +89,7 @@ func traceCell(trace *PreferenceTrace, result modelprefs.CellResult) {
 	trace.LockedBy = result.LockedBy
 	trace.PrefsRevision = result.Revision
 	if result.Cell != nil {
+		trace.Selector = result.Cell
 		trace.Mode = result.Cell.Mode
 	}
 	if result.KindFallback {
