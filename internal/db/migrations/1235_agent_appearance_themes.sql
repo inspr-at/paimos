@@ -10,6 +10,11 @@ LOCK TABLE tenants, principals, user_preferences, themes, theme_selections IN SH
 CREATE TEMP TABLE agent_theme_audit (tenant_id uuid NOT NULL, actor_id uuid NOT NULL,
     type text NOT NULL, before jsonb, after jsonb NOT NULL, audience uuid NOT NULL) ON COMMIT DROP;
 
+-- Snapshot explicit effective choices before any backfill writes. A canonical
+-- account inherits a saved alias choice (including explicit default); creating
+-- a canonical or lower-UUID alias selection would silently displace it.
+CREATE TEMP TABLE agent_theme_explicit_groups (tenant_id uuid NOT NULL, canonical_id uuid NOT NULL, PRIMARY KEY(tenant_id,canonical_id)) ON COMMIT DROP;
+
 -- The normal guard requires a canonical owner at creation. A migrated alias
 -- must keep its own immutable owner so unlink restores its own choices. Only
 -- this locked migration bypasses that trigger; all constraints/RLS remain on.
@@ -36,11 +41,17 @@ BEGIN
         PERFORM set_config('aeon.tenant_id',target::text,true);
         SELECT config INTO STRICT default_config FROM themes WHERE tenant_id=target AND scope='default';
         actor := aeon_authz_system_actor(target);
-        FOR person IN SELECT p.id FROM principals p WHERE p.tenant_id=target AND p.kind='person'
+        INSERT INTO agent_theme_explicit_groups(tenant_id,canonical_id)
+            SELECT DISTINCT p.tenant_id, coalesce(p.linked_to,p.id) FROM principals p
+            JOIN theme_selections s ON s.tenant_id=p.tenant_id AND s.principal_id=p.id
+            WHERE p.tenant_id=target AND p.kind='person' AND p.status='active'
+                AND s.unsaved_revision IS DISTINCT FROM s.revision;
+        FOR person IN SELECT p.id, coalesce(p.linked_to,p.id) AS canonical_id FROM principals p WHERE p.tenant_id=target AND p.kind='person'
             AND EXISTS (SELECT 1 FROM user_preferences u WHERE u.tenant_id=target AND u.principal_id=p.id
                 AND ((u.key='agent-indicator' AND u.value ?| ARRAY['style','ring','hovering','size'])
                   OR (u.key='agent-state' AND u.value ?| ARRAY['palette','dimInactive','inactiveOpacity'])))
             ORDER BY p.id LOOP
+            IF EXISTS (SELECT 1 FROM agent_theme_explicit_groups WHERE tenant_id=target AND canonical_id=person.canonical_id) THEN CONTINUE; END IF;
             SELECT * INTO chosen FROM theme_selections WHERE tenant_id=target AND principal_id=person.id;
             -- A saved theme choice already made through the additive API wins.
             IF FOUND AND chosen.unsaved_revision IS DISTINCT FROM chosen.revision THEN CONTINUE; END IF;

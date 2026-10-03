@@ -188,6 +188,113 @@ func TestAppearanceMigrationPreservesPhysicalOwnersGeometryAndBehaviour(t *testi
 	}
 }
 
+// Seed explicit linked choices before the migration, including a canonical
+// absence left by Undo. Every identity must retain its effective choice/CAS.
+func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
+	for _, choice := range []string{"theme", "default"} {
+		for _, canonicalRow := range []string{"missing", "unsaved"} {
+			t.Run(choice+"/"+canonicalRow, func(t *testing.T) {
+				ctx := t.Context()
+				d, err := dbtest.NewUnmigrated(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := d.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				s := Store{d.App}
+				var people []tenant.Principal
+				var before Active
+				var explicitTheme *string
+				seeded := false
+				err = db.MigrateWithHook(ctx, d.App, func(name string) error {
+					if name != "1235_agent_appearance_themes.sql" {
+						return nil
+					}
+					seeded = true
+					var tid string
+					if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('inherited-appearance','Inherited appearance') RETURNING id::text`).Scan(&tid); err != nil {
+						return err
+					}
+					// Force the legacy-only alias to sort ahead of the saved alias, proving
+					// that the backfill cannot insert a new winning linked selection either.
+					for _, id := range []string{"ffffffff-ffff-4fff-8fff-ffffffffffff", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "11111111-1111-4111-8111-111111111111"} {
+						p := tenant.Principal{TenantID: tid, ID: id, Kind: tenant.Person}
+						if _, err := d.Admin.Exec(ctx, `INSERT INTO principals(id,tenant_id,kind,name) VALUES($1,$2,'person','Linked person')`, id, tid); err != nil {
+							return err
+						}
+						dbtest.BindRole(t, d, tid, id, "member")
+						people = append(people, p)
+					}
+					if choice == "theme" {
+						theme, err := s.Create(ctx, people[1], CreateInput{Name: "Explicit alias choice", Scope: "personal"})
+						if err != nil {
+							return err
+						}
+						explicitTheme = &theme.ID
+					}
+					if _, err := s.Select(ctx, people[1], SelectionInput{ThemeID: explicitTheme}); err != nil {
+						return err
+					}
+					if canonicalRow == "unsaved" {
+						if _, err := d.Admin.Exec(ctx, `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision,unsaved_revision) VALUES($1,$2,NULL,7,7)`, tid, people[0].ID); err != nil {
+							return err
+						}
+					}
+					for i, p := range people {
+						if i > 0 {
+							if _, err := d.Admin.Exec(ctx, `UPDATE principals SET linked_to=$3 WHERE tenant_id=$1 AND id=$2`, tid, p.ID, people[0].ID); err != nil {
+								return err
+							}
+						}
+						if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+							_, err := tx.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agent-indicator','{"style":"sprite"}')`, tid, p.ID)
+							return err
+						}); err != nil {
+							return err
+						}
+					}
+					var err error
+					before, err = s.Active(ctx, people[0])
+					return err
+				})
+				if err != nil || !seeded {
+					t.Fatalf("migration fixture: %v (seeded=%v)", err, seeded)
+				}
+				if before.SelectedThemeID == nil && choice == "theme" || before.SelectedThemeID != nil && choice == "default" {
+					t.Fatalf("wrong pre-migration explicit choice: %+v", before)
+				}
+				for _, p := range people {
+					after, err := s.Active(ctx, p)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !same(after, before) {
+						t.Fatalf("%s displaced inherited explicit %s choice: before=%+v after=%+v", canonicalRow, choice, before, after)
+					}
+				}
+				var n int
+				if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE metadata->>'migration'='AEON-643'`).Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				if n != 0 {
+					t.Fatalf("explicit linked choices received %d backfill events", n)
+				}
+				// Unlink must keep the physical explicit selection, including default.
+				if _, err := d.Admin.Exec(ctx, `UPDATE principals SET linked_to=NULL WHERE tenant_id=$1 AND id=$2`, people[1].TenantID, people[1].ID); err != nil {
+					t.Fatal(err)
+				}
+				after, err := s.Active(ctx, people[1])
+				if err != nil || !same(after, before) {
+					t.Fatalf("unlink changed explicit choice: %+v %v", after, err)
+				}
+			})
+		}
+	}
+}
+
 func ptr[T any](value T) *T { return &value }
 
 func TestAgentAppearanceAPIRoundTripAndBounds(t *testing.T) {

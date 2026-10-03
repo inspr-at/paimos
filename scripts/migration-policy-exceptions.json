@@ -76,9 +76,9 @@
     },
     {
       "file": "1235_agent_appearance_themes.sql",
-      "sha256": "21d4ef2673c38be1befbde329b88cdf7e55ccb64735d749a3b035e55ee004c6e",
+      "sha256": "162e304d9c18903698224e266b5dea9519c55e30dda45a42173c1ae8a32dc221",
       "ticket": "AEON-643",
-      "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
+      "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Snapshots existing explicit choices across linked identities before backfill, preserving effective themes/defaults and selection generations. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
     }
   ]
 }
