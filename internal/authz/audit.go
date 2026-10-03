@@ -19,6 +19,7 @@ const auditPage = 50
 
 // accessEventTypes are the v2 audit names plus the P1 names they replace.
 var accessEventTypes = []string{
+	"agent_key.owner_workstation_changed", "agent_key.governance_used",
 	"role.created", "role.updated", "role.deleted",
 	"binding.set", "binding.removed",
 	"invite.created", "invite.revoked", "invite.accepted",
@@ -155,6 +156,8 @@ func decodeJSON(raw []byte) any {
 
 func mapAuditType(stored string, after any) (string, bool) {
 	switch stored {
+	case "agent_key.owner_workstation_changed", "agent_key.governance_used":
+		return stored, true
 	case "role.created", "role.updated", "role.deleted",
 		"binding.set", "binding.removed",
 		"invite.created", "invite.revoked", "invite.accepted",

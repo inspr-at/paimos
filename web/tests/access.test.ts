@@ -222,6 +222,8 @@ test('audit events read as sentences from the server’s shape', () => {
   assert.equal(auditSentence(e('agent_key.scopes_changed', { name: 'worker', scopes: [], expires_at: null }, { name: 'worker', scopes: ['nodes.read'], expires_at: '2026-12-31T00:00:00Z' }), names).text, 'changed scopes and expiry for the key worker; expires 2026-12-31T00:00:00Z')
   assert.equal(auditSentence(e('agent_key.revoked', null, { principal_id: 'x', name: 'deployer', prefix: 'ph4r' }), names).text, 'revoked the key deployer (aeon_ph4r_…)')
   assert.equal(auditSentence(e('something.else', null, {}), names).text, 'something else')
+  assert.equal(auditSentence(e('agent_key.owner_workstation_changed', null, { name: 'workstation', owner_workstation: true }), names).text, 'marked the owner workstation key workstation')
+  assert.equal(auditSentence(e('agent_key.governance_used', null, { key_id: 'key', computer_id: 'computer', action: 'POST /api/roles', step_up: true, outcome: 'admitted' }), names).text, 'used key key on computer computer for POST /api/roles; confirmed locally (admitted)')
   assert.deepEqual(['role.created', 'binding.removed', 'invite.revoked', 'principal.deactivated', 'agent_key.created', 'node.updated'].map(categoryOf), ['roles', 'bindings', 'invites', 'lifecycle', 'keys', null])
 })
 

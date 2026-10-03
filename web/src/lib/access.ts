@@ -375,6 +375,8 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
       return { actor, subject: personName, text: aliasName ? `${linked ? 'linked' : 'unlinked'} ${aliasName} ${linked ? 'to' : 'from'} ${personName}` : `${linked ? 'linked a classic identity to' : 'unlinked a classic identity from'} ${personName}` }
     }
     case 'agent_key.created': return { actor, subject: who, text: `created the key ${str(either.name) || 'for an agent'}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}` }
+    case 'agent_key.owner_workstation_changed': return { actor, subject: who, text: `${after.owner_workstation ? 'marked' : 'unmarked'} the owner workstation key ${str(either.name)}` }
+    case 'agent_key.governance_used': return { actor, subject: who, text: `used key ${str(after.key_id)} on computer ${str(after.computer_id)} for ${str(after.action)}; ${after.step_up ? 'confirmed locally' : 'without local confirmation'} (${str(after.outcome)})` }
     case 'agent_key.scopes_changed': {
       const role = obj(after.role), priorRole = obj(before.role)
       const roleDelta = diff((priorRole.permissions as string[] | undefined) ?? [], (role.permissions as string[] | undefined) ?? [])

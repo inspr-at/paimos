@@ -125,9 +125,9 @@ func (m *Module) person(w http.ResponseWriter, r *http.Request) (tenant.Principa
 		fail(w, http.StatusUnauthorized, "sign in required")
 		return tenant.Principal{}, false
 	}
-	// Portal settings are a person decision. An agent key is refused even when
-	// its scopes name settings.manage, which is not an agent permission.
-	if p.Kind != tenant.Person {
+	// Ordinary agents cannot administer portal settings. Marked keys retain
+	// their agent identity and the transaction's settings.manage check.
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		fail(w, http.StatusForbidden, "permission denied")
 		return tenant.Principal{}, false
 	}

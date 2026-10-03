@@ -139,6 +139,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdKeys(),
 		rt.cmdScopes(),
 		rt.cmdWhoami(""),
+		rt.cmdMe(),
 		rt.cmdIssue(),
 		rt.cmdQueue(),
 		rt.cmdRecur(),
@@ -349,6 +350,12 @@ func (rt *runtime) cmdWhoami(use string) *Command {
 	}
 }
 
+func (rt *runtime) cmdMe() *Command {
+	c := rt.cmdWhoami("me")
+	c.Name = "me"
+	return c
+}
+
 func (rt *runtime) whoami(ctx context.Context) error {
 	inst, err := rt.resolve()
 	if err != nil {
@@ -360,15 +367,20 @@ func (rt *runtime) whoami(ctx context.Context) error {
 	}
 	if rt.jsonOut {
 		return rt.printJSON(map[string]any{
-			"instance":  inst.Name,
-			"url":       inst.URL,
-			"principal": me.Principal,
-			"tenant":    me.Tenant,
-			"identity":  me.Identity,
+			"instance":                inst.Name,
+			"url":                     inst.URL,
+			"principal":               me.Principal,
+			"tenant":                  me.Tenant,
+			"identity":                me.Identity,
+			"owner_workstation":       me.OwnerWorkstation,
+			"workstation_computer_id": me.WorkstationComputerID,
 		})
 	}
 	fmt.Fprintf(rt.stdout, "instance: %s (%s)\n", inst.Name, inst.URL)
 	fmt.Fprintf(rt.stdout, "principal: %s (%s)\n", me.Principal.Name, me.Principal.Kind)
 	fmt.Fprintf(rt.stdout, "tenant: %s (%s)\n", me.Tenant.Name, me.Tenant.Slug)
+	if me.OwnerWorkstation {
+		fmt.Fprintf(rt.stdout, "owner workstation: %s\n", me.WorkstationComputerID)
+	}
 	return nil
 }

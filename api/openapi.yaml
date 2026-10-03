@@ -3,6 +3,19 @@ info:
   title: PAIMOS AEON API
   version: dev
   license: {name: AGPL-3.0-only}
+  description: >-
+    AEON-580 adds an explicit owner-workstation exception to the person-only
+    governance routes documented below. Unmarked keys are unchanged. Marked
+    keys may hold owner_workstation_grantable permissions within their live role
+    and creator ceilings; they remain agents. High-risk governance writes return
+    OwnerWorkstationStepUp (428) and accept the Aeon-Step-Up header. This exception
+    never permits ownership.transfer, customer-portal permissions or deciding
+    the acting agent's own approval requests. Marking itself requires an Owner
+    person session and matching Origin. Member reactivation and project-member
+    replacement require the same step-up as deactivation and workspace-role changes.
+    Confirmation summaries include the canonical query and stored route-target and
+    query-selected role names; requests return 400 if the complete summary cannot
+    fit within 256 UTF-8 bytes. Client confirmation is implemented in AEON-581.
 servers:
   - url: /api
 paths:
@@ -60,33 +73,6 @@ paths:
         '400': {description: Invalid cursor or limit}
         '403': {description: Account read permission required}
 
-  /agentd/step-ups/{challenge_id}:
-    get:
-      operationId: getAgentdStepUp
-      summary: Fetch the server-authored confirmation through the paired daemon
-      description: >-
-        AEON-580 implements this endpoint; AEON-581 consumes it. Requires the paired
-        runtime bearer and that computer's lifecycle proof. The computer must be
-        the workstation bound to the challenged key, with a pinned confirmation key.
-        Never return nonce, digest or summary through the agent's 428 response.
-        Refuse expired, consumed, revoked, foreign-computer and foreign-tenant challenges.
-        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
-        concatenating the two lowercase 64-character hex wire strings. The client
-        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
-        The server must consume the proof atomically with the exact bound mutation.
-      security: [{agentKey: []}]
-      parameters:
-        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
-        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
-        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string}, description: 'Pairing lifecycle proof, daemon only; never log'}
-      responses:
-        '200':
-          description: Private daemon challenge; Cache-Control no-store
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/AgentdStepUpChallenge'}
-        '403': {description: Pairing or challenge refused}
-        '410': {description: Challenge expired or already consumed}
   /reviews/github:
     post:
       operationId: receiveReviewPullChange
@@ -476,6 +462,7 @@ paths:
                     expected_revision: {type: integer, minimum: 0}
                     confirm_upgrade: {type: boolean, default: false, description: Explicit owner confirmation ends the upgrade suggestion period; requires ownership.transfer and never overrides server mode.}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Saved settings and new revision
           content:
@@ -514,6 +501,7 @@ paths:
                 mode: {type: string, enum: [inherit, on, off]}
                 expected_revision: {type: integer, minimum: 0}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Saved override
           content:
@@ -575,6 +563,7 @@ paths:
               properties:
                 action: {type: string, enum: [apply, dismiss]}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Applied or dismissed; returns an empty object}
         '400': {description: Invalid proposal or action}
         '403': {description: Person with settings.manage and nodes.write required; server Off forbids Apply}
@@ -1722,6 +1711,7 @@ paths:
       operationId: "publishRuleSet"
       description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot. A rule that copies a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
@@ -1754,6 +1744,7 @@ paths:
       operationId: "restoreRuleSet"
       description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version. Restoring a copy of a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
@@ -1848,6 +1839,7 @@ paths:
       operationId: "publishRuleSets"
       description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds the workspace budget: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged. A rule that copies a git-backed doctrine rule is 409 doctrine_duplicate and names Propose a change; the batch writes nothing."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Every set published, in request order"
@@ -2082,6 +2074,7 @@ paths:
       operationId: "setRuleBudget"
       description: "AEON-432. settings.manage in the workspace; people only. Sets the total budget (2,000 to 500,000 bytes; older clients never block saving) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Outside the product bounds returns 400 invalid_budget, including 500,001. Refused with 422 when a session file served now would no longer fit. Each client receives whole rules within min(budget, its reported limit), retaining all locked rules or failing closed. Publication and explanation use the workspace budget. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: "The saved budget"
           content:
@@ -2202,6 +2195,7 @@ paths:
               properties:
                 head_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: Proposal after approval attempt
           content:
@@ -2227,6 +2221,7 @@ paths:
                 machine_key: {type: string, pattern: "^[0-9a-f]{64}$"}
                 commit: {type: string, pattern: "^[0-9a-f]{40}$"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: Updated reported pin count
           content:
@@ -2377,6 +2372,7 @@ paths:
           application/json:
             schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the change
           content:
@@ -2399,6 +2395,7 @@ paths:
           application/json:
             schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the change
           content:
@@ -2414,6 +2411,7 @@ paths:
       operationId: removeDoctrineSource
       description: "settings.manage; person only. Stops indexing a repository and deletes its cached bytes. Git is not touched."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the change
           content:
@@ -2429,6 +2427,7 @@ paths:
       operationId: indexDoctrineSource
       description: "settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error. An unavailable credential grant prevents fetching and hides cached files until the operator authorizes this workspace/repository again."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the attempt
           content:
@@ -2950,6 +2949,7 @@ paths:
       operationId: createRole
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '201': {description: Role created, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
         '403': {description: Permission denied or role escalation}
   /roles/{id}:
@@ -2959,6 +2959,7 @@ paths:
       operationId: updateRole
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Updated custom role, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
         '403': {description: Permission denied or role escalation}
     delete:
@@ -2966,6 +2967,7 @@ paths:
       parameters:
         - {name: reassign_to, in: query, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '204': {description: Custom role deleted}
         '409': {description: Role still has bindings}
   /members:
@@ -3001,6 +3003,7 @@ paths:
                       project_id: {type: string, format: uuid}
                       role_id: {type: string, format: uuid}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '201': {description: Agent ready for its first key, content: {application/json: {schema: {$ref: '#/components/schemas/AgentMember'}}}}
         '400': {description: 'Invalid name, description or role selection'}
         '403': {description: Requires a person with keys.manage and authority to grant the requested roles}
@@ -3013,6 +3016,7 @@ paths:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role_id], properties: {role_id: {type: [string, 'null'], format: uuid}}}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Updated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Invalid role; Guest is a project role (code project_only_role)}
         '403': {description: Permission denied or role escalation}
@@ -3047,6 +3051,7 @@ paths:
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '204': {description: Invite revoked}
         '404': {description: No such invite}
         '409': {description: Invite was already accepted}
@@ -3069,6 +3074,7 @@ paths:
       parameters:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '403': {description: Permission denied}
         '409': {description: 'Last active owner, already deactivated, or a connected computer (disconnect it under Agents first; code connected_computer)'}
@@ -3096,6 +3102,7 @@ paths:
               properties:
                 from_principal_id: {type: string, format: uuid}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Person with the new alias, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Alias would form a chain or a self-link}
         '403': {description: Permission denied}
@@ -3107,6 +3114,7 @@ paths:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: from_principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '204': {description: Alias removed}
         '404': {description: That alias is not linked to this person}
   /audit:
@@ -3514,6 +3522,85 @@ paths:
         '200': {description: PNG with strong ETag; immutable cache only with matching v hash query}
         '304': {description: ETag matched}
         '404': {description: Person or avatar missing}
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the original confirmation challenge through the paired daemon
+      description: >-
+        Requires the computer's exact paired runtime bearer key and lifecycle proof.
+        Agents pass only challenge_id to agentd. The daemon fetches this resource at
+        its pinned server origin and displays this server-generated summary; it must
+        never display a summary forwarded by the requesting agent. A sibling key,
+        another computer or tenant, an inactive pairing or a consumed, superseded,
+        expired or signer-mismatched challenge cannot retrieve it. No proof in URLs.
+        AEON-580 implements this endpoint; AEON-581 consumes it. The computer must
+        be the workstation bound to the challenged key, with a pinned confirmation
+        key. Never return nonce, digest or summary through the agent's 428 response.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent or logged.}
+      responses:
+        '200':
+          description: Original challenge for this computer; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [summary, nonce, action_digest, expires_at, computer_id]
+                properties:
+                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action, escaped route, canonical query and stored target names including query-selected roles; at most 256 UTF-8 bytes, no control or format characters. Names and fields are never shortened or omitted to fit; an incomplete summary fails challenge creation with 400.'}
+                  nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  expires_at: {type: string, format: date-time}
+                  computer_id: {type: string, format: uuid}
+        '403': {description: Paired runtime and device proof required}
+        '404': {description: Challenge unavailable for this computer}
+        '410': {description: Challenge expired or already consumed}
+  /agent-keys/{id}/owner-workstation:
+    put:
+      operationId: setOwnerWorkstationKey
+      summary: Mark or unmark the owner's workstation key
+      description: >-
+        Workspace Owner person session only; keys cannot mark or unmark any key.
+        Marking requires the key's active agent to be the principal of the connected,
+        redeemed computer with a pinned P-256 Secure Enclave confirmation key.
+        One unrevoked marked key per tenant (and therefore per computer).
+        Marking grants no role and changes no scopes; use the scope endpoint to grant
+        governance permissions within the agent's role and original creator ceiling.
+        Unmarking removes governance scopes and invalidates outstanding challenges.
+        Ownership transfer and customer-portal permissions remain unavailable to keys;
+        a marked agent cannot decide its own approval requests.
+      security: [{session: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [owner_workstation]
+              properties:
+                owner_workstation: {type: boolean}
+                workstation_computer_id: {type: string, format: uuid, description: Required when marking; omitted when unmarking.}
+      responses:
+        '200':
+          description: Updated key metadata; no secret
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid request}
+        '403': {description: Owner person session required or computer binding invalid}
+        '404': {description: Key not in this tenant}
+        '409': {description: Key inactive or another marked key exists}
   /agent-keys:
     get:
       operationId: listAgentKeys
@@ -3586,6 +3673,7 @@ paths:
                   format: date-time
                   description: Future expiry for the new key; omitted or null means never. The UI defaults to 90 days and offers 30, 90, 365 days or never. Rotation uses this new expiry, not the old date.
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "201":
           description: Key created. token is shown only in this response.
           content:
@@ -3671,6 +3759,7 @@ paths:
                     role_id: {type: string, format: uuid}
                     add: {type: array, minItems: 1, maxItems: 256, items: {type: string}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Updated key metadata without a secret
           content:
@@ -3694,6 +3783,7 @@ paths:
           required: true
           schema: {type: string, format: uuid}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "204":
           description: Revoked
         "400":
@@ -6255,6 +6345,7 @@ paths:
       description: Person with settings.manage required. Uses revision compare-and-swap. API keys use the existing tenant-bound encrypted vault, never JSON settings or events. Omit api_key to preserve it; empty clears it. Changing base_url clears an omitted key. Saving makes no model request.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProviderWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved configuration, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProvider'}}}}
         '400': {description: Invalid configuration}
         '403': {$ref: '#/components/responses/Error'}
@@ -6271,6 +6362,7 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Chat endpoint responded, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {const: true}}}}}}
         '400': {description: Invalid request}
         '403': {$ref: '#/components/responses/Error'}
@@ -6287,6 +6379,7 @@ paths:
       description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
         '400': {$ref: '#/components/responses/Error'}
   /settings/eta-interval:
@@ -6316,6 +6409,7 @@ paths:
               properties:
                 interval_minutes: {type: integer, minimum: 1, maximum: 240}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Updated interval
           content:
@@ -6347,6 +6441,7 @@ paths:
               properties:
                 short_name: {type: string, maxLength: 32}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '400': {description: Invalid short name}
         '403': {description: 'Not a person, or settings.manage missing'}
@@ -6378,6 +6473,7 @@ paths:
           image/webp: {schema: {type: string, format: binary}}
           image/svg+xml: {schema: {type: string, format: binary}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '400': {description: 'Wrong type, unreadable or animated image, unsupported static SVG feature, or outside the pixel bounds; includes a reason'}
         '403': {description: 'Not a person, or settings.manage missing'}
@@ -6386,6 +6482,7 @@ paths:
       operationId: deleteBrandLogo
       description: Removes the logo; the header falls back to the product mark (or, for dark, to the light logo). Person only; requires settings.manage.
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '403': {description: 'Not a person, or settings.manage missing'}
   /brand/logo/{variant}:
@@ -6419,6 +6516,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/AgentActivitySetting'}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
         '400': {description: Unknown mode}
         '403': {description: Settings permission required}
@@ -6449,6 +6547,7 @@ paths:
               properties:
                 heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Updated threshold
           content:
@@ -6898,6 +6997,7 @@ paths:
       parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalDecisionWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Decision, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -8557,6 +8657,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettingsWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Updated settings, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettings'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /quote-profiles:
@@ -8893,6 +8994,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettingsWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -8905,6 +9007,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -8919,6 +9022,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -8933,6 +9037,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -8948,6 +9053,7 @@ paths:
       parameters: [{name: productId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalProductEdit'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Product after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -8962,6 +9068,7 @@ paths:
       parameters: [{name: featureId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFeatureEdit'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Feature after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9095,6 +9202,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9109,6 +9217,7 @@ paths:
       parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorPatch'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9121,6 +9230,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -9132,6 +9242,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9146,6 +9257,7 @@ paths:
       parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9158,6 +9270,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -9170,6 +9283,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCellWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9185,6 +9299,7 @@ paths:
       parameters: [{name: cellId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Approved cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9199,6 +9314,7 @@ paths:
       parameters: [{name: correctionId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Closed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalClosed'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -9220,6 +9336,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9234,6 +9351,7 @@ paths:
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFulfillmentWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9525,7 +9643,7 @@ components:
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
     JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
-    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.6']}}
@@ -11348,6 +11466,7 @@ components:
         risk: {type: string, enum: [low, medium, high]}
         grantable_at: {type: array, items: {type: string, enum: [workspace, project]}}
         agent_grantable: {type: boolean, description: A key may carry this permission. The scope picker is built from this flag.}
+        owner_workstation_grantable: {type: boolean, description: A specifically marked owner workstation key may carry this permission within its live role and creator ceilings.}
     AuthzRoleRef:
       type: object
       required: [id, key, name]
@@ -16170,11 +16289,38 @@ components:
         error: {type: string, enum: [unauthorized]}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
         oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
+    OwnerWorkstationStepUp:
+      type: object
+      description: >-
+        HTTP 428 for a marked key's high-risk governance action. Retry the identical
+        method, route (including query), body and conditional headers with
+        Aeon-Step-Up: <challenge_id>.<base64 signature>. nonce and action_digest are
+        lowercase 64-character hexadecimal strings. Sign their UTF-8 concatenation
+        (128 ASCII bytes, no separator or hex decoding) with ECDSA P-256/SHA-256;
+        the signature is ASN.1 DER in standard padded base64. The server verifies
+        against the computer's pairing-pinned key, never a request-supplied key.
+        Challenges expire after two minutes and are consumed once even if the
+        eventual action fails. They bind tenant, key, agent, computer, exact action
+        and signer. Changing marking, revoking, disconnecting or changing the signer
+        invalidates authority. All mutating keys, roles, settings, rules publication,
+        approval decisions, member removal/deactivation and workspace role changes
+        require step-up. All governance attempts are recorded in the access audit.
+        Agents must forward only challenge_id to agentd; agentd retrieves the original
+        challenge using GET /agentd/step-ups/{challenge_id} with its runtime bearer and
+        device proof. The agent receives no summary, nonce or action_digest.
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {type: string, const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
     Me:
       type: object
       description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
       required: [principal, tenant, identity, dev_mode]
       properties:
+        owner_workstation: {type: boolean}
+        workstation_computer_id: {type: string, format: uuid}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
         oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
         principal:
@@ -16189,6 +16335,8 @@ components:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
       properties:
+        owner_workstation: {type: boolean}
+        workstation_computer_id: {type: [string, 'null'], format: uuid}
         id:
           type: string
           format: uuid
@@ -17210,6 +17358,12 @@ components:
         next_cursor:
           type: [string, 'null']
   parameters:
+    AeonStepUp:
+      name: Aeon-Step-Up
+      in: header
+      required: false
+      description: Single-use signed proof for the exact request; see OwnerWorkstationStepUp.
+      schema: {type: string, maxLength: 181}
     NodeId:
       name: nodeId
       in: path
@@ -17331,6 +17485,13 @@ components:
           schema:
             $ref: '#/components/schemas/ViewPatch'
   responses:
+    OwnerWorkstationStepUpRequired:
+      description: A marked owner workstation key needs local confirmation for this exact action.
+      headers:
+        Cache-Control: {schema: {type: string, const: no-store}}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/OwnerWorkstationStepUp"}
     IntakeError:
       description: Intake refusal with a stable machine-readable code; Cache-Control no-store.
       content: {application/json: {schema: {$ref: '#/components/schemas/IntakeError'}}}
