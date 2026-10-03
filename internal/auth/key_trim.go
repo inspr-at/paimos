@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -361,24 +362,12 @@ func readTrimTx(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) 
 	}
 	return out, err
 }
-func trimFence(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, keyIDs ...string) error {
+func trimFence(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) error {
+	// The complete key admission batch is already held before this tenant
+	// access fence, whether this is an agent proposal or a person decision.
 	var locked string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&locked); err != nil {
 		return err
-	}
-	// Proposals may touch the authenticating key and a different target key.
-	// Acquire the complete batch in canonical order before RequireTx records use.
-	if p.KeyID != "" {
-		keyIDs = append(keyIDs, p.KeyID)
-	}
-	for i := range keyIDs {
-		keyIDs[i] = strings.ToLower(keyIDs[i])
-	}
-	sort.Strings(keyIDs)
-	for _, keyID := range slices.Compact(keyIDs) {
-		if err := authz.LockKeyScopeUseTx(ctx, tx, p.TenantID, keyID); err != nil {
-			return err
-		}
 	}
 	return authz.RequireTx(ctx, tx, p, permission, authz.Scope{})
 }
@@ -485,8 +474,9 @@ func (m *Module) proposeKeyTrim(ctx context.Context, p tenant.Principal, keyID s
 		Input trimInput
 	}{keyID, in})
 	fingerprint := trimScopeDigest([]string{string(payload)})
+	ctx = db.WithKeyScopeUse(ctx, p.TenantID, keyID)
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := trimFence(ctx, tx, p, "approvals.request", keyID); err != nil {
+		if err := trimFence(ctx, tx, p, "approvals.request"); err != nil {
 			return err
 		}
 		key, err := readTrimKeyTx(ctx, tx, p.TenantID, keyID, true)
@@ -560,15 +550,21 @@ func (m *Module) decideKeyTrim(ctx context.Context, p tenant.Principal, id strin
 		return out, authz.ErrForbidden
 	}
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := trimFence(ctx, tx, p, "keys.manage"); err != nil {
+		// Protect metadata discovery too; trimFence repeats the check under
+		// the access-change lock before any mutation.
+		if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {
 			return err
 		}
-		// Discover the immutable key identity without taking the proposal lock first.
+		// Discover the immutable key identity without taking any resource lock.
+		// The key admission fence must precede the tenant access fence.
 		var keyID string
 		if err := tx.QueryRow(ctx, `SELECT key_id::text FROM key_trim_proposals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, id).Scan(&keyID); err != nil {
 			return err
 		}
 		if err := authz.LockKeyScopeUseTx(ctx, tx, p.TenantID, keyID); err != nil {
+			return err
+		}
+		if err := trimFence(ctx, tx, p, "keys.manage"); err != nil {
 			return err
 		}
 		key, err := readTrimKeyTx(ctx, tx, p.TenantID, keyID, true)
@@ -578,6 +574,9 @@ func (m *Module) decideKeyTrim(ctx context.Context, p tenant.Principal, id strin
 		out, err = readTrimTx(ctx, tx, p.TenantID, id, true)
 		if err != nil {
 			return err
+		}
+		if out.KeyID != key.ID {
+			return errTrimChanged
 		}
 		now := m.trimClock()
 		before, err := trimScopes(key.Scopes)

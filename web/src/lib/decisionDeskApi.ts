@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
-import { readKeyTrims, decideKeyTrim, type KeyTrimProposal } from './keyTrim'
+import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
 import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
@@ -183,10 +183,10 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
   const result = await decidePhone(review, { decision, reason, request_hash: review.request_hash })
   if (result.pending || result.approval?.decision !== decision) throw new Error('The verified decision was not confirmed.')
 }
-export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean> }
-export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
+export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean>; nextKeyTrims: KeyTrimCursors }
+export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}, trimCursors: KeyTrimCursors = {}): Promise<DeskRead> {
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
-  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims()])
+  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors)])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
   if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
@@ -233,7 +233,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     try { const read = await adapters.tiers.read(); items.push(...read.items.slice(0, 100).map(item => ({ ...item, kind: 'tier' as const }))); warnings.push(...read.warnings); if (read.items.length > 100) warnings.push('Only the first 100 tier requests are shown.') }
     catch { warnings.push('Tier requests could not be read.') }
   }
-  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more } }
+  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more }, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {} }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)

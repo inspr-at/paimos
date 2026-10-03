@@ -9,6 +9,7 @@ import { phoneVerificationAvailable } from '../lib/deskPhoneApproval'
 import { can, onAccessChange } from '../lib/authz'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
+import type { KeyTrimCursors } from '../lib/keyTrim'
 
 const route = useRoute(), consumedLink = ref('')
 const session = useSession()
@@ -19,6 +20,8 @@ const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.ide
 const items = ref<DeskItem[]>([]), roundItems = ref<DeskItem[]>([]), round = ref<string[]>([]), start = ref(''), opened = ref(false)
 const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), more = ref({ open: false, answered: false }), loading = ref(false), pages = ref({ open: 1, answered: 1 }), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | ''>('')
 const roundBaseline = ref<string[]>([]), phoneVerification = ref<boolean | undefined>(), capabilityError = ref('')
+const trimCursors = ref<KeyTrimCursors>({}), nextKeyTrims = ref<KeyTrimCursors>({})
+const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided')
 let sources: DeskSources = emptySources(), generation = 0, alive = true
 const fresh = computed(() => arrivals(items.value, roundBaseline.value))
 const visible = computed(() => items.value.filter(item => item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
@@ -28,9 +31,10 @@ async function refresh() {
   const turn = ++generation, identity = owner.value
   loading.value = true
   try {
-    const result = await loadDesk(pages.value, adapters)
+    const result = await loadDesk(pages.value, adapters, trimCursors.value)
     if (!alive || turn !== generation || identity !== owner.value) return
     sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
+    nextKeyTrims.value = result.nextKeyTrims
     // Memo content stays frozen; changed or vanished records require a deliberate reopen.
     if (opened.value) roundItems.value = roundItems.value.map(item => {
       const latest = result.items.find(row => row.id === item.id)
@@ -46,6 +50,14 @@ async function loadMore() {
   const state = filter.value === 'open' ? 'open' : 'answered'
   if (loading.value || !more.value[state] || pages.value[state] >= MAX_QUESTION_PAGES) return
   pages.value = { ...pages.value, [state]: pages.value[state] + 1 }
+  await refresh()
+}
+async function pageKeyTrims(first = false) {
+  if (loading.value) return
+  const state = trimState.value
+  const cursor = first ? undefined : nextKeyTrims.value[state]
+  if (!first && !cursor) return
+  trimCursors.value = { ...trimCursors.value, [state]: cursor }
   await refresh()
 }
 function begin(id?: string) {
@@ -72,6 +84,7 @@ function recorded(item: DeskItem) {
 watch(owner, () => {
   generation++; consumedLink.value = ''; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
   sources = emptySources(); adapters = makeAdapters(); filter.value = 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
+  trimCursors.value = {}; nextKeyTrims.value = {}
   phoneVerification.value = undefined; capabilityError.value = ''
   const identity = owner.value
   void phoneVerificationAvailable().then(available => { if (alive && identity === owner.value) phoneVerification.value = available })
@@ -92,6 +105,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
   <main class="decision-desk" aria-labelledby="desk-title">
     <header class="desk-head"><div><p class="eyebrow">{{ session.identity?.tenant.name }}</p><h1 id="desk-title">Decision Desk</h1><p class="intro">One topic at a time. The work can wait while the answer takes shape.</p></div><div class="desk-links"><RouterLink to="/agents">Agents</RouterLink><button type="button" :disabled="loading" @click="refresh">Refresh</button></div></header>
     <div class="desk-summary"><div class="view-tabs" role="group" aria-label="Desk view"><button type="button" :aria-pressed="filter === 'open'" @click="filter = 'open'">Open <span>{{ items.filter(item => !item.decided).length }}</span></button><button type="button" :aria-pressed="filter === 'decided'" @click="filter = 'decided'">Decided <span>{{ items.filter(item => item.decided).length }}</span></button></div><label v-if="filter === 'decided'" class="outcome-filter">Stamp <select v-model="outcomeFilter" aria-label="Filter decided by stamp"><option value="">All</option><option v-for="(label, outcome) in outcomeLabels" :key="outcome" :value="outcome">{{ label }}</option></select></label><button type="button" class="review-button" :disabled="!visible.length || loading" @click="begin()">One at a time</button></div>
+    <nav v-if="nextKeyTrims[trimState] || trimCursors[trimState]" class="trim-pages" aria-label="Key trim pages"><button type="button" :disabled="loading || !trimCursors[trimState]" @click="pageKeyTrims(true)">First key trims</button><button type="button" :disabled="loading || !nextKeyTrims[trimState]" @click="pageKeyTrims()">Next key trims</button><span>Up to 100 key trims per page</span></nav>
     <p v-if="state === 'loading'" role="status">Reading the desk…</p>
     <div v-if="warnings.length" class="source-warnings" role="status"><p v-for="warning in warnings" :key="warning">{{ warning }}</p></div>
     <p v-if="state === 'ready' && !visible.length">{{ warnings.length ? 'The available sources have no matching items.' : filter === 'decided' ? 'No recorded decisions in this view.' : 'Nothing is waiting in the available sources.' }}</p>
@@ -104,6 +118,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
 </template>
 
 <style scoped>
+.trim-pages { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; font-size: 12px; color: var(--ink-3); }.trim-pages button { height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--ink); }
 .decision-desk { width: min(1120px, 100%); margin: 0 auto; padding: 30px 32px; color: var(--ink); }.desk-head { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 28px; }.eyebrow { font-size: 11px; color: var(--ink-3); margin: 0 0 7px; }h1 { font-size: 30px; font-weight: 550; margin: 0; letter-spacing: -.02em; }.intro { font-size: 13px; color: var(--ink-3); margin-top: 10px; }.desk-links { display: flex; align-items: flex-start; gap: 20px; padding-top: 10px; }.desk-links a, .chore-line a { color: var(--teal-ink); text-decoration: none; font-size: 12px; }button { cursor: pointer; }button:disabled { cursor: default; opacity: .5; }.desk-links button { border: 0; color: var(--ink-2); background: transparent; font-size: 12px; padding: 0; }.desk-summary { display: flex; align-items: center; gap: 18px; border-bottom: 1px solid var(--line-2); padding-bottom: 14px; }.view-tabs { display: flex; gap: 20px; }.view-tabs button { border: 0; background: transparent; color: var(--ink-3); font-size: 13px; padding: 8px 0; }.view-tabs button[aria-pressed=true] { font-weight: 700; color: var(--ink); }.view-tabs span { font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }.review-button { margin-left: auto; border: 1px solid var(--line-2); border-radius: 8px; background: var(--glass); padding: 10px 16px; color: var(--teal-ink); font-size: 12px; font-weight: 600; }.outcome-filter { font-size: 12px; display: flex; gap: 8px; align-items: center; }.outcome-filter select { color: var(--ink); background: var(--surface); border: 1px solid var(--line); height: 32px; max-width: 130px; }.desk-list { margin: 0; padding: 0; list-style: none; }.desk-row { width: 100%; display: grid; grid-template-columns: 120px minmax(0,1fr) 100px; align-items: center; gap: 22px; padding: 20px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--ink); }.desk-row:hover { background: var(--row-hover); }.row-kind { font-size: 11px; color: var(--ink-3); }.row-topic { min-width: 0; }.row-topic strong { display: block; font-size: 14px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.row-topic small { display: block; font-size: 12px; color: var(--ink-3); margin-top: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.row-state { font-size: 11px; text-align: right; color: var(--ink-3); }.chore-line, .incomplete { margin-top: 24px; font-size: 12px; color: var(--ink-3); }.incomplete button { border: 0; background: transparent; color: var(--teal); font-size: inherit; }.source-warnings { font-size: 12px; color: var(--warn-ink); padding: 10px 0; }.source-warnings p { margin: 5px 0; }.arrival-line { font-size: 12px; color: var(--teal-ink); }button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 @media (max-width: 720px) { .decision-desk { padding: 22px 18px; }.desk-head { gap: 12px; }.desk-links { gap: 12px; }h1 { font-size: 25px; }.intro { max-width: 24ch; }.desk-summary { flex-wrap: wrap; gap: 12px; }.desk-row { grid-template-columns: minmax(0,1fr) 78px; gap: 10px; padding: 16px 0; }.row-kind { grid-column: 1 / -1; }.row-state { grid-column: 2; grid-row: 2; }.row-topic { grid-row: 2; }.review-button { padding: 10px; }.outcome-filter { order: 3; } }
 </style>

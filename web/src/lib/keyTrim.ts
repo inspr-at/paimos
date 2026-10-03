@@ -10,6 +10,7 @@ export interface KeyTrimProposal {
   revision: number; applied_at: string | null; restore_until: string | null; blocked_reason?: string
 }
 interface TrimPage { items: KeyTrimProposal[]; has_more: boolean; next_cursor?: string }
+export type KeyTrimCursors = { pending?: string; decided?: string }
 async function trimRequest<T>(path: string, input?: unknown): Promise<T> {
   const response = await api(path, input === undefined ? undefined : { method: 'POST', body: JSON.stringify(input) })
   const maxBytes = 8 * 1024 * 1024
@@ -30,16 +31,23 @@ async function trimRequest<T>(path: string, input?: unknown): Promise<T> {
   if (!response.ok) throw new APIError(response.status, result.error || 'The key trim action failed.', result)
   return result
 }
-export async function readKeyTrims(): Promise<{ items: KeyTrimProposal[]; warnings: string[] }> {
+export async function readKeyTrims(cursors: KeyTrimCursors = {}): Promise<{ items: KeyTrimProposal[]; warnings: string[]; next: KeyTrimCursors }> {
   const items: KeyTrimProposal[] = [], warnings: string[] = []
-  // Separate pages keep pending decisions visible even with a large history.
-  for (const state of ['pending', 'decided']) {
-    const page = await trimRequest<TrimPage>(`/key-trim-proposals?state=${state}&limit=100`)
+  const next: KeyTrimCursors = {}
+  // One bounded window per state. Explicit continuation can reach any record
+  // without accumulating an unbounded history or re-reading earlier pages.
+  for (const state of ['pending', 'decided'] as const) {
+    const cursor = cursors[state]
+    const page = await trimRequest<TrimPage>(`/key-trim-proposals?state=${state}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
     if (!Array.isArray(page.items) || page.items.length > 100 || typeof page.has_more !== 'boolean') throw new Error('The key trim page is invalid.')
     items.push(...page.items)
-    if (page.has_more) warnings.push(`Only the first 100 ${state} key trim proposals are shown.`)
+    if (page.has_more) {
+      if (!page.next_cursor || page.next_cursor.length > 128 || page.next_cursor === cursor || !page.items.length || page.items.at(-1)?.id !== page.next_cursor) throw new Error('The key trim continuation is invalid.')
+      next[state] = page.next_cursor
+      warnings.push(`More ${state} key trim proposals are available. Use Next key trims in that view.`)
+    }
   }
-  return { items, warnings }
+  return { items, warnings, next }
 }
 export async function decideKeyTrim(proposal: KeyTrimProposal, decision: 'approve' | 'decline' | 'restore', requestId: string): Promise<KeyTrimProposal> {
   const restore = decision === 'restore'

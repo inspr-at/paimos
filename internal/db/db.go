@@ -72,6 +72,9 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 			return fmt.Errorf("set read statement timeout: %w", err)
 		}
 	}
+	if err := lockAgentScopeUse(ctx, tx, tenantID); err != nil {
+		return err
+	}
 	if err := fn(tx); err != nil {
 		if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok && IsStatementTimeout(err) {
 			limit.timedOut.Store(true)

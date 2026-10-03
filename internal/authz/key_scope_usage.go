@@ -4,23 +4,19 @@ package authz
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-// LockKeyScopeUseTx serializes grants and trim decisions for one authenticating
-// key. Call before key row locks and before the event counter. It neither locks
-// the tenant nor upgrades a key FK lock, so transactional resource checks keep
-// their existing tenant -> tree -> record order. Callers touching several keys
-// must acquire their entire batch in canonical order before other key locks.
+// LockKeyScopeUseTx serializes grants and trims before resource locking.
+// InTenant takes the authenticating-key fence before calling handlers, so
+// RequireTx only re-enters it even when it follows a resource row lock.
+// Person-owned trims take the target-key fence before their tenant fence.
 func LockKeyScopeUseTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,615))`, strings.ToLower(tenantID+":"+keyID))
-	return err
+	return db.LockKeyScopeUseTx(ctx, tx, tenantID, keyID)
 }
 
 func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) error {
