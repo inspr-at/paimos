@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"math"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -47,8 +46,7 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
 		if !exists {
 			return out, errNotFound
 		}
-		// K1 is an explicit unresolved definition gate, never silently broaden to all notes.
-		return out, fail(http.StatusConflict, "release_context_undecided", "Release Knowledge context awaits decision K1")
+
 	}
 	sortBy := q.Sort
 	if sortBy == "" {
@@ -98,8 +96,8 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
  WHERE n.tenant_id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug=ANY($6::text[])
  AND (cardinality($7::text[])=0 OR k.slug=ANY($7::text[])) AND (cardinality($8::text[])=0 OR n.state=ANY($8::text[]))
  AND ($3::text='' OR n.search_document@@t.q OR n.title ILIKE $5 ESCAPE '\' OR coalesce(n.fields->>'slug','') ILIKE $5 ESCAPE '\' OR (cardinality($4::text[])>0 AND NOT EXISTS(SELECT 1 FROM unnest($4::text[]) w WHERE NOT(n.title ILIKE w ESCAPE '\' OR coalesce(n.fields->>'slug','') ILIKE w ESCAPE '\' OR n.key ILIKE w ESCAPE '\' OR n.body ILIKE w ESCAPE '\'))))
- AND EXISTS(SELECT 1 FROM node_relations link JOIN nodes peer ON peer.tenant_id=link.tenant_id AND peer.id=CASE WHEN link.source_node_id=n.id THEN link.target_node_id ELSE link.source_node_id END AND peer.deleted_at IS NULL AND peer.project_id=$2 JOIN ` + delivery.Effective + ` e ON e.tenant_id=peer.tenant_id AND e.item_node_id=peer.id AND e.project_node_id=$2 AND e.release_node_id IS NULL WHERE link.tenant_id=n.tenant_id AND link.type='relates' AND (link.source_node_id=n.id OR link.target_node_id=n.id)))`
-	args := []any{p.TenantID, q.ProjectID, q.Q, patterns, likePattern(strings.TrimSpace(q.Q))[1:], kindSlugs(), types, statuses}
+ AND EXISTS(SELECT 1 FROM node_relations link JOIN nodes peer ON peer.tenant_id=link.tenant_id AND peer.id=CASE WHEN link.source_node_id=n.id THEN link.target_node_id ELSE link.source_node_id END AND peer.deleted_at IS NULL AND peer.project_id=$2 WHERE link.tenant_id=n.tenant_id AND link.type='relates' AND (link.source_node_id=n.id OR link.target_node_id=n.id) AND (( $9::uuid IS NOT NULL AND peer.id=$9::uuid) OR EXISTS(SELECT 1 FROM ` + delivery.Effective + ` e WHERE e.tenant_id=peer.tenant_id AND e.item_node_id=peer.id AND e.project_node_id=$2 AND e.kind='ticket' AND e.release_node_id IS NOT DISTINCT FROM $9::uuid))))`
+	args := []any{p.TenantID, q.ProjectID, q.Q, patterns, likePattern(strings.TrimSpace(q.Q))[1:], kindSlugs(), types, statuses, nullableScopeID(strings.Replace(q.ShipsIn, "none", "", 1))}
 	rows, err := tx.Query(ctx, prefix+` SELECT kind,state,count(*) FROM (SELECT kind,state FROM context_entries LIMIT 10001) bounded GROUP BY kind,state`, args...)
 	if err != nil {
 		return out, err
@@ -179,8 +177,8 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
 		// Scan timestamps as times; PostgreSQL text depends on session formatting.
 		orderExpr = expr
 	}
-	pageSQL := prefix + `, selected AS MATERIALIZED (SELECT ce.*,` + orderExpr + ` order_value FROM context_entries ce WHERE ($9::bool OR ` + expr + op + `$10::` + cast + ` OR (` + expr + `=$10::` + cast + ` AND (ce.updated_at,ce.id)<($11,$12::uuid))) ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC LIMIT $13)
- SELECT ` + itemColumns + `,CASE WHEN $14::text<>'' AND strpos(lower(n.body),lower($14))>0 THEN substr(n.body,greatest(1,strpos(lower(n.body),lower($14))-300),900) ELSE left(n.body,900) END,$14::text<>'' AND strpos(lower(n.body),lower($14))>300,ce.order_value FROM selected ce JOIN nodes n ON n.tenant_id=$1 AND n.id=ce.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id ` + nearestProject + "\n" + lastWrite + ` ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC`
+	pageSQL := prefix + `, selected AS MATERIALIZED (SELECT ce.*,` + orderExpr + ` order_value FROM context_entries ce WHERE ($10::bool OR ` + expr + op + `$11::` + cast + ` OR (` + expr + `=$11::` + cast + ` AND (ce.updated_at,ce.id)<($12,$13::uuid))) ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC LIMIT $14)
+ SELECT ` + itemColumns + `,CASE WHEN $15::text<>'' AND strpos(lower(n.body),lower($15))>0 THEN substr(n.body,greatest(1,strpos(lower(n.body),lower($15))-300),900) ELSE left(n.body,900) END,$15::text<>'' AND strpos(lower(n.body),lower($15))>300,ce.order_value FROM selected ce JOIN nodes n ON n.tenant_id=$1 AND n.id=ce.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id ` + nearestProject + "\n" + lastWrite + ` ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC`
 	rows, err = tx.Query(ctx, pageSQL, args...)
 	if err != nil {
 		return out, err

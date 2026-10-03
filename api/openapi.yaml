@@ -5001,11 +5001,14 @@ paths:
         project and q scope before the type and status filters.
         With ships_in, the visible linked-context population and own filters
         intersect before keyset pagination/counts (maximum page 200). Counts
-        stop at 10,001 and report counts_incomplete. Release UUID context is
-        refused with release_context_undecided until decision K1 is resolved.
+        stop at 10,001 and report counts_incomplete. Release UUID context includes
+        same-project notes linked one hop by relates, in either direction, to
+        visible effective ticket members or the release node itself. Backlog
+        includes notes linked to visible effective backlog tickets (ranked or tail).
+        Entries are deduplicated; deleted, invisible and cross-project peers do not match.
       security: *auth
       parameters:
-        - {name: ships_in, in: query, description: "Single releases-mode project scope, UUID or none (ranked and tail Backlog). Requires project_id. Release context awaits K1; no fallback to all work.", schema: {type: string, maxLength: 36}}
+        - {name: ships_in, in: query, description: "Single releases-mode project scope, UUID or none (ranked and tail Backlog). Requires project_id. Explicit linked context; no fallback to all work.", schema: {type: string, maxLength: 36}}
         - {name: cursor, in: query, description: "Query-bound keyset cursor; scoped limit at most 200.", schema: {type: string, maxLength: 2048}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
@@ -5026,7 +5029,7 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          description: Release linked-context definition awaits decision K1
+          description: Knowledge context conflict
           content:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgeProblem'}
@@ -17461,6 +17464,7 @@ components:
       type: object
       required: [project_id, release_id, visibility, state, rank, revision, title, rollup]
       properties:
+        undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed release.reranked event for this action; null on reads or non-undoable actions. Never inferred from latest event."}
         display_name: {type: string, description: "Bound product marketing name or actual project/internal title. Product-name inventories exceeding 10000 entries or sequence 10000 refuse rather than omit matches."}
         matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
         project_id: {type: string, format: uuid}
@@ -17481,7 +17485,7 @@ components:
         build_settings: {$ref: '#/components/schemas/DeliveryBuildSettings'}
         resolved_build_settings: {$ref: '#/components/schemas/DeliveryBuildSettings'}
         setting_sources: {type: object, additionalProperties: {type: string, enum: [inherited, overridden, missing]}}
-        build_summary: {type: object, properties: {authorized: {type: boolean}, budget_outlook: {type: string, enum: [unknown]}}}
+        build_summary: {type: object, properties: {authorized: {type: boolean}, budget_outlook: {type: string, enum: [unknown]}, agents: {type: integer, minimum: 0, description: Distinct active agents on visible member tickets; absent without harness.read.}, waiting: {type: integer, minimum: 0, description: Distinct active agents whose bound run reports waiting.}, agents_incomplete: {type: boolean, description: Counts are lower bounds when the bounded 5000-session aggregate is exceeded.}}}
         reservation_basis: {type: string, enum: [history, attested]}
         reservation_ref: {type: string, maxLength: 512}
         released_by: {type: string, format: uuid}
@@ -17569,8 +17573,10 @@ components:
       type: object
       required: [items]
       properties:
+        undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed ships_in.changed event for the single/all-or-nothing batch; null for no-op. Items carry committed item/project/release identity and revision."}
         items: {type: array, maxItems: 101, items: {$ref: '#/components/schemas/DeliveryPlacement'}}
         release_revision: {type: integer, minimum: 1}
+        release_revisions: {type: object, maxProperties: 102, additionalProperties: {type: integer, minimum: 1}, description: Committed revisions of the touched source and destination releases.}
     DeliveryAdoptionJob:
       type: object
       description: Private persisted summary; opaque report and backup references never authorize download. No provider journal or credential payloads.

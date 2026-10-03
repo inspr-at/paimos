@@ -115,6 +115,22 @@ describe('bounded release reads', () => {
     h.state.reset({ ...context, person: 'other' }); expect(h.state.overview.value).toBe(null); expect(h.state.expanded.size).toBe(0)
     h.requests[3]!.resolve(overview()); await settle(); expect(h.state.overview.value).toBe(null); h.state.dispose()
   })
+  it('keeps an own committed move when a pre-commit continuation ignores abort', async () => {
+    const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview()); await settle()
+    h.state.expand('0'); h.state.expand('1')
+    const original = { ...page(1, 'owned').items[0]!, release_id: '0' }
+    h.requests[1]!.resolve({ ...page(0), items: [original], next_cursor: 'older-page' })
+    h.requests[2]!.resolve(page(0)); await settle()
+    h.state.moreWork('release:0'); const late = h.requests.at(-1)!
+    h.state.committed({ kind: 'placement', result: { items: [{ ...original, release_id: '1', revision: 2 }], release_revision: 2, release_revisions: { '0': 2, '1': 2 }, undo_event_id: 42 } })
+    expect(late.signal.aborted).toBe(true)
+    late.resolve({ ...page(0), items: [original] }); await settle()
+    expect(h.state.work['release:0']?.items).toHaveLength(0)
+    expect(h.state.work['release:1']?.items.map(i => i.item_id)).toEqual([original.item_id])
+    expect(h.state.overview.value?.active.map(r => r.revision)).toEqual([2, 2])
+    expect(h.requests.filter(r => r.source === 'overview')).toHaveLength(1)
+    h.state.dispose()
+  })
   it('queues passive insertion until active controls leave or a fixed action applies it', async () => {
     let safe = true
     const h = harness(() => safe); h.state.reset(context); h.requests[0]!.resolve(overview()); await settle(); h.state.expand('0'); safe = false

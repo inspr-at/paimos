@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { releaseScope } from '../lib/releaseScope'
+import { releaseScope, scopeValuesFromQuery } from '../lib/releaseScope'
+import { DELIVERY_ACTIONS, useDeliveryChanges, type DeliveryCommit } from '../lib/deliveryChanges'
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -44,6 +45,8 @@ import PanelSplitter from '../components/PanelSplitter.vue'
 import FilterSheet from '../components/work/FilterSheet.vue'
 import ListToolbar from '../components/work/ListToolbar.vue'
 import ProjectTabs from '../components/work/ProjectTabs.vue'
+import { vClipTip } from '../lib/clipTip'
+import ReleaseScopePicker from '../components/releases/ReleaseScopePicker.vue'
 import { PROJECT_SECTIONS, projectSection, ticketView, type ProjectSection, type TicketView } from '../components/work/projectNavigation'
 import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
@@ -138,7 +141,25 @@ const ticketSectionQuery = (value: ProjectSection = section.value): Record<strin
 const onKnowledge = () => section.value === 'knowledge'
 const releasesActive = computed(() => section.value === 'releases')
 const planningSummary = ref<{ total: number | null; loading: boolean; incomplete: boolean }>({ total: null, loading: false, incomplete: false })
-const filters = computed(() => filtersFromQuery(section.value === 'tickets' || releasesActive.value ? route.query : {}))
+const scopeValues = computed(() => scopeValuesFromQuery(route.query.ships_in))
+const projectScope = computed(() => releaseScope(scopeValues.value))
+const scopeLabel = ref('All work')
+const scopeOwner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
+const scopePicker = ref<InstanceType<typeof ReleaseScopePicker>>()
+const planningView = ref<InstanceType<typeof ReleasePlanning>>()
+function deliveryApplied() {
+  if (section.value === 'tickets') { void list.load(); if (outlineActive.value) void outline.reload() }
+  if (section.value === 'knowledge') void knowledge.load()
+}
+function deliveryCommitted(change: DeliveryCommit) { planningView.value?.committed(change) }
+const deliveryLive = useDeliveryChanges(projectId, scopeOwner, { context: () => projectScope.value, applied: deliveryApplied, committed: deliveryCommitted })
+provide(DELIVERY_ACTIONS, deliveryLive.actions)
+
+function chooseScope(values: string[]) {
+  const query = { ...route.query, ships_in: values.length ? values.join(',') : undefined }
+  void router.push({ path: route.path, query })
+}
+const filters = computed(() => filtersFromQuery(section.value === 'tickets' || releasesActive.value ? route.query : { ships_in: route.query.ships_in }))
 // A view (or a shared link) may carry its own column set; widths stay the person's.
 const tablePrefs = computed<ListPrefs | null>(() => {
   const cols = filters.value.cols
@@ -209,8 +230,8 @@ provide(routerKey, { ...router, push: (to: RouteLocationRaw) => {
   delete query.entry
   return router.push({ ...(typeof to === 'string' ? { path: target.path, hash: target.hash } : to), query })
 } })
-const knowledgeListQuery = computed(() => ({ ...knowledgeDisplay.value, ...knowledgeQuery(knowledgeFilters.value) }))
-const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive)
+const knowledgeListQuery = computed(() => ({ ...knowledgeDisplay.value, ...knowledgeQuery(knowledgeFilters.value), ...(scopeValues.value.length ? { ships_in: scopeValues.value.join(',') } : {}) }))
+const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive, projectScope, scopeOwner)
 const knowledgeTab = ref<InstanceType<typeof KnowledgeTabType>>()
 const knowledgeEntry = ref<InstanceType<typeof KnowledgeEntryPageType>>()
 // Wide screens dock an entry beside the list (?entry=<type>/<slug>); narrower ones open its own page.
@@ -262,6 +283,7 @@ const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncat
 const ticketGraphView = ref<{ focus: () => void }>()
 const outlineActive = computed(() => viewMode.value === 'outline')
 const outline = useOutline(projectId, filters, outlineActive, list, {
+  autoApply: () => false,
   fetchList: fetchWorkList,
   me: () => session.identity?.principal.id ?? null,
   quiet: id => !!ticketKey.value && panelItem.value?.id === id,
@@ -280,6 +302,7 @@ const outline = useOutline(projectId, filters, outlineActive, list, {
 // structural updates behind the "N updates · Show" pill until it is safe.
 const listActive = computed(() => section.value === 'tickets' && viewMode.value === 'list')
 const liveList = useLiveList({
+  autoApply: () => false,
   projectId, filters, rows: list.rows, loading: list.loading, reads: list.reads, loadedOnce: list.loadedOnce,
   more: () => !!list.cursor.value, edge: () => list.edge.value, active: listActive, me: () => session.identity?.principal.id ?? null,
   quiet: id => !!ticketKey.value && panelItem.value?.id === id,
@@ -438,7 +461,10 @@ function update(patch: Partial<ListFilters>) {
 // Remember each section's filters and view while moving around this project.
 watch(section, () => { creating.value = false; openedFromList = false })
 const sectionQueries: Partial<Record<ProjectSection, typeof route.query>> = {}
-watch(projectKey, () => { for (const key of Object.keys(sectionQueries)) delete sectionQueries[key as ProjectSection] })
+watch([projectKey, scopeOwner], (_value, before) => {
+  for (const key of Object.keys(sectionQueries)) delete sectionQueries[key as ProjectSection]
+  if (before && _value[1] !== before[1] && scopeValues.value.length) chooseScope([])
+})
 function setSection(id: string) {
   const target = PROJECT_SECTIONS.find(item => item.id === id)?.id
   if (!target || target === section.value) return
@@ -446,7 +472,7 @@ function setSection(id: string) {
   sectionQueries[section.value] = query
   const saved = sectionQueries[target] ?? {}
   void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
-    query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
+    query: { ...saved, ships_in: scopeValues.value.length ? scopeValues.value.join(',') : undefined, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
 }
 watch([project, journeyActive, journeyStage], () => {
   const current = project.value
@@ -936,7 +962,7 @@ function updateKnowledge(patch: Partial<KnowledgeFilters>) {
   knowledgeWrite = knowledgeWrite.catch(() => undefined).then(async () => {
     const go = () => {
       const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
-      return router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry, ...(ticketKey.value ? { section: 'knowledge' } : {}) } })
+      return router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...(scopeValues.value.length ? { ships_in: scopeValues.value.join(',') } : {}), ...entry, ...(ticketKey.value ? { section: 'knowledge' } : {}) } })
     }
     let retriedAbort = false
     while (knowledgeActive.value && !knowledgeEntryOpen.value) {
@@ -1447,6 +1473,8 @@ function extendSelection(step: number) {
   table.value?.focusGrid()
 }
 function keydown(event: KeyboardEvent) {
+  if (event.key === 'a' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.defaultPrevented && !typing(event.target) && !document.querySelector('dialog[open], .floating') && deliveryLive.pending.value) { event.preventDefault(); deliveryLive.apply(); return }
+
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
   if ((knowledgeActive.value || releasesActive.value) && !ticketKey.value) {
@@ -1633,8 +1661,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
+        <ReleaseScopePicker ref="scopePicker" :project-id="project.id" :person="scopeOwner" :values="scopeValues" :count-text="knowledgeActive ? `${knowledge.total.value} entries${projectScope.kind === 'all' ? '' : ` in ${scopeLabel}`}` : `${releasesActive ? planningSummary.total ?? '…' : total ?? '…'} tickets${projectScope.kind === 'all' || releasesActive ? '' : ` in ${scopeLabel}`}`" :pending-changes="deliveryLive.pending.value" @apply-changes="deliveryLive.apply()" @choose="chooseScope" @label="scopeLabel = $event" />
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="releasesActive ? planningSummary.total : total" :total-incomplete="releasesActive && planningSummary.incomplete" :loading="releasesActive ? planningSummary.loading : graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
+          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="releasesActive ? planningSummary.total : total" :pending-changes="deliveryLive.pending.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' ? '' : scopeLabel" :total-incomplete="releasesActive && planningSummary.incomplete" :loading="releasesActive ? planningSummary.loading : graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading" :facet-errors="list.facetErrors"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
@@ -1655,8 +1684,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
       </div>
 
-      <ReleasePlanning v-if="releasesActive" :project-id="project.id" :project-key="project.routeKey" :person="`${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`" :filters="filters" :scroll-root="scrollRoot" :now="now" :density="density"
-        @summary="planningSummary = $event" @open="openKey" @copy="copyKey" @new-tab="newTab" @scope="id => update({ ships_in: [id] })" />
+      <div class="delivery-notice" role="status" aria-live="polite">
+        <span v-clip-tip="deliveryLive.error.value">{{ deliveryLive.error.value || (deliveryLive.undo.value ? 'Move saved' : '') }}</span>
+        <button type="button" class="btn sm" :disabled="!deliveryLive.undo.value || deliveryLive.undoBusy.value" @click="deliveryLive.undoLast()">Undo</button>
+      </div>
+      <ReleasePlanning ref="planningView" :apply-version="deliveryLive.applied.value" v-if="releasesActive" :project-id="project.id" :project-key="project.routeKey" :person="`${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`" :filters="filters" :scroll-root="scrollRoot" :now="now" :density="density"
+        @summary="planningSummary = $event" @open="openKey" @copy="copyKey" @new-tab="newTab" @scope="id => chooseScope([id])" />
       <JourneyView
         v-else-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
         :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
@@ -1669,7 +1702,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </section>
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
+        :filters="knowledgeFilters" :pending-changes="deliveryLive.pending.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' ? '' : scopeLabel" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
       />
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
@@ -1731,7 +1764,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
-      />
+      ><template #scope><button type="button" class="btn" @click="filterSheet?.close(); scopePicker?.open()">Release scope: {{ scopeLabel }}</button></template></FilterSheet>
       <SaveViewPanel
         v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"
         :busy="saveBusy" :error="saveError" @submit="submitSave" @close="closeSave"
@@ -1769,6 +1802,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 
 <style scoped>
 /* Lists use the full width; the gutter grows with the screen. */
+.delivery-notice { position: fixed; z-index: 30; bottom: max(18px, env(safe-area-inset-bottom)); right: var(--gutter); display: flex; align-items: center; gap: 12px; width: min(28rem, calc(100vw - 24px)); height: 44px; pointer-events: none; }
+.delivery-notice span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delivery-notice .btn { pointer-events: auto; }
+.delivery-notice:has(.btn:disabled):not(:has(span:not(:empty))) { visibility: hidden; }
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 /* The header follows its own width, not the window's: a docked ticket panel can
    leave the list as narrow as a phone on a wide screen (AEON-140). */

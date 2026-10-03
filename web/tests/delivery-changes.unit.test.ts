@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { effectScope, nextTick, ref } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
+import { parseDeliveryEvent, useDeliveryChanges, placeDelivery, type PlacementReceipt } from '../src/lib/deliveryChanges'
+vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error { constructor(public status: number, message: string, public body: unknown) { super(message) } } }))
+import { api } from '../src/lib/api'
+const move = (id = 7): PlacementReceipt => ({ items: [{ item_id: 'item', project_id: 'project', release_id: 'later', rank: 'V', revision: 3, expedite: false, due_on: null }], undo_event_id: id })
+const event = (id: number, project = 'project', type = 'ships_in.changed') => JSON.stringify({ id, type, actor_principal_id: 'me', after: { project_id: project } })
+function setup() {
+  const project = ref<string | null>('project'), owner = ref('tenant:me'), scope = effectScope(), changes: unknown[] = [], apply = vi.fn()
+  const live = scope.run(() => useDeliveryChanges(project, owner, { open: () => ({ close: vi.fn(), addEventListener: vi.fn(), onerror: null }), committed: c => changes.push(c), applied: apply }))!
+  return { scope, project, owner, live, changes, apply }
+}
+describe('exact own receipts and held changes', () => {
+  it('deduplicates an echo before or after commit, while same-actor other actions stay held', () => {
+    const h = setup(), identity = h.live.actions.begin()
+    h.live.receive(event(7)); h.live.receive(event(8)); expect(h.live.pending.value).toBe(2)
+    expect(h.live.actions.commit(identity, { kind: 'placement', result: move() })).toBe(true)
+    expect(h.live.pending.value).toBe(1); expect(h.changes).toHaveLength(1)
+    h.live.receive(event(7)); expect(h.live.pending.value).toBe(1)
+    h.live.apply(); expect(h.live.pending.value).toBe(0); expect(h.apply).toHaveBeenCalledOnce(); h.scope.stop()
+  })
+  it('a refusal changes nothing and gives no Undo; a foreign adoption waits for Apply', () => {
+    const h = setup(), identity = h.live.actions.begin()
+    h.live.receive(event(3, 'project', 'delivery.adopted')); h.live.actions.failed(identity)
+    expect(h.changes).toEqual([]); expect(h.live.undo.value).toBeNull(); expect(h.live.applied.value).toBe(0)
+    h.live.apply(); expect(h.live.applied.value).toBe(1); h.scope.stop()
+  })
+  it('project/person changes discard late commits and all owned pending/Undo state', () => {
+    const h = setup(), identity = h.live.actions.begin()
+    h.live.receive(event(3)); h.owner.value = 'tenant:another'
+    expect(h.live.actions.commit(identity, { kind: 'placement', result: move() })).toBe(false)
+    expect(h.live.pending.value).toBe(0); expect(h.live.undo.value).toBeNull(); expect(h.changes).toEqual([]); h.scope.stop()
+  })
+  it('Undo uses only the exact receipt and exposes authoritative CAS refusal without losing it', async () => {
+    const h = setup(); h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move(17) })
+    vi.mocked(api).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Placement changed again' }), { status: 409 }))
+    await h.live.undoLast(); expect(api).toHaveBeenLastCalledWith('/events/17/undo', expect.objectContaining({ method: 'POST' }))
+    expect(h.live.error.value).toBe('Placement changed again'); expect(h.live.undo.value?.id).toBe(17); expect(h.apply).not.toHaveBeenCalled()
+    vi.mocked(api).mockResolvedValueOnce(new Response(JSON.stringify({ id: 21, undo_of: 17, type: 'ships_in.changed', after: { members: move().items } }), { status: 201 }))
+    await h.live.undoLast(); h.live.receive(event(21)); expect(h.live.pending.value).toBe(0); expect(h.live.undo.value).toBeNull(); expect(h.apply).not.toHaveBeenCalled(); expect(h.changes).toHaveLength(2); h.scope.stop()
+  })
+  it('placement writes capture item/project/revision and commit only after success', async () => {
+    const h = setup(); let answer!: (r: Response) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))
+    const pending = placeDelivery('project', { item_id: 'item', project_id: 'project', revision: 2 }, { release_id: 'later', expected_release_revision: 8 }, h.live.actions)
+    expect(h.changes).toEqual([])
+    const [path, init] = vi.mocked(api).mock.calls.at(-1)!
+    expect(path).toBe('/nodes/item/ships-in'); expect(JSON.parse(init!.body as string)).toEqual({ release_id: 'later', expected_release_revision: 8, expected_project_id: 'project', expected_revision: 2 })
+    answer(new Response(JSON.stringify(move()), { status: 200 })); await pending
+    expect(h.changes).toHaveLength(1); expect(h.live.undo.value?.id).toBe(7); h.scope.stop()
+  })
+  it('deduplicates and bounds held events without claiming complete reads', async () => {
+    const h = setup(); for (let i = 1; i <= 510; i++) h.live.receive(event(i))
+    h.live.receive(event(1)); expect(h.live.pending.value).toBe(501); expect(h.live.overflow.value).toBe(true)
+    h.project.value = 'other'; await nextTick(); expect(h.live.pending.value).toBe(0); h.scope.stop()
+  })
+  it('ignores malformed, oversized and other-project events, including nested release snapshots', () => {
+    expect(parseDeliveryEvent('x', 'project')).toBeNull(); expect(parseDeliveryEvent(event(1, 'other'), 'project')).toBeNull()
+    expect(parseDeliveryEvent('x'.repeat((1 << 20) + 1), 'project')).toBeNull()
+    expect(parseDeliveryEvent(JSON.stringify({ id: 1, type: 'release.updated', after: { release: { project_id: 'project' } } }), 'project')?.id).toBe(1)
+  })
+})

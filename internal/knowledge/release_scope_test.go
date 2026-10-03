@@ -32,7 +32,7 @@ func TestKnowledgeBacklogVisibleLinksDeduplicateIntersectAndPage(t *testing.T) {
 		}
 		node := func(key, state string) (string, error) {
 			var id string
-			e := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state) SELECT $1,id,$2,$2,$3,$4 FROM node_kinds WHERE tenant_id=$1 AND slug='task' RETURNING id::text`, f.a.TenantID, key, f.project, state).Scan(&id)
+			e := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state) SELECT $1,id,$2,$2,$3,$4 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING id::text`, f.a.TenantID, key, f.project, state).Scan(&id)
 			return id, e
 		}
 		var e error
@@ -101,7 +101,7 @@ func TestKnowledgeBacklogVisibleLinksDeduplicateIntersectAndPage(t *testing.T) {
 		t.Fatalf("tenant scope: %d", rr.Code)
 	}
 }
-func TestKnowledgeScopeValidationAndK1Gate(t *testing.T) {
+func TestKnowledgeScopeValidationAndReleaseContext(t *testing.T) {
 	f := setup(t)
 	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "owner")
 	for _, q := range []string{"ships_in=none", "project_id=" + f.project + "&ships_in=!none", "project_id=" + f.project + "&ships_in=none&limit=201", "project_id=" + f.project + "&ships_in=none&ships_in=none"} {
@@ -125,15 +125,77 @@ func TestKnowledgeScopeValidationAndK1Gate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr := call(t, f, f.a, "GET", "/api/knowledge?project_id="+f.project+"&ships_in="+release, nil)
-	if rr.Code != 409 {
-		t.Fatalf("K1 must stay closed: %d %s", rr.Code, rr.Body.String())
+	linked := addNode(t, f, "RUN-1", "runbook", "Release note", &f.project)
+	memberNote := addNode(t, f, "RUN-2", "runbook", "Ticket note", &f.project)
+	other := addNode(t, f, "RUN-3", "runbook", "Unlinked note", &f.project)
+	foreign := addNode(t, f, "RUN-4", "runbook", "Other project note", &f.other)
+	indirect := addNode(t, f, "RUN-5", "runbook", "Two hop note", &f.project)
+	err = db.InTenant(ctx, f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO ships_in(tenant_id,project_node_id,item_node_id,release_node_id,rank,source,placed_by) VALUES($1,$2,$3,$4,'V','person',$5)`, f.a.TenantID, f.project, f.ticket, release, f.a.ID); err != nil {
+			return err
+		}
+		for _, pair := range [][2]string{{linked, release}, {memberNote, f.ticket}, {linked, f.ticket}, {foreign, f.ticket}, {indirect, memberNote}} {
+			if pair[0] > pair[1] {
+				pair[0], pair[1] = pair[1], pair[0]
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'relates')`, f.a.TenantID, pair[0], pair[1]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var body map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &body)
-	if body["code"] != "release_context_undecided" {
-		t.Fatalf("wrong refusal %v", body)
+	err = db.InTenant(ctx, f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE nodes SET state='backlog' WHERE id=ANY($1::uuid[])`, []string{linked, memberNote})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	path := "/api/knowledge?project_id=" + f.project + "&ships_in=" + release
+	for _, order := range []string{"updated", "created", "title", "slug", "type", "relevance"} {
+		rr := call(t, f, f.a, "GET", path+"&limit=1&sort="+order, nil)
+		if rr.Code != 200 {
+			t.Fatalf("release context %s: %d %s", order, rr.Code, rr.Body.String())
+		}
+		var page ListPage
+		if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		if page.Total != 2 || len(page.Items) != 1 || page.NextCursor == "" {
+			t.Fatalf("release context %+v", page)
+		}
+		first := page.Items[0].ID
+		rr = call(t, f, f.a, "GET", path+"&limit=1&sort="+order+"&cursor="+url.QueryEscape(page.NextCursor), nil)
+		if rr.Code != 200 {
+			t.Fatalf("next %d %s", rr.Code, rr.Body.String())
+		}
+		page = ListPage{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != 1 || page.Items[0].ID == first || page.NextCursor != "" || page.Total != 2 {
+			t.Fatalf("next %+v", page)
+		}
+		for _, id := range []string{other, foreign, indirect} {
+			if page.Items[0].ID == id || first == id {
+				t.Fatal("unlinked/cross-project/two-hop note leaked")
+			}
+		}
+	}
+	rr := call(t, f, f.a, "GET", path+"&q=Ticket&type=runbook&status=active", nil)
+	var page ListPage
+	json.Unmarshal(rr.Body.Bytes(), &page)
+	if rr.Code != 200 || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != memberNote {
+		t.Fatalf("filters %d %s", rr.Code, rr.Body.String())
+	}
+	rr = call(t, f, f.foreign, "GET", path, nil)
+	if rr.Code != 403 && rr.Code != 404 {
+		t.Fatalf("tenant leak %d", rr.Code)
+	}
+
 }
 
 func TestKnowledgeBacklogTimestampCursorPagesAndTies(t *testing.T) {

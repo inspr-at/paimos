@@ -21,6 +21,8 @@ const props = defineProps<{
   label: (dimension: Dimension, value: string) => string
   total: number | null
   totalIncomplete?: boolean
+  scopeLabel?: string
+  pendingChanges?: number
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
@@ -33,6 +35,7 @@ const props = defineProps<{
   headerGraph?: boolean
 }>()
 const emit = defineEmits<{
+  applyChanges: []
   search: [q: string]
   toggle: [dimension: Dimension, value: string]
   exclude: [dimension: Dimension, value: string]
@@ -199,7 +202,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     <span class="spacer" />
 
-    <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ totalIncomplete ? '≥ ' : '' }}{{ plural(total, 'ticket') }}</template></span>
+    <span class="count mono" :class="{ scoped: scopeLabel }" :title="total !== null ? `${plural(total, 'ticket')}${scopeLabel ? ` in ${scopeLabel}` : ''}` : undefined" role="status" aria-live="polite"><button v-if="pendingChanges" type="button" class="apply-changes" @click="emit('applyChanges')">{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><span v-else-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ totalIncomplete ? '≥ ' : '' }}{{ plural(total, 'ticket') }}{{ scopeLabel ? ` in ${scopeLabel}` : '' }}</template></span>
     <label class="switch closed-switch">
       <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <span>Hide closed</span>
@@ -278,6 +281,9 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .spacer { flex: 1; }
 /* The count keeps its width while numbers change, so the controls beside it never shift. */
 .count { display: inline-block; min-width: 13ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.apply-changes { border: 0; padding: 0; background: transparent; color: var(--teal-ink); font: inherit; }
+.count { width: clamp(13ch, 19vw, 30ch); overflow: hidden; text-overflow: ellipsis; }
+.count.scoped { width: clamp(13ch, 19vw, 30ch); overflow: hidden; text-overflow: ellipsis; }
 .count-skeleton { display: inline-block; width: 64px; height: 8px; vertical-align: middle; }
 .closed-switch { font-size: 12.5px; }
 .display-btn { gap: 6px; color: var(--ink-2); }

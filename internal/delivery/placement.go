@@ -50,7 +50,11 @@ type item struct {
 }
 
 func validatePlacements(project string, requests []PlacementRequest) error {
-	if !uuid(project) || len(requests) == 0 || len(requests) > 100 {
+	return validatePlacementBound(project, requests, 100)
+}
+
+func validatePlacementBound(project string, requests []PlacementRequest, maximum int) error {
+	if !uuid(project) || len(requests) == 0 || len(requests) > maximum {
 		return errors.New("a placement batch needs 1–100 items in one project")
 	}
 	seen := map[string]bool{}
@@ -72,8 +76,10 @@ func validatePlacements(project string, requests []PlacementRequest) error {
 }
 
 type PlacementResult struct {
-	Items           []Placement `json:"items"`
-	ReleaseRevision int64       `json:"release_revision,omitempty"`
+	ReleaseRevisions map[string]int64 `json:"release_revisions,omitempty"`
+	UndoEventID      *int64           `json:"undo_event_id"`
+	Items            []Placement      `json:"items"`
+	ReleaseRevision  int64            `json:"release_revision,omitempty"`
 }
 
 func (s *Store) Place(ctx context.Context, p tenant.Principal, project string, requests []PlacementRequest) ([]Placement, error) {
@@ -85,18 +91,45 @@ func (s *Store) PlaceWithRevision(ctx context.Context, p tenant.Principal, proje
 		return PlacementResult{}, err
 	}
 	var out PlacementResult
-	err := s.mutate(ctx, p, project, "", false, func(w *write) error {
+	err := s.mutateWithReceipt(ctx, p, project, "", false, &out.UndoEventID, func(w *write) error {
 		before, after, err := w.place(requests, nil)
 		if err != nil {
 			return err
 		}
 		out.Items = after
+		out.ReleaseRevisions = map[string]int64{}
+		ids := []string{}
+		for _, row := range append(append([]Placement{}, before...), after...) {
+			ids = append(ids, row.ReleaseID)
+		}
+		rows, queryErr := w.tx.Query(w.ctx, `SELECT release_node_id::text,revision FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=ANY($3::uuid[])`, p.TenantID, project, sortedIDs(ids))
+		if queryErr != nil {
+			return queryErr
+		}
+		for rows.Next() {
+			var id string
+			var revision int64
+			if err := rows.Scan(&id, &revision); err != nil {
+				rows.Close()
+				return err
+			}
+			out.ReleaseRevisions[id] = revision
+		}
+		queryErr = rows.Err()
+		rows.Close()
+		if queryErr != nil {
+			return queryErr
+		}
+
 		if requests[0].ReleaseID != "" {
 			if err = w.tx.QueryRow(w.ctx, `SELECT revision FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3`, p.TenantID, project, requests[0].ReleaseID).Scan(&out.ReleaseRevision); err != nil {
 				return err
 			}
 		}
-		w.placementEvents(before, after)
+		// One action is one atomic Undo receipt, including an expedite displacement.
+		if len(before) > 0 {
+			w.audit("ships_in.changed", w.project, placementSnapshot{w.project, before}, placementSnapshot{w.project, after})
+		}
 		return nil
 	})
 	if err != nil {

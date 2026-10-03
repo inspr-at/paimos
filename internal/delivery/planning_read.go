@@ -368,6 +368,10 @@ func planningReleases(ctx context.Context, tx pgx.Tx, p tenant.Principal, projec
 		}
 		out.NextCursor = encodeCursor(pageCursor{Scope: scope, Rank: v.Rank, ID: v.ID, At: at})
 	}
+	rows.Close()
+	if err := agentSummaries(ctx, tx, p, project, out.Items); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 

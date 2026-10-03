@@ -9,14 +9,14 @@ import KnowledgeGraphLegend from './KnowledgeGraphLegend.vue'
 import { useSession } from '../../stores/session'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { normalKey } from '../../lib/ticketLinks'
-import { entryPath, type KnowledgeType } from '../../lib/knowledge'
+import { entryPath, type KnowledgeItem, type KnowledgeType } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters } from '../../lib/useKnowledge'
 import { fetchKnowledgeGraph, filterGraph, graphEntry, graphMatches, graphTypeLabel, graphTypeTokens, type GraphNode, type KnowledgeGraphData } from '../../lib/knowledgeGraph'
 import { knowledgeGraphData } from '../../lib/knowledgeGraphRenderer'
 import type { GraphNode as CanvasNode } from '../../lib/graphRenderer'
 
 // Knowledge owns API data, URLs and reading cards; GraphCanvas owns presentation.
-const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean; docked?: boolean }>()
+const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean; docked?: boolean; scopedItems?: KnowledgeItem[]; scopedIncomplete?: boolean }>()
 const emit = defineEmits<{ create: []; reset: []; list: [] }>()
 const route = useRoute(), router = useRouter(), session = useSession()
 const peek = inject(TICKET_PEEK, null)
@@ -27,7 +27,16 @@ const data = shallowRef<KnowledgeGraphData>(empty)
 const loading = ref(true), error = ref(''), tickets = ref(false)
 const hovered = shallowRef<GraphNode | null>(null), ticketSelection = ref('')
 const pointer = ref({ x: 0, y: 0 })
-const visible = computed(() => filterGraph(data.value, props.filters.type))
+const visible = computed(() => {
+  if (props.scopedItems) {
+    const ids = new Set(props.scopedItems.map(it => it.id))
+    const entries = props.scopedItems.map(it => ({ ...it, kind: 'knowledge' as const, degree: 0 }))
+    const edges = data.value.edges.filter(e => ids.has(e.source) && ids.has(e.target))
+    for (const entry of entries) entry.degree = edges.filter(e => e.source === entry.id || e.target === entry.id).length
+    return filterGraph({ nodes: entries, edges, truncated: !!props.scopedIncomplete }, props.filters.type)
+  }
+  return filterGraph(data.value, props.filters.type)
+})
 const adapted = computed(() => knowledgeGraphData(visible.value, props.project.routeKey))
 const selected = computed(() => visible.value.nodes.find(n => n.kind === 'knowledge' ? graphEntry(n) === route.query.entry : n.id === ticketSelection.value) ?? null)
 const peekingTicket = computed(() => selected.value?.kind === 'ticket' && peek?.openKey.value === normalKey(selected.value.key))

@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import type { DeliveryCommit } from '../../lib/deliveryChanges'
 import { api } from '../../lib/api'
 import { planningQuery, releaseName, type MatchCounts, type PlanningSource } from '../../lib/deliveryPlanning'
 import { readPreference, writePreference } from '../../lib/preferences'
@@ -11,7 +12,7 @@ import PlanningReleaseRow from './PlanningReleaseRow.vue'
 import PlanningWork from './PlanningWork.vue'
 import AppIcon from '../AppIcon.vue'
 
-const props = defineProps<{ projectId: string; projectKey: string; person: string; filters: ListFilters; hideStates?: string[]; scrollRoot: HTMLElement | null; now: number; density: 'compact' | 'comfortable' }>()
+const props = defineProps<{ applyVersion?: number; projectId: string; projectKey: string; person: string; filters: ListFilters; hideStates?: string[]; scrollRoot: HTMLElement | null; now: number; density: 'compact' | 'comfortable' }>()
 const emit = defineEmits<{ open: [key: string]; copy: [key: string]; newTab: [key: string]; scope: [id: string]; summary: [value: { total: number | null; loading: boolean; incomplete: boolean }]; menu: [releaseId: string, anchor: HTMLElement]; abandoned: [anchor: HTMLElement] }>()
 const root = ref<HTMLElement>()
 let hovered: Element | null = null
@@ -42,11 +43,11 @@ const queryError = computed(() => parsedQuery.value.error)
 const identity = computed(() => JSON.stringify([owner.value, releaseScope(props.filters.ships_in), query.value, mode.value]))
 let statusAbort: AbortController | null = null, touched = false, savedIds: string[] = [], readyOwner = '', disposed = false
 const prefKey = () => `releases-expanded:${props.projectId}`
-async function loadMode() {
+async function loadMode(preserve = false) {
   statusAbort?.abort(); statusAbort = new AbortController()
   const signal = statusAbort.signal, captured = owner.value
-  mode.value = 'checking'; modeError.value = ''; preferenceError.value = ''; touched = false; savedIds = []; readyOwner = ''; pendingExpansion.value = false
-  planning.reset(null)
+  if (!preserve) { mode.value = 'checking'; preferenceError.value = ''; touched = false; savedIds = []; readyOwner = ''; pendingExpansion.value = false; planning.reset(null) }
+  modeError.value = ''
   // Expansion preference is separate from Outline and scoped by the authenticated
   // person on the server. Capture ownership before either asynchronous read.
   const key = prefKey()
@@ -61,13 +62,17 @@ async function loadMode() {
     const status = await response.json()
     if (disposed || captured !== owner.value || signal.aborted) return
     if (status.project_id !== props.projectId || !['journey', 'releases'].includes(status.mode)) throw new Error('Invalid delivery status')
+    const unchanged = mode.value === status.mode
     mode.value = status.mode
+    if (preserve && unchanged && status.mode === 'releases') planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value })
   } catch (e) {
     if (disposed || captured !== owner.value || signal.aborted) return
     modeError.value = e instanceof Error ? e.message : 'Delivery status could not be loaded'; mode.value = 'error'
   }
 }
 watch(owner, () => { void loadMode() }, { immediate: true })
+watch(() => props.applyVersion, () => { void loadMode(true) })
+function committed(change: DeliveryCommit) { planning.committed(change) }
 watch(identity, () => {
   if (mode.value !== 'releases' || !query.value) { planning.reset(null); return }
   planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value })
@@ -131,7 +136,7 @@ function workProps(source: PlanningSource, matches?: MatchCounts) {
 }
 watch([overview, loading, stale], () => emit('summary', { total: stale.value ? null : overview.value?.matches?.shown_count ?? null, loading: loading.value || mode.value === 'checking', incomplete: overview.value?.counts_incomplete ?? false }), { immediate: true })
 onBeforeUnmount(() => { disposed = true; statusAbort?.abort(); planning.dispose() })
-defineExpose({ reload: () => mode.value === 'error' ? loadMode() : planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value }) })
+defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value }) })
 </script>
 
 <template>

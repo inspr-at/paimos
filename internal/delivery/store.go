@@ -49,6 +49,7 @@ func (s *Store) WithClock(now func() time.Time) *Store {
 }
 
 type Release struct {
+	UndoEventID   *int64          `json:"undo_event_id"`
 	Recovery      *RecoveryCounts `json:"recovery,omitempty"`
 	ProjectID     string          `json:"project_id"`
 	ID            string          `json:"release_id"`
@@ -116,6 +117,11 @@ func fence(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, permissi
 }
 
 func (s *Store) mutate(ctx context.Context, p tenant.Principal, project, permission string, person bool, fn func(*write) error) error {
+	return s.mutateWithReceipt(ctx, p, project, permission, person, nil, fn)
+}
+
+// The receipt is assigned from this transaction only; callers discard it on rollback.
+func (s *Store) mutateWithReceipt(ctx context.Context, p tenant.Principal, project, permission string, person bool, receipt **int64, fn func(*write) error) error {
 	if !uuid(project) || !uuid(p.TenantID) || !uuid(p.ID) {
 		return errors.New("delivery write requires UUID identities")
 	}
@@ -137,8 +143,13 @@ func (s *Store) mutate(ctx context.Context, p tenant.Principal, project, permiss
 		}
 		// No resource locks or writes follow the event-counter acquisition.
 		for _, change := range w.changes {
-			if _, err = events.Append(ctx, tx, p, change); err != nil {
-				return err
+			event, appendErr := events.Append(ctx, tx, p, change)
+			if appendErr != nil {
+				return appendErr
+			}
+			if receipt != nil && (change.Type == "ships_in.changed" || change.Type == "release.reranked") {
+				id := event.ID
+				*receipt = &id
 			}
 		}
 		return ctx.Err()
@@ -439,7 +450,7 @@ func (s *Store) Rerank(ctx context.Context, p tenant.Principal, in ReleaseEdit) 
 		return Release{}, errors.New("invalid release rank request")
 	}
 	var out Release
-	err := s.mutate(ctx, p, in.ProjectID, "releases.write", true, func(w *write) error {
+	err := s.mutateWithReceipt(ctx, p, in.ProjectID, "releases.write", true, &out.UndoEventID, func(w *write) error {
 		r, err := w.lockReleases([]string{in.ReleaseID})
 		if err != nil {
 			return err

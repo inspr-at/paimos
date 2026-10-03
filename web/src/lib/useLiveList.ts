@@ -119,6 +119,7 @@ export interface LiveListOptions {
   released?: () => void
   // The list is on show (not the Outline, the graph or another tab).
   active: Ref<boolean>
+  autoApply?: () => boolean
   me: () => string | null
   // The ticket open in the panel says its own changes; the list only tints its row.
   quiet?: (id: string) => boolean
@@ -497,7 +498,7 @@ export function useLiveList(options: LiveListOptions) {
   function check() {
     catchUp()
     if (!pending.count || pending.overflow || !options.active.value || options.loading.value) return
-    if (autoApplyDelay(blocked()) === 0) apply()
+    if (options.autoApply?.() !== false && autoApplyDelay(blocked()) === 0) apply()
   }
   // A row Show left to an editor takes the newer copy once the editor let go.
   // An editor that saved on top leaves its own version: nothing to tint.

@@ -52,6 +52,7 @@ defineExpose({ open, close })
         </div>
       </header>
       <div class="sheet-scroll">
+        <slot name="scope" />
         <div class="sheet-row">
           <label class="switch">
             <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />

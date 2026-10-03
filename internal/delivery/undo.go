@@ -37,7 +37,7 @@ func (s *Store) undoPlacements(ctx context.Context, tx pgx.Tx, p tenant.Principa
 		return events.Change{}, events.ErrConflict
 	}
 	var before, after placementSnapshot
-	if json.Unmarshal(e.Before, &before) != nil || json.Unmarshal(e.After, &after) != nil || !uuid(before.ProjectID) || before.ProjectID != after.ProjectID || e.NodeID == nil || *e.NodeID != before.ProjectID || len(before.Members) == 0 || len(before.Members) > 100 || len(before.Members) != len(after.Members) {
+	if json.Unmarshal(e.Before, &before) != nil || json.Unmarshal(e.After, &after) != nil || !uuid(before.ProjectID) || before.ProjectID != after.ProjectID || e.NodeID == nil || *e.NodeID != before.ProjectID || len(before.Members) == 0 || len(before.Members) > 101 || len(before.Members) != len(after.Members) {
 		return events.Change{}, events.ErrConflict
 	}
 	requests := make([]PlacementRequest, 0, len(before.Members))
@@ -50,7 +50,7 @@ func (s *Store) undoPlacements(ctx context.Context, tx pgx.Tx, p tenant.Principa
 		requests = append(requests, PlacementRequest{ItemID: old.ItemID, ExpectedProjectID: before.ProjectID, ExpectedRevision: current.Revision, ReleaseID: old.ReleaseID, ExpectedReleaseRevision: 1, Expedite: old.Expedite, DueOn: old.DueOn})
 		restore[old.ItemID] = old
 	}
-	if err := validatePlacements(before.ProjectID, requests); err != nil {
+	if err := validatePlacementBound(before.ProjectID, requests, 101); err != nil {
 		return events.Change{}, events.ErrConflict
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)

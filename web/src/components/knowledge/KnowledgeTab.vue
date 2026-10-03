@@ -19,6 +19,8 @@ import MethodLearnings from './MethodLearnings.vue'
 // in the project toolbar (teleported), so the tab reads like the other views.
 const props = defineProps<{
   project: { id: string; routeKey: string; title: string }
+  scopeLabel?: string
+  pendingChanges?: number
   state: KnowledgeState; filters: KnowledgeFilters; canWrite: boolean; person: boolean; now: number
   // An entry page is open over the tab: its keys belong to the entry.
   paused: boolean
@@ -26,7 +28,7 @@ const props = defineProps<{
   dock?: boolean
   openEntry?: { type: KnowledgeType; slug: string } | null
 }>()
-const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>]; accepted: [entry: KnowledgeEntry]; reverted: [] }>()
+const emit = defineEmits<{ applyChanges: []; update: [patch: Partial<KnowledgeFilters>]; accepted: [entry: KnowledgeEntry]; reverted: [] }>()
 const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
@@ -108,6 +110,7 @@ watch(() => openItem.value?.id, id => { if (id && id !== cursorId.value) reveal(
 // back returns to the same list and next/previous follow its order.
 function filtersQuery() {
   const out: Record<string, string> = {}
+  if (typeof route.query.ships_in === 'string') out.ships_in = route.query.ships_in
   if (props.filters.q) out.q = props.filters.q
   if (props.filters.type) out.type = props.filters.type
   if (props.filters.status !== 'current') out.status = props.filters.status
@@ -240,7 +243,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       <AppIcon name="sliders" :size="13" /><span class="k-sort-label">{{ sortLabel }}</span><AppIcon name="chevron" :size="12" class="k-chev" />
     </button>
     <span class="k-spacer" />
-    <span class="k-count mono" role="status" aria-live="polite"><template v-if="state.loaded.value && !nothingYet">{{ plural(shown, 'entry', 'entries') }}</template></span>
+    <span class="k-count mono" :title="scopeLabel ? `${state.total.value} entries in ${scopeLabel}` : undefined" role="status" aria-live="polite"><button v-if="pendingChanges" type="button" class="apply-changes" @click="emit('applyChanges')">{{ pendingChanges }} changes · Apply <kbd class="keycap">a</kbd></button><template v-else-if="state.loaded.value && !nothingYet">{{ state.truncated.value ? '≥ ' : '' }}{{ plural(scopeLabel ? state.total.value : shown, 'entry', 'entries') }}{{ scopeLabel ? ` in ${scopeLabel}` : '' }}</template></span>
     <button v-if="canWrite" type="button" class="btn primary k-new" aria-label="New knowledge entry" aria-keyshortcuts="n" data-tip="New entry · n" @click="openCreate()">
       <AppIcon name="plus" :size="14" /><span class="k-new-label">New entry</span>
     </button>
@@ -249,6 +252,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
   <div class="k-frame">
   <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" @emptied="holdFocus" />
   <div class="k-layout">
+    <div v-if="state.cursor.value" class="knowledge-more"><button type="button" class="btn" :disabled="state.loading.value" @click="state.loadMore()">Load more entries</button></div>
     <nav class="k-rail" aria-label="Kinds of knowledge">
       <div class="k-kinds">
         <button type="button" class="k-kind" :aria-current="!filters.type ? 'true' : undefined" @click="setType('')">
@@ -270,7 +274,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       </section>
     </nav>
 
-    <KnowledgeGraph v-if="graphMode && !paused" ref="graph" :project="project" :filters="filters" :can-write="canWrite" :docked="!!openEntry" @create="openCreate()" @reset="resetFilters" @list="setMode(false)" />
+    <KnowledgeGraph v-if="graphMode && !paused" ref="graph" :scoped-items="scopeLabel ? state.items.value : undefined" :scoped-incomplete="state.truncated.value || !!state.cursor.value" :project="project" :filters="filters" :can-write="canWrite" :docked="!!openEntry" @create="openCreate()" @reset="resetFilters" @list="setMode(false)" />
     <div v-else ref="listEl" class="k-list" :class="{ stale: state.searching.value && !!state.visible.value.length }">
       <p v-if="state.error.value && state.loaded.value" class="k-banner" role="status"><AppIcon name="alert" :size="14" />{{ state.error.value }}</p>
 
@@ -400,7 +404,8 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-chev { color: var(--ink-3); }
 .k-sort-btn { padding-left: 10px; }
 .k-spacer { flex: 1; }
-.k-count { min-width: 10ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.apply-changes { border: 0; padding: 0; background: transparent; color: var(--teal-ink); font: inherit; }
+.k-count { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; min-width: 10ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .k-new { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .k-menu { display: grid; gap: 1px; }
 .k-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
@@ -508,7 +513,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 @container toolbar (max-width: 1080px) { .k-mode-label { display: none; } .k-mode button { padding: 0 8px; } }
 /* Beside the preview pane the toolbar is list-wide: the search gives way before anything wraps. */
 @container toolbar (max-width: 720px) { .k-search { width: auto; flex: 1 1 120px; min-width: 120px; } .k-spacer { display: none; } }
-@container toolbar (max-width: 1000px) { .k-count { display: none; } .k-new { width: 32px; padding: 0; } .k-new-label { display: none; } .k-menu-dim { display: none; } }
+@container toolbar (max-width: 1000px) { .k-count { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; display: none; } .k-new { width: 32px; padding: 0; } .k-new-label { display: none; } .k-menu-dim { display: none; } }
 /* Docked beside an entry (U25) the list is narrower than the window says: the
    frame and the list fold by their own width (selectors carry .k-frame / .k-list
    so they win over the window-width rules below). The rail becomes the row of
@@ -564,7 +569,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
   .k-menu-btn { height: 44px; }
   .k-sort-btn { width: 44px; padding: 0; justify-content: center; }
   .k-sort-btn .k-chev { display: none; }
-  .k-spacer, .k-count { display: none; }
+  .k-spacer, .k-count { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; display: none; }
   .k-new { width: 44px; height: 44px; padding: 0; }
   .k-new-label { display: none; }
   .k-group-head { padding: 10px 10px 10px 12px; }

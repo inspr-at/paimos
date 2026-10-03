@@ -215,6 +215,10 @@ func listReleases(ctx context.Context, tx pgx.Tx, p tenant.Principal, project st
 		}
 		out.NextCursor = encodeCursor(pageCursor{Scope: scope, Rank: v.Rank, ID: v.ID, At: at})
 	}
+	rows.Close()
+	if err := agentSummaries(ctx, tx, p, project, out.Items); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 func (s *Store) ListReleases(ctx context.Context, p tenant.Principal, project string, opt ReadOptions) (ReleasePage, error) {

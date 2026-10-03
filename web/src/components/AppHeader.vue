@@ -250,6 +250,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
           <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span>
           <span class="crumb-name">{{ project?.title ?? '' }}</span>
         </RouterLink>
+        <div id="release-scope-controls" class="release-scope-slot" />
         <template v-if="fullTicket">
           <span class="sep" aria-hidden="true">/</span>
           <span class="crumb current mono-crumb" aria-current="page">{{ fullTicket }}</span>
@@ -355,6 +356,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .crumb-short { display: none; }
 .project-crumb { min-width: 0; }
+.release-scope-slot { flex-shrink: 0; width: clamp(12rem, 19vw, 19rem); height: 30px; }
+@media (max-width:720px) { .release-scope-slot { display: none; } }
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
@@ -378,7 +381,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 }
 /* The search pill gives up width before a breadcrumb has to clip. */
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
-@media (max-width: 900px) { .search-pill { width: 180px; } }
+@media (max-width: 1024px) { .search-pill { width: 32px; min-width: 32px; padding: 0; justify-content: center; } .search-pill .pill-text, .search-pill .pill-keys, .project-crumb .crumb-name { display: none; } }
 /* Just wider than the phone header, the fixed pill is a few pixels too wide for the row. */
 @media (max-width: 720px) {
   .search-pill { flex-shrink: 1; min-width: 44px; overflow: hidden; }

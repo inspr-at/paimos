@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { DeliveryCommit } from './deliveryChanges'
 import { computed, reactive, ref, shallowRef } from 'vue'
 import { READ_CONCURRENCY, RELEASE_PAGE_SIZE, WORK_PAGE_SIZE, WORK_RENDER_LIMIT, readPlanning, type ItemPage, type MatchCounts, type PlanningAnswer, type PlanningContext, type PlanningOverview, type PlanningRead, type PlanningRelease, type PlanningSource, type ReleasePage } from './deliveryPlanning.ts'
 
 interface WorkState { items: ItemPage['items']; cursor: string; matches?: MatchCounts; count: number; incomplete: boolean; loaded: boolean; loading: boolean; error: string }
 interface Job { source: PlanningSource; cursor: string; generation: number; token: number; context: PlanningContext; abort: AbortController; limit: number; publish?: () => void }
+const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
 const isWork = (source: PlanningSource) => source.startsWith('release:') || source.startsWith('backlog:')
 const ownerOf = (source: PlanningSource) => source.startsWith('backlog:') ? 'backlog' : source.slice(8)
 const message = (e: unknown) => e instanceof Error ? e.message : 'Release read failed'
@@ -160,7 +162,56 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
   }
   const continuations = computed(() => Object.entries(work).filter(([, state]) => state.error || state.cursor || !state.loaded).map(([source]) => source as PlanningSource))
   function moreWork(source: PlanningSource) { const state = stateOf(source); enqueue(source, state.loaded ? state.cursor : '') }
+  function committed(change: DeliveryCommit) {
+    if (!overview.value || !context) return
+    if (change.kind === 'lifecycle') { reset(context); return }
+    // Cancel pre-commit reads without replacing the visible snapshot: a late
+    // continuation must never overwrite or reinsert the old placement.
+    invalidate()
+    loading.value = false
+    if (change.kind === 'rank') {
+      const result = change.result
+      const at = overview.value.active.findIndex(row => row.release_id === result.release_id)
+      if (at < 0 || result.project_id !== context.project) return
+      const active = overview.value.active.map(row => row.release_id === result.release_id ? { ...row, ...result } : row)
+      active.sort((a, b) => compare(a.rank, b.rank) || compare(a.release_id, b.release_id))
+      overview.value = { ...overview.value, active }; return
+    }
+    for (const placement of change.result.items) {
+      if (placement.project_id !== context.project) continue
+      const known = Object.values(work).flatMap(state => state.items).find(it => it.item_id === placement.item_id)
+      if (!known) continue
+      const source: PlanningSource = known.release_id ? `release:${known.release_id}` : known.rank ? 'backlog:ranked' : 'backlog:tail'
+      const destination: PlanningSource = placement.release_id ? `release:${placement.release_id}` : placement.rank ? 'backlog:ranked' : 'backlog:tail'
+      for (const state of Object.values(work)) state.items = state.items.filter(it => it.item_id !== placement.item_id)
+      const target = work[destination]
+      if (target?.loaded && rendered.value < WORK_RENDER_LIMIT) {
+        target.items.push({ ...known, ...placement })
+        target.items.sort((a, b) => compare(destination === 'backlog:tail' ? a.created_at : a.rank ?? '', destination === 'backlog:tail' ? b.created_at : b.rank ?? '') || compare(a.item_id, b.item_id))
+      }
+      if (source !== destination) {
+        for (const [key, delta] of [[source, -1], [destination, 1]] as const) {
+          const state = work[key]
+          if (state) { state.count = Math.max(0, state.count + delta); if (state.matches) state.matches = { ...state.matches, matched_count: Math.max(0, state.matches.matched_count + delta), shown_count: Math.max(0, state.matches.shown_count + delta) } }
+          const row = rows().find(r => `release:${r.release_id}` === key)
+          if (row) {
+            if (row.matches) row.matches = { ...row.matches, matched_count: Math.max(0, row.matches.matched_count + delta), shown_count: Math.max(0, row.matches.shown_count + delta) }
+            const completed = ['done', 'accepted', 'delivered'].includes(known.state), canceled = ['cancelled', 'canceled'].includes(known.state)
+            if (['ticket','task'].includes(known.kind) && !canceled) row.rollup = { units: Math.max(0, row.rollup.units + delta), completed: Math.max(0, row.rollup.completed + (completed ? delta : 0)), open_hours: Math.max(0, row.rollup.open_hours + (completed ? 0 : (known.estimated_hours ?? 0) * delta)) }
+          } else if (key.startsWith('backlog:')) {
+            const part = key.slice(8) as 'ranked' | 'tail'
+            overview.value.backlog[part] = Math.max(0, overview.value.backlog[part] + delta)
+          }
+        }
+      }
+    }
+    for (const row of rows()) {
+      const revision = change.result.release_revisions?.[row.release_id]
+      if (revision) row.revision = revision
+    }
+    overview.value = { ...overview.value }
+  }
   function dispose() { disposed = true; invalidate(); context = null }
   return { overview, expanded, work, loading, stale, error, pageError, pending, inFlight, queued, budgetBlocked, paging, rendered, continuations,
-    reset, expand, collapse, expandAll, collapseAll, more, moreWork, flush, dispose }
+    committed, reset, expand, collapse, expandAll, collapseAll, more, moreWork, flush, dispose }
 }

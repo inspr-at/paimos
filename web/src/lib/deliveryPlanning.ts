@@ -16,7 +16,7 @@ export interface PlanningRelease {
   rank: string; revision: number; version?: string; version_scheme?: string
   rollup: { units: number; completed: number; open_hours: number }
   matches?: MatchCounts
-  build_summary: { budget_outlook?: string; agents?: number; waiting?: number }
+  build_summary: { budget_outlook?: string; agents?: number; waiting?: number; agents_incomplete?: boolean }
 }
 export interface ReleasePage { items: PlanningRelease[]; next_cursor?: string; matches?: MatchCounts }
 export interface PlanningOverview {
