@@ -326,3 +326,84 @@ test('a phone tap reveals the whole clamped name, then a second tap opens its pr
     await expect(page).toHaveURL(/\/p\/PHAROS/)
   } finally { await context.close() }
 })
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const view of ['Rows', 'Cards'] as const) {
+    test(`touch discloses ${view} before project navigation ${width} ${theme}`, async ({ browser }) => {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: true, isMobile: width === 390, reducedMotion: 'reduce' })
+      try {
+        const page = await context.newPage()
+        const errors = watchErrors(page)
+        const data = await setup(page, theme)
+        // Equal text must not let disclosure of a different record arm this link.
+        data.projects[1]!.title = NAME
+        await page.goto('/')
+        await page.getByRole('radio', { name: view === 'Rows' ? 'List view' : 'Cards view', exact: true }).click()
+        const project = page.locator('[data-project-id="p-pharos"]')
+        const link = project.locator('.item-link')
+        const name = project.locator(view === 'Rows' ? '.name' : '.card-name')
+        const other = page.locator('[data-project-id="p-aeon"]').locator(view === 'Rows' ? '.name' : '.card-name')
+        await expect(name).toHaveAttribute('data-tip', NAME)
+        await expect(other).toHaveAttribute('data-tip', NAME)
+        // Observe after the disclosure guard, before RouterLink's bubbling
+        // handler (which prevents browser navigation even when it routes).
+        await page.locator('[data-project-id] .item-link').evaluateAll(links => links.forEach(link => link.addEventListener('click', event => {
+          (window as Window & { clipNavigationPrevented?: boolean }).clipNavigationPrevented = event.defaultPrevented
+        }, true)))
+        const disclose = async (target: Locator) => {
+          await target.tap()
+          expect(await page.evaluate(() => (window as Window & { clipNavigationPrevented?: boolean }).clipNavigationPrevented), 'the disclosure tap must cancel navigation').toBe(true)
+          // Flush RouterLink's queued navigation before asserting retention.
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+          await expect(page).toHaveURL(/\/$/)
+          await expect(page.locator('.tooltip')).toHaveText(NAME)
+        }
+        await expectStableControls({ controls: { link, name, menu: project.getByRole('button', { name: /^Actions for/ }) }, interactions: [
+          { name: 'first touch only discloses', run: () => disclose(name) },
+          { name: 'dismissed disclosure requires a new first tap', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await disclose(name)
+          } },
+          { name: 'another record with equal text does not arm this link', run: async () => {
+            await disclose(other)
+            await disclose(name)
+          } },
+        ] })
+        const bounds = (await page.locator('.tooltip').boundingBox())!
+        expect(bounds.x).toBeGreaterThanOrEqual(8)
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8)
+        mkdirSync(shots, { recursive: true })
+        await page.screenshot({ path: `${shots}/touch-project-${view.toLowerCase()}-${width}-${theme}.png` })
+        await name.tap()
+        await expect(page).toHaveURL(/\/p\/PHAROS/)
+        expect(await page.evaluate(() => (window as Window & { clipNavigationPrevented?: boolean }).clipNavigationPrevented)).toBe(false)
+        expect(errors).toEqual([])
+      } finally { await context.close() }
+    })
+  }
+}
+
+test('unclipped touch, mouse and keyboard project activation stay immediate', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true })
+  try {
+    const page = await context.newPage()
+    const data = await setup(page, 'light')
+    data.projects[0]!.title = 'Kurz'
+    await page.goto('/')
+    const link = page.locator('[data-project-id="p-pharos"] .item-link')
+    const name = link.locator('.name')
+    await expect(name).not.toHaveAttribute('data-clip-tip')
+    await name.tap()
+    await expect(page).toHaveURL(/\/p\/PHAROS/)
+    data.projects[0]!.title = NAME
+    await page.goto('/')
+    await expect(name).toHaveAttribute('data-tip', NAME)
+    await name.click()
+    await expect(page).toHaveURL(/\/p\/PHAROS/)
+    await page.goto('/')
+    await link.focus()
+    await link.press('Enter')
+    await expect(page).toHaveURL(/\/p\/PHAROS/)
+  } finally { await context.close() }
+})

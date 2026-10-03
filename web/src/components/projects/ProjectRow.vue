@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { vClipLink } from '../../directives/clipLink'
 import type { Project } from '../../stores/projects'
 import { projectProgressTip, type ProjectColumnId } from '../../lib/projectColumns'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -33,7 +34,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
 
 <template>
   <li class="project-item" :data-agent-state="agents.length ? agentState : undefined" :style="agents.length ? appearance(agentState) : undefined" :class="{ selected, dragging, menu: menuOpen, archived: project.archived, live: agents.length }" :data-project-id="project.id" draggable="true">
-    <RouterLink class="project-row item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" draggable="false">
+    <RouterLink v-clip-link="`${project.id}:${to}:${project.title}`" class="project-row item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" draggable="false">
       <span class="key-badge"><template v-for="(part, i) in highlight(project.routeKey, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
       <span class="project-text">
         <span class="project-name">

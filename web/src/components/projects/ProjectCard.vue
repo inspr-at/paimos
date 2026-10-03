@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { vClipLink } from '../../directives/clipLink'
 import type { Project } from '../../stores/projects'
 import { useLiveAgents } from '../../stores/liveAgents'
 import { absoluteTime, highlight, relativeTime } from '../../lib/work'
@@ -32,7 +33,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 
 <template>
   <li class="card" :data-agent-state="agents.length ? agentState : undefined" :style="agents.length ? appearance(agentState) : undefined" :class="{ selected, dragging, menu: menuOpen, archived: project.archived, live: agents.length }" :data-project-id="project.id">
-    <RouterLink class="card-link item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown" draggable="false">
+    <RouterLink v-clip-link="`${project.id}:${to}:${project.title}`" class="card-link item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown" draggable="false">
       <span class="card-top">
         <span class="key-badge"><template v-for="(part, i) in highlight(project.routeKey, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
         <span v-if="project.frozen" class="chip state-chip frozen">Frozen</span>
