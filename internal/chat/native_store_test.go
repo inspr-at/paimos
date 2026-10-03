@@ -342,3 +342,21 @@ func TestNativeStoreMigrationPreservesPreChatLinks(t *testing.T) {
 		t.Fatalf("pre-chat alias ownership count=%d: %v", count, err)
 	}
 }
+
+func TestNativeStoreUnownedHarnessChangesRemainCompatible(t *testing.T) {
+	f := newFixture(t)
+	id, _ := f.registerNative(t, f.alice, f.project, "unowned-adapter-"+uid(), "")
+	for _, adapter := range []string{"codex", "cursor", "pi", "grok", "claude"} {
+		err := db.InTenant(tenant.WithPrincipal(t.Context(), f.alice), f.d.App, f.alice.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET harness=$2 WHERE id=$1`, id, adapter)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("unowned adapter %s: %v", adapter, err)
+		}
+	}
+	var claims int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM chat_native_contexts`).Scan(&claims); err != nil || claims != 0 {
+		t.Fatalf("unbound adapter changes invented ownership: %d %v", claims, err)
+	}
+}

@@ -243,7 +243,7 @@ $$;
 -- closed. No SECURITY DEFINER: tenant RLS still applies to this narrow internal
 -- visibility scope, including with the production NOBYPASSRLS migration owner.
 CREATE FUNCTION aeon_store_chat_native(p_tenant uuid,p_harness text,p_refs bytea[],
-    p_person uuid,p_project uuid,p_role uuid DEFAULT NULL) RETURNS void
+    p_person uuid,p_project uuid,p_role uuid DEFAULT NULL,p_previous_harness text DEFAULT NULL) RETURNS void
 LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
 DECLARE
     refs bytea[];
@@ -271,6 +271,13 @@ BEGIN
     END IF;
     PERFORM id FROM public.tenants WHERE id=p_tenant FOR NO KEY UPDATE NOWAIT;
     PERFORM set_config('aeon.chat_native_store','on',true);
+    -- Unbound registrations can change adapters. An owned native context must
+    -- never escape its original namespace through such a change.
+    IF p_previous_harness IS NOT NULL AND p_previous_harness<>p_harness AND EXISTS(
+        SELECT 1 FROM public.chat_native_contexts WHERE tenant_id=p_tenant
+            AND harness=p_previous_harness AND ref_digest=ANY(refs)) THEN
+        RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+    END IF;
     INSERT INTO public.chat_native_aliases(tenant_id,harness,ref_digest,alias_digest)
         SELECT p_tenant,p_harness,refs[1],r FROM unnest(refs) r ON CONFLICT DO NOTHING;
     -- UNION deduplicates cycles; LIMIT bounds traversal before aggregation.
@@ -321,14 +328,16 @@ CREATE TRIGGER chat_native_alias_immutable BEFORE UPDATE OR DELETE ON chat_nativ
 
 CREATE FUNCTION aeon_chat_registration_store() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE refs bytea[] := ARRAY[NEW.ref_digest,NEW.vendor_ref_digest];
+    previous_harness text;
 BEGIN
     IF TG_OP='UPDATE' THEN
-        IF NEW.tenant_id<>OLD.tenant_id OR NEW.harness<>OLD.harness THEN
+        IF NEW.tenant_id<>OLD.tenant_id THEN
             RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
         END IF;
+        previous_harness := OLD.harness;
         refs := refs || ARRAY[OLD.ref_digest,OLD.vendor_ref_digest];
     END IF;
-    PERFORM aeon_store_chat_native(NEW.tenant_id,NEW.harness,refs,NEW.owner_principal_id,NEW.project_id);
+    PERFORM aeon_store_chat_native(NEW.tenant_id,NEW.harness,refs,NEW.owner_principal_id,NEW.project_id,NULL,previous_harness);
     RETURN NEW;
 END;
 $$;
