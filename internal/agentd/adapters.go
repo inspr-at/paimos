@@ -33,18 +33,24 @@ func operationContext(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithTimeout(ctx, 20*time.Second)
 }
 
+var (
+	errAccountHomeMissing  = errors.New("local account key is not enrolled")
+	errAccountHomePhysical = errors.New("local account home is not physical")
+	errAccountHomePrivate  = errors.New("local account home is not private")
+)
+
 func localHome(homes map[string]string, key string) (string, error) {
 	home := homes[key]
 	if key == "" || home == "" || !filepath.IsAbs(home) {
-		return "", errors.New("local account key is not enrolled")
+		return "", errAccountHomeMissing
 	}
 	physical, err := filepath.EvalSymlinks(home)
 	if err != nil || physical != home {
-		return "", errors.New("local account home is not physical")
+		return "", errAccountHomePhysical
 	}
 	info, err := os.Stat(home)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return "", errors.New("local account home is not private")
+		return "", errAccountHomePrivate
 	}
 	return home, nil
 }
@@ -63,9 +69,15 @@ func withEnv(name, value string) []string {
 // Claude authenticates from its pinned account directory. Never inherit daemon
 // credentials, loader flags, provider overrides or arbitrary host configuration.
 func claudeEnvironment(home, nodePath, claudePath string) []string {
-	return []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
-		"PATH=" + strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
-		"LANG=C", "LC_ALL=C"}
+	accountEnv := []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home}
+	// The default profile uses Claude's normal preferences and keychain item.
+	// Setting CLAUDE_CONFIG_DIR, even to ~/.claude, selects a different login.
+	if userHome, err := os.UserHomeDir(); err == nil && home == filepath.Join(userHome, ".claude") {
+		accountEnv = []string{"HOME=" + userHome}
+	}
+	return append(accountEnv,
+		"PATH="+strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"LANG=C", "LC_ALL=C")
 }
 
 func eventProbe(raw json.RawMessage) (method, kind, model string) {

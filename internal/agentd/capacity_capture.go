@@ -52,6 +52,9 @@ func (a *CodexAdapter) CaptureCapacityResult(ctx context.Context, key string) Ca
 		return CapacityCapture{Result: "unsupported"}
 	}
 	return a.captureCapacityResult(ctx, key, func(home string) (*wireProcess, error) {
+		if err := harnesslaunch.Validate(a.Path, a.Nodes[key].Path); err != nil {
+			return nil, err
+		}
 		environment := harnesslaunch.Environment(capacityEnvironment("CODEX_HOME", home, a.Path), a.Nodes[key].Path)
 		return launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, environment, "jsonrpc", func(AdapterEvent) {})
 	})
