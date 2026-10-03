@@ -282,3 +282,48 @@ func TestThemeWriteRechecksLinkAfterAuthorityFence(t *testing.T) {
 		t.Fatalf("post-unlink write committed: %s %v", nameNow, err)
 	}
 }
+
+func TestAliasThemeWriteDropsCachedCanonicalAfterUnlink(t *testing.T) {
+	f := setup(t)
+	private := mustTheme(t, f.s, f.other, "Former canonical person's private theme", "personal")
+	linkPeople(t, f, f.member, f.other)
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "pg_advisory_xact_lock") })
+	tx, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.member.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	result, done := make(chan error, 1), make(chan struct{})
+	name := "Must remain private"
+	go func() {
+		// InTenant caches [alias, canonical] before the write waits. Unlink
+		// must remove the canonical identity from RLS, even in this transaction.
+		_, err := (Store{pool}).Update(ctx, f.member, private.ID, UpdateInput{Revision: 1, Name: &name})
+		result <- err
+		close(done)
+	}()
+	barrier.Wait(t, ctx)
+	barrier.Release()
+	if dbtest.BlockedOrDone(t, ctx, f.d.Admin, tx.Conn().PgConn().PID(), done) == "" {
+		t.Fatal("alias write did not overlap the unlink")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE principals SET linked_to=NULL WHERE tenant_id=$1 AND id=$2`, f.member.TenantID, f.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRoleWith(t, tx, f.member.TenantID, f.member.ID, "member")
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Require a hidden row, not merely permission rejection: the old cached
+	// canonical identity must no longer reveal the theme's existence.
+	if err := dbtest.Await(t, ctx, result); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("cached canonical identity retained theme visibility: %v", err)
+	}
+	got, err := f.s.Get(t.Context(), f.other, private.ID)
+	if err != nil || !same(got, private) {
+		t.Fatalf("post-unlink alias changed canonical theme: %+v %v", got, err)
+	}
+}
