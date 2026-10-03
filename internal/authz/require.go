@@ -71,11 +71,9 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if !ok || pool == nil {
 		return ErrNoStore
 	}
-	effective, err := Load(ctx, pool, p, scope.ProjectID)
-	if err != nil {
-		return err
-	}
-	return permitEffective(p, permission, effective, scope)
+	return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+		return requireTx(ctx, tx, p, permission, scope)
+	})
 }
 
 func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
@@ -86,7 +84,10 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	if err != nil {
 		return err
 	}
-	return permitEffective(p, permission, effective, scope)
+	if err := permitEffective(p, permission, effective, scope); err != nil {
+		return err
+	}
+	return recordKeyScopeUseTx(ctx, tx, p, permission)
 }
 
 // RequireInProjects decides permission in each listed project separately; ""

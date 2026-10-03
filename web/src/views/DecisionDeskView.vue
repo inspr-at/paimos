@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import { arrivals, kindLabels, newRound, outcomeLabels, type DeskDraft, type DeskItem, type DeskOutcome } from '../lib/decisionDesk'
@@ -9,6 +10,7 @@ import { can, onAccessChange } from '../lib/authz'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 
+const route = useRoute(), consumedLink = ref('')
 const session = useSession()
 const agents = useAgents()
 const makeAdapters = () => ({ tiers: nativeTierAdapter(async () => { await agents.refreshSessions(); return agents.sessions }, can) })
@@ -55,7 +57,8 @@ function begin(id?: string) {
 }
 async function decide(item: DeskItem, draft: DeskDraft, requestId: string) {
   const identity = owner.value
-  if (!allowed(item) || item.unavailable) throw new Error('This action is no longer available to this person.')
+  const declineBlockedTrim = item.kind === 'key_trim' && draft.optionId === 'decline' && item.keyTrim?.state === 'pending' && item.unavailable === item.keyTrim.blocked_reason
+  if (!allowed(item) || (item.unavailable && !declineBlockedTrim)) throw new Error('This action is no longer available to this person.')
   if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) throw new Error('This request expired.')
   if (item.kind === 'approval' && phoneVerification.value === undefined) throw new Error(capabilityError.value || 'Approval verification availability is still being checked.')
   const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, adapters)
@@ -67,7 +70,7 @@ function recorded(item: DeskItem) {
   roundItems.value = roundItems.value.map(row => row.id === item.id ? item : row)
 }
 watch(owner, () => {
-  generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
+  generation++; consumedLink.value = ''; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
   sources = emptySources(); adapters = makeAdapters(); filter.value = 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
   phoneVerification.value = undefined; capabilityError.value = ''
   const identity = owner.value
@@ -77,6 +80,7 @@ watch(owner, () => {
 }, { immediate: true })
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
+watch(() => [state.value, items.value] as const, () => { const needs = route.query.needs; if (!opened.value && typeof needs === 'string' && needs !== consumedLink.value && items.value.some(item => item.id === needs)) { consumedLink.value = needs; begin(needs) } })
 const stopAccess = onAccessChange(change => { if (change === 'reset' && opened.value) roundItems.value = roundItems.value.map(item => allowed(item) ? item : { ...item, unavailable: 'Access changed. Reopen the desk to confirm this source.' }) })
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }

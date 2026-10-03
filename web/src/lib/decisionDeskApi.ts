@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
+import { readKeyTrims, decideKeyTrim, type KeyTrimProposal } from './keyTrim'
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
 import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
@@ -101,8 +102,21 @@ export function ruleItem(rule: DoctrineInboxItem): DeskItem {
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
   ]), prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
-export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem> }
-export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map() })
+export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
+  const pending = proposal.state === 'pending'
+  return { ...base(`k:${proposal.id}`, 'key_trim', `Trim ${proposal.key_name}?`, proposal.evidence.summary, []),
+    projectName: 'Workspace', revision: proposal.revision, createdAt: proposal.created_at,
+    expiresAt: pending ? proposal.expires_at : undefined, decided: !pending, keyTrim: proposal,
+    answer: pending ? undefined : proposal.state === 'applied' ? 'Trim approved' : proposal.state === 'restored' ? 'Previous scopes restored' : proposal.state === 'expired' ? 'Expired without a decision' : 'Trim declined',
+    unavailable: pending ? proposal.blocked_reason : undefined,
+    meanwhile: 'The key keeps its current permissions until a person approves.',
+    destination: 'This key only. Approval and restore recheck live scopes and permissions and record an audit event.',
+    suggestion: 'Approve applies this exact scope reduction. Decline keeps the current set.',
+    delivery: proposal.state === 'applied' ? 'Trim applied. Restore is available for 30 days, subject to current scopes and grant authority.' : proposal.state === 'restored' ? 'The previous scope set was restored.' : undefined,
+  }
+}
+export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal> }
+export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map() })
 /** Upstream owners supply their native, permission-checked flows here. No
  * guessed endpoints, boolean verification bypass, or Q&A fallback is accepted. */
 export interface ProtectedDeskAdapters {
@@ -172,7 +186,7 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
 export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean> }
 export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
-  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox()])
+  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims()])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
   if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
@@ -211,6 +225,10 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       const item = actionItem(message, read.value.project.id, read.value.project.title); sources.actions.set(item.id, message); items.push(item)
     }
   }
+  if (trimsResult.status === 'fulfilled') {
+    warnings.push(...trimsResult.value.warnings)
+    for (const proposal of trimsResult.value.items) { const item = keyTrimItem(proposal); sources.keyTrims.set(item.id, proposal); items.push(item) }
+  } else warnings.push('Key trim proposals could not be read; key management rights are required.')
   if (adapters.tiers) {
     try { const read = await adapters.tiers.read(); items.push(...read.items.slice(0, 100).map(item => ({ ...item, kind: 'tier' as const }))); warnings.push(...read.warnings); if (read.items.length > 100) warnings.push('Only the first 100 tier requests are shown.') }
     catch { warnings.push('Tier requests could not be read.') }
@@ -219,12 +237,23 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
+  if (item.kind === 'key_trim') return can('keys.manage')
   if (item.kind === 'approval') { const approval = sources.approvals.get(item.id); return !!approval && canDecideApproval(approval, can) }
   if (item.kind === 'action') return can('inbox.manage')
   if (item.kind === 'rule') return can('rules.write')
   return item.kind === 'tier' && adapters.tiers?.allowed(item) === true
 }
 export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: DeskSources, requestId: string, phone: boolean, adapters: ProtectedDeskAdapters = {}): Promise<DeskItem> {
+  if (item.kind === 'key_trim') {
+    const source = sources.keyTrims.get(item.id)
+    if (!source || !item.keyTrim || source.key_id !== item.keyTrim.key_id || source.revision !== item.revision || source.state !== item.keyTrim.state) throw new Error('The key trim source changed. Reopen the memo.')
+    const decision = draft.optionId
+    if (decision !== 'approve' && decision !== 'decline' && decision !== 'restore') throw new Error('Choose a key trim action.')
+    if (source.blocked_reason && decision !== 'decline') throw new Error(source.blocked_reason)
+    const updated = await decideKeyTrim(source, decision, requestId)
+    sources.keyTrims.set(item.id, updated)
+    return keyTrimItem(updated)
+  }
   if (item.kind === 'question' || item.kind === 'handover') {
     const question = sources.questions.get(item.id)
     if (!question || question.revision !== item.revision) throw new Error('The question changed. Reopen it before deciding.')

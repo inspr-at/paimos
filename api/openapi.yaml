@@ -242,7 +242,7 @@ paths:
         stable source ID breaks ties. Merged askers count once and a question replaces its linked held request.
         Answered questions (including grace/corrections), decided/expired approvals and resolved requests are excluded.
         A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
-        Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
+        Key trim proposals require keys.manage and remain quiet; their own protected approval API rechecks scopes and recent use. Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
         Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
         counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
         The existing question-only decision-desk endpoint remains available.
@@ -3509,6 +3509,133 @@ paths:
           description: Agent or rotation key not found in this tenant
         "409":
           description: Rotation key was already revoked or rotated, or the agent is deactivated (reactivate it first)
+  /agent-keys/{id}/trim-proposals:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: proposeAgentKeyTrim
+      summary: Propose a scope reduction without changing the key
+      description: >-
+        Requires approvals.request; agents may propose. The expected scope set must
+        match the live set. Candidates must be a strict subset. Every dropped scope
+        needs evidence and a plain-language risk. Recent use is checked under the
+        key usage fence; a one-minute conservative margin covers debounce. No usage
+        record means unknown, never proof of non-use. OPS confirmation is a process
+        prerequisite for ops proposals. Exact request_id replay is idempotent.
+        No key credential, prefix or credential hash is returned or audited.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_scopes, candidate_scopes, evidence, expires_at]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_scopes: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                candidate_scopes: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                evidence: {$ref: '#/components/schemas/KeyTrimEvidence'}
+                expires_at: {type: string, format: date-time, description: Future timestamp within seven days}
+      responses:
+        '201':
+          description: Proposal recorded; scopes unchanged (also exact replay)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid or oversized input}
+        '403': {description: Permission denied}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Live scopes changed, key inactive, recent scope use, or conflicting replay}
+  /key-trim-proposals:
+    get:
+      operationId: listKeyTrimProposals
+      summary: Read protected key trim approval memos
+      description: Person only, keys.manage. Reads recheck current scopes and recent use and expose blocked_reason. Bounded keyset pagination; no key material.
+      security: [{session: []}]
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [pending, decided], default: pending}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: A page of approval memos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, has_more]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/KeyTrimProposal'}}
+                  has_more: {type: boolean}
+                  next_cursor: {type: string, format: uuid}
+        '400': {description: Invalid query}
+        '403': {description: Signed-in person with key management rights required}
+  /key-trim-proposals/{proposalId}/decision:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: decideKeyTrimProposal
+      summary: Approve or decline a key trim as a person
+      description: >-
+        Person only, keys.manage rechecked in the final tenant-fenced transaction.
+        Approval rechecks expiry, key activity, live editor/agent/creator ceilings,
+        snapshot digest and recent use, atomically applies the candidate set and
+        retains the original set. Decline closes without changing scopes. Exact
+        actor/request_id/decision/digest replay never reapplies or audits twice.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_digest, decision]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Scope snapshot digest, never a credential hash}
+                decision: {type: string, enum: [approve, decline]}
+      responses:
+        '200':
+          description: Decision recorded or replayed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid input}
+        '403': {description: Person key-management or live grant authority denied}
+        '404': {description: Proposal not found in this tenant}
+        '409': {description: Proposal expired, scopes changed, key inactive, recent use, or conflicting decision}
+  /key-trim-proposals/{proposalId}/restore:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: restoreKeyTrimProposal
+      summary: Restore the previous scope set for thirty days
+      description: Person only, keys.manage and live editor/agent/original-creator ceilings. CAS against the applied candidate digest; never overwrites intervening edits. Exact replay does not reapply. Audits agent_key.scopes_changed with the original set and no key material.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_digest]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: Previous scopes restored or exact replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid input}
+        '403': {description: Person key-management or live grant authority denied}
+        '404': {description: Proposal not found in this tenant}
+        '409': {description: Restore window closed, scopes changed, key inactive, or conflicting replay}
   /agent-keys/{id}/scopes:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -9085,7 +9212,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim]}
         project_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 1}
         title: {type: string}
@@ -15037,6 +15164,56 @@ components:
           oneOf:
             - {$ref: "#/components/schemas/Identity"}
             - {type: "null"}
+    KeyTrimEvidence:
+      type: object
+      additionalProperties: false
+      required: [summary, observed_at, risks]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 2000}
+        observed_at: {type: string, format: date-time}
+        risks:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            additionalProperties: false
+            required: [scope, evidence, risk_if_dropped]
+            properties:
+              scope: {type: string, maxLength: 128}
+              evidence: {type: string, minLength: 1, maxLength: 2000}
+              risk_if_dropped: {type: string, minLength: 1, maxLength: 1000}
+    KeyTrimProposal:
+      type: object
+      description: Protected approval memo; metadata only. Usage timestamps have at most a one-minute debounce lag. Unknown use is not evidence of safety.
+      required: [id, key_id, key_name, owner_id, owner_name, previous_scopes, snapshot_digest, candidate_scopes, candidate_digest, evidence, usage, created_by, created_at, expires_at, state, revision]
+      properties:
+        id: {type: string, format: uuid}
+        key_id: {type: string, format: uuid}
+        key_name: {type: string}
+        owner_id: {type: string, format: uuid, description: Agent principal owning this key}
+        owner_name: {type: string}
+        previous_scopes: {type: array, items: {type: string}}
+        snapshot_digest: {type: string}
+        candidate_scopes: {type: array, items: {type: string}}
+        candidate_digest: {type: string}
+        evidence: {$ref: '#/components/schemas/KeyTrimEvidence'}
+        usage:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [scope, last_used_at]
+            properties:
+              scope: {type: string}
+              last_used_at: {type: [string, 'null'], format: date-time}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        state: {type: string, enum: [pending, applied, declined, restored, expired]}
+        revision: {type: integer, minimum: 1}
+        applied_at: {type: [string, 'null'], format: date-time}
+        restore_until: {type: [string, 'null'], format: date-time}
+        blocked_reason: {type: string, description: Non-actionable source, rechecked during reads and writes}
     AgentKey:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
