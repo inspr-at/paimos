@@ -108,6 +108,7 @@ type Enrollment struct {
 	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
+	LocalAuthPinned    *bool                    `json:"local_auth_pinned,omitempty"`
 	AgentCompatibility *agentcompat.Result      `json:"agent_compatibility,omitempty"`
 	HarnessDetails     map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses    map[string]string        `json:"harness_statuses,omitempty"`
