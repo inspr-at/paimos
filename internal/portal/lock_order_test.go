@@ -44,7 +44,7 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO portal_competitors(tenant_id,product_id,name,published) VALUES($1,$2,'Northwind',true)`, tid, product); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO portal_competitors(tenant_id,product_id,name,published,position) VALUES($1,$2,'Northwind',true,1)`, tid, product); err != nil {
 					return err
 				}
 				return tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='ticket'`).Scan(&kind)
