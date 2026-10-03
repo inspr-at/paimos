@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "SPDX-License-Identifier: AGPL-3.0-only; OPS-257. Proposal only: nothing is applied by the tooling.",
+    "RFC 6902 operations below are relative to the existing merge_queue rule's parameters. The tool resolves the rule index; never replace the whole rules array with this file.",
+    "Read and preview: gh api --method GET repos/inspr-at/paimos/rulesets/$RULESET_ID > /tmp/ops257-ruleset-before.json; node scripts/ci-queue-measure.mjs --ruleset $RULESET_ID --dry-run",
+    "Prepare candidate: node scripts/ci-queue-measure.mjs --ruleset-payload --snapshot /tmp/ops257-ruleset-before.json > /tmp/ops257-ruleset-after.json",
+    "Prepare rollback: node scripts/ci-queue-measure.mjs --rollback-payload --snapshot /tmp/ops257-ruleset-before.json > /tmp/ops257-ruleset-rollback.json",
+    "Operator apply (not executed by this tool): gh api --method PUT repos/inspr-at/paimos/rulesets/$RULESET_ID --input /tmp/ops257-ruleset-after.json",
+    "Operator rollback: gh api --method PUT repos/inspr-at/paimos/rulesets/$RULESET_ID --input /tmp/ops257-ruleset-rollback.json",
+    "Refresh the snapshot and recheck the diff immediately before any operator PUT. Full PUT/rollback bodies preserve this snapshot, so concurrent ruleset edits require a fresh plan.",
+    "Preserves merge_method, grouping_strategy, check timeout, required checks, enforcement, conditions and bypass actors. No HEADGREEN relaxation is proposed.",
+    "max_entries_to_merge=5 limits merges, not CI builds: GitHub documents that merge limits do not combine merge_group builds. min=1 avoids deliberately waiting to fill a group; wait=1 is only a fallback if min later increases.",
+    "API reference: https://docs.github.com/en/rest/repos/rules#update-a-repository-ruleset",
+    "Queue semantics: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue"
+  ],
+  "schema": 1,
+  "select": { "rule_type": "merge_queue" },
+  "patch": [
+    { "op": "replace", "path": "/max_entries_to_build", "value": 2 },
+    { "op": "replace", "path": "/max_entries_to_merge", "value": 5 },
+    { "op": "replace", "path": "/min_entries_to_merge", "value": 1 },
+    { "op": "replace", "path": "/min_entries_to_merge_wait_minutes", "value": 1 }
+  ]
+}
