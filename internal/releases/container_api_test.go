@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/delivery"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -186,5 +187,44 @@ func TestPlacementBatchReturnsAtomicRefusalPerItem(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &placed)
 	if len(placed.Items) != 2 || placed.Items[0].ItemID != first || placed.Items[1].ItemID != second || placed.Items[0].Rank >= placed.Items[1].Rank || placed.ReleaseRevision != 2 {
 		t.Fatalf("top batch order=%+v", placed)
+	}
+}
+
+func TestGenericReleaseTextEditRejectsStaleReleaseAPIEdit(t *testing.T) {
+	for _, field := range []string{"title", "body"} {
+		t.Run(field, func(t *testing.T) {
+			f := adoptFixture(t)
+			dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "owner")
+			nodes.New(f.db.App, nil).Mount(f.mux)
+			base := "/api/projects/" + f.project + "/releases/" + f.release
+			w := f.request(f.person, "PATCH", "/api/nodes/"+f.release, fmt.Sprintf(`{"%s":"New generic text"}`, field))
+			if w.Code != 200 {
+				t.Fatalf("generic edit: %d %s", w.Code, w.Body.String())
+			}
+			w = f.request(f.person, "PATCH", base, fmt.Sprintf(`{"expected_revision":1,"%s":"Stale text"}`, field))
+			if w.Code != 409 || !strings.Contains(w.Body.String(), "revision_changed") {
+				t.Fatalf("stale release edit: %d %s", w.Code, w.Body.String())
+			}
+			var title, body string
+			var revision int64
+			f.tx(func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT n.title,n.body,r.revision FROM nodes n JOIN project_releases r ON r.tenant_id=n.tenant_id AND r.release_node_id=n.id WHERE n.id=$1`, f.release).Scan(&title, &body, &revision)
+			})
+			text := title
+			if field == "body" {
+				text = body
+			}
+			if text != "New generic text" || revision != 2 {
+				t.Fatalf("generic text/revision: %q / %d", text, revision)
+			}
+			w = f.request(f.person, "PATCH", "/api/nodes/"+f.release, `{"title":""}`)
+			if w.Code != 400 {
+				t.Fatalf("invalid edit: %d %s", w.Code, w.Body.String())
+			}
+			w = f.request(f.person, "PATCH", base, fmt.Sprintf(`{"expected_revision":2,"%s":"Fresh text"}`, field))
+			if w.Code != 200 {
+				t.Fatalf("fresh release edit after rejected patch: %d %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

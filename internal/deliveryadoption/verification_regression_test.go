@@ -3,13 +3,16 @@ package deliveryadoption
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -171,4 +174,39 @@ func TestVerificationRecordsUndoRemovalOfPlacementCreatedAfterMove(t *testing.T)
 			requireAdoptionVerification(t, f, reader, 2, 2)
 		})
 	}
+}
+
+func TestAdoptionVerificationHTTPUsesActualService(t *testing.T) {
+	f := newFixture(t)
+	release := f.legacyRelease(t, f.project, "REL-1", "planning", 1)
+	f.member(t, f.project, release, "TK-1", 1)
+	mux := http.NewServeMux()
+	releases.New(f.d.App, releases.WithAdoptionReporting(f.s)).Mount(mux)
+	verify := func(mode string, members int) {
+		t.Helper()
+		before := f.count(t, `SELECT count(*) FROM events`)
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+f.project+"/delivery/verify", nil)
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), f.p))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("verification route: %d %s", rec.Code, rec.Body.String())
+		}
+		var got Verification
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.OK || got.Mode != mode || got.JourneyMembers != members || got.AdoptedMembers != members || got.Incomplete || got.MissingArchiveMembers != 0 {
+			t.Fatalf("verification route evidence: %+v", got)
+		}
+		if after := f.count(t, `SELECT count(*) FROM events`); after != before {
+			t.Fatal("verification wrote events")
+		}
+	}
+	verify("journey", 0)
+	j := f.prepare(t, f.project)
+	if _, err := f.s.apply(t.Context(), f.a, j); err != nil {
+		t.Fatal(err)
+	}
+	verify("releases", 1)
 }
