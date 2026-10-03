@@ -87,6 +87,7 @@ test.describe('bounded heading reader', () => {
             }, text)
             const gate = page.locator('dialog.gate')
             await expect(gate).toBeVisible()
+            await expect(gate.getByLabel('Pill · English')).toBeFocused()
             heading = gate.locator('.name')
             controls = { heading, cancel: gate.getByRole('button', { name: 'Not now' }), submit: gate.getByRole('button', { name: 'Mark done' }) }
           } else if (surface === 'rules') {
@@ -165,13 +166,24 @@ test.describe('bounded heading reader', () => {
               await expect(reader).toHaveCount(0)
               await expect(heading).toBeFocused()
             } },
+            ...(input === 'keyboard' ? [{ name: 'hover also stays within the viewport', run: async () => {
+              await heading.blur()
+              await heading.hover()
+              await expect(reader).toHaveText(shown)
+              expect(await reader.evaluate(el => {
+                const box = el.getBoundingClientRect()
+                return box.top >= 8 && box.bottom <= innerHeight - 8 && box.left >= 8 && box.right <= innerWidth - 8
+              })).toBe(true)
+              await page.mouse.move(0, 0)
+              await expect(reader).toHaveCount(0)
+            } }] : []),
           ] })
           await noOverflow(page)
         })
-        }
       }
     }
-  })
+  }
+})
 function projectControls(page: Page, width: number) {
   return {
     tabs: page.getByRole('tablist', { name: 'Project sections' }),

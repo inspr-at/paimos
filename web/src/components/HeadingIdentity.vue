@@ -73,6 +73,12 @@ function outside(event: Event) {
 }
 function scroll(event: Event) {
   if (event.target === reader.value) return
+  // Focusing the heading may scroll its dialog body. Keep the keyboard
+  // reader attached while the source is on screen; only its content scrolls.
+  if (opened.value && (document.activeElement === source.value || document.activeElement === reader.value)) {
+    const box = source.value?.getBoundingClientRect()
+    if (box && box.bottom > 0 && box.top < innerHeight) { place(); return }
+  }
   close()
 }
 function keys(event: KeyboardEvent) {
@@ -93,6 +99,7 @@ onMounted(() => {
   document.addEventListener('focusin', outside)
   document.addEventListener('scroll', scroll, true)
   window.addEventListener('resize', measure)
+  document.fonts.addEventListener('loadingdone', measure)
   measure()
 })
 onBeforeUnmount(() => {
@@ -101,6 +108,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('focusin', outside)
   document.removeEventListener('scroll', scroll, true)
   window.removeEventListener('resize', measure)
+  document.fonts.removeEventListener('loadingdone', measure)
 })
 </script>
 
@@ -109,13 +117,13 @@ onBeforeUnmount(() => {
     :data-heading-tip="clipped ? text : undefined" :data-clip-tip="clipped ? '' : undefined"
     :aria-controls="clipped ? id : undefined" :aria-expanded="clipped ? opened : undefined"
     @focus="focus" @pointerenter="hover" @pointerleave="leave" @click="open(true)" @keydown="keys"
-  >{{ text }}</component>
-  <Teleport :to="layer ?? 'body'">
-    <div v-if="opened" :id="id" ref="reader" class="tooltip heading-reader" role="region" aria-label="Full heading" tabindex="0"
-      :style="{ left: `${x}px`, top: `${y}px` }" @keydown="keys"
-      @pointerenter="keep" @pointerleave="leave"
-    >{{ text }}</div>
-  </Teleport>
+  >{{ text }}<Teleport :to="layer ?? 'body'">
+      <div v-if="opened" :id="id" ref="reader" class="tooltip heading-reader" role="region" aria-label="Full heading" tabindex="0"
+        :style="{ left: `${x}px`, top: `${y}px` }" @keydown="keys"
+        @pointerenter="keep" @pointerleave="leave"
+      >{{ text }}</div>
+    </Teleport>
+  </component>
 </template>
 
 <style scoped>
