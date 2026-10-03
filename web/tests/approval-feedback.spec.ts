@@ -165,6 +165,7 @@ test.describe('with motion', () => {
   for (const eventless of [false, true]) for (const emptyHistory of [false, true]) test(`deciding the last request folds Needs you away without a jump and focuses Decided (${emptyHistory ? 'empty' : 'existing'} history${eventless ? ', completion fallback' : ''})`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 640 })
     await setup(page, { only: 'nodes.read', emptyHistory })
+    const release = await holdDecisions(page)
     await openAgents(page)
     await expect(queue(page).locator('.items > li')).toHaveCount(1)
     const id = (await queue(page).locator('[data-row^="a:"]').getAttribute('data-row'))!.slice(2)
@@ -181,34 +182,84 @@ test.describe('with motion', () => {
         if (event.target === el && (event as TransitionEvent).propertyName === 'height') event.stopImmediatePropagation()
       }, { capture: true })
     })
-    const before = await page.evaluate(() => {
+    // Timers and CSS transitions use different clocks. Hold the server response
+    // and both clocks so a busy CI renderer cannot skip half a fold between RAFs.
+    await page.clock.install({ time: new Date() })
+    await page.clock.pauseAt(new Date(Date.now() + 100))
+    const probe = await page.evaluateHandle(() => {
       const section = document.querySelector<HTMLElement>('.agents-page .main-col > .queue')!
       const next = section.nextElementSibling as HTMLElement
       const tops: number[] = []
-      const w = window as unknown as { tops: number[]; sampling: boolean; foldRemoved: boolean }
-      w.tops = tops; w.sampling = true; w.foldRemoved = false
       const main = document.getElementById('main')!
-      const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop); if (w.sampling) requestAnimationFrame(sample) }
+      const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop) }
+      const seen = new WeakSet<Animation>()
+      let transitions: CSSTransition[] = []
+      const capture = () => {
+        for (const animation of section.getAnimations({ subtree: true })) {
+          if (!(animation instanceof CSSTransition) || seen.has(animation)) continue
+          if (!['height', 'padding-top', 'padding-bottom', 'margin-bottom'].includes(animation.transitionProperty)) continue
+          seen.add(animation)
+          animation.pause()
+          animation.currentTime = 0
+          transitions.push(animation)
+        }
+      }
+      const observer = new MutationObserver(capture)
+      observer.observe(section, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] })
       sample()
-      const removed = new MutationObserver(() => {
-        if (section.isConnected) return
-        // Observe the actual removal, including the component's completion
-        // fallback, then sample the final layout without a clock delay.
-        removed.disconnect()
-        w.sampling = false
-        requestAnimationFrame(() => { sample(); w.foldRemoved = true })
-      })
-      removed.observe(section.parentElement!, { childList: true })
-      return { height: section.getBoundingClientRect().height, gap: parseFloat(getComputedStyle(section.parentElement!).rowGap) }
+      return {
+        tops, sample, observer,
+        before: { height: section.getBoundingClientRect().height, gap: parseFloat(getComputedStyle(section.parentElement!).rowGap) },
+        advance: () => {
+          capture()
+          const active = transitions.filter(animation => animation.playState !== 'idle')
+          transitions = []
+          const durations = active.map(animation => Number(animation.effect!.getComputedTiming().endTime))
+          if (durations.some(duration => !Number.isFinite(duration) || duration <= 0 || duration > 1000)) throw new Error('Expected bounded, positive layout transitions')
+          const duration = Math.max(0, ...durations)
+          // Scrub the real rendered CSS at a fixed 16 ms cadence, including both
+          // endpoints; layout reads expose jumps without host scheduling noise.
+          for (let time = 0; time < duration + 16; time += 16) {
+            active.forEach((animation, index) => { animation.currentTime = Math.min(time, durations[index]) })
+            sample()
+          }
+          const properties = active.map(animation => animation.transitionProperty)
+          active.forEach(animation => animation.finish())
+          return properties
+        },
+      }
     })
     await item.getByRole('button', { name: 'Approve permission' }).click()
+    await expect(item.getByRole('button', { name: 'Saving…' })).toBeDisabled()
+    release()
     await expect(settled(page)).toBeVisible()
+    // Success fits the answer into the old card, then the card collapses, then
+    // the empty section folds. Sample each phase before allowing its timer on.
+    expect(await probe.evaluate(p => p.advance())).toContain('height')
+    await page.clock.runFor(SUCCESS_MS)
+    await expect(settled(page)).toHaveClass(/collapsing/)
+    expect(await probe.evaluate(p => p.advance())).toContain('height')
+    await page.clock.runFor(COLLAPSE_MS)
+    const foldProperties = await probe.evaluate(p => p.advance())
+    expect(foldProperties).toContain('height')
+    expect(foldProperties).toContain('margin-bottom')
+    // The eventless case must remain mounted until the completion fallback.
+    if (eventless) {
+      await expect(queue(page)).toHaveCount(1)
+      await page.clock.runFor(450)
+    } else {
+      await page.clock.runFor(16)
+    }
     await expect(queue(page)).toHaveCount(0)
     const decided = page.getByRole('region', { name: 'Decided requests' }).getByRole('button', { name: /^Decided/ })
     await expect(decided).toBeFocused()
     await expect(decided.locator('.mono')).toHaveText(emptyHistory ? '1' : '5')
-    await expect.poll(() => page.evaluate(() => (window as unknown as { foldRemoved: boolean }).foldRemoved)).toBe(true)
-    const tops = await page.evaluate(() => (window as unknown as { tops: number[] }).tops)
+    const { tops, before } = await probe.evaluate(p => {
+      p.sample()
+      p.observer.disconnect()
+      return { tops: p.tops, before: p.before }
+    })
+    await probe.dispose()
     expect(await main.evaluate(el => el.scrollTop)).toBe(80)
     // What followed Needs you rose by exactly its height and gap, over many frames,
     // with no single-frame jump and no snap when the card was removed.

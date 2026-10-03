@@ -106,6 +106,12 @@ class CoverageTests(unittest.TestCase):
             self.assertEqual(owners(path, config), [sid])
         self.assertFalse(check(['internal/new-package/main.go'], config)['ok'])
 
+    def test_stepup_contract_is_owned_by_security_core(self):
+        config = load(HERE / 'slices.json')
+        for path in ('internal/stepup/contract.go', 'internal/stepup/contract_test.go'):
+            with self.subTest(path=path):
+                self.assertEqual(owners(path, config), ['S1'])
+
 
 class MergeTests(unittest.TestCase):
     def test_tool_theme_sampling_and_individual_override(self):
