@@ -197,8 +197,8 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 	var out residencyEvidenceRecord
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
-		// m.in acquires pairing first, matching existing lifecycle writers.
-		// Only writes need the tenant fence shared with role mutation.
+		// m.in already holds tenant, tree and pairing in the shared order.
+		// Re-entry retains that fence through final authorization.
 		if write {
 			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
 				return err

@@ -481,7 +481,7 @@ WHERE account_id=$1 AND state='pending' AND expires_at<=clock_timestamp() RETURN
 // Called under the pairing lock in the lifecycle transaction. Only pending
 // requests whose enrollment or computer was disconnected change state, so
 // retries and later drain finalization cannot append the event twice.
-func cancelDisconnectedAccountLinks(ctx context.Context, tx pgx.Tx, computer string) error {
+func cancelDisconnectedAccountLinks(ctx context.Context, tx pgx.Tx, computer string, pending ...*[]events.Change) error {
 	rows, err := tx.Query(ctx, `UPDATE account_person_link_requests l SET state='revoked'
 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
 WHERE l.tenant_id=e.tenant_id AND l.account_id=e.account_id AND e.computer_id=$1
@@ -513,6 +513,10 @@ RETURNING l.tenant_id::text,l.account_id::text,l.account_revision,c.principal_id
 			// Lifecycle proof requests have no authenticated principal; attribute
 			// automatic revocation to the computer's paired agent.
 			p = tenant.Principal{ID: link.principal, TenantID: link.tenant, Kind: tenant.Agent}
+		}
+		if len(pending) > 0 {
+			*pending[0] = append(*pending[0], events.Change{Type: "account.link_cancelled", After: map[string]any{"account_id": link.account, "person_id": "", "revision": link.revision}})
+			continue
 		}
 		if err = accountLinkEvent(ctx, tx, p, "account.link_cancelled", link.account, "", link.revision); err != nil {
 			return err

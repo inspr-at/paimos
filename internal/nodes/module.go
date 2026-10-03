@@ -87,6 +87,5 @@ func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Contex
 // lockTree serializes tree edits for this tenant on the same advisory key the
 // node trigger uses, so position assignment and cycle checks cannot race.
 func lockTree(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id', true), 0))`)
-	return err
+	return db.LockCurrentTree(ctx, tx)
 }

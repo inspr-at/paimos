@@ -68,7 +68,7 @@ func (e *queueError) Error() string     { return e.Message }
 func (e *queueError) HTTPStatus() int   { return e.Status }
 func (e *queueError) ErrorCode() string { return e.Code }
 
-// Same tree lock as nodes, work orders and status autopilot, after pairing and
+// Same tree lock as nodes, work orders and status autopilot, after the shared tenant/tree/pairing entry and
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {

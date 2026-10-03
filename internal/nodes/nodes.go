@@ -377,7 +377,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 		}
 		// Match queue writes and delete: tree before any node row lock. Terminal
-		// edits additionally take pairing first to serialize cancellation and claim.
+		// edits additionally enter pairing to serialize cancellation and claim.
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}

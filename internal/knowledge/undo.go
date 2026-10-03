@@ -70,7 +70,7 @@ func guard(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event, d
 	return before, after, current, nil
 }
 
-// Match generic node writers and their triggers: pairing, tree, then rows and
+// Match generic node writers and their triggers: tenant, tree, pairing, then rows and
 // slug reservations. Restores and field edits can also invoke tree guards.
 func lockKnowledgeTree(ctx context.Context, tx pgx.Tx) error {
 	if err := agentpairing.Lock(ctx, tx); err != nil {

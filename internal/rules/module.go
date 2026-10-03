@@ -137,10 +137,10 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 				return err
 			}
 			if r.Method != "GET" && r.Method != "HEAD" {
-				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
+				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
 					return err
 				}
-				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
+				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
 					return err
 				}
 				// Project visibility was derived when the transaction began; derive
@@ -282,7 +282,7 @@ func expired(ctx context.Context) bool {
 // binding, member and invite mutations in internal/authz) and holds it until
 // commit. Every permission decision of a rules write is made after it, so a
 // concurrent demotion either commits first and is seen, or waits for this
-// write. Order: the tenant advisory lock first, then the row, the same order as
+// write. Order: the tenant row first, then the tree advisory lock, as in
 // authz.lockProjectMutation, so the two never deadlock.
 //
 // NO KEY UPDATE, not UPDATE: it conflicts with the FOR UPDATE that access

@@ -11,15 +11,19 @@ import (
 	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-// Lock is acquired before work-order/run/account locks by every paired
-// dispatch, claim, probe, settlement and lifecycle mutation. This serializes
+// Lock acquires tenant, tree, then pairing before work-order/run/account locks.
+// Paired dispatch, claim, probe, settlement and lifecycle mutations share it. It serializes
 // revocation with in-flight credentials that passed the HTTP auth boundary.
 func Lock(ctx context.Context, tx pgx.Tx) error {
+	if err := db.LockCurrentTree(ctx, tx); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
 	return err
 }
@@ -205,7 +209,7 @@ func cancelQueued(ctx context.Context, tx pgx.Tx, computer, account string, all 
 
 	return nil
 }
-func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
+func revokeComputer(ctx context.Context, tx pgx.Tx, id string, pending ...*[]events.Change) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, id); err != nil {
 		return err
 	}
@@ -215,10 +219,10 @@ func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id); err != nil {
 		return err
 	}
-	return cancelDisconnectedAccountLinks(ctx, tx, id)
+	return cancelDisconnectedAccountLinks(ctx, tx, id, pending...)
 }
-func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
-	if err := cancelDisconnectedAccountLinks(ctx, tx, computer); err != nil {
+func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string, pending ...*[]events.Change) error {
+	if err := cancelDisconnectedAccountLinks(ctx, tx, computer, pending...); err != nil {
 		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
@@ -239,7 +243,7 @@ func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
 		return err
 	}
 	if ready {
-		return revokeComputer(ctx, tx, computer)
+		return revokeComputer(ctx, tx, computer, pending...)
 	}
 	return nil
 }
