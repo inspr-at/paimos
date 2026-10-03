@@ -58,6 +58,13 @@ func (s *Store) undoPlacements(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if err := fence(ctx, tx, p, before.ProjectID, "releases.write"); err != nil {
 		return events.Change{}, undoFailure(err)
 	}
+	// The event module's earlier check can become stale while waiting for
+	// these fences. Other-actor authority is part of the final write too.
+	if e.ActorPrincipalID != p.ID {
+		if err := authz.RequireTx(ctx, tx, p, "events.undo_other", authz.Scope{ProjectID: before.ProjectID}); err != nil {
+			return events.Change{}, undoFailure(err)
+		}
+	}
 	w, err := s.projectWrite(ctx, tx, p, before.ProjectID)
 	if err != nil {
 		return events.Change{}, undoFailure(err)
@@ -99,6 +106,11 @@ func (s *Store) undoRank(ctx context.Context, tx pgx.Tx, p tenant.Principal, e e
 	defer cancel()
 	if err := fence(ctx, tx, p, before.ProjectID, "releases.write"); err != nil {
 		return events.Change{}, undoFailure(err)
+	}
+	if e.ActorPrincipalID != p.ID {
+		if err := authz.RequireTx(ctx, tx, p, "events.undo_other", authz.Scope{ProjectID: before.ProjectID}); err != nil {
+			return events.Change{}, undoFailure(err)
+		}
 	}
 	if p.Kind != tenant.Person {
 		return events.Change{}, events.ErrForbidden

@@ -716,6 +716,41 @@ func TestStorePublicationFailureAndTransactionBounds(t *testing.T) {
 	}
 }
 
+func TestStoreUndoRechecksOtherActorAuthorityInsideFences(t *testing.T) {
+	for _, typ := range []string{"ships_in.changed", "release.reranked"} {
+		t.Run(typ, func(t *testing.T) {
+			f := newStoreFixture(t)
+			if typ == "ships_in.changed" {
+				id := f.item(t, "ticket", "TK-1", "open", f.release, "V")
+				if _, err := f.store.Place(t.Context(), f.person, f.project, []PlacementRequest{{ItemID: id, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1}}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				r := f.addRelease(t, f.project, "REL-3", "internal", "planned", "F")
+				if _, err := f.store.Rerank(t.Context(), f.person, ReleaseEdit{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: 1, Slot: Slot{BeforeID: f.release}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e := f.lastEvent(t, typ)
+			other := tenant.Principal{TenantID: f.tenant, Kind: tenant.Person}
+			f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Second planner') RETURNING id::text`, f.tenant).Scan(&other.ID)
+			})
+			dbtest.BindRole(t, f.d, f.tenant, other.ID, "member")
+			ctx := tenant.WithPrincipal(authz.BindPool(t.Context(), f.d.App), other)
+			if err := authz.Require(ctx, "releases.write", authz.Scope{ProjectID: f.project}); err != nil {
+				t.Fatalf("missing ordinary write authority: %v", err)
+			}
+			if err := f.undo(t, other, e); !errors.Is(err, events.ErrForbidden) || !errors.Is(err, authz.ErrForbidden) {
+				t.Fatalf("other-actor undo bypassed final authority: %v", err)
+			}
+			if err := f.undo(t, f.person, e); err != nil {
+				t.Fatalf("refusal changed the still-reversible resource: %v", err)
+			}
+		})
+	}
+}
+
 func TestProjectVersionTaggedGrammar(t *testing.T) {
 	for _, tc := range []struct {
 		scheme, version string
