@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
+func TestKnowledgeTenantTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 	for _, action := range []string{"delete", "undo-create", "undo-delete", "undo-update"} {
 		t.Run(action, func(t *testing.T) {
 			f := setup(t)
@@ -69,8 +69,10 @@ func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 			}()
 			lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, pid, done)
 			barrier.Release()
-			if lock != "advisory" {
-				t.Errorf("generic PATCH waited for %q instead of tree", lock)
+			// The tenant fence precedes the tree and record fences. The first
+			// mutation holds it while stopped before locking the record.
+			if lock != "transactionid" {
+				t.Errorf("generic PATCH waited for %q instead of tenant fence", lock)
 			}
 			firstStatus := 201
 			if action == "delete" {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -195,15 +196,22 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out residencyEvidenceRecord
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		ctx := r.Context()
-		// m.in already holds tenant, tree and pairing in the shared order.
-		// Re-entry retains that fence through final authorization.
-		if write {
-			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
-				return err
-			}
+	enter := m.in
+	if !write {
+		// Evidence GET retains the original pure pairing read: it must not
+		// wait on account or tenant write rows, nor acquire either afterward.
+		enter = func(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
+			return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+				if err := agentpairing.LockRead(ctx, tx); err != nil {
+					return err
+				}
+				return fn(tx)
+			})
 		}
+	}
+	err := enter(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ctx := r.Context()
+		// The write entry holds tenant, tree and pairing through final authority.
 		permission := "account.read"
 		if write {
 			permission = "account.manage"

@@ -174,7 +174,7 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 	return tx, pid
 }
 
-func TestResidencyEvidencePairingLockPrecedesTenantLock(t *testing.T) {
+func TestResidencyEvidenceTenantFencePrecedesPairingLock(t *testing.T) {
 	reset(t)
 	owner, host, profile, token, mod := groupFixture(t)
 	a := groupAccount(t, mod, owner, host, token, "lock-order", "daemon", "Order", "test")
@@ -190,12 +190,13 @@ func TestResidencyEvidencePairingLockPrecedesTenantLock(t *testing.T) {
 	}
 	done := startEvidenceRequest(t, ctx, mod, owner, "", "PUT", a.ID, evidenceAt(profile, time.Now()))
 	w, query := evidenceBlockedOrDone(t, ctx, pid, done)
-	if w != nil || !strings.Contains(query, "aeon-pairing:") {
-		t.Fatalf("write did not stop at pairing fence: response=%v query=%s", w, query)
+	if w != nil || !strings.Contains(query, "FROM tenants WHERE") || !strings.Contains(query, "FOR NO KEY UPDATE") {
+		t.Fatalf("write did not stop at tenant fence: response=%v query=%s", w, query)
 	}
-	// A writer waiting on pairing must not already hold the tenant fence.
+	// The blocker already holds tenant/tree/pairing. The waiting write has
+	// not reached pairing, so re-entering those fences cannot deadlock.
 	if _, err := blocker.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, owner.TenantID); err != nil {
-		t.Fatalf("pairing waiter holds tenant row: %v", err)
+		t.Fatalf("holder could not re-enter its tenant fence: %v", err)
 	}
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)

@@ -751,16 +751,20 @@ func TestRulesPublishDoesNotDeadlockWithAForeignKeyReference(t *testing.T) {
 	}
 }
 
-// The demotion guard relies on access changes locking the tenant row FOR
-// UPDATE, which conflicts with the NO KEY UPDATE taken by rules writes.
-func TestAccessChangesStillLockTheTenantForUpdate(t *testing.T) {
-	for _, file := range []string{"../authz/module.go", "../authz/project_members.go"} {
+// The demotion guard requires a conflicting tenant fence. Project mutation
+// now shares the FK-compatible NO KEY UPDATE entry with other tree writers.
+func TestAccessChangesStillTakeConflictingTenantFence(t *testing.T) {
+	for file, fragment := range map[string]string{
+		"../authz/module.go":          "FROM tenants WHERE id=$1::uuid FOR UPDATE",
+		"../authz/project_members.go": "return db.LockTree(ctx, tx, tenantID)",
+		"../db/fences.go":             "FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE",
+	} {
 		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") {
-			t.Fatalf("%s no longer locks the tenant row FOR UPDATE; revisit rules lockAccess", file)
+		if !strings.Contains(string(src), fragment) {
+			t.Fatalf("%s no longer retains the conflicting access fence; revisit rules lockAccess", file)
 		}
 	}
 }

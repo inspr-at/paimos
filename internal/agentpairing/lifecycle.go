@@ -28,16 +28,10 @@ func Lock(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// LockRead serializes a read with lifecycle changes without retaining the tree.
-// Its callers must never mutate resources or acquire tree locks afterward.
+// LockRead serializes a pure read with lifecycle changes. It has no outgoing
+// tenant/tree/resource edge: callers must never mutate resources or acquire
+// those fences afterward. Write entries use Lock, including GETs that mutate.
 func LockRead(ctx context.Context, tx pgx.Tx) error {
-	var tenantID string
-	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
-		return err
-	}
-	if err := db.LockTenant(ctx, tx, tenantID); err != nil {
-		return err
-	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
 	return err
 }

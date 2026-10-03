@@ -350,7 +350,7 @@ func TestResidencyEvidenceRechecksAfterConcurrentAccessChange(t *testing.T) {
 			for {
 				var waiting bool
 				if err := adminPool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
- WHERE datname=current_database() AND query='SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE'
+ WHERE datname=current_database() AND query LIKE '%FROM tenants WHERE%FOR NO KEY UPDATE%'
  AND $1=ANY(pg_blocking_pids(pid)))`, blockerPID).Scan(&waiting); err != nil {
 					t.Fatal(err)
 				}
