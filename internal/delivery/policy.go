@@ -157,13 +157,17 @@ func CheckPublishedRank(sequence int, rank string, lower, higher *NumberedRank) 
 // history correction and promotion remain independent requirements. Callers
 // sample their trusted clock after fences; reranking/removal is not admission.
 func CheckAdmission(kind tenant.PrincipalKind, hasReleasesWrite bool, state string, closesAt *time.Time, now time.Time, adding bool) error {
+	return checkAdmission(kind, hasReleasesWrite, state, closesAt, now, adding, false)
+}
+
+func checkAdmission(kind tenant.PrincipalKind, hasReleasesWrite bool, state string, closesAt *time.Time, now time.Time, adding, historyCorrection bool) error {
 	if !adding {
 		return nil
 	}
 	if state == "frozen" {
 		return ErrFrozen
 	}
-	if state != "planned" && state != "building" {
+	if state != "planned" && state != "building" && !(state == "released" && historyCorrection) {
 		return ErrReleaseClosed
 	}
 	if now.IsZero() {
@@ -197,7 +201,7 @@ func CheckHistoryCorrectionAdmission(kind tenant.PrincipalKind, hasRolesManage, 
 	if kind != tenant.Person || !hasRolesManage {
 		return ErrHistoryCorrection
 	}
-	if err := CheckAdmission(kind, hasReleasesWrite, a.State, a.ClosesAt, a.Now, a.Adding); err != nil {
+	if err := checkAdmission(kind, hasReleasesWrite, a.State, a.ClosesAt, a.Now, a.Adding, true); err != nil {
 		return err
 	}
 	return CheckCounts(a.ReleaseRows, a.NonTerminalReleases, a.PendingRows)
