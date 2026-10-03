@@ -56,9 +56,10 @@ func portalModerator(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 // settings.manage. Everyone else, including an agent whose scopes name that
 // permission, leaves it unset so the database trigger refuses the write.
 // Enter the canonical tree -> tenant fence before checking grants, including
-// callers that arm moderation before their own reentrant lockTree call.
+// callers that arm moderation before their own reentrant lockTree call. This
+// does not change grants: the write fence keeps concurrent tenant FKs compatible.
 func armPortalModeration(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if err := authz.LockProjectMutation(ctx, tx, p.TenantID); err != nil {
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
 		return err
 	}
 	actor, err := principalForPortal(ctx, tx, p)

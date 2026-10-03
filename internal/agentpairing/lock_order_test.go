@@ -62,10 +62,10 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"operatoractor/actor.go:EnsureWithProduction":       "tree tenant:UPDATE",
 
 		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
-		"nodes/module.go:lockTree":                    "project.Mutation",
+		"nodes/module.go:lockTree":                    "project.Write",
 		"nodes/nodes.go:updateNode":                   "pairing.Lock",
 		"nodes/nodes.go:deleteNode":                   "pairing.Lock",
-		"nodes/portal_publish.go:armPortalModeration": "project.Mutation",
+		"nodes/portal_publish.go:armPortalModeration": "project.Write",
 		"portal/market.go:manage":                     "pairing.Mutation",
 		"portal/moderate.go:moderate":                 "pairing.Mutation",
 		"portal/module.go:updateSettings":             "pairing.Mutation",
