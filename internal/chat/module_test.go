@@ -237,7 +237,7 @@ func TestDurableIdentityAndPrivateRoleHandover(t *testing.T) {
 	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, first, f.bob.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, f.call(f.bob, "POST", "/api/chat-threads/"+bob.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": first}, ""), 404)
+	expect(t, f.call(f.bob, "POST", "/api/chat-threads/"+bob.ID+"/binding", map[string]string{"expected_epoch": "1", "session_id": first}, ""), 404)
 }
 
 func TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration(t *testing.T) {
