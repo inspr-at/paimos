@@ -3,10 +3,13 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/harness"
 )
@@ -280,5 +283,72 @@ func TestRegistrationAliasStaleCoordinatorBeforeEvents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRegistrationAliasInlineResumeFencesBeforeHierarchyAndEvents(t *testing.T) {
+	f := newFixture(t)
+	thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "original"))
+	ref, alias := "inline-original-"+uid(), "inline-alias-"+uid()
+	first, _ := f.registerNative(t, f.alice, f.project, ref, alias)
+	f.bind(t, f.alice, thread, first, "0")
+	pause, err := json.Marshal(harness.Pause{State: "paused", Handover: &harness.Handover{State: "ready"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped',stop_reason='paused',pause_record=$2 WHERE id=$1`, first, pause); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.d.Admin.Exec(t.Context(), `CREATE FUNCTION test_inline_registration_before_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.type='harness.resume_requested' AND (SELECT count(*) FROM harness_sessions)<>2 THEN
+ RAISE EXCEPTION 'registration missing before event'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER test_inline_registration_before_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION test_inline_registration_before_event()`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	tx, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.alice.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- f.call(f.admin, "POST", "/api/projects/"+f.project+"/harness-sessions/"+first+"/resume", map[string]any{"registration": map[string]string{"harness_session_ref": alias, "worker_lease": "inline-resume-lease-" + uid()}}, "")
+	}()
+	for {
+		select {
+		case w := <-done:
+			t.Fatalf("inline resume returned before tenant fence: status %d", w.Code)
+		default:
+		}
+		var waiting bool
+		if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM tenants WHERE id=$1 FOR NO KEY UPDATE%')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+	}
+	var free bool
+	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,0))`, f.project).Scan(&free); err != nil || !free {
+		t.Fatalf("inline resume locked hierarchy before tenant: free=%v err=%v", free, err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case w := <-done:
+		expect(t, w, http.StatusOK)
+		var out struct{ Successor harness.Session }
+		if err = json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		f.bind(t, f.alice, thread, out.Successor.ID, "1")
+	case <-ctx.Done():
+		t.Fatal("inline resume did not finish")
 	}
 }
