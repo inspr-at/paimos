@@ -368,6 +368,7 @@ func TestCodexUnnamedChatGPTAccountRemainsLaunchable(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			qualifyCodexFixture(t, a)
 			readings := a.CaptureCapacity(ctx, "account")
 			if (len(readings) == 1) != tc.ok {
 				t.Fatalf("quota identity check: %d readings", len(readings))

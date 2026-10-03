@@ -15,6 +15,23 @@ test('duplicate numbers fail even with different names and SQL', () => {
   assert.match(problems.join('\n'), /duplicate migration number 1050/);
 });
 
+test('AEON-613 quota migrations coexist with the AEON-615 and lead block reservations', () => {
+  const directory = new URL('../internal/db/migrations/', import.meta.url);
+  const names = readdirSync(directory).filter(name => /_quota_warning(?:s|_observations)\.sql$/.test(name)).sort();
+  assert.equal(names.length, 2);
+  assert.match(names[0], /_quota_warnings\.sql$/);
+  assert.match(names[1], /_quota_warning_observations\.sql$/);
+  assert.ok(names[0] > '1135_account_readiness.sql', 'quota tables follow their readiness foreign key target');
+  const files = new Map(names.map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
+  // 1136/1137 belong to AEON-615; the lead reserved the whole 1139–1146
+  // block for other workers. Validate a combined candidate, since these
+  // branch-only migrations previously passed the isolated-tree guard.
+  for (const number of [1136, 1137, 1138, 1139, 1140, 1141, 1142, 1143, 1144, 1145, 1146]) {
+    files.set(`${number}_reserved_other_ticket.sql`, `CREATE TABLE reserved_${number}(id uuid);`);
+  }
+  assert.deepEqual(checkMigrations(files), []);
+});
+
 test('drops and renames require a header contract marker', () => {
   for (const sql of [
     'DROP TABLE nodes;', 'DROP TABLE IF EXISTS public.nodes CASCADE;',
@@ -291,7 +308,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -354,7 +371,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 

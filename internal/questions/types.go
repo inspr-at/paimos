@@ -95,8 +95,9 @@ type Question struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 type Page struct {
-	Items   []Question `json:"items"`
-	HasMore bool       `json:"has_more"`
+	Items      []Question `json:"items"`
+	HasMore    bool       `json:"has_more"`
+	NextCursor string     `json:"next_cursor,omitempty"`
 }
 
 func bounded(s string, max int, required bool) bool {

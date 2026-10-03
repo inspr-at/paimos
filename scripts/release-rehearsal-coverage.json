@@ -145,7 +145,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
       "mode": "step",
-      "sha256": "5f00a1741318395777dacf9d034b68998716990a6f94d2d79e885eb695973a0b",
+      "sha256": "8ba39fe5956a3ef04ec0056581b27beae52575c4dfa333604cbb8862e1375ffb",
       "step": "Publish multi-arch index"
     },
     {
@@ -309,7 +309,7 @@
     {
       "counterpart": "TestRehearsalPlatformDigestHandoff",
       "mode": "test",
-      "sha256": "93a3f35d369cd08c47d2bcbf494ba894584a66c0d7836121f6d518648d989776",
+      "sha256": "2b27938d169c6d4742781ce12efbdc25c446e8b904da522103fd7c2ed1b8814a",
       "step": "Record platform digest"
     },
     {

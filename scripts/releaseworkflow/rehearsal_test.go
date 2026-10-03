@@ -178,21 +178,121 @@ func TestRehearsalReleaseTagValidation(t *testing.T) {
 	}
 }
 
+// Always exercise the system bash (3.2 on macOS), even inside nix develop.
+// Also exercise the PATH bash when it differs, covering the Nix/CI shell.
+func digestTestShells(t *testing.T) []string {
+	t.Helper()
+	pathBash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shells := []string{"/bin/bash"}
+	if pathBash != shells[0] {
+		shells = append(shells, pathBash)
+	}
+	return shells
+}
+
 func TestRehearsalPlatformDigestHandoff(t *testing.T) {
 	_, source := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Record platform digest")
-	for _, digest := range []string{"sha256:" + strings.Repeat("a", 64), "bad"} {
-		dir := t.TempDir()
-		cmd := exec.Command("bash", "-c", source.Run)
-		cmd.Env = append(os.Environ(), "DIGEST="+digest, "ARCH=arm64", "RUNNER_TEMP="+dir, "GITHUB_STEP_SUMMARY="+filepath.Join(dir, "summary"))
-		if err := cmd.Run(); (err == nil) != (digest != "bad") {
-			t.Fatalf("digest handoff: %v", err)
-		}
-		if digest != "bad" {
-			body, err := os.ReadFile(filepath.Join(dir, "image-digests/arm64.txt"))
-			if err != nil || string(body) != digest+"\n" {
-				t.Fatal("lost platform digest")
+	for _, bash := range digestTestShells(t) {
+		t.Run(bash, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, digest string
+				valid        bool
+			}{
+				{"valid", "sha256:" + strings.Repeat("a", 64), true},
+				{"empty", "", false},
+				{"bad", "bad", false},
+				{"short", "sha256:" + strings.Repeat("a", 63), false},
+				{"long", "sha256:" + strings.Repeat("a", 65), false},
+				{"uppercase", "sha256:" + strings.Repeat("A", 64), false},
+				{"non-hex", "sha256:" + strings.Repeat("g", 64), false},
+				{"wrong-algorithm", "sha512:" + strings.Repeat("a", 64), false},
+				{"trailing-newline", "sha256:" + strings.Repeat("a", 64) + "\n", false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					dir := t.TempDir()
+					cmd := exec.Command(bash, "-c", source.Run)
+					cmd.Env = append(os.Environ(), "DIGEST="+tc.digest, "ARCH=arm64", "RUNNER_TEMP="+dir, "GITHUB_STEP_SUMMARY="+filepath.Join(dir, "summary"))
+					output, err := cmd.CombinedOutput()
+					if tc.valid {
+						if err != nil {
+							t.Fatalf("digest handoff: %v: %s", err, output)
+						}
+						body, err := os.ReadFile(filepath.Join(dir, "image-digests/arm64.txt"))
+						if err != nil || string(body) != tc.digest+"\n" {
+							t.Fatal("lost platform digest")
+						}
+						body, err = os.ReadFile(filepath.Join(dir, "summary"))
+						if err != nil || !strings.Contains(string(body), "ghcr.io/inspr-at/aeon@"+tc.digest) {
+							t.Fatal("lost verified image summary")
+						}
+						return
+					}
+					if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(output), "Invalid platform image digest") {
+						t.Fatalf("expected digest rejection, got %v: %s", err, output)
+					}
+					for _, path := range []string{"image-digests", "summary"} {
+						if _, err := os.Stat(filepath.Join(dir, path)); !os.IsNotExist(err) {
+							t.Fatalf("invalid digest produced %s: %v", path, err)
+						}
+					}
+				})
 			}
-		}
+		})
+	}
+}
+
+func TestRehearsalIndexDigestValidation(t *testing.T) {
+	_, source := named(t, readWorkflow(t, "release.yml").Jobs["image"], "Publish multi-arch index")
+	// Exercise the exact post-publish body. The earlier mapfile/build commands
+	// require Bash 4 and Docker; neither is part of digest validation.
+	const start = `digest="$(jq `
+	_, suffix, ok := strings.Cut(source.Run, start)
+	if !ok {
+		t.Fatal("missing index metadata digest extraction")
+	}
+	for _, bash := range digestTestShells(t) {
+		t.Run(bash, func(t *testing.T) {
+			for _, digest := range []string{"sha256:" + strings.Repeat("a", 64), "bad", ""} {
+				t.Run(digest, func(t *testing.T) {
+					dir := t.TempDir()
+					// Functions keep all registry and verifier calls offline and observable.
+					stubs := `jq() { printf '%s\n' "$TEST_DIGEST"; }
+docker() { printf '%s\n' "$*" >> "$RUNNER_TEMP/inspect"; printf '{}'; }
+node() { printf '%s\n' "$*" >> "$RUNNER_TEMP/verify"; }
+`
+					cmd := exec.Command(bash, "-c", "set -euo pipefail\n"+stubs+start+suffix)
+					cmd.Env = append(os.Environ(), "TEST_DIGEST="+digest, "RUNNER_TEMP="+dir, "GITHUB_OUTPUT="+filepath.Join(dir, "output"))
+					output, err := cmd.CombinedOutput()
+					if digest != "bad" && digest != "" {
+						if err != nil {
+							t.Fatalf("index digest: %v: %s", err, output)
+						}
+						for path, want := range map[string]string{
+							"inspect": "buildx imagetools inspect --raw ghcr.io/inspr-at/aeon@" + digest + "\n",
+							"verify":  "scripts/release-image-index.mjs verify " + filepath.Join(dir, "published-index.json") + "\n",
+							"output":  "digest=" + digest + "\n",
+						} {
+							body, err := os.ReadFile(filepath.Join(dir, path))
+							if err != nil || string(body) != want {
+								t.Fatalf("%s: got %q, want %q: %v", path, body, want, err)
+							}
+						}
+						return
+					}
+					if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(output), "Invalid multi-arch image digest") {
+						t.Fatalf("expected digest rejection, got %v: %s", err, output)
+					}
+					for _, path := range []string{"inspect", "verify", "output", "published-index.json"} {
+						if _, err := os.Stat(filepath.Join(dir, path)); !os.IsNotExist(err) {
+							t.Fatalf("invalid digest produced %s: %v", path, err)
+						}
+					}
+				})
+			}
+		})
 	}
 }
 

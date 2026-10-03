@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
+import { COLLAPSE_MS, SUCCESS_MS } from '../src/components/agents/approvalSettle'
 
 const world: AgentWorld = {
   me: me.id,
@@ -47,6 +48,20 @@ const decidedCount = (page: Page) => queue(page).locator('.history-toggle .mono'
 const live = (page: Page) => page.locator('.agents-page > [aria-live="polite"]')
 const idOf = (data: Awaited<ReturnType<typeof setup>>['data'], scope: string) => data.approvals.find(a => a.scope === scope && !a.decision)!.id
 
+function expectSmoothFold(tops: number[], before: { height: number; gap: number }, removals: { jump: number }[]) {
+  // Keep the original geometry and per-frame limits for the real removal too.
+  const moved = tops[0] - tops[tops.length - 1]
+  expect(Math.abs(moved - (before.height + before.gap))).toBeLessThanOrEqual(0.5)
+  expect(Math.max(...tops) - tops[0]).toBeLessThanOrEqual(0.5)
+  const steps = tops.slice(1).map((top, index) => tops[index] - top)
+  expect(steps.filter(step => step > 0.5).length).toBeGreaterThanOrEqual(6)
+  expect(Math.max(...steps), 'no single-frame jump, including actual removal').toBeLessThan(moved * 0.5)
+  expect(Math.max(...removals.map(removal => removal.jump)), 'no snap at actual removal').toBeLessThanOrEqual(0.5)
+}
+
+const foldCases = [false, true].flatMap(eventless => [false, true].map(emptyHistory => ({ eventless, emptyHistory, premature: false })))
+foldCases.push(...[false, true].map(emptyHistory => ({ eventless: true, emptyHistory, premature: true })))
+
 test.describe('with motion', () => {
   test.use({ reducedMotion: 'no-preference' })
 
@@ -66,6 +81,9 @@ test.describe('with motion', () => {
     await expect(item.getByRole('button', { name: 'Saving…' })).toBeDisabled()
     await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(0)
     await expect(settled(page)).toHaveCount(0)
+    // Hold the short collapse phase so hosted scheduling cannot skip it.
+    await page.clock.install({ time: new Date() })
+    await page.clock.pauseAt(new Date(Date.now() + 100))
     release()
     const done = settled(page)
     await expect(done).toHaveClass(/approved/)
@@ -79,9 +97,11 @@ test.describe('with motion', () => {
     await expect(decidedCount(page)).toHaveText('4')
     await expect(queue(page).locator('.count-badge')).toHaveText('4')
     // The fold: Decided ticks, the card goes, the count follows.
+    await page.clock.runFor(SUCCESS_MS)
     await expect(done).toHaveClass(/collapsing/)
     await expect(decidedCount(page)).toHaveText('5')
     await expect(decidedCount(page)).toHaveClass(/tick/)
+    await page.clock.runFor(COLLAPSE_MS)
     await expect(done).toHaveCount(0)
     await expect(queue(page).locator('[data-row^="a:"]')).toHaveCount(2)
     await expect(queue(page).locator('.count-badge')).toHaveText('3')
@@ -156,9 +176,10 @@ test.describe('with motion', () => {
     expect(samples.every(sample => sample.scroll === 80)).toBe(true)
   })
 
-  for (const emptyHistory of [false, true]) test(`deciding the last request folds Needs you away without a jump and focuses Decided (${emptyHistory ? 'empty' : 'existing'} history)`, async ({ page }) => {
+  for (const { eventless, emptyHistory, premature } of foldCases) test(premature ? `fold probe rejects a premature removal timer (${emptyHistory ? 'empty' : 'existing'} history)` : `deciding the last request folds Needs you away without a jump and focuses Decided (${emptyHistory ? 'empty' : 'existing'} history${eventless ? ', completion fallback' : ''})`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 640 })
     await setup(page, { only: 'nodes.read', emptyHistory })
+    const release = await holdDecisions(page)
     await openAgents(page)
     await expect(queue(page).locator('.items > li')).toHaveCount(1)
     const id = (await queue(page).locator('[data-row^="a:"]').getAttribute('data-row'))!.slice(2)
@@ -168,38 +189,167 @@ test.describe('with motion', () => {
     const main = page.locator('#main')
     await main.evaluate(el => { el.scrollTop = 80 })
     await expect.poll(() => main.evaluate(el => el.scrollTop)).toBe(80)
-    const before = await page.evaluate(() => {
+    // The component also completes through its fallback when a browser omits
+    // transitionend. Motion and the final removal still have to be smooth.
+    if (eventless) await queue(page).evaluate(el => {
+      el.addEventListener('transitionend', event => {
+        if (event.target === el && (event as TransitionEvent).propertyName === 'height') event.stopImmediatePropagation()
+      }, { capture: true })
+    })
+    // Timers and CSS transitions use different clocks. Hold the server response
+    // and both clocks so a busy CI renderer cannot skip half a fold between RAFs.
+    await page.clock.install({ time: new Date() })
+    await page.clock.pauseAt(new Date(Date.now() + 100))
+    // Mutation coverage: run the application's actual removal callback early,
+    // without changing CSS, so the same probe must reject the visible jump.
+    const mutation = premature ? await page.evaluateHandle(() => {
+      const original = window.setTimeout.bind(window)
+      const stats = { calls: 0, fired: [] as number[] }
+      window.setTimeout = (callback, ms, ...args) => {
+        if (ms === 450) {
+          stats.calls++
+          if (typeof callback !== 'function') throw new Error('Expected a removal callback')
+          return original(() => { stats.fired.push(Date.now()); callback(...args) }, 16)
+        }
+        return original(callback, ms, ...args)
+      }
+      return stats
+    }) : undefined
+    const probe = await page.evaluateHandle(() => {
       const section = document.querySelector<HTMLElement>('.agents-page .main-col > .queue')!
       const next = section.nextElementSibling as HTMLElement
       const tops: number[] = []
-      const w = window as unknown as { tops: number[]; sampling: boolean }
-      w.tops = tops; w.sampling = true
       const main = document.getElementById('main')!
-      const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop); if (w.sampling) requestAnimationFrame(sample) }
-      requestAnimationFrame(sample)
-      return { height: section.getBoundingClientRect().height, gap: parseFloat(getComputedStyle(section.parentElement!).rowGap) }
+      const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop) }
+      const seen = new WeakSet<Animation>()
+      const transitions: { animation: CSSTransition; target: Element | null; started: number; duration: number; currentTime: number; finished: boolean }[] = []
+      let properties: string[] = []
+      const removals: { kind: 'card' | 'section'; remaining: number; jump: number; at: number }[] = []
+      let settledCard: Element | null = null
+      const capture = () => {
+        for (const animation of section.getAnimations({ subtree: true })) {
+          if (!(animation instanceof CSSTransition) || seen.has(animation)) continue
+          if (!['height', 'padding-top', 'padding-bottom', 'margin-bottom'].includes(animation.transitionProperty)) continue
+          seen.add(animation)
+          const duration = Number(animation.effect!.getComputedTiming().endTime)
+          if (!Number.isFinite(duration) || duration <= 0 || duration > 1000) throw new Error('Expected bounded, positive layout transitions')
+          animation.pause()
+          animation.currentTime = 0
+          transitions.push({ animation, target: (animation.effect as KeyframeEffect).target, started: Date.now(), duration, currentTime: 0, finished: false })
+          properties.push(animation.transitionProperty)
+        }
+      }
+      const record = () => {
+        capture()
+        // Keep the actual CSS position before removal cancels the animation.
+        // transitionend can run partway through clock.runFor(), after advance()
+        // put CSS at its end but before the JS clock reaches the frame's end.
+        // Date.now() then wrongly reports unfinished motion (AEON-636).
+        for (const entry of transitions) {
+          if (typeof entry.animation.currentTime === 'number') entry.currentTime = entry.animation.currentTime
+        }
+        const card = section.querySelector('.item.settled')
+        for (const [kind, target] of [['card', settledCard], ['section', section]] as const) {
+          if (!target || target.isConnected || removals.some(removal => removal.kind === kind)) continue
+          const remaining = Math.max(0, ...transitions.filter(entry => entry.target === target)
+            .map(entry => entry.duration - entry.currentTime))
+          removals.push({ kind, remaining, jump: Math.abs(tops[tops.length - 1] - (next.getBoundingClientRect().top + main.scrollTop)), at: Date.now() })
+        }
+        settledCard ??= card
+        sample()
+      }
+      const observer = new MutationObserver(record)
+      observer.observe(section, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] })
+      observer.observe(section.parentElement!, { childList: true })
+      sample()
+      return {
+        tops, sample, observer,
+        removals,
+        before: { height: section.getBoundingClientRect().height, gap: parseFloat(getComputedStyle(section.parentElement!).rowGap) },
+        takeProperties: () => { const result = properties; properties = []; return result },
+        advance: (ms: number) => {
+          capture()
+          for (const entry of transitions) {
+            if (entry.finished || entry.animation.playState === 'idle') continue
+            entry.currentTime = Math.min(Date.now() + ms - entry.started, entry.duration)
+            entry.animation.currentTime = entry.currentTime
+          }
+          // Sample immediately before the matching JS tick can remove anything.
+          sample()
+        },
+        afterTimers: async () => {
+          record()
+          const completions: Promise<void>[] = []
+          for (const entry of transitions) {
+            if (entry.finished || entry.animation.playState === 'idle' || entry.currentTime < entry.duration) continue
+            const completed = entry.animation.finished
+            entry.animation.finish()
+            completions.push(completed.then(() => { entry.finished = true }))
+          }
+          await Promise.all(completions)
+          record()
+        },
+      }
     })
+    const advance = async (ms: number) => {
+      // CSS and timer time advance together, one frame at a time. Never finish
+      // a transition while its removal callback is still paused at its start.
+      for (let elapsed = 0; elapsed < ms;) {
+        const step = Math.min(16, ms - elapsed)
+        await probe.evaluate((p, value) => p.advance(value), step)
+        await page.clock.runFor(step)
+        await probe.evaluate(p => p.afterTimers())
+        elapsed += step
+      }
+    }
     await item.getByRole('button', { name: 'Approve permission' }).click()
+    await expect(item.getByRole('button', { name: 'Saving…' })).toBeDisabled()
+    release()
     await expect(settled(page)).toBeVisible()
+    // Success fits the answer into the old card, then the card collapses, then
+    // the empty section folds. Keep sampling through the actual DOM removals.
+    expect(await probe.evaluate(p => p.takeProperties())).toContain('height')
+    await advance(SUCCESS_MS)
+    await expect(settled(page)).toHaveClass(/collapsing/)
+    expect(await probe.evaluate(p => p.takeProperties())).toContain('height')
+    await advance(COLLAPSE_MS)
+    const foldProperties = await probe.evaluate(p => p.takeProperties())
+    expect(foldProperties).toContain('height')
+    expect(foldProperties).toContain('margin-bottom')
+    // The eventless case must remain mounted until the completion fallback.
+    if (eventless) {
+      await advance(COLLAPSE_MS)
+      if (!premature) await expect(queue(page)).toHaveCount(1)
+      await advance(450 - COLLAPSE_MS)
+    } else {
+      await advance(COLLAPSE_MS + 16)
+    }
     await expect(queue(page)).toHaveCount(0)
     const decided = page.getByRole('region', { name: 'Decided requests' }).getByRole('button', { name: /^Decided/ })
     await expect(decided).toBeFocused()
     await expect(decided.locator('.mono')).toHaveText(emptyHistory ? '1' : '5')
-    const tops = await page.evaluate(async () => {
-      await new Promise(resolve => setTimeout(resolve, 150))
-      const w = window as unknown as { tops: number[]; sampling: boolean }
-      w.sampling = false
-      return w.tops
+    const { tops, before, removals } = await probe.evaluate(p => {
+      p.sample()
+      p.observer.disconnect()
+      return { tops: p.tops, before: p.before, removals: p.removals }
     })
+    await probe.dispose()
+    await test.info().attach('fold-samples', { body: JSON.stringify({ tops, before, removals, mutation: await mutation?.evaluate(stats => stats) }), contentType: 'application/json' })
     expect(await main.evaluate(el => el.scrollTop)).toBe(80)
     // What followed Needs you rose by exactly its height and gap, over many frames,
     // with no single-frame jump and no snap when the card was removed.
-    const moved = tops[0] - tops[tops.length - 1]
-    expect(Math.abs(moved - (before.height + before.gap))).toBeLessThanOrEqual(1.5)
-    expect(Math.max(...tops) - tops[0]).toBeLessThanOrEqual(1.5)
-    const steps = tops.slice(1).map((top, index) => tops[index] - top)
-    expect(steps.filter(step => step > 0.5).length).toBeGreaterThanOrEqual(6)
-    expect(Math.max(...steps)).toBeLessThan(moved * 0.5)
+    expect(removals.map(removal => removal.kind)).toEqual(['card', 'section'])
+    if (premature) {
+      expect(await mutation!.evaluate(stats => stats.calls)).toBe(1)
+      expect(await mutation!.evaluate(stats => stats.fired.length)).toBe(1)
+      await mutation!.dispose()
+      expect(removals.find(removal => removal.kind === 'section')!.remaining).toBeGreaterThan(0)
+      expect(removals.find(removal => removal.kind === 'section')!.jump).toBeGreaterThan(1.5)
+      expect(() => expectSmoothFold(tops, before, removals)).toThrow('no snap at actual removal')
+    } else {
+      expect(removals.map(removal => removal.remaining), 'CSS motion completed before each removal').toEqual([0, 0])
+      expectSmoothFold(tops, before, removals)
+    }
   })
 })
 
