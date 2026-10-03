@@ -43,7 +43,7 @@ async function setup(page: Page, options: { admin?: boolean; fail?: number; defa
   })
   return data
 }
-async function setupPaged(page: Page, options: { fail?: number } = {}) {
+async function setupPaged(page: Page, options: { admin?: boolean; fail?: number } = {}) {
   const data = await setup(page, { ...options, defaultLater: true })
   // A real next cursor follows a full bounded page, so the list already scrolls.
   for (let index = 0; index < 48; index++) data.items.push(record(`later-${index}`, `Workspace theme ${index}`, 'workspace'))
@@ -266,4 +266,47 @@ test('platform submit shortcut closes the picker and saves an in-place name', as
   const name = page.getByRole('textbox', { name: 'Theme name' }); await name.fill('Blue copper')
   await name.press(`${mod}+a`); await name.press(`${mod}+Enter`)
   await expect(bar(page)).toHaveCount(0); expect(data.items[2]!.name).toBe('Blue copper')
+})
+
+for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) test(`consecutive record conflicts retain active recovery through pagination (${width} ${mode})`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 950 })
+  const data = await setupPaged(page, { admin: true, fail: 409 })
+  await page.goto('/settings/theme')
+  await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+  const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
+  const reload = page.getByRole('button', { name: 'Reload themes', exact: true })
+  const status = page.locator('.theme-status')
+  await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+  await expect(status).toContainText('changed elsewhere'); await expect(primary).toBeDisabled()
+  await page.getByRole('button', { name: 'Keep theme', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete High contrast', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+  await expect(status).toContainText('changed elsewhere')
+  await expect(primary).toBeDisabled(); await expect(reload).toBeVisible()
+  await page.getByRole('button', { name: 'Keep theme', exact: true }).click()
+  await mkdir('test-results/aeon-642-record-recovery', { recursive: true })
+  await page.screenshot({ path: `test-results/aeon-642-record-recovery/conflicts-${width}-${mode}.png`, fullPage: true })
+  await expectStableControls({ controls: { primary, reload, newTheme: page.getByRole('button', { name: 'New theme', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'other-record conflict and pagination cannot resolve active recovery', run: async () => {
+      await page.getByRole('button', { name: 'Load more themes', exact: true }).click()
+      await expect(page.getByRole('button', { name: 'Load more themes', exact: true })).toHaveCount(0)
+      await expect(status).toContainText('changed elsewhere')
+      await expect(primary).toBeDisabled(); await expect(reload).toBeVisible(); await expect(reload).toBeEnabled()
+    } },
+  ] })
+  await page.screenshot({ path: `test-results/aeon-642-record-recovery/pagination-${width}-${mode}.png`, fullPage: true })
+  expect(data.writes).toEqual([
+    { method: 'DELETE', path: '/api/themes/copper', body: null },
+    { method: 'DELETE', path: '/api/themes/contrast', body: null },
+  ])
+  data.fail = 0; data.items.find(item => item.id === 'copper')!.revision++
+  await reload.click()
+  await expect(reload).toBeHidden(); await expect(primary).toBeEnabled()
+  await expect(status).not.toContainText('changed elsewhere')
+  await page.screenshot({ path: `test-results/aeon-642-record-recovery/recovered-${width}-${mode}.png`, fullPage: true })
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0); await expect(status).toContainText('Saved.')
+  expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
 })
