@@ -52,6 +52,9 @@ test('execution kinds and person-specific host names on the real agents table', 
     const labelLefts = await page.locator('.exec-copy').evaluateAll(items => items.map(item => item.getBoundingClientRect().left))
     expect(new Set(labelLefts).size).toBe(1)
     const workerHost = page.locator(`[data-row="s:${ai.id}"] .host-badge`)
+    // The working-plan card can put this row below the viewport. Complete
+    // Playwright's action scroll before measuring hover-induced movement.
+    await workerHost.scrollIntoViewIfNeeded()
     const original = await workerHost.boundingBox()
     await workerHost.hover()
     const pencil = page.locator(`[data-row="s:${ai.id}"] .host-pencil`)
