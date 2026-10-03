@@ -11138,7 +11138,7 @@ components:
         release_channel: {type: string}
         release_sequence: {type: integer}
         codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
-        state: {type: string, enum: [published, reserved]}
+        state: {type: string, enum: [published, reserved, candidate]}
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}
         published_at: {type: [string, 'null'], format: date-time}
@@ -11185,6 +11185,10 @@ components:
             ci: {$ref: '#/components/schemas/ReleaseRun'}
             release_run: {$ref: '#/components/schemas/ReleaseRun'}
             release_url: {type: string}
+            pending:
+              type: array
+              description: 'Candidate evidence not yet established. Corresponding fields stay empty or null until a later tagged build records them.'
+              items: {type: string, enum: [tag_message, tagged_at, published_at, image, ci, release_run, release_url]}
             unavailable: {type: array, items: {type: string}, description: 'What could not be established, in plain words'}
     ReleaseRun:
       type: [object, 'null']
