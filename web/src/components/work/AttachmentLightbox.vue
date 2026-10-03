@@ -314,7 +314,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
           <button v-for="view in (['side', 'slider', 'onion'] as const)" :key="view" type="button" role="radio" class="pill-btn" :aria-checked="compare.view === view" @click="compare.view = view">
             {{ view === 'side' ? 'Side by side' : view === 'slider' ? 'Slider' : 'Onion skin' }}
           </button>
-          <label v-if="compare.view === 'onion'" class="onion"><span class="sr-only">Overlay opacity</span><input v-model.number="onion" type="range" min="0" max="1" step="0.01" /></label>
+          <label class="onion" :class="{ inactive: compare.view !== 'onion' }" :aria-hidden="compare.view !== 'onion' ? true : undefined"><span class="sr-only">Overlay opacity</span><input v-model.number="onion" type="range" min="0" max="1" step="0.01" :disabled="compare.view !== 'onion'" /></label>
           <span class="compare-note">A: {{ current.caption || current.name }} · B: {{ other?.caption || other?.name }} — pick B in the strip</span>
         </div>
         <ol v-if="items.length > 1" class="strip" aria-label="All attachments">
@@ -415,6 +415,7 @@ figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; co
 .foot > .pill { max-width: 100%; min-width: 0; }
 .foot:empty { display: none; }
 .onion { display: inline-flex; align-items: center; padding: 0 10px; }
+.onion.inactive { visibility: hidden; }
 .onion input { width: 140px; accent-color: #d69b31; }
 .compare-note { padding: 0 12px; font-size: 12px; color: var(--lb-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
 .strip { display: flex; gap: 8px; max-width: 100%; margin: 0; padding: 4px; list-style: none; overflow-x: auto; scrollbar-width: none; }

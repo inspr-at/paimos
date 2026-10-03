@@ -1942,6 +1942,12 @@ On phones, List and Outline share a bottom-centred updates chip above the safe
 area, footer and selection sheet, with scroll clearance for the last row; the
 desktop action stays in the table header. Lazy pages retain the server's order.
 
+At widths up to 900 px, Filters includes Display controls for sorting, row
+height, columns and model display. Saved column visibility and order also apply
+to phone cards: optional values appear below Key and Title; Automatic restores
+the compact phone layout. Attachment Compare reserves its opacity control slot
+across Side by side, Slider and Onion skin so the mode buttons stay in place.
+
 The auth adapter is isolated in `web/src/lib/api.ts`. It expects `/api/me` to return
 `{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean, oidc_display_name?: string }`.
 A 401 clears identity and routes to sign-in. Development email sign-in is

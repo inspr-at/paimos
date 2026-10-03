@@ -152,12 +152,93 @@ for (const width of [390, 768, 1024, 1440]) {
         { name: 'stop Compare', run: async () => { await compare.click(); await expect(box.getByRole('radiogroup', { name: 'Compare view' })).toHaveCount(0) } },
       ] })
       await compare.click()
+      await expect(box.getByRole('slider', { name: 'Compare divide' })).toBeVisible()
+      const modes = box.getByRole('radiogroup', { name: 'Compare view' })
+      const side = modes.getByRole('radio', { name: 'Side by side', exact: true })
+      const slider = modes.getByRole('radio', { name: 'Slider', exact: true })
+      const onion = modes.getByRole('radio', { name: 'Onion skin', exact: true })
+      await expectStableControls({ controls: { box, compare, details, close, modes, side, slider, onion, strip: box.getByRole('list', { name: 'All attachments' }) }, scrollAreas: { box, footer: box.locator('footer') }, interactions: [
+        { name: 'side by side', run: async () => { await side.click(); await expect(side).toHaveAttribute('aria-checked', 'true'); await expect(box.locator('.side')).toHaveCount(2) } },
+        { name: 'onion skin', run: async () => { await onion.click(); await expect(onion).toHaveAttribute('aria-checked', 'true'); await expect(box.getByRole('slider', { name: 'Overlay opacity' })).toBeVisible() } },
+        { name: 'adjust opacity', run: async () => { const opacity = box.getByRole('slider', { name: 'Overlay opacity' }); await opacity.fill('0.25'); await expect(box.locator('.compare-frame .over')).toHaveCSS('opacity', '0.25') } },
+        { name: 'slider', run: async () => { await slider.click(); await expect(slider).toHaveAttribute('aria-checked', 'true'); await expect(box.getByRole('slider', { name: 'Compare divide' })).toBeVisible(); await expect(box.getByRole('slider', { name: 'Overlay opacity' })).toBeHidden() } },
+        { name: 'side again', run: async () => { await side.click(); await expect(side).toHaveAttribute('aria-checked', 'true') } },
+      ] })
+      await onion.click()
+      await capture(page, `compare-onion-${width}-${theme}`)
+      await compare.click()
+      await expect(modes).toHaveCount(0)
+      await compare.click()
       await capture(page, `compare-${width}-${theme}`)
       await close.click()
       await expect(box).toHaveCount(0)
     })
   }
 }
+
+test('phone cards render saved column visibility and order at 390px', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  const data = germanWorld('light')
+  const costUnit = 'Mandantenübergreifende Berechtigungsverwaltung und Qualitätssicherung'
+  data.nodes.find(n => n.id === 'n-1')!.fields.cost_unit = costUnit
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  const card = page.locator('#row-n-1')
+  await expect(card.locator('.c-cost')).toHaveCount(0)
+  const opener = page.getByRole('button', { name: 'Filters', exact: true })
+  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  const columns = sheet.getByRole('list', { name: 'Columns', exact: true })
+  await opener.click()
+  const cost = columns.getByRole('checkbox', { name: 'Cost unit', exact: true })
+  await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, cost }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+    { name: 'show Cost unit on cards', run: async () => { await cost.check(); await expect(card.locator('.c-cost')).toContainText(costUnit) } },
+  ] })
+  await sheet.locator('footer button').click()
+  await inFrame(card.locator('.c-cost'), card)
+  await expect(card.locator('.c-cost')).toContainText(costUnit)
+  await page.reload()
+  await expect(card.locator('.c-cost')).toBeVisible()
+  await expect(card.locator('.c-cost')).toContainText(costUnit)
+  await opener.click()
+  for (const checkbox of await columns.getByRole('checkbox').all()) {
+    if (await checkbox.isEnabled()) await checkbox.uncheck()
+  }
+  await sheet.locator('footer button').click()
+  await expect(card.locator('td')).toHaveCount(2)
+  await expect(card.locator('.c-key')).toContainText('PHAROS-11')
+  await expect(card.locator('.c-title')).toContainText(data.nodes.find(n => n.id === 'n-1')!.title)
+  await opener.click()
+  await columns.getByRole('checkbox', { name: 'Assignee', exact: true }).check()
+  await columns.getByRole('checkbox', { name: 'Cost unit', exact: true }).check()
+  const costRow = columns.locator('[data-column-row="cost"]')
+  await costRow.focus()
+  await page.keyboard.press('Alt+ArrowUp')
+  await page.keyboard.press('Alt+ArrowUp')
+  await page.keyboard.press('Alt+ArrowUp')
+  await page.keyboard.press('Alt+ArrowUp')
+  await sheet.locator('footer button').click()
+  await inFrame(card.locator('.c-assignee'), card)
+  await inFrame(card.locator('.c-cost'), card)
+  await expect(card.locator('.c-assignee .person-name')).toContainText(data.people[0]!.name)
+  const costBox = (await card.locator('.c-cost').boundingBox())!
+  const assigneeBox = (await card.locator('.c-assignee').boundingBox())!
+  expect(costBox.y + costBox.height).toBeLessThanOrEqual(assigneeBox.y + .5)
+  expect(await page.locator('.table-card').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      await capture(page, `columns-custom-${width}-${theme}`)
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 900 })
+  await opener.click()
+  await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
+  await sheet.locator('footer button').click()
+  await expect(card.locator('.c-cost, .c-assignee')).toHaveCount(0)
+  await expect(card.locator('.c-status')).toBeVisible()
+})
 
 for (const width of [390, 768]) {
   test(`select every paginated match without moving bulk actions at ${width}px`, async ({ page }) => {
