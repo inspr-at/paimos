@@ -7,6 +7,11 @@ import { expectStableControls } from './helpers/stable'
 import { clipSession, longAgent, longComputer, longName } from './clip-tip-fixtures'
 
 const shots = 'test-results/aeon-632a-clip'
+const fixShots = `${shots}/tooltip-fix`
+const overflowShots = `${shots}/overflow-fix4`
+const touchShots = `${shots}/touch-fix5`
+const tableShots = `${shots}/table-fix6`
+const overflowText = Array.from({ length: 20 }, (_, index) => `${index + 1}. ${longName}`).join('\n')
 async function noOverflow(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
   const offenders = overflow > 1 ? await page.evaluate(() => [...document.querySelectorAll('main *')]
@@ -19,6 +24,20 @@ async function keyboardTip(page: Page, control: Locator, text: string) {
   await page.keyboard.press('ArrowRight')
   await control.focus()
   await expect(page.locator('.tooltip')).toHaveText(text)
+}
+async function scrollPage(page: Page, top: number) {
+  // The scroll event is asynchronous. Cross its dispatch before asserting so
+  // an old, still-visible tooltip cannot satisfy the disclosure assertion.
+  await page.evaluate(top => new Promise<void>(resolve => {
+    window.addEventListener('scroll', () => requestAnimationFrame(() => resolve()), { once: true })
+    window.scrollTo(0, top)
+  }), top)
+  await expect.poll(() => page.evaluate(() => scrollY)).toBe(top)
+}
+async function pauseForGesture(page: Page) {
+  // The protocol call crosses processes while the clock is still running.
+  // Pause ahead of that transit; every gesture's tested delay starts afterward.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
 }
 async function setupHarness(page: Page, theme: string, query = '') {
   const data = fixtures()
@@ -57,7 +76,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
         scrollAreas: { page: page.locator('.harness') },
       })
       if (width === 390) {
-        await standalone.tap(); await expect(page.locator('.tooltip')).toHaveText(longName)
+        await standalone.tap(); await expect(page.locator('.tooltip')).toHaveCount(0)
       }
       const child = page.locator('.child-row').first()
       await keyboardTip(page, child, longName)
@@ -228,6 +247,259 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
   })
 }
 
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test.describe(`tooltip fix: ${width}px ${theme}`, () => {
+    test.use({ viewport: { width, height: 400 }, colorScheme: theme })
+
+    test('keyboard disclosure survives pointer movement until Escape or blur', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      const name = page.locator('.standalone')
+      const change = page.getByRole('button', { name: 'Change name' })
+      await keyboardTip(page, name, longName)
+      await expect(name).toBeFocused()
+      await expectStableControls({ controls: { name, change }, interactions: [
+        { name: 'pointer leaves the keyboard source', run: async () => {
+          await name.hover()
+          await page.mouse.move(1, 1)
+          await expect(name).toBeFocused()
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+        } },
+        { name: 'pointer crosses another tooltip source', run: async () => {
+          await change.evaluate(el => el.setAttribute('data-tip', 'Andere Aktion'))
+          await change.hover()
+          await expect(name).toBeFocused()
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+        } },
+        { name: 'ordinary key keeps the focused disclosure', run: async () => {
+          await name.press('a')
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+        } },
+        { name: 'Escape dismisses without a pointer reopening it', run: async () => {
+          await name.press('Escape')
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await expect(name).toBeFocused()
+          await page.evaluate(() => document.body.appendChild(document.createElement('span')))
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+        } },
+        { name: 'focus leaves the source', run: async () => {
+          await keyboardTip(page, name, longName)
+          await change.focus()
+          await expect(page.locator('.tooltip')).toHaveText('Andere Aktion')
+          await change.evaluate(el => el.removeAttribute('data-tip'))
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+        } },
+      ] })
+      await noOverflow(page)
+      await keyboardTip(page, name, longName)
+      await page.mouse.move(1, 1)
+      await expect(page.locator('.tooltip')).toHaveText(longName)
+      await page.screenshot({ path: `${fixShots}/keyboard-${width}-${theme}.png` })
+      expect(errors).toEqual([])
+    })
+
+    test('focus disclosure follows real scrolling; pointer disclosure dismisses', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      const name = page.locator('.standalone')
+      const change = page.getByRole('button', { name: 'Change name' })
+      await keyboardTip(page, name, longName)
+      const before = (await name.boundingBox())!
+      await expectStableControls({ controls: { name, change }, interactions: [
+        { name: 'scroll the focused name', run: async () => {
+          await scrollPage(page, 50)
+          await expect(name).toBeFocused()
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+          const tipBox = (await page.locator('.tooltip').boundingBox())!
+          const nameBox = (await name.boundingBox())!
+          expect(nameBox.y).toBeCloseTo(before.y - 50, 1)
+          expect(tipBox.y + tipBox.height).toBeCloseTo(nameBox.y - 8, 0)
+        } },
+        { name: 'scroll the focused name offscreen', run: async () => {
+          await scrollPage(page, 250)
+          await expect(name).toBeFocused()
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+          expect((await page.locator('.tooltip').boundingBox())!.y).toBeGreaterThanOrEqual(8)
+        } },
+      ] })
+      await page.screenshot({ path: `${fixShots}/scroll-${width}-${theme}.png` })
+      await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+      await scrollPage(page, 0)
+      await name.hover()
+      await expect(page.locator('.tooltip')).toHaveText(longName)
+      await scrollPage(page, 50)
+      await expect(page.locator('.tooltip')).toHaveCount(0)
+      expect(errors).toEqual([])
+    })
+
+    for (const side of ['default', 'end'] as const) {
+      test(`long ${side} disclosure is viewport bounded and scrolls inside`, async ({ page }) => {
+        const errors = watchErrors(page)
+        await setupHarness(page, theme)
+        const name = page.locator('.standalone')
+        const longText = Array.from({ length: 20 }, (_, index) => `${index + 1}. ${longName}`).join('\n')
+        await name.evaluate((el, options) => {
+          el.textContent = options.text
+          if (options.side === 'end') el.setAttribute('data-tip-side', 'end')
+        }, { text: longText, side })
+        await expect(name).toHaveAttribute('data-tip', longText)
+        await keyboardTip(page, name, longText)
+        const tip = page.locator('.tooltip')
+        const checkBounds = async () => {
+          const box = (await tip.boundingBox())!
+          expect(box.y).toBeGreaterThanOrEqual(8)
+          expect(box.y + box.height).toBeLessThanOrEqual(392)
+          expect(box.x).toBeGreaterThanOrEqual(8)
+          expect(box.x + box.width).toBeLessThanOrEqual(width - 8)
+          expect(await tip.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
+          expect(await tip.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+        }
+        await checkBounds()
+        await expectStableControls({ controls: { name, change: page.getByRole('button', { name: 'Change name' }) }, interactions: [
+          { name: 'read overflowing disclosure with the wheel', run: async () => {
+            await tip.hover()
+            await page.mouse.wheel(0, 200)
+            await expect.poll(() => tip.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+            await expect(name).toBeFocused()
+            await expect(tip).toHaveText(longText)
+            expect(await page.evaluate(() => scrollY)).toBe(0)
+            await checkBounds()
+          } },
+          { name: 'move source towards viewport top', run: async () => {
+            await scrollPage(page, 160)
+            await expect(tip).toHaveText(longText)
+            await checkBounds()
+          } },
+        ] })
+        await noOverflow(page)
+        await page.screenshot({ path: `${fixShots}/long-${side}-${width}-${theme}.png` })
+        expect(errors).toEqual([])
+      })
+    }
+  })
+}
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test.describe(`overflow fix4: ${width}px ${theme}`, () => {
+    test.use({ viewport: { width, height: 400 }, colorScheme: theme, hasTouch: true })
+
+    async function picker(page: Page) {
+      await setupHarness(page, theme)
+      await page.getByRole('button', { name: 'option', exact: true }).click()
+      const panel = page.getByRole('dialog', { name: 'Assignee of PHAROS-11' })
+      const row = panel.locator('.menu-item').first()
+      const label = row.locator('.label')
+      await label.evaluate((el, text) => { el.textContent = text }, overflowText)
+      await expect(label).toHaveAttribute('data-tip', overflowText)
+      await keyboardTip(page, row, overflowText)
+      const tip = page.locator('.tooltip')
+      await expect(tip).toHaveClass(/scrollable/)
+      return { panel, row, tip }
+    }
+
+    async function finalLine(page: Page, tip: Locator, shot: string) {
+      // Every navigation key must scroll this region, without moving the page
+      // or the picker's active row. Browser animation is observed, never slept.
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(() => tip.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+      await page.keyboard.press('PageDown')
+      await expect.poll(() => tip.evaluate(el => el.scrollTop)).toBeGreaterThan(100)
+      await page.keyboard.press('End')
+      await expect.poll(() => tip.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1)
+      await expect(tip).toContainText(`20. ${longName}`)
+      await expect(tip).toHaveAttribute('role', 'region')
+      await expect(tip).not.toHaveAttribute('aria-hidden', 'true')
+      await expect(tip).toBeFocused()
+      const box = (await tip.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(8)
+      expect(box.x + box.width).toBeLessThanOrEqual(width - 8)
+      expect(box.y).toBeGreaterThanOrEqual(8)
+      expect(box.y + box.height).toBeLessThanOrEqual(392)
+      await page.screenshot({ path: `${overflowShots}/${shot}-text-${width}-${theme}.png` })
+      await page.keyboard.press('PageUp')
+      await expect.poll(() => tip.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeGreaterThan(0)
+      const beforeUp = await tip.evaluate(el => el.scrollTop)
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(() => tip.evaluate(el => el.scrollTop)).toBeLessThan(beforeUp)
+      await page.keyboard.press('Home')
+      await expect.poll(() => tip.evaluate(el => el.scrollTop)).toBe(0)
+    }
+
+    test('keyboard reaches the final line and Escape restores the standalone source', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      const name = page.locator('.standalone')
+      await name.evaluate((el, text) => { el.textContent = text }, overflowText)
+      await keyboardTip(page, name, overflowText)
+      const tip = page.locator('.tooltip')
+      const pageTop = await page.evaluate(() => scrollY)
+      await expectStableControls({ controls: { name, change: page.getByRole('button', { name: 'Change name' }) }, interactions: [
+        { name: 'Tab into full text', run: async () => { await page.keyboard.press('Tab'); await expect(tip).toBeFocused() } },
+        { name: 'keyboard reads the final line', run: async () => { await finalLine(page, tip, 'standalone'); expect(await page.evaluate(() => scrollY)).toBe(pageTop) } },
+        { name: 'Escape returns focus without reopening', run: async () => { await page.keyboard.press('Escape'); await expect(tip).toHaveCount(0); await expect(name).toBeFocused() } },
+      ] })
+      await noOverflow(page)
+      await page.screenshot({ path: `${overflowShots}/standalone-${width}-${theme}.png` })
+      expect(errors).toEqual([])
+    })
+
+    test('Tab reads picker overflow and Escape returns to the same option before closing', async ({ page }) => {
+      const errors = watchErrors(page)
+      const { panel, row, tip } = await picker(page)
+      const short = panel.locator('.menu-item').last()
+      const pageTop = await page.evaluate(() => scrollY)
+      await expectStableControls({ controls: { row, short, group: panel.locator('.menu'), title: panel.locator('.menu-title') }, interactions: [
+        { name: 'Tab into picker full text', run: async () => { await page.keyboard.press('Tab'); await expect(tip).toBeFocused(); await expect(panel).toBeVisible() } },
+        { name: 'scroll without picker navigation', run: async () => { await finalLine(page, tip, 'picker-keyboard'); await expect(short).not.toBeFocused(); expect(await page.evaluate(() => scrollY)).toBe(pageTop) } },
+        { name: 'Shift Tab returns to source', run: async () => { await page.keyboard.press('Shift+Tab'); await expect(row).toBeFocused(); await expect(tip).toBeVisible() } },
+        { name: 'Escape dismisses only the full text', run: async () => {
+          await page.keyboard.press('Tab'); await expect(tip).toBeFocused()
+          await page.keyboard.press('Escape'); await expect(tip).toHaveCount(0); await expect(row).toBeFocused(); await expect(panel).toBeVisible()
+        } },
+      ], scrollAreas: { picker: panel } })
+      await noOverflow(page)
+      await page.screenshot({ path: `${overflowShots}/picker-keyboard-${width}-${theme}.png` })
+      await page.keyboard.press('Escape')
+      await expect(panel).toHaveCount(0)
+      expect(errors).toEqual([])
+    })
+
+    for (const input of ['scrollbar', 'touch'] as const) {
+      test(`${input} scrolling keeps the originating picker open`, async ({ page }) => {
+        const errors = watchErrors(page)
+        const { panel, row, tip } = await picker(page)
+        await expectStableControls({ controls: { row, short: panel.locator('.menu-item').last(), group: panel.locator('.menu'), title: panel.locator('.menu-title') }, interactions: [
+          { name: `${input} interacts with overflowing text`, run: async () => {
+            const box = (await tip.boundingBox())!
+            if (input === 'scrollbar') {
+              // Press the scrollbar gutter/track itself, then wheel inside the
+              // region. Both pointerdown and scrolling must belong to the panel.
+              await page.mouse.click(box.x + box.width - 2, box.y + box.height / 2)
+              await expect(panel).toBeVisible()
+              await tip.hover(); await page.mouse.wheel(0, 200)
+            } else {
+              const cdp = await page.context().newCDPSession(page)
+              try {
+                const x = box.x + box.width / 2, y = box.y + box.height - 40
+                await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+                await expect(panel).toBeVisible()
+                for (const distance of [30, 60, 90, 120]) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - distance }] })
+                await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+              } finally { await cdp.detach() }
+            }
+            await expect.poll(() => tip.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+            await expect(panel).toBeVisible(); await expect(tip).toHaveText(overflowText)
+            await expect(page.getByRole('status')).toBeEmpty()
+          } },
+        ], scrollAreas: { picker: panel } })
+        await noOverflow(page)
+        await page.screenshot({ path: `${overflowShots}/picker-${input}-${width}-${theme}.png` })
+        expect(errors).toEqual([])
+      })
+    }
+  })
+}
+
 test('touch selection reveals the same full graph card after leaving ticket details', async ({ browser }) => {
   test.setTimeout(60_000)
   for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
@@ -261,3 +533,327 @@ test('touch selection reveals the same full graph card after leaving ticket deta
     } finally { await context.close() }
   }
 })
+
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test.describe(`touch fix5: ${width}px ${theme}`, () => {
+    test.use({ viewport: { width, height: 1000 }, colorScheme: theme, hasTouch: true })
+
+    test('tap activates a list row and never reveals its clipped name', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      const name = page.locator('.standalone')
+      const row = page.locator('.child-row').first()
+      await expectStableControls({ controls: { name, row, change: page.getByRole('button', { name: 'Change name' }) }, interactions: [
+        { name: 'tap standalone text', run: async () => { await name.tap(); await expect(page.locator('.tooltip')).toHaveCount(0) } },
+        { name: 'tap opens the child on the first try', run: async () => {
+          await row.tap()
+          await expect(page.getByRole('status')).toHaveText('PHAROS-11')
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+        } },
+      ] })
+      await noOverflow(page)
+      await page.screenshot({ path: `${touchShots}/tap-${width}-${theme}.png` })
+      expect(errors).toEqual([])
+    })
+
+    test('long press reads a production epic picker before a tap selects and closes it', async ({ page }) => {
+      const errors = watchErrors(page)
+      const data = fixtures(); data.preferences.theme = { choice: theme }
+      data.nodes.find(node => node.id === 'n-epic')!.title = longName
+      const calls = await mockWork(page, data)
+      await page.goto('/p/PHAROS/PHAROS-14')
+      const workspace = page.getByRole('complementary', { name: 'Ticket details' })
+      await workspace.getByRole('button', { name: 'No epic. Choose an epic' }).tap()
+      const panel = page.getByRole('dialog', { name: 'Epic for PHAROS-14' })
+      const row = panel.getByRole('option')
+      await expect(row.locator('.title')).toHaveAttribute('data-tip', longName)
+      // Clear autofocus disclosure through ordinary touch input before the
+      // hold. Older hosts must reach the missing 500 ms disclosure assertion,
+      // rather than fail because the search's initial focus already showed it.
+      await panel.getByText('Epic', { exact: true }).tap()
+      await expect(page.locator('.tooltip')).toHaveCount(0)
+      const writes = () => calls.filter(call => call.method !== 'GET')
+      const before = writes().length
+      await page.clock.install()
+      const cdp = await page.context().newCDPSession(page)
+      try {
+        await expectStableControls({ controls: { row, search: panel.getByRole('combobox'), group: panel.getByRole('listbox') }, interactions: [
+          { name: 'hold reveals at 500 ms without selection', run: async () => {
+            await pauseForGesture(page)
+            const box = (await row.boundingBox())!
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+            await page.clock.runFor(499)
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await page.clock.runFor(1)
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await page.clock.resume()
+            await expect(panel).toBeVisible()
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            expect(writes()).toHaveLength(before)
+          } },
+          { name: 'Escape dismisses full text without closing the picker', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await expect(panel).toBeVisible()
+          } },
+        ] })
+        await noOverflow(page)
+        // Reveal again for the evidence, then use the row's normal tap action.
+        await pauseForGesture(page)
+        const box = (await row.boundingBox())!
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+        await page.clock.runFor(500)
+        await expect(page.locator('.tooltip')).toHaveText(longName)
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await page.clock.resume()
+        await page.screenshot({ path: `${touchShots}/production-picker-${width}-${theme}.png` })
+        await row.tap()
+        await expect(panel).toHaveCount(0)
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+        await expect.poll(() => data.nodes.find(node => node.id === 'n-4')!.parent_id).toBe('n-epic')
+        const move = calls.filter(call => call.method === 'POST' && call.path === '/api/nodes/n-4/move')
+        expect(move).toHaveLength(1)
+        expect(move[0]!.body).toMatchObject({ parent_id: 'n-epic' })
+        expect(errors).toEqual([])
+      } finally { await page.clock.resume(); await cdp.detach() }
+    })
+
+    test('production table hold discloses without selection and the next tap opens the ticket', async ({ page }) => {
+      const errors = watchErrors(page)
+      const data = fixtures(); data.preferences.theme = { choice: theme }
+      data.preferences.releases = { last_seen: '260923120000.0.0' }
+      data.nodes.find(node => node.id === 'n-1')!.title = longName
+      const calls = await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      const table = page.getByRole('grid', { name: 'Tickets' })
+      const row = table.locator('#row-n-1')
+      const name = row.locator('.title-text')
+      const selected = table.locator('.ticket-row.selected')
+      const bulk = page.getByRole('toolbar', { name: /selected ticket/ })
+      await expect(name).toHaveAttribute('data-tip', longName)
+      await expect(selected).toHaveCount(0)
+      await page.clock.install()
+      const cdp = await page.context().newCDPSession(page)
+      try {
+        await expectStableControls({ controls: { row, name, copy: row.getByRole('button', { name: 'Copy PHAROS-11' }) }, interactions: [
+          { name: 'clipped-name hold owns disclosure before the table selection threshold', run: async () => {
+            await pauseForGesture(page)
+            const box = (await name.boundingBox())!
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+            await page.clock.runFor(479)
+            await expect(selected).toHaveCount(0)
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await page.clock.runFor(1)
+            await expect(selected).toHaveCount(0)
+            await page.clock.runFor(19)
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            // A native hold can raise contextmenu before its compatibility
+            // click; it must not hand the gesture back to row selection.
+            await name.dispatchEvent('contextmenu', { bubbles: true, cancelable: true })
+            await expect(selected).toHaveCount(0)
+            await page.clock.runFor(1)
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await page.clock.resume()
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await expect(selected).toHaveCount(0)
+            await expect(bulk).toHaveCount(0)
+            await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
+            expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
+          } },
+          { name: 'Escape dismisses disclosure without moving row controls', run: async () => {
+            await page.screenshot({ path: `${tableShots}/disclosure-${width}-${theme}.png` })
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await expect(selected).toHaveCount(0)
+          } },
+        ] })
+        await noOverflow(page)
+        // The compatibility click was consumed, but no row suppression flag
+        // may swallow this fresh native tap on the same record.
+        await name.tap()
+        await expect(page).toHaveURL(/\/p\/PHAROS\/PHAROS-11$/)
+        await expect(page.getByRole('complementary', { name: 'Ticket details' })).toBeVisible()
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+        expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
+        expect(errors).toEqual([])
+      } finally { await page.clock.resume(); await cdp.detach() }
+    })
+
+    if (width === 390) test('production phone selection holds still work and clipped holds preserve an existing selection', async ({ page }) => {
+      const errors = watchErrors(page)
+      const data = fixtures(); data.preferences.theme = { choice: theme }
+      data.preferences.releases = { last_seen: '260923120000.0.0' }
+      data.nodes.find(node => node.id === 'n-1')!.title = longName
+      data.nodes.find(node => node.id === 'n-2')!.title = 'Kurz'
+      const calls = await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      const table = page.getByRole('grid', { name: 'Tickets' })
+      const clippedRow = table.locator('#row-n-1'), shortRow = table.locator('#row-n-2')
+      const name = clippedRow.locator('.title-text'), short = shortRow.locator('.title-text')
+      const selectedKeys = table.locator('.ticket-row.selected .key')
+      await expect(name).toHaveAttribute('data-tip', longName)
+      await expect(short).not.toHaveAttribute('data-clip-tip')
+      await page.clock.install()
+      const cdp = await page.context().newCDPSession(page)
+      try {
+        await pauseForGesture(page)
+        const box = (await short.boundingBox())!
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+        await page.clock.runFor(479)
+        await expect(selectedKeys).toHaveCount(0)
+        await page.clock.runFor(1)
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await page.clock.resume()
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+        // Ordinary taps continue to toggle when selection is already active.
+        await name.tap()
+        await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])
+        await expectStableControls({ controls: { row: clippedRow, name, check: clippedRow.getByRole('checkbox', { name: 'Select PHAROS-11' }), clear: page.getByRole('button', { name: 'Clear the selection' }) }, interactions: [
+          { name: 'hold reads an already selected row without toggling it', run: async () => {
+            await pauseForGesture(page)
+            const box = (await name.boundingBox())!
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+            await page.clock.runFor(500)
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await page.clock.resume()
+            await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])
+          } },
+          { name: 'dismiss retains selection and row controls', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])
+          } },
+        ] })
+        await name.tap()
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
+        await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
+        await noOverflow(page)
+        expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
+        expect(errors).toEqual([])
+      } finally { await page.clock.resume(); await cdp.detach() }
+    })
+
+    test('movement beyond 8 px and scrolling cancel pending long presses', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      const name = page.locator('.standalone')
+      await page.clock.install()
+      // Synthetic pointers allow exact 8 px boundary and cancellation events;
+      // the production test above covers real touch and its compatibility click.
+      const pointer = (type: string, x = 100) => name.dispatchEvent(type, { pointerType: 'touch', pointerId: 42, isPrimary: true, button: 0, clientX: x, clientY: 100, bubbles: true })
+      await expectStableControls({ controls: { name, change: page.getByRole('button', { name: 'Change name' }) }, interactions: [
+        { name: '8 px remains a hold, 9 px cancels it', run: async () => {
+          await pauseForGesture(page)
+          await pointer('pointerdown'); await pointer('pointermove', 108)
+          await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+          await pointer('pointerup', 108)
+          await page.keyboard.press('Escape')
+          await pointer('pointerdown'); await pointer('pointermove', 109)
+          await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await pointer('pointerup', 109)
+          await name.dispatchEvent('click', { pointerType: 'touch', pointerId: 42, detail: 1 })
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await page.clock.resume()
+        } },
+        { name: 'container scroll cancels before the threshold', run: async () => {
+          await pauseForGesture(page)
+          await pointer('pointerdown'); await page.clock.runFor(250)
+          await page.locator('.harness').dispatchEvent('scroll')
+          await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await pointer('pointerup')
+          await name.dispatchEvent('click', { pointerType: 'touch', pointerId: 42, detail: 1 })
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await page.clock.resume()
+        } },
+      ] })
+      await noOverflow(page)
+      expect(errors).toEqual([])
+    })
+
+    test('real touch scrolling cancels a hold without blocking the page', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      await page.setViewportSize({ width, height: 400 })
+      const name = page.locator('.standalone')
+      await page.clock.install()
+      const cdp = await page.context().newCDPSession(page)
+      try {
+        await pauseForGesture(page)
+        const box = (await name.boundingBox())!
+        const x = box.x + box.width / 2, y = box.y + box.height / 2
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+        await page.clock.runFor(200)
+        for (const distance of [10, 30, 60, 90]) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - distance }] })
+        await page.clock.runFor(500)
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await page.clock.resume()
+        await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0)
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+        expect(errors).toEqual([])
+      } finally { await page.clock.resume(); await cdp.detach() }
+    })
+
+    test('long press remains until an outside tap; cancellation and changed records cannot reveal stale text', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme)
+      const name = page.locator('.standalone')
+      const change = page.getByRole('button', { name: 'Change name' })
+      await page.clock.install()
+      const pointer = (type: string, id = 42) => name.dispatchEvent(type, { pointerType: 'touch', pointerId: id, isPrimary: id === 42, button: 0, clientX: 100, clientY: 100 })
+      await expectStableControls({ controls: { name, change }, interactions: [
+        { name: 'release and focus loss retain text until outside tap', run: async () => {
+          await pauseForGesture(page)
+          await pointer('pointerdown'); await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+          await pointer('pointerup')
+          await name.dispatchEvent('focusout')
+          await page.clock.runFor(2000)
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+          await page.clock.resume()
+          await change.tap()
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await change.tap()
+          await expect(name).toHaveAttribute('data-tip', longName)
+        } },
+        { name: 'pointer cancellation leaves no delayed disclosure', run: async () => {
+          await pauseForGesture(page)
+          await pointer('pointerdown'); await pointer('pointercancel')
+          await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await page.clock.resume()
+        } },
+        { name: 'a second finger cancels the first hold', run: async () => {
+          await pauseForGesture(page)
+          await pointer('pointerdown'); await pointer('pointerdown', 43)
+          await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await pointer('pointerup', 43); await pointer('pointerup')
+          await page.clock.resume()
+        } },
+        { name: 'a reused row cannot reveal the old record', run: async () => {
+          await pauseForGesture(page)
+          await pointer('pointerdown')
+          await name.evaluate(el => { el.textContent = `Other record: ${el.textContent}` })
+          // The directive measures mutations in the next animation frame.
+          await page.clock.runFor(16)
+          await expect(name).toHaveAttribute('data-tip', `Other record: ${longName}`)
+          await page.clock.runFor(500)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await pointer('pointerup')
+          await page.clock.resume()
+        } },
+      ] })
+      await noOverflow(page)
+      expect(errors).toEqual([])
+    })
+  })
+}

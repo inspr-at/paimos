@@ -306,36 +306,28 @@ test('hidden journey stages reveal their labels at 768px without moving the rail
   await capture(page, 'journey-rail', 768, 'light')
 })
 
-test('a phone tap reveals the whole clamped name, then a second tap opens its project', async ({ browser }) => {
+test('a phone tap opens its project immediately without revealing text', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
   try {
     const page = await context.newPage()
     await setup(page, 'dark')
     await page.goto('/')
     const name = page.locator('[data-project-id="p-pharos"] .name')
-    await expect(name).toBeVisible()
-    await name.tap()
-    await expect(page).toHaveURL(/\/$/)
-    await expect(page.locator('.tooltip')).toHaveText(NAME)
-    const bounds = await page.locator('.tooltip').boundingBox()
-    expect(bounds!.x).toBeGreaterThanOrEqual(8)
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(382)
-    mkdirSync(shots, { recursive: true })
-    await page.screenshot({ path: `${shots}/clip-tip-touch-390-dark.png` })
+    await expect(name).toHaveAttribute('data-tip', NAME)
     await name.tap()
     await expect(page).toHaveURL(/\/p\/PHAROS/)
+    await expect(page.locator('.tooltip')).toHaveCount(0)
   } finally { await context.close() }
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   for (const view of ['Rows', 'Cards'] as const) {
-    test(`touch discloses ${view} before project navigation ${width} ${theme}`, async ({ browser }) => {
+    test(`long press reads ${view} before native project navigation ${width} ${theme}`, async ({ browser }) => {
       const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: true, isMobile: width === 390, reducedMotion: 'reduce' })
       try {
         const page = await context.newPage()
         const errors = watchErrors(page)
         const data = await setup(page, theme)
-        // Equal text must not let disclosure of a different record arm this link.
         data.projects[1]!.title = NAME
         await page.goto('/')
         await page.getByRole('radio', { name: view === 'Rows' ? 'List view' : 'Cards view', exact: true }).click()
@@ -345,40 +337,50 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         const other = page.locator('[data-project-id="p-aeon"]').locator(view === 'Rows' ? '.name' : '.card-name')
         await expect(name).toHaveAttribute('data-tip', NAME)
         await expect(other).toHaveAttribute('data-tip', NAME)
-        // Observe after the disclosure guard, before RouterLink's bubbling
-        // handler (which prevents browser navigation even when it routes).
-        await page.locator('[data-project-id] .item-link').evaluateAll(links => links.forEach(link => link.addEventListener('click', event => {
-          (window as Window & { clipNavigationPrevented?: boolean }).clipNavigationPrevented = event.defaultPrevented
-        }, true)))
-        const disclose = async (target: Locator) => {
-          await target.tap()
-          expect(await page.evaluate(() => (window as Window & { clipNavigationPrevented?: boolean }).clipNavigationPrevented), 'the disclosure tap must cancel navigation').toBe(true)
-          // Flush RouterLink's queued navigation before asserting retention.
+        await page.clock.install()
+        const cdp = await context.newCDPSession(page)
+        const hold = async (target: Locator) => {
+          // CDP sends viewport coordinates and does not scroll like tap().
+          // Finish intentional scrolling before starting the timed gesture.
+          await target.scrollIntoViewIfNeeded()
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+          await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+          const box = (await target.boundingBox())!
+          expect(await target.evaluate((element, box) => element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)), box), 'the real touch must hit the clipped name').toBe(true)
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+          await page.clock.runFor(499)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          await page.clock.runFor(1)
+          await expect(page.locator('.tooltip')).toHaveText(NAME)
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+          await page.clock.resume()
           await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
           await expect(page).toHaveURL(/\/$/)
           await expect(page.locator('.tooltip')).toHaveText(NAME)
         }
-        await expectStableControls({ controls: { link, name, menu: project.getByRole('button', { name: /^Actions for/ }) }, interactions: [
-          { name: 'first touch only discloses', run: () => disclose(name) },
-          { name: 'dismissed disclosure requires a new first tap', run: async () => {
-            await page.keyboard.press('Escape')
-            await expect(page.locator('.tooltip')).toHaveCount(0)
-            await disclose(name)
-          } },
-          { name: 'another record with equal text does not arm this link', run: async () => {
-            await disclose(other)
-            await disclose(name)
-          } },
-        ] })
-        const bounds = (await page.locator('.tooltip').boundingBox())!
-        expect(bounds.x).toBeGreaterThanOrEqual(8)
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8)
-        mkdirSync(shots, { recursive: true })
-        await page.screenshot({ path: `${shots}/touch-project-${view.toLowerCase()}-${width}-${theme}.png` })
-        await name.tap()
-        await expect(page).toHaveURL(/\/p\/PHAROS/)
-        expect(await page.evaluate(() => (window as Window & { clipNavigationPrevented?: boolean }).clipNavigationPrevented)).toBe(false)
-        expect(errors).toEqual([])
+        try {
+          await expectStableControls({ controls: { link, name, menu: project.getByRole('button', { name: /^Actions for/ }) }, interactions: [
+            { name: '500 ms hold reveals without navigation', run: () => hold(name) },
+            { name: 'Escape dismisses and a new hold reveals', run: async () => {
+              await page.keyboard.press('Escape')
+              await expect(page.locator('.tooltip')).toHaveCount(0)
+              await hold(name)
+            } },
+            { name: 'equal text on another record remains bound to its source', run: async () => {
+              await hold(other)
+              await hold(name)
+            } },
+          ], scrollAreas: { content: page.locator('#main') } })
+          const bounds = (await page.locator('.tooltip').boundingBox())!
+          expect(bounds.x).toBeGreaterThanOrEqual(8)
+          expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8)
+          mkdirSync(shots, { recursive: true })
+          await page.screenshot({ path: `${shots}/touch-project-${view.toLowerCase()}-${width}-${theme}.png` })
+          await name.tap()
+          await expect(page).toHaveURL(/\/p\/PHAROS/)
+          await expect(page.locator('.tooltip')).toHaveCount(0)
+          expect(errors).toEqual([])
+        } finally { await page.clock.resume(); await cdp.detach() }
       } finally { await context.close() }
     })
   }
