@@ -980,6 +980,8 @@ inbox sweeper or fail when their recipient session ends. Exact figures
 on `/agents` follow current owner sharing, including every pooled sibling.
 The internal notice step works for reporting daemons without project access;
 it sends only to leads with current access and restores the reporter's scope.
+A restarted daemon's committed heartbeat still evaluates accepted fresh
+measurements for notices while rejecting the previous generation's check facts.
 
 Matching login fingerprints are hints. In Settings → Accounts, open an account
 and choose **Pool with…**, then confirm the named accounts use the same vendor
