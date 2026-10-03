@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/inspr-at/paimos/internal/agentsecurity"
@@ -22,7 +24,12 @@ func (s *Store) vaultID(name string) string { return Hash([]byte(s.path)) + "/" 
 // A pre-created Keychain item or a hardlink refuses migration and leaves the
 // legacy 0600 file in place. That refusal does not rotate the secret or create
 // an enclave key; rotating a legacy secret is a separate pairing choice.
-func (s *Store) readVault(name string, max int64) ([]byte, error) {
+func (s *Store) readVault(name string, max int64) (_ []byte, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("read Keychain-backed state %s: %w", filepath.Join(s.path, name), resultErr)
+		}
+	}()
 	guard, err := s.lockNamed("keychain-migration.lock")
 	if err != nil {
 		return nil, err

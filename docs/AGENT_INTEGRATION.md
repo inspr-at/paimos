@@ -725,6 +725,76 @@ creation, Touch ID success/cancel, changed-biometry invalidation and Keychain AC
 refusal to a separate unsigned process before release. Local unsigned checks do
 not supply that hardware or ACL qualification.
 
+### Diagnosing paired daemon startup (AEON-667)
+
+`aeon-agentd serve --setup-root /physical/approved/root` logs startup failures
+with `slog`, including the logical file or operation and its path. It never logs
+file contents. Missing files retain `errors.Is(err, os.ErrNotExist)` semantics;
+ownership, symlink, mode and executable checks remain enforced.
+
+A plain macOS `go build` (even with `CGO_ENABLED=1` and the release version
+ldflag) does **not** select the Keychain backend. That backend requires
+`-tags aeon_enclave`. After a signed daemon has migrated a pairing, an ordinary
+build still reads `runtime.json`, then fails reading
+`<setup-root>/pairing.json` in `pairedPreflight → SyncFences → Engine.load →
+Store.Read → openFile`. The source file was removed by `readVault` after its
+verified Keychain import. `runtime.key` is likewise absent, but comes later.
+An empty root instead fails at `runtime.json`. `status` can exit successfully
+when the pairing snapshot is absent: it reports provisioning, which does not
+prove that the process can start the paired daemon. Diagnose the named failure
+on the affected host before assuming its pairing was migrated.
+
+Startup file inventory (paths below are relative to the approved setup root
+unless stated otherwise):
+
+| Stage | Reads and checks | Install-layout dependency |
+| --- | --- | --- |
+| Runtime | Private physical root and ancestors; `runtime.json`; in an enclave build, protected `pairing.json` before using the runtime origin | Keychain backend is selected at build time; its ACL validates the running daemon signature, not the Homebrew directory |
+| Lifecycle preflight | `setup.lock`, `pairing.json`; Keychain reads may acquire `keychain-migration.lock` and inspect/import the same legacy disk file; snapshot writes are atomic | Keychain item identity includes the exact physical setup-root path |
+| Optional existing-daemon observation / fences | `daemon/control.json`, referenced socket and `.token`; offline instance lock, journal, checkpoint and `dispatch-fence-all.json` / `dispatch-fence-<account-hash>.json` | Long socket paths use `$HOME/.aeon/run/<state-hash>.sock`; HOME/setup root must agree, independently of binary location |
+| Runtime credential / attach / Touch ID | `runtime.json`, protected `pairing.json`, `runtime.key`; attach and step-up reuse protected pairing proof | Missing/denied proof disables the optional feature; no plaintext fallback after ACL denial |
+| Account pins | Approved launcher files (bounded headers), Node pins and version probes; Claude Node/SDK entry and `package.json`; executable ancestors and repository markers; attach fallback revalidates approved vendor paths | These are saved harness installations, never paths relative to the daemon executable; invalid account pins block that account without vetoing daemon startup |
+| Supervisor | Physical workspace; `daemon/aeon-agentd-<id>.lock`, `.journal`, `.checkpoint.json`, `.checks.json`, `.capacity.json` | No daemon installation dependency; absent journal/capacity files are valid fresh state |
+| Listener | Private socket directory, lifetime `.sock.lock`, socket, `.token`, legacy `.owner.json` and recognized `.s<hex>` residue; then writes `daemon/control.json` | Socket lifetime and inode ownership checks apply to dev builds too |
+
+Gemini/OpenCode adapter construction only stores their approved homes and
+executable pins. Home/config checks occur when probing or launching those
+harnesses, not as a prerequisite to constructing the daemon. `service.json`,
+launchd/systemd unit ownership, `ServiceExecutable` and `managedExecutable`
+belong to setup/service management, not direct paired `serve`. Only service
+installation maps Homebrew `Cellar/aeon-agentd/<version>/bin/aeon-agentd` to its
+verified `opt` link, or `~/.local/lib/aeon/...` to `~/.local/bin/aeon-agentd`.
+Direct serve has no Homebrew-only or `/tmp`-binary prohibition.
+
+There is no developer flag or environment variable that allows an unsigned
+build to use a migrated real pairing. Adding `aeon_enclave` alone still fails
+the native signed-daemon check. Keep the existing pairing intact: do not copy
+its capabilities back to disk, change Keychain ACLs, substitute HOME, or weaken
+ownership checks. The real-root verification route is a candidate produced by
+the existing approved Darwin release/signing pipeline, with the required team,
+identifier and hardened runtime. Once the coordinator has arranged a drained,
+stopped installed service, OPS can verify and run that signed candidate from a
+separate physical path:
+
+```sh
+codesign -dv /physical/candidate/aeon-agentd
+codesign --verify --strict --test-requirement="=notarized" /physical/candidate/aeon-agentd
+/physical/candidate/aeon-agentd serve --setup-root "$HOME/Library/Application Support/aeon/paired"
+```
+
+Use the actual approved physical setup-root path if it differs. Preserve the
+installed artifact and service definition for the coordinator's normal restart
+after verification; do not run two daemons on that root. No signing credentials
+are available to branch/PR workers. Before a signed candidate exists, the safe
+development route is the synthetic local tests below; these do not use an
+operator pairing, Keychain, harness login or production server:
+
+```sh
+GOMAXPROCS=2 go test -p 2 ./internal/agentsetup -run 'Test(StartupFileErrors|MigratedPairing|ServiceExecutableLayout)'
+GOMAXPROCS=2 go test -p 2 ./cmd/aeon-agentd -run TestServeStartupLogsExactMissingFile
+GOMAXPROCS=2 go test -p 2 -tags aeon_enclave ./internal/agentsecurity
+```
+
 ### Signed release daemon (AEON-285)
 
 Release darwin `paimos-agentd` is signed with **Developer ID Application:

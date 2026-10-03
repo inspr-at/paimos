@@ -140,26 +140,26 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if err != nil {
 		var tooLong *agentsetup.SocketPathLengthError
 		if errors.As(err, &tooLong) {
-			return fmt.Errorf("%w Use a shorter --setup-root.", err)
+			return fmt.Errorf("resolve daemon socket in %s: %w Use a shorter --setup-root.", state, err)
 		}
-		return err
+		return fmt.Errorf("resolve daemon socket in %s: %w", state, err)
 	}
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
-		return err
+		return fmt.Errorf("load runtime configuration %s: %w", filepath.Join(root, agentsetup.RuntimeName), err)
 	}
 	// The independent lifecycle proof must be usable before runtime Me. A
 	// revoked key cannot prevent cold-start tombstone discovery/fencing.
 	permitted, err := pairedPreflight(ctx, root, c.Origin, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("paired lifecycle preflight %s: %w", root, err)
 	}
 	if !permitted {
 		return nil
 	} // successful intentional exit; helper owns cleanup
 	c, key, err := agentsetup.ReadRuntime(root)
 	if err != nil {
-		return err
+		return fmt.Errorf("load paired runtime %s: %w", root, err)
 	}
 	accounts, adapters, err := pairedAdapters(c)
 	if err != nil {
@@ -174,14 +174,14 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	stepUps, stepErr := pairedStepUp(root, c, remote)
 	if stepErr != nil {
-		slog.Warn("Touch ID step-up disabled; check pairing status")
+		slog.Warn("Touch ID step-up disabled; check pairing status", "error", stepErr)
 	} else {
 		defer stepUps.Close()
 	}
 	s, err := agentd.NewSupervisor(ctx, agentd.Config{StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
 		PollDiagnostic: func(reason string) { slog.Warn("agentd polling diagnostic", "reason", reason) }})
 	if err != nil {
-		return err
+		return fmt.Errorf("initialize daemon state %s: %w", state, err)
 	}
 	defer s.Close(context.Background())
 	if s.TenantID() != c.TenantID || s.PrincipalID() != c.PrincipalID {
@@ -201,7 +201,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	local, err := agentd.ServePairedLocal(s, socket, watches)
 	if err != nil {
-		return err
+		return fmt.Errorf("start local daemon socket %s: %w", socket, err)
 	}
 	defer local.Close()
 	store, err := agentsetup.OpenStore(state, false)

@@ -68,16 +68,22 @@ func ReadPrivateFile(path string, max int64) ([]byte, error) {
 
 // openDirectory also anchors user-service directories, which may conventionally
 // be 0755. Their ancestors still cannot be writable by any other user.
-func openDirectory(path string, create, private bool) (*Store, error) {
+func openDirectory(path string, create, private bool) (_ *Store, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("open state directory %s: %w", path, resultErr)
+		}
+	}()
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
 		return nil, ErrUnsafePath
 	}
 	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, ErrUnsafePath
+		return nil, fmt.Errorf("%w: open /: %w", ErrUnsafePath, err)
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for i, part := range parts {
+		component := "/" + filepath.Join(parts[:i+1]...)
 		if !validName(part) {
 			unix.Close(fd)
 			return nil, ErrUnsafePath
@@ -89,28 +95,28 @@ func openDirectory(path string, create, private bool) (*Store, error) {
 			}
 			if e != nil {
 				unix.Close(fd)
-				return nil, ErrUnsafePath
+				return nil, fmt.Errorf("%w: create directory %s: %w", ErrUnsafePath, component, e)
 			}
 			next, e = unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		}
 		unix.Close(fd)
 		if e != nil {
 			if errors.Is(e, unix.ENOENT) {
-				return nil, os.ErrNotExist
+				return nil, fmt.Errorf("open directory %s: %w", component, os.ErrNotExist)
 			}
-			return nil, ErrUnsafePath
+			return nil, fmt.Errorf("%w: open directory %s: %w", ErrUnsafePath, component, e)
 		}
 		fd = next
 		var st unix.Stat_t
-		if unix.Fstat(fd, &st) != nil {
+		if err := unix.Fstat(fd, &st); err != nil {
 			unix.Close(fd)
-			return nil, ErrUnsafePath
+			return nil, fmt.Errorf("%w: stat directory %s: %w", ErrUnsafePath, component, err)
 		}
 		owned := int(st.Uid) == os.Getuid()
 		trustedParent := (owned || st.Uid == 0) && (st.Mode&0022 == 0 || st.Uid == 0 && st.Mode&unix.S_ISVTX != 0)
 		if !trustedParent || i == len(parts)-1 && (!owned || private && st.Mode&0777 != 0700) {
 			unix.Close(fd)
-			return nil, ErrUnsafePath
+			return nil, fmt.Errorf("validate directory %s: %w", component, ErrUnsafePath)
 		}
 	}
 	return &Store{root: os.NewFile(uintptr(fd), "private-state"), path: path}, nil
@@ -145,7 +151,12 @@ func (s *Store) lockNamed(name string) (*os.File, error) {
 
 // The injectable syscall keeps EINTR and replacement races testable without a
 // process-global hook. Lock files are permanent: never unlink or rename them.
-func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (*os.File, error) {
+func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (_ *os.File, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("acquire state lock %s: %w", filepath.Join(s.path, name), resultErr)
+		}
+	}()
 	if !validName(name) || s.root == nil {
 		return nil, ErrUnsafePath
 	}
@@ -245,7 +256,12 @@ func (s *Store) open(name string, flags int) (*os.File, error) {
 	return s.openFile(name, flags, false)
 }
 
-func (s *Store) openFile(name string, flags int, snapshotRead bool) (*os.File, error) {
+func (s *Store) openFile(name string, flags int, snapshotRead bool) (_ *os.File, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("open private file %s: %w", filepath.Join(s.path, name), resultErr)
+		}
+	}()
 	if !validName(name) || s.root == nil {
 		return nil, ErrUnsafePath
 	}
@@ -254,13 +270,13 @@ func (s *Store) openFile(name string, flags int, snapshotRead bool) (*os.File, e
 		if errors.Is(err, unix.ENOENT) {
 			return nil, os.ErrNotExist
 		}
-		return nil, ErrUnsafePath
+		return nil, fmt.Errorf("%w: %w", ErrUnsafePath, err)
 	}
 	f := os.NewFile(uintptr(fd), "private-file")
 	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil {
+	if err := unix.Fstat(fd, &st); err != nil {
 		f.Close()
-		return nil, ErrUnsafePath
+		return nil, fmt.Errorf("%w: stat private file: %w", ErrUnsafePath, err)
 	}
 	// Atomic replacement can unlink the snapshot after openat, before fstat.
 	// Its opened inode remains a consistent read-only snapshot. No other read
@@ -279,7 +295,15 @@ func (s *Store) readSnapshot() ([]byte, error) { return s.readFile(snapshotName,
 
 func (s *Store) Read(name string, max int64) ([]byte, error) { return s.readFile(name, max, false) }
 
-func (s *Store) readFile(name string, max int64, snapshotRead bool) ([]byte, error) {
+func (s *Store) readFile(name string, max int64, snapshotRead bool) (_ []byte, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			if s.vault == nil && runtime.GOOS == "darwin" && vaultedName(name) && errors.Is(resultErr, os.ErrNotExist) {
+				resultErr = fmt.Errorf("%w; this macOS build has no Keychain support; if pairing was migrated to Keychain, use the signed aeon_enclave release daemon (CGO_ENABLED=1 alone is insufficient)", resultErr)
+			}
+			resultErr = fmt.Errorf("read private state %s: %w", filepath.Join(s.path, name), resultErr)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.vault != nil && vaultedName(name) {
@@ -291,7 +315,10 @@ func (s *Store) readFile(name string, max int64, snapshotRead bool) ([]byte, err
 	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, max+1))
-	if err != nil || int64(len(b)) > max {
+	if err != nil {
+		return nil, fmt.Errorf("read private file: %w", err)
+	}
+	if int64(len(b)) > max {
 		return nil, errors.New("private state exceeds bound or is unreadable")
 	}
 	return b, nil
@@ -299,7 +326,12 @@ func (s *Store) readFile(name string, max int64, snapshotRead bool) ([]byte, err
 
 // Write commits a complete file durably. createOnly uses the platform's atomic
 // exclusive rename; interruption never leaves a second hardlink to an identity.
-func (s *Store) Write(name string, raw []byte, createOnly bool) error {
+func (s *Store) Write(name string, raw []byte, createOnly bool) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("write private state %s: %w", filepath.Join(s.path, name), resultErr)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !validName(name) || len(raw) > 1<<20 {
@@ -332,7 +364,7 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) error {
 	}
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
-		return errors.New("private state write failed")
+		return fmt.Errorf("private state write failed: %w", errors.Join(err, closeErr))
 	}
 	if createOnly {
 		err = renameExclusive(int(s.root.Fd()), tmp, name)
@@ -342,8 +374,11 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) error {
 	if errors.Is(err, unix.EEXIST) {
 		return ErrCollision
 	}
-	if err != nil || unix.Fsync(int(s.root.Fd())) != nil {
-		return errors.New("private state commit failed")
+	if err != nil {
+		return fmt.Errorf("commit private state: %w", err)
+	}
+	if err := unix.Fsync(int(s.root.Fd())); err != nil {
+		return fmt.Errorf("sync private state directory %s: %w", s.path, err)
 	}
 	return nil
 }

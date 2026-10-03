@@ -209,12 +209,18 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		return nil, errors.New("invalid daemon configuration")
 	}
 	physical, err := filepath.EvalSymlinks(c.Workspace)
-	if err != nil || !filepath.IsAbs(c.Workspace) || physical != c.Workspace {
-		return nil, errors.New("workspace must be an existing physical absolute path")
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace %s: %w", c.Workspace, err)
+	}
+	if !filepath.IsAbs(c.Workspace) || physical != c.Workspace {
+		return nil, fmt.Errorf("workspace %s must be an existing physical absolute path", c.Workspace)
 	}
 	info, err := os.Stat(physical)
-	if err != nil || !info.IsDir() {
-		return nil, errors.New("workspace is not a directory")
+	if err != nil {
+		return nil, fmt.Errorf("stat workspace %s: %w", physical, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("workspace %s is not a directory", physical)
 	}
 	tenantID, principalID, err := c.API.Identity(ctx)
 	if err != nil {
