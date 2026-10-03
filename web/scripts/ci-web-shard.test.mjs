@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   balanceShards, checkCoverage, discoverSpecs, loadManifest, main, parseArgs,
-  parseShard, planCommands, retryCount, validateManifest, mergeReports, webRoot,
+  parseShard, planCommands, planFlakeRetry, retryCount, validateManifest, mergeReports, webRoot,
 } from './ci-web-shard.mjs'
 
 const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project: null,
@@ -107,7 +107,7 @@ test('real manifest covers every UI spec once for 1, 12 and 256 shards, includin
   assert.ok(expected.includes('tests/quotes/print-receipt.spec.ts'))
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
   for (const count of [1, 12, 256]) {
-    assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count), expected), { specs: expected.length, shards: count })
+    assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), { specs: expected.length, shards: count })
   }
   const access = manifest.groups.find(g => g.id === 'access-dialogs')
   assert.equal(access.hostedOnly, true)
@@ -124,8 +124,11 @@ test('real manifest covers every UI spec once for 1, 12 and 256 shards, includin
 test('list/check launch no process and checks are wired into the existing CI unit script', async () => {
   const forbiddenRun = async () => { assert.fail('Browser-free mode launched a process') }
   const output = []
-  assert.equal(await main(['--check', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
+  assert.equal(await main(['--check', '--all', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   assert.equal(JSON.parse(output.pop()).specs, discoverSpecs().length)
+  assert.equal(await main(['--check', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
+  const gate = JSON.parse(output.pop())
+  assert.equal(gate.specs + gate.ungated, discoverSpecs().length)
   assert.equal(await main(['--list', '1/12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   assert.equal(JSON.parse(output.pop()).length, 1)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts
@@ -148,7 +151,7 @@ test('runner is hosted-only, runs groups sequentially, retains failure and stops
     return { code: calls.length === 1 ? 1 : 0 }
   }
   assert.equal(await main(['1/1'], { manifest, env, run, out: () => {} }), 1)
-  assert.equal(calls.length, manifest.groups.length)
+  assert.equal(calls.length, manifest.groups.filter(g => g.gate !== false).length)
   assert.equal(calls.find(call => call.options.env.AEON_DESK_SHOTS).options.env.AEON_DESK_SHOTS, '/tmp/runner/aeon-desk-shots')
   let interruptedCalls = 0
   assert.equal(await main(['1/1'], { env, out: () => {}, run: async () => { interruptedCalls++; return { code: 143 } } }), 143)
@@ -222,4 +225,60 @@ test('wrapper JSON output aggregates every group and cannot reuse a stale green 
   writeFileSync(path, JSON.stringify(report))
   assert.equal(await main(['1/12'], { env, run: async () => ({ code: 143 }), reportDirectory, out: () => {} }), 143)
   assert.equal(readFileSync(path, 'utf8'), '', 'interruption retained an old green aggregate')
+})
+
+test('a flake retry selects exactly one test in its original group and fails closed otherwise', async () => {
+  const manifest = loadManifest(), env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PW_RETRIES: '0' }
+  const planned = planCommands(manifest, balanceShards(manifest, 12)[0], env, webRoot)
+  const spec = planned[0].files[0]
+  const test = { file: spec, line: 12, column: 3, title: 'suite › case', project: '' }
+  const withTests = (...tests) => ({ ...env, CI_FLAKE_PLAYWRIGHT_TESTS: JSON.stringify(tests), PW_GREP: '(?:^| )suite case$' })
+  const retryEnv = withTests(test)
+  const [only] = planFlakeRetry(planned, retryEnv, webRoot)
+  assert.deepEqual(only.files, [spec])
+  assert.equal(only.args.filter(arg => arg.startsWith('^')).length, 1)
+  assert.equal(only.args[only.args.indexOf('--grep') + 1], retryEnv.PW_GREP)
+  assert.ok(only.args.includes('--retries=0'))
+  // Reporter paths relative to the config testDir resolve to the same spec.
+  assert.deepEqual(planFlakeRetry(planned, withTests({ ...test, file: spec.replace(/^[^/]+\//, '') }), webRoot)[0].files, [spec])
+  for (const bad of [
+    { ...env, CI_FLAKE_PLAYWRIGHT_TESTS: 'not json', PW_GREP: 'x' },
+    withTests(),
+    withTests(test, test),
+    { ...retryEnv, PW_GREP: '' },
+    withTests({ ...test, file: 'tests/not-in-this-shard.spec.ts' }),
+    withTests({ ...test, title: '' }),
+  ]) assert.throws(() => planFlakeRetry(planned, bad, webRoot))
+  const projectCommand = planned.find(command => command.args.includes('--project'))
+  if (projectCommand) {
+    const other = { ...test, file: projectCommand.files[0], project: 'other-project' }
+    assert.throws(() => planFlakeRetry(planned, withTests(other), webRoot), /differs from group project/)
+  }
+  const calls = []
+  const run = async args => { calls.push(args); return { code: 0 } }
+  assert.equal(await main(['1/12'], { manifest, env: retryEnv, run, out: () => {} }), 0)
+  assert.equal(calls.length, 1, 'retry ran more than one group')
+  await assert.rejects(main(['1/12', '--last-failed'], { manifest, env: retryEnv, run, out: () => {} }), /cannot combine/)
+})
+
+test('ungated groups stay declared and checked but only run with --all', () => {
+  const manifest = fixture()
+  manifest.groups[1].gate = false
+  const gate = balanceShards(manifest, 2), all = balanceShards(manifest, 2, { all: true })
+  assert.deepEqual(gate.flatMap(s => s.specs.map(t => t.groupId)).sort(), ['a', 'a', 'a'])
+  assert.equal(all.flatMap(s => s.specs).length, 6)
+  assert.deepEqual(checkCoverage(manifest, gate, files(manifest)), { specs: 3, shards: 2, ungated: 3 })
+  assert.deepEqual(checkCoverage(manifest, all, files(manifest), { all: true }), { specs: 6, shards: 2 })
+  assert.throws(() => checkCoverage(manifest, all, files(manifest)), /Ungated spec in a gate shard/)
+  assert.throws(() => checkCoverage(manifest, gate, files(manifest), { all: true }), /Spec missing from shards/)
+  assert.throws(() => checkCoverage(manifest, gate, files(manifest).slice(1)), /Stale manifest spec/)
+  manifest.groups[1].gate = 'no'
+  assert.throws(() => validateManifest(manifest), /Invalid gate/)
+  assert.equal(parseArgs(['--all', '1/12']).all, true)
+  assert.equal(parseArgs(['1/12']).all, undefined)
+  const real = loadManifest()
+  assert.equal(real.groups.find(g => g.id === 'remaining-ui').gate, false)
+  const gated = balanceShards(real, 12).flatMap(s => s.specs)
+  assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
+  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
 })

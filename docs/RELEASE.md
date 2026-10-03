@@ -246,7 +246,11 @@ system libraries. The shard command is `npm --prefix web run ci:web:shard --
 i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
-cancelled or skipped setup/shards.
+cancelled or skipped setup/shards. The shards run today's measured gate scope
+(49 specs); the 164 specs of the `remaining-ui` group are declared in
+`web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
+follow-up ticket measures them. A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
+reruns exactly one test in its original config group.
 
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below

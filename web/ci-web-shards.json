@@ -20,6 +20,7 @@
     }
   },
   "integrationNotes": [
+    "OPS: group remaining-ui is ungated (gate:false). These 164 specs were never part of the CI gate and have no measured timing; the gate keeps today's measured coverage so the merge queue gets faster, not wider. Run them with --all (ci:web:shard -- --all i/N); a follow-up ticket measures them and decides whether they gate.",
     "The old workflow discovers no full-suite step: it explicitly selects 48 UI specs (37 in web). The manifest covers all 213 UI specs once; 165 have no measured CI step duration.",
     "Remove the replaced browser invocations, including overlaps in footer/status/e2e jobs, when wiring the full UI shards. Keep their other checks and collect evidence from the shards. Otherwise those old jobs still duplicate manifest coverage.",
     "Prior-revision release capture is a different product revision and must stay separate. Preserve git source restoration and -g release list screenshot there.",
@@ -1171,6 +1172,7 @@
     },
     {
       "id": "remaining-ui",
+      "gate": false,
       "config": "playwright.ui.config.ts",
       "project": null,
       "flags": [

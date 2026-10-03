@@ -36,6 +36,7 @@ export function validateManifest(manifest) {
       throw new Error(`Selection flags belong in the manifest fields, not flags: ${group.id}`)
     }
     if (typeof group.env !== 'object' || group.env === null || Object.values(group.env).some(v => typeof v !== 'string')) throw new Error(`Invalid env in ${group.id}`)
+    if (group.gate !== undefined && typeof group.gate !== 'boolean') throw new Error(`Invalid gate in ${group.id}`)
     if (typeof group.hostedOnly !== 'boolean' || !Array.isArray(group.specs) || !group.specs.length) throw new Error(`Invalid specs/policy in ${group.id}`)
     for (const spec of group.specs) {
       if (!/^(?:tests|e2e)\/[a-zA-Z0-9_/-]+\.spec\.ts$/.test(spec.file ?? '')) throw new Error(`Invalid spec path: ${spec.file}`)
@@ -53,11 +54,14 @@ export function loadManifest(path = manifestPath) {
 
 // Longest-processing-time scheduling. File names break weight ties, and the
 // lowest shard index breaks load ties; manifest order cannot change assignment.
-export function balanceShards(manifest, count) {
+// Groups with gate:false are declared (so drift is still caught) but only run with all:true.
+export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
+
+export function balanceShards(manifest, count, { all = false } = {}) {
   validateManifest(manifest)
   parseShard(`1/${count}`)
   const shards = Array.from({ length: count }, (_, i) => ({ index: i + 1, weightSeconds: 0, specs: [] }))
-  const specs = manifest.groups.flatMap(group => group.specs.map(spec => ({ ...spec, groupId: group.id })))
+  const specs = gatedGroups(manifest, all).flatMap(group => group.specs.map(spec => ({ ...spec, groupId: group.id })))
     .sort((a, b) => b.weightSeconds - a.weightSeconds || compare(a.file, b.file))
   for (const spec of specs) {
     const shard = shards.reduce((best, candidate) => candidate.weightSeconds < best.weightSeconds ? candidate : best)
@@ -81,10 +85,11 @@ export function discoverSpecs(root = webRoot, directories = ['tests']) {
   return files.sort(compare)
 }
 
-export function checkCoverage(manifest, shards, expectedSpecs) {
+export function checkCoverage(manifest, shards, expectedSpecs, { all = false } = {}) {
   validateManifest(manifest)
   const expected = new Set(expectedSpecs)
   const declared = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  const required = new Set(gatedGroups(manifest, all).flatMap(group => group.specs.map(spec => spec.file)))
   const owners = new Map(manifest.groups.flatMap(group => group.specs.map(spec => [spec.file, group.id])))
   const assigned = new Set()
   for (const shard of shards) {
@@ -92,13 +97,15 @@ export function checkCoverage(manifest, shards, expectedSpecs) {
       if (assigned.has(spec.file)) throw new Error(`Spec appears in two shards: ${spec.file}`)
       if (!declared.has(spec.file)) throw new Error(`Undeclared shard spec: ${spec.file}`)
       if (owners.get(spec.file) !== spec.groupId) throw new Error(`Wrong group for shard spec: ${spec.file}`)
+      if (!required.has(spec.file)) throw new Error(`Ungated spec in a gate shard: ${spec.file}`)
       assigned.add(spec.file)
     }
   }
-  for (const file of declared) if (!assigned.has(file)) throw new Error(`Spec missing from shards: ${file}`)
+  for (const file of required) if (!assigned.has(file)) throw new Error(`Spec missing from shards: ${file}`)
   for (const file of expected) if (!declared.has(file)) throw new Error(`Spec missing from manifest: ${file}`)
   for (const file of declared) if (!expected.has(file)) throw new Error(`Stale manifest spec: ${file}`)
-  return { specs: assigned.size, shards: shards.length }
+  const ungated = declared.size - required.size
+  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}) }
 }
 
 export function retryCount(env) {
@@ -127,9 +134,38 @@ export function planCommands(manifest, shard, env = process.env, root = webRoot)
   })
 }
 
+// OPS-257: scripts/ci-flake-guard.mjs retries one failed test by exporting
+// CI_FLAKE_PLAYWRIGHT_TESTS (JSON [{file,line,title,project}]) and PW_GREP.
+// Select exactly that test in its original config group, or fail closed: a
+// retry must never rerun (and so silently green-wash) a whole shard.
+export function planFlakeRetry(commands, env, root = webRoot) {
+  let tests
+  try { tests = JSON.parse(env.CI_FLAKE_PLAYWRIGHT_TESTS) } catch { throw new Error('CI_FLAKE_PLAYWRIGHT_TESTS must be JSON') }
+  if (!Array.isArray(tests) || tests.length !== 1) throw new Error('CI_FLAKE_PLAYWRIGHT_TESTS must hold exactly one test')
+  const [test] = tests
+  if (typeof test?.file !== 'string' || !test.file || typeof test.title !== 'string' || !test.title) throw new Error('Flake retry needs file and title')
+  if (!env.PW_GREP) throw new Error('Flake retry needs PW_GREP')
+  // The reporter path is relative to the config testDir or to web/; accept both.
+  const wanted = test.file.replace(/^(?:\.\/)?(?:web\/)?/, '')
+  const matches = commands.flatMap(command => command.files
+    .filter(file => file === wanted || file.endsWith(`/${wanted}`))
+    .map(file => ({ command, file })))
+  if (matches.length !== 1) throw new Error(`Flake retry file ${test.file} matches ${matches.length} specs in this shard`)
+  const { command, file } = matches[0]
+  const projectAt = command.args.indexOf('--project')
+  if (projectAt >= 0 && test.project && command.args[projectAt + 1] !== test.project) {
+    throw new Error(`Flake retry project ${test.project} differs from group project ${command.args[projectAt + 1]}`)
+  }
+  const kept = command.args.slice(0, command.args.length - command.files.length)
+  const anchored = `^${resolve(root, file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
+  return [{ ...command, files: [file], args: [...kept,
+    ...(projectAt < 0 && test.project ? ['--project', test.project] : []),
+    '--grep', env.PW_GREP, anchored] }]
+}
+
 export function parseArgs(args, defaultCount = 12) {
   let shard, mode = 'run', count = parseShard(`1/${defaultCount}`).count
-  let lastFailed = false, testList, reporter
+  let lastFailed = false, testList, reporter, all = false
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--list' || arg === '--check') {
@@ -142,6 +178,8 @@ export function parseArgs(args, defaultCount = 12) {
       const value = args[++i]
       if (!/^\d+$/.test(value ?? '')) throw new Error('--shards requires N')
       count = parseShard(`1/${value}`).count
+    } else if (arg === '--all') {
+      all = true
     } else if (arg === '--last-failed') {
       lastFailed = true
     } else if (arg === '--test-list' || arg.startsWith('--test-list=')) {
@@ -159,7 +197,7 @@ export function parseArgs(args, defaultCount = 12) {
   if (lastFailed && testList) throw new Error('Choose one of --last-failed and --test-list')
   if (mode !== 'run' && (lastFailed || testList || reporter)) throw new Error('Retry/reporter options require run mode')
   return { mode, shard, count: shard?.count ?? count,
-    ...(lastFailed ? { lastFailed } : {}), ...(testList ? { testList } : {}), ...(reporter ? { reporter } : {}),
+    ...(all ? { all } : {}), ...(lastFailed ? { lastFailed } : {}), ...(testList ? { testList } : {}), ...(reporter ? { reporter } : {}),
   }
 }
 
@@ -183,9 +221,9 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
   readLastRun = path => JSON.parse(readFileSync(path, 'utf8')),
 } = {}) {
   const options = parseArgs(args, manifest.defaultShards ?? 12)
-  const shards = balanceShards(manifest, options.count)
+  const shards = balanceShards(manifest, options.count, { all: options.all })
   const expected = discoverSpecs(root, manifest.specDirectories ?? ['tests'])
-  const coverage = checkCoverage(manifest, shards, expected)
+  const coverage = checkCoverage(manifest, shards, expected, { all: options.all })
   for (const group of manifest.groups) if (!existsSync(resolve(root, group.config))) throw new Error(`Missing config: ${group.config}`)
   const plans = (options.shard ? [shards[options.shard.index - 1]] : shards).map(shard => ({ ...shard, commands: planCommands(manifest, shard, env, root) }))
   if (options.mode === 'check') {
@@ -204,6 +242,10 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
   }
   const reports = []
   let commands = plans[0].commands
+  if (env.CI_FLAKE_PLAYWRIGHT_TESTS) {
+    if (options.lastFailed || options.testList) throw new Error('CI_FLAKE_PLAYWRIGHT_TESTS cannot combine with --last-failed or --test-list')
+    commands = planFlakeRetry(commands, env, root)
+  }
   if (options.lastFailed) {
     // Playwright falls back to the entire selection if its last-run file is
     // absent or malformed. Preflight every group, fail closed, and skip green

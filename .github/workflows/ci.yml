@@ -210,6 +210,10 @@ jobs:
           test "${GO_TIMING}" = success
 
   # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
+  # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
+  # model-settings step ran specs that the shards now own (groups footer,
+  # status-help, status-autopilot, model-settings); their unit tests run once in
+  # web-setup via npm run test:unit.
   web-setup:
     runs-on: ubuntu-latest
     outputs:
@@ -336,6 +340,8 @@ jobs:
             ${{ runner.temp }}/aeon-release-list-shots/
             ${{ runner.temp }}/aeon-desk-shots/
             ${{ runner.temp }}/aeon-attach-shots/
+            ${{ runner.temp }}/aeon-521a-shots/
+            ${{ runner.temp }}/status-autopilot-shots/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
@@ -357,99 +363,6 @@ jobs:
           echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
           test "${WEB_SETUP}" = success
           test "${WEB_SHARD}" = success
-
-  # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
-  footer-ui:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - name: Install shells for web command tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
-      - name: Web unit tests
-        working-directory: web
-        run: npm run test:unit
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Footer and affected release/brand integration checks
-        working-directory: web
-        env:
-          AEON_SCREENSHOTS_DIR: test-results/footer-release-pill
-        run: >-
-          npx playwright test -c playwright.ui.config.ts --workers=2
-          tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts
-          tests/release-codenames.spec.ts tests/version-reveal.spec.ts
-          tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts
-          tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts
-      - name: Desktop light screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-desktop-light
-          path: web/test-results/footer-release-pill/desktop-light.png
-          if-no-files-found: error
-      - name: Desktop dark screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-desktop-dark
-          path: web/test-results/footer-release-pill/desktop-dark.png
-          if-no-files-found: error
-      - name: Phone light screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-phone-light
-          path: web/test-results/footer-release-pill/phone-light.png
-          if-no-files-found: error
-      - name: Phone dark screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-phone-dark
-          path: web/test-results/footer-release-pill/phone-dark.png
-          if-no-files-found: error
-
-  status-help-ui:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - name: Status definitions and human-check unit tests
-        working-directory: web
-        run: node --experimental-strip-types --test tests/status-definitions.test.ts tests/work.test.ts tests/activity.test.ts
-      - name: Human-check action permission regressions
-        working-directory: web
-        run: npx vitest run tests/live-ticket.unit.test.ts --maxWorkers=1 --no-file-parallelism
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Status help and human-check browser regressions
-        working-directory: web
-        env:
-          AEON_521A_SHOTS: ${{ runner.temp }}/aeon-521a-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: aeon-521a-status-help
-          path: |
-            ${{ runner.temp }}/aeon-521a-shots
-            web/test-results
-          if-no-files-found: warn
-          retention-days: 14
 
   release-check:
     runs-on: ubuntu-latest
@@ -551,35 +464,6 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
-      - name: Test workspace model provider and catalog refresh controls
-        working-directory: web
-        run: npm test -- tests/model-provider.spec.ts tests/model-refresh.spec.ts --workers=1
-
-  status-autopilot-ui:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - working-directory: web
-        run: node --experimental-strip-types --test tests/status-autopilot.test.ts
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - working-directory: web
-        env:
-          STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
-          AGENT_ACTIVITY_SHOTS: ${{ runner.temp }}/status-autopilot-shots/activity
-        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: status-autopilot-screenshots
-          path: ${{ runner.temp }}/status-autopilot-shots
 
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
   migration-compat:
