@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
+import { vClipTip } from '../lib/clipTip'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
@@ -85,6 +86,15 @@ const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
+const descriptionExpanded = ref(false)
+const descriptionClipped = ref(false)
+function measureDescription(clipped: boolean) {
+  if (!descriptionExpanded.value) descriptionClipped.value = clipped
+}
+watch([projectId, () => project.value?.description], () => {
+  descriptionExpanded.value = false
+  descriptionClipped.value = false
+})
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const queue = useWorkQueue(), releases = useReleases()
 const queueAnchor = ref<HTMLElement | null>(null)
@@ -1588,7 +1598,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
-          <p v-if="project.description" class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description }}</p>
+          <div v-if="project.description" class="description-block">
+            <button v-if="descriptionClipped || descriptionExpanded" type="button" class="description-more" :aria-expanded="descriptionExpanded" aria-controls="project-description" @click="descriptionExpanded = !descriptionExpanded">{{ descriptionExpanded ? 'Less' : 'More' }}</button>
+            <p id="project-description" v-clip-tip="{ text: project.description, onClip: measureDescription }" class="description" :class="{ expanded: descriptionExpanded }" tabindex="0">{{ project.description }}</p>
+          </div>
         </div>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
@@ -1757,17 +1770,18 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 /* The header follows its own width, not the window's: a docked ticket panel can
    leave the list as narrow as a phone on a wide screen (AEON-140). */
 .project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
-.head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.head-flex { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
 .head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
-.head-flex.with-glimpse .head-stats { align-self: end; }
-.head-flex.with-glimpse .head-main { align-self: center; }
+.head-flex.with-glimpse .head-stats, .head-flex.with-glimpse .head-main { align-self: start; }
 .head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
 .head-stats { position: relative; z-index: 1; }
-.title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-line { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
-.title-line h1 { font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-line h1 { min-width: 0; font-size: 30px; white-space: normal; overflow-wrap: anywhere; }
+.title-line .key-badge, .state-chip { flex: none; margin-top: 4px; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.description-more { display: none; }
 .head-stats { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
 .head-stats-skeleton { width: 280px; }
 .stat-placeholder { width: 100%; height: 19px; }
@@ -1858,7 +1872,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .toolbar-wrap { margin: 0 -12px; padding: 0 12px; }
   .title-line { gap: 10px; }
   .title-line h1 { font-size: 24px; }
-  .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .description-block { display: flex; flex-direction: column; }
+  .description-more { display: block; align-self: flex-start; width: 64px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .description { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .description.expanded { display: block; }
   .stat-line { flex-wrap: wrap; gap: 4px 14px; }
   .activity { display: none; }
   .hint { display: none; }

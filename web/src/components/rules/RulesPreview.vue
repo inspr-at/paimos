@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import RulesDialog from './RulesDialog.vue'
+import { vClipTip } from '../../lib/clipTip'
 import {
   HARNESS_LABEL, HARNESSES, LAYER_LABEL, ROLE_LABEL, ROLES, RulesError, budgetParts, byteSize, explainRules, mergeQuery, orderPreviewAgents, previewDenial, previewOptionLabel, rulesMessage,
   type ExplainedRule, type ExplainedRules, type ExplainedSet, type HarnessName, type NamedAgent, type RoleName, type RuleScope,
@@ -121,7 +122,7 @@ watch([projectId, role, harness, agentId], load)
   <RulesDialog title="What agents receive" lede="Each rule next to its explanation. Only published rules count." size="sheet" @close="emit('close')">
     <div class="for">
       <span class="for-label">For</span>
-      <span class="for-value">{{ forLine }}</span>
+      <span v-clip-tip="forLine" class="for-value" tabindex="0">{{ forLine }}</span>
       <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">{{ choosing ? 'Done' : 'Change' }}</button>
     </div>
     <div v-if="choosing" class="choose" role="group" aria-label="Preview for">
@@ -195,9 +196,11 @@ watch([projectId, role, harness, agentId], load)
 </template>
 
 <style scoped>
-.for { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--surface-2); }
+.for { display: flex; align-items: flex-start; gap: 6px 10px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--surface-2); }
+.for .btn { flex: none; width: 76px; justify-content: center; }
 .for-label { color: var(--ink-3); font-size: 12.5px; font-weight: 600; }
-.for-value { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Changing the preview identity must not displace its selectors or search. */
+.for-value { flex: 1; min-width: 0; height: 2lh; line-height: 1.45; font-size: 13.5px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .choose { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .choose label { display: grid; gap: 4px; min-width: 0; color: var(--ink-2); font-size: 12px; font-weight: 650; }
 .choose option:disabled { color: var(--ink-3); }
@@ -230,7 +233,7 @@ watch([projectId, role, harness, agentId], load)
 .group-cell { display: grid; gap: 2px; min-width: 0; }
 .group-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .set-name { font-size: 14px; font-weight: 650; }
-.where { color: var(--ink-3); font-size: 12.5px; }
+.where { min-width: 0; overflow-wrap: anywhere; color: var(--ink-3); font-size: 12.5px; }
 .set-bytes { margin-left: auto; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .set-tldr { display: flex; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .row { padding-top: 8px; padding-bottom: 8px; align-items: start; }
@@ -252,7 +255,7 @@ watch([projectId, role, harness, agentId], load)
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) {
   .choose { grid-template-columns: 1fr; }
-  .harness { width: 100%; }
+  .harness { width: 100%; box-sizing: border-box; flex-wrap: wrap; }
   .seg { flex: 1 1 0; padding: 0 6px; }
   .thead { display: none; }
   .row { grid-template-columns: minmax(0, 1fr); gap: 4px; }

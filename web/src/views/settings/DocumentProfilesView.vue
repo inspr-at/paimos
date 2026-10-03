@@ -550,12 +550,13 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
 
 <style scoped>
 .profiles-page { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
-.profiles-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-height: 60px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--surface-raised-2); }
-.head-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.profiles-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 16px; min-height: 60px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--surface-raised-2); }
+.head-left { display: flex; flex: 1; align-items: flex-start; gap: 10px; min-width: 0; }
+.head-left .back { flex: none; }
 .head-titles { min-width: 0; }
 .head-titles .eyebrow { font: 500 10.5px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.head-titles h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 17px/1.3 var(--font); letter-spacing: 0; color: var(--ink); }
-.head-right { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.head-titles h1 { white-space: normal; overflow-wrap: anywhere; font: 600 17px/1.3 var(--font); letter-spacing: 0; color: var(--ink); }
+.head-right { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .head-titles .dirty { color: var(--gold-ink); font-weight: 700; }
 .head-actions { display: flex; align-items: center; gap: 8px; }
 .pane-switch { display: none; }
@@ -654,8 +655,9 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
   .btn-text { display: none; }
 }
 @media (max-width: 520px) {
-  .profiles-head { padding: 8px 12px; }
-  .head-right { width: 100%; justify-content: space-between; }
+  .profiles-head { padding: 8px 12px; flex-direction: column; }
+  .head-left { width: 100%; }
+  .head-right { order: -1; width: 100%; justify-content: space-between; }
   .sections { padding: 0 12px 32px; }
   /* Touch-sized pane switch. */
   .pane-switch button { height: 36px; }

@@ -5,6 +5,7 @@ import { doneGateState, settleDoneGate } from '../lib/doneGateAsk'
 import { gateAction, gateProgress, gateTitle } from '../lib/doneGate'
 import { benefitDraft, benefitIssues, pillWords } from '../lib/ticketBenefits'
 import AppIcon from './AppIcon.vue'
+import { vClipTip } from '../lib/clipTip'
 
 const dialog = ref<HTMLDialogElement>()
 const titleId = useId()
@@ -108,7 +109,7 @@ watch(() => doneGateState.request, async (next) => {
           <h2 :id="titleId">{{ title }}</h2>
           <p class="quiet">
             <span class="id">{{ request.key }}</span>
-            <span class="name">{{ request.title }}</span>
+            <span v-clip-tip="request.title" class="name" tabindex="0">{{ request.title }}</span>
             <span v-if="progress" class="step">{{ progress }}</span>
           </p>
         </div>
@@ -193,7 +194,8 @@ watch(() => doneGateState.request, async (next) => {
 h2 { margin: 0; font-size: 18px; line-height: 1.3; text-wrap: balance; }
 .quiet { display: flex; gap: 8px; align-items: baseline; min-width: 0; margin: 4px 0 0; color: var(--ink-3); font-size: 12.5px; }
 .quiet .id { flex: none; font-family: var(--mono); letter-spacing: .02em; color: var(--ink-2); font-variant-ligatures: none; }
-.quiet .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Keep actions still between series items; clipped titles remain focusable. */
+.quiet .name { flex: 1; min-width: 0; height: 2lh; line-height: 1.4; overflow: hidden; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .quiet .step { flex: none; font-variant-numeric: tabular-nums; }
 .scroll { flex: 1; min-height: 0; margin-top: 16px; overflow: auto; overscroll-behavior: contain; }
 .languages { display: grid; gap: 14px; }

@@ -94,15 +94,15 @@ const ICONS: Record<StatKey, string[]> = {
     <div class="arrows">
       <button type="button" class="nav" aria-label="Previous stat" @click="go(-1)"><AppIcon name="chevron-left" :size="15" /></button>
       <button type="button" class="nav" aria-label="Next stat" @click="go(1)"><AppIcon name="chevron-right" :size="15" /></button>
+      <button type="button" class="nav pause" :aria-label="paused ? 'Resume automatic rotation' : 'Pause automatic rotation'" @click="toggle">
+        <AppIcon :name="paused ? 'play' : 'pause'" :size="12" />
+      </button>
     </div>
     <div class="foot">
       <span class="dots" aria-hidden="true">
         <span v-for="(s, i) in stats" :key="s.key" class="dot" :class="{ on: i === index }"><span class="fill" :style="{ width: i === index ? `${progress * 100}%` : '0%' }" /></span>
       </span>
       <span class="pos">{{ index + 1 }} / {{ stats.length }}</span>
-      <button type="button" class="nav pause" :aria-label="paused ? 'Resume automatic rotation' : 'Pause automatic rotation'" @click="toggle">
-        <AppIcon :name="paused ? 'play' : 'pause'" :size="12" />
-      </button>
     </div>
   </section>
 </template>
@@ -115,20 +115,20 @@ const ICONS: Record<StatKey, string[]> = {
 }
 .slide { display: flex; flex-direction: column; min-width: 0; }
 .slide-in { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.label { display: flex; align-items: center; gap: 8px; margin: 0; padding-right: 72px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+.label { display: flex; align-items: center; gap: 8px; margin: 0; padding-right: 108px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
 .icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); }
 .value { margin: 8px 0 0; font: 650 42px/1.05 var(--font); letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--ink); }
-.sub { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); white-space: normal; overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .stat-chip { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); font: 600 12.5px/1 var(--font); white-space: nowrap; }
 .viz { margin-top: 12px; }
-.arrows { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; }
+.arrows { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 4px; }
 .nav { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); cursor: pointer; }
 .nav:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (hover: hover) { .nav:hover { background: var(--row-hover); color: var(--teal-ink); } }
 /* Arrows wait for hover or focus where there is a pointer; touch always shows them, at 44 px. */
 @media (hover: hover) and (pointer: fine) {
-  .stat-card:not(.compact) .arrows .nav { opacity: 0; transition: opacity .16s ease; }
+  .stat-card:not(.compact) .arrows .nav:not(.pause) { opacity: 0; transition: opacity .16s ease; }
   .stat-card:not(.compact):hover .arrows .nav, .stat-card:not(.compact):focus-within .arrows .nav { opacity: 1; }
 }
 .foot { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 14px; }
@@ -141,11 +141,10 @@ const ICONS: Record<StatKey, string[]> = {
 @media (hover: none), (pointer: coarse) { .nav { width: 44px; height: 44px; } }
 /* Phones: the arrows sit in the label row, always there, 44 px. */
 .compact { padding: 16px 10px 8px 16px; }
-.compact .label { padding-right: 92px; }
+.compact .label { padding-right: 136px; }
 .compact .arrows { top: 4px; right: 4px; gap: 0; }
 .compact .nav { width: 44px; height: 44px; }
 .compact .value { font-size: 34px; }
-.compact .sub { white-space: normal; }
 /* Short screens keep the list in view: a tighter card. */
 @media (max-height: 800px) and (min-width: 761px) {
   .stat-card { padding: 16px 20px 10px; }
