@@ -51,6 +51,7 @@ type StatusError struct {
 	Status        int
 	Message       string
 	AttachRefusal string
+	ReasonCode    string
 }
 
 func (e *StatusError) Error() string {
@@ -148,9 +149,10 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		var detail struct {
 			AttachRefusal string `json:"attach_refusal"`
+			ReasonCode    string `json:"reason_code"`
 		}
 		_ = json.Unmarshal(payload, &detail)
-		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal}
+		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode}
 	}
 	if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
 		return nil
