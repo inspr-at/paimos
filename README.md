@@ -2496,6 +2496,84 @@ People with `harness.recover` permission can open **Recover** in a session’s d
 
 Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, an ownership report no more than 45 seconds old, and exact session/host/process-group confirmation. Ownership recording and freshness checks use the Postgres clock, so API-host clock skew does not reject a fresh report; future-dated observations still fail closed. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses the database-derived monotonic budget above; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Legacy normal user **Stop** sends TERM and reports timeout without escalating; the qualified Claude managed control uses native close as described above. Daemon cleanup retains its existing bounded force cleanup.
 
+### Attached owner notes (AEON-392, disabled)
+
+The server contract adds separate, single-use messaging consent to protocol-2
+attachments. Watching never grants sending. The independent helper prepares a
+snapshot/pin-bound grant; only the computer owner's same-origin browser session
+can approve it. Policy B additionally requires a fresh messaging nonce and a P-256 signature
+verified against the browser-pinned pairing key. Its signed digest includes the
+full attachment, owner, session, generation, daemon and hook tuple plus the
+canonical local prompt. Watch signatures and boolean confirmations are refused;
+activation consumes the messaging challenge atomically. Each
+re-enablement gets a fresh message generation. Turning messages off preserves
+the watch lease; message operations never renew that lease.
+
+`AEON_ATTACHED_MESSAGES=true` also requires the deployment-owner qualification
+`AEON_ATTACHED_MESSAGES_SINGLE_INSTANCE=true`. Both default off. This is an
+operator attestation, not a distributed lock or automatically verified lease:
+exactly one serving/sweeping Aeon process may use the database while enabled.
+There must be no sibling replica, overlapping rolling restart, second service,
+or separately running sweeper. Stop the old process before starting its
+replacement; disable the feature if that invariant cannot be maintained.
+The production hook-capability projection remains fail-closed until native qualification
+work lands. `internal/attachedmsg/store.go` narrows every pairing capability
+report through AEON-391's release-owned `hookcap.Project` ceiling. Tests
+inject qualified fixtures; those fixtures are not production qualification.
+
+An explicit `recipient_message_generation` always selects an attached note,
+including when messaging is disabled or its attachment has ended. Such a send
+is volatile or refused; it never falls back to durable chat. Active attachments
+also enforce the policy when a caller omits the generation or session. Ordinary
+unattached messages retain their behavior. The final durable write rechecks
+attachment status under the same fence as activation, closing the lookup gap.
+Both inbox send APIs (therefore CLI and MCP) use one attached-recipient policy.
+A person needs the exact computer ownership, live project permissions, current
+grant and `recipient_message_generation`. Agents can create only bounded
+notification metadata; their labels and sender-session fields confer no owner
+authority. Attached v1 rejects steering, action requests and reply/thread modes.
+The capability route is `/api/agent-pairing/attach/{requestId}/messages`; its
+`approve` and `revoke` subroutes are owner-only. Ordinary inbox reads, streams,
+acks, adapter claims and managed drains cannot consume these rows.
+
+Note bodies live only in the shared inbox payload service. Both message tables
+store “Attached-session note; text not retained”, with database constraints.
+Idempotency comparison uses a keyed in-memory digest; after payload loss an old
+key returns existing metadata and never recreates a note. Events are private
+metadata, and failure settlement does not copy a note to a coordinator or a
+notice. Request/SQL logging never receives the raw body. A five-minute deadline,
+a live attach lease, a 4 KiB body limit, an 8,000-character escaped frame limit,
+a session burst of three (one token per ten seconds), 30 sends/minute/computer,
+five pending notes/session, and 1 MiB/tenant plus 16 MiB/process payload ceilings
+are enforced server-side. Notifications use separate session/computer rate
+counters (the same burst/refill and 30/minute limits) and separate in-memory
+metadata limits (5/session, 1,024/tenant, 16,384/process). Their text is cleared
+before reservation. They never consume any owner-note rate or memory capacity.
+Quota failures return 429 with `Retry-After`.
+
+S2-3 must use the exported exact `Binding`/`Offer` contract, recheck
+`ValidateGrant` under the pairing fence, commit its one attempt, then use the
+single-use payload `Take`; it must never replay a body. Pass
+`Take(binding, grantID, messageID, TakeTransaction{Context: ctx, Tx: tx})` in the
+transaction that holds the pairing fence and revalidates the grant. `Take`
+locks and re-reads the exact message tuple, accepting only queued/offered rows
+before their deadline; a sibling's `content_lost` settlement denies release even
+while the old process retains RAM. Missing transaction or any SQL error fails
+closed. Existing three-argument calls still compile but return no body. Never
+expose the result before that transaction commits; a rollback loses the taken
+body rather than replaying it. Lock order is pairing
+fence → tree → tenant, then compat advisory lock, attachment/grant, session, message,
+delivery, receipt, event counter. Publication follows the metadata commit;
+rollback discards the reservation. The service epoch binds the owning process.
+Restart/disabled/expired/revoked notes settle without automatic retry. Status
+adds `attached` evidence and never treats a legacy fetch/ack as model reading.
+Negative controls run with `nix develop -c python3 scripts/check-attached-policy-mutations.py`
+and `AEON_TEST_DATABASE_URL` pointing at a disposable test database; the script
+restores exact source bytes after each owner/tuple/digest/replay mutation.
+The local credential-free hook and offer/receipt broker are separate dependent
+packages; this change does not activate delivery or managed controls.
+
+
 ### Removing ghost sessions (AEON-265)
 
 People with `harness.read` access to a project can remove a session from its

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -37,7 +38,7 @@ import (
 // The coordinator mounts this module and runs NewRoutineDispatcher per tenant
 // for server-owned grok_bot_routine webhook delivery; neither constructor
 // starts a background worker implicitly.
-func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
+func NewMessaging(pool *pgxpool.Pool, key []byte, attached ...*attachedmsg.Service) (httpapi.Module, error) {
 	if len(key) != 32 {
 		return nil, errors.New("messaging requires a 32-byte encryption key")
 	}
@@ -49,7 +50,7 @@ func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
 	if err != nil {
 		return nil, errors.New("messaging encryption unavailable")
 	}
-	return &messaging{base: newModule(pool), aead: aead}, nil
+	return &messaging{base: newModule(pool, attached...), aead: aead}, nil
 }
 
 // MessagingPlugin supplies a sealed registration for plugins.Builtin's extra
@@ -88,6 +89,9 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 // Messaging errors must not log pgx errors: they can contain private row
 // values. Return only controlled error codes, including on encryption failure.
 func messagingFailure(w http.ResponseWriter, err error) {
+	if attachedmsg.WriteError(w, err) {
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		writeError(w, he.status, he.code, he.msg)

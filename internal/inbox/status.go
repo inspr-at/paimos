@@ -17,13 +17,20 @@ import (
 // sent (accepted), delivered (handed to the recipient by a pull, drain, stream
 // or adapter claim), read (the recipient confirmed it) or not_delivered. It is
 // content-free and, like the receipt, readable only by the sender.
+type AttachedStatus struct {
+	Protocol    string  `json:"protocol"`
+	Outcome     string  `json:"outcome"`
+	ContentMode string  `json:"content_mode"`
+	Generation  *string `json:"message_generation,omitempty"`
+}
 type MessageStatus struct {
-	MessageID   string     `json:"message_id"`
-	Status      string     `json:"status"`
-	Reason      string     `json:"reason,omitempty"`
-	DeliveredAt *time.Time `json:"delivered_at"`
-	ReadAt      *time.Time `json:"read_at"`
-	DeliverBy   *time.Time `json:"deliver_by"`
+	Attached    *AttachedStatus `json:"attached,omitempty"`
+	MessageID   string          `json:"message_id"`
+	Status      string          `json:"status"`
+	Reason      string          `json:"reason,omitempty"`
+	DeliveredAt *time.Time      `json:"delivered_at"`
+	ReadAt      *time.Time      `json:"read_at"`
+	DeliverBy   *time.Time      `json:"deliver_by"`
 }
 
 const maxStatusIDs = 100
@@ -55,7 +62,7 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 	items := []MessageStatus{}
 	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = items[:0]
-		rows, err := tx.Query(r.Context(), `SELECT m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by
+		rows, err := tx.Query(r.Context(), `SELECT m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by,m.content_mode,m.attached_outcome,m.recipient_message_generation::text
  FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
  WHERE m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
 		if err != nil {
@@ -64,8 +71,9 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 		for rows.Next() {
 			var s MessageStatus
-			var state string
-			if err := rows.Scan(&s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy); err != nil {
+			var state, mode string
+			var outcome, generation *string
+			if err := rows.Scan(&s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy, &mode, &outcome, &generation); err != nil {
 				return err
 			}
 			switch {
@@ -80,6 +88,18 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 			}
 			if state != "failed" {
 				s.Reason = ""
+			}
+			if mode != "durable" {
+				s.Attached = &AttachedStatus{Protocol: "attached_messages_v1", ContentMode: mode, Generation: generation}
+				if outcome != nil {
+					s.Attached.Outcome = *outcome
+				}
+				s.DeliveredAt = nil
+				s.ReadAt = nil
+				s.Status = "sent"
+				if state == "failed" {
+					s.Status = "not_delivered"
+				}
 			}
 			items = append(items, s)
 		}

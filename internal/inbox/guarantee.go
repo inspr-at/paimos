@@ -150,7 +150,7 @@ func handOver(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, id
 		return alive, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT id::text,sender_principal_id::text,fetched_at IS NULL FROM inbox_messages
- WHERE id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
+ WHERE content_mode='durable' AND id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
  ORDER BY id FOR NO KEY UPDATE`, ids, p.ID)
 	if err != nil {
 		return nil, err
@@ -270,7 +270,7 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
  FROM inbox_messages m JOIN principals rp ON rp.tenant_id=m.tenant_id AND rp.id=m.recipient_principal_id
  LEFT JOIN harness_sessions rs ON rs.tenant_id=m.tenant_id AND rs.id=m.recipient_session_id
  LEFT JOIN harness_sessions ps ON ps.tenant_id=rs.tenant_id AND ps.id=rs.parent_id AND ps.role='coordinator' AND ps.project_id=rs.project_id
- WHERE m.id=$1::uuid FOR UPDATE OF m`, messageID).Scan(&f.tenant, &f.id, &f.sender, &f.recipient, &f.recipientName, &f.recipientSession, &f.senderSession, &f.sessionLabel, &f.parentSession, &f.parentPrincipal, &f.body, &f.createdAt, &acked)
+ WHERE m.id=$1::uuid AND m.content_mode='durable' FOR UPDATE OF m`, messageID).Scan(&f.tenant, &f.id, &f.sender, &f.recipient, &f.recipientName, &f.recipientSession, &f.senderSession, &f.sessionLabel, &f.parentSession, &f.parentPrincipal, &f.body, &f.createdAt, &acked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

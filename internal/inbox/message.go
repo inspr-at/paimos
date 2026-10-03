@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -24,20 +25,24 @@ const (
 
 // Message is one durable inbox row. AckedAt is null until the recipient acks.
 type Message struct {
-	RecipientSessionID   *string `json:"recipient_session_id,omitempty"`
-	SenderSessionID      *string `json:"sender_session_id,omitempty"`
-	SenderLabel          string  `json:"sender_label,omitempty"`
-	frozenSenderLabel    string
-	ID                   string     `json:"id"`
-	SenderPrincipalID    string     `json:"sender_principal_id"`
-	RecipientPrincipalID string     `json:"recipient_principal_id"`
-	Body                 string     `json:"body"`
-	IdempotencyKey       string     `json:"idempotency_key"`
-	ReplyToID            *string    `json:"reply_to_id,omitempty"`
-	ExpiresAt            *time.Time `json:"expires_at,omitempty"`
-	SentEventID          int64      `json:"sent_event_id"`
-	CreatedAt            time.Time  `json:"created_at"`
-	AckedAt              *time.Time `json:"acked_at"`
+	ContentMode                string     `json:"content_mode,omitempty"`
+	MessageGrantID             *string    `json:"message_grant_id,omitempty"`
+	RecipientMessageGeneration *string    `json:"recipient_message_generation,omitempty"`
+	MessageDeadline            *time.Time `json:"message_deadline,omitempty"`
+	RecipientSessionID         *string    `json:"recipient_session_id,omitempty"`
+	SenderSessionID            *string    `json:"sender_session_id,omitempty"`
+	SenderLabel                string     `json:"sender_label,omitempty"`
+	frozenSenderLabel          string
+	ID                         string     `json:"id"`
+	SenderPrincipalID          string     `json:"sender_principal_id"`
+	RecipientPrincipalID       string     `json:"recipient_principal_id"`
+	Body                       string     `json:"body"`
+	IdempotencyKey             string     `json:"idempotency_key"`
+	ReplyToID                  *string    `json:"reply_to_id,omitempty"`
+	ExpiresAt                  *time.Time `json:"expires_at,omitempty"`
+	SentEventID                int64      `json:"sent_event_id"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	AckedAt                    *time.Time `json:"acked_at"`
 }
 
 // Page is a listen result. NextAfter is the sent event id to pass as after.
@@ -71,20 +76,24 @@ func metaFrom(m Message) messageMeta {
 	}
 }
 
-const messageCols = `recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
+const messageCols = `content_mode,message_grant_id::text,recipient_message_generation::text,message_deadline,recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
 	reply_to_id::text, body, idempotency_key, expires_at, sent_event_id, created_at, acked_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var m Message
-	err := row.Scan(&m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
+	err := row.Scan(&m.ContentMode, &m.MessageGrantID, &m.RecipientMessageGeneration, &m.MessageDeadline, &m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
 		&m.Body, &m.IdempotencyKey, &m.ExpiresAt, &m.SentEventID, &m.CreatedAt, &m.AckedAt)
 	if m.RecipientSessionID != nil || m.SenderSessionID != nil {
 		m.SenderLabel = m.frozenSenderLabel
+	}
+	if m.ContentMode == "durable" {
+		m.ContentMode = ""
 	}
 	return m, err
 }
 
 type sendInput struct {
+	Generation         string
 	RecipientSessionID *string
 	SenderSessionID    *string
 	Recipient          string
@@ -104,6 +113,7 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Generation           string     `json:"recipient_message_generation"`
 		RecipientSessionID   *string    `json:"recipient_session_id"`
 		SenderSessionID      *string    `json:"sender_session_id"`
 		RecipientPrincipalID string     `json:"recipient_principal_id"`
@@ -129,7 +139,8 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	msg, err := m.send(r.Context(), p, in)
+	in.Generation = body.Generation
+	msg, err := m.send(attachedmsg.BrowserContext(r, m.attached.Origin(), p), p, in)
 	if err != nil {
 		failure(w, err)
 		return
@@ -169,8 +180,19 @@ func normalizeSend(p tenant.Principal, recipient, body, key string, reply *strin
 }
 
 func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Message, error) {
+	if handled, msg, _, err := m.tryAttached(ctx, p, "", attachedInput{Expires: in.Expires, Recipient: in.Recipient, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo}); handled || err != nil {
+		return msg, err
+	}
 	var out Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if request, err := attachedmsg.AttachmentForSend(ctx, tx, in.Recipient, in.RecipientSessionID); err != nil {
+			return err
+		} else if request != "" {
+			return attachedmsg.Fail(409, "attached_consent_required")
+		}
 		// UUIDs are fixed width, so this key aliases only when the idempotency
 		// key itself collides. Postgres text cannot store a NUL separator.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 22))`,
@@ -332,7 +354,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		// recipient and session are immutable, so an unlocked read picks the lock.
 		var recipient, sender string
 		var session *string
-		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &sender, &session)
+		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE id=$1::uuid AND content_mode='durable'`, id).Scan(&recipient, &sender, &session)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}

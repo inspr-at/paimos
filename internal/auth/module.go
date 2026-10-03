@@ -138,6 +138,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)

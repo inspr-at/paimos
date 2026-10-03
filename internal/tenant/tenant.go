@@ -18,13 +18,14 @@ const (
 
 // Principal is who acts, always inside exactly one tenant.
 type Principal struct {
-	ID           string // principals.id (uuid)
-	TenantID     string // tenants.id (uuid)
-	Kind         PrincipalKind
-	Name         string
-	Roles        []string // e.g. "admin", "member"
-	Scopes       []string // authenticated agent key's outer permission ceiling
-	KeyCreatorID string   // creator's live binding further narrows an agent key
+	BrowserSession bool   // set only after authenticating an interactive session cookie
+	ID             string // principals.id (uuid)
+	TenantID       string // tenants.id (uuid)
+	Kind           PrincipalKind
+	Name           string
+	Roles          []string // e.g. "admin", "member"
+	Scopes         []string // authenticated agent key's outer permission ceiling
+	KeyCreatorID   string   // creator's live binding further narrows an agent key
 }
 
 type ctxKey struct{}

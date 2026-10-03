@@ -30,6 +30,7 @@ import (
 	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -188,9 +189,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		go aithemaHost.Run(ctx)
 	}
 
+	attachedMessages := attachedmsg.New(attachedmsg.Options{Enabled: cfg.AttachedMessages, SingleInstance: cfg.AttachedMessagesSingleInstance, Origin: cfg.PublicURL})
+	go attachedMessages.Run(ctx, pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
-		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, attachedMessages)
 		if err != nil {
 			closeListener()
 			return fmt.Errorf("messaging: %w", err)
@@ -310,6 +313,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
 		return fmt.Errorf("account linking: %w", err)
 	}
+	pairingMod.SetAttachedMessages(attachedMessages)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
@@ -366,7 +370,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			imports.New(pool),
 			// R2: agents
-			inbox.New(pool),
+			inbox.New(pool, attachedMessages),
 			harness.New(pool, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,

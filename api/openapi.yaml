@@ -2711,6 +2711,7 @@ paths:
               schema:
                 oneOf:
                   - {$ref: '#/components/schemas/AttachView'}
+                  - {$ref: '#/components/schemas/AttachedMessageCapability'}
                   - type: object
                     required: [state]
                     additionalProperties: false
@@ -2824,6 +2825,47 @@ paths:
       responses:
         '200': {description: Detached; conversation access ends}
         '403': {description: Same-origin paired owner required}
+  /agent-pairing/attach/{requestId}/messages:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: attachedMessageCapability
+      summary: Owner-only content-free messaging grant and specific readiness blocker
+      responses:
+        '200': {description: Messaging capability, content: {application/json: {schema: {$ref: '#/components/schemas/AttachedMessageCapability'}}}}
+        '403': {description: Authenticated computer owner required}
+  /agent-pairing/attach/{requestId}/messages/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveAttachedMessages
+      summary: Allow my messages at the next step for this attachment and generation
+      description: Separate single-use approval; watch consent never grants messaging. Requires an interactive same-origin owner session and the exact digest prepared by the independent local helper. Vendor context retention and the live watch audience remain outside Aeon's text-not-retained promise. Processes running as your OS user are not isolated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [message_generation, consent_digest]
+              properties:
+                message_generation: {type: string, format: uuid}
+                consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+      responses:
+        '200': {description: Approved; policy B still requires a messaging-specific signed local confirmation, content: {application/json: {schema: {$ref: '#/components/schemas/AttachedMessageCapability'}}}}
+        '403': {description: Same-origin interactive owner required}
+        '409': {description: 'Stale generation, replay, digest mismatch, disabled feature or hook blocker'}
+  /agent-pairing/attach/{requestId}/messages/revoke:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: revokeAttachedMessages
+      summary: Turn messages off; keep watching
+      description: Stops later offers and purges queued payloads. An already released note cannot be recalled. Re-enabling needs a new generation and explicit approval.
+      responses:
+        '200': {description: Messages off; watch lease unchanged}
+        '403': {description: Same-origin interactive owner required}
   /projects/{projectId}/harness-sessions/{sessionId}/watch:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -5132,6 +5174,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSend'}}}}
       responses:
         '201': {description: Sent message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
+        '429': {description: Attached note quota exceeded, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retry}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -9891,10 +9934,10 @@ components:
             operation: {const: register}
           required: [device_proof]
         - properties:
-            operation: {enum: [request, poll, detach, exited]}
+            operation: {enum: [request, poll, detach, exited, message_request, message_activate, message_observed]}
           required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [register, request, poll, detach, exited]}
+        operation: {type: string, enum: [register, request, poll, detach, exited, message_request, message_activate, message_observed]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
         attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
@@ -9911,10 +9954,69 @@ components:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
+        message_protocol: {type: string, enum: [attached_messages_v1], description: Negotiated at registration; mandatory for message operations}
+        message_generation: {type: string, format: uuid}
+        hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_config_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        qualified_harness_version: {type: string, maxLength: 80}
+        message_consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        message_local_auth_nonce: {type: string, pattern: '^[a-f0-9]{64}$', description: Messaging-specific single-use challenge; never the watch challenge}
+        message_local_auth_signature: {type: string, maxLength: 144, description: P-256 DER signature in base64 over the messaging consent digest, nonce and canonical prompt; verified against the pairing-pinned key}
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
         doing: {type: string, maxLength: 60, description: Public summary on an active poll only; collected only in agent_summary mode.}
         tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+    AttachedMessageCapability:
+      type: object
+      required: [ready, blocker]
+      properties:
+        ready: {type: boolean}
+        blocker: {type: string, description: 'Specific disabled, consent, owner, hook, lease, generation or qualification blocker.'}
+        grant: {$ref: '#/components/schemas/AttachedMessageGrant'}
+    AttachedMessageGrant:
+      type: object
+      required: [id, binding, state, consent_digest, expires_at, snapshot, notice]
+      properties:
+        id: {type: string, format: uuid}
+        binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        notice: {type: string, description: 'Server-authored vendor retention, live-watch audience and same-user isolation limits'}
+        state: {type: string, enum: [pending, approved, active, revoked]}
+        consent_digest: {type: string}
+        expires_at: {type: string, format: date-time}
+        message_local_auth_nonce: {type: string, description: Present after policy B approval; consumed atomically by activation}
+    AttachedMessageBinding:
+      type: object
+      description: Immutable consent tuple. Each operation rechecks every field and the live attachment lease; message operations never renew it.
+      required: [tenant_id, project_id, attach_request_id, session_id, computer_id, owner_id, message_generation, daemon_epoch, hook_release_digest, hook_config_digest, qualified_harness_version, scope, consent_policy, snapshot_digest, service_epoch]
+      properties:
+        tenant_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        attach_request_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        message_generation: {type: string, format: uuid}
+        daemon_epoch: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_config_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        qualified_harness_version: {type: string, maxLength: 80}
+        scope: {type: string, const: owner_messages}
+        consent_policy: {type: string, enum: [aeon, local_auth]}
+        snapshot_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        service_epoch: {type: string, format: uuid}
+    AttachedMessageOffer:
+      type: object
+      description: S2-3 integration contract; single attempt committed before releasing body, never replayed. This schema grants no new HTTP drain route.
+      required: [binding, grant_id, delivery_id, message_id, deadline, nonce, body]
+      properties:
+        binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        grant_id: {type: string, format: uuid}
+        delivery_id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        deadline: {type: string, format: date-time}
+        nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        body: {type: string, maxLength: 4096, description: 'Volatile UTF-8, 4096 bytes maximum; full escaped frame at most 8000 characters. Never logged or persisted.'}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
@@ -13216,6 +13318,7 @@ components:
       properties:
         recipient_principal_id: {type: string, format: uuid}
         recipient_session_id: {type: string, format: uuid, description: 'Optional exact active recipient generation; stopped or archived sessions return 409.'}
+        recipient_message_generation: {type: string, format: uuid, description: 'Required for attached owner notes. Cannot be inherited by a new grant. Attached sends use 5-minute volatile payloads and may return 429 with Retry-After.'}
         sender_session_id: {type: string, format: uuid, description: 'Optional active session owned by the authenticated sender; freezes its label.'}
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
@@ -13226,6 +13329,7 @@ components:
       additionalProperties: false
       required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason]
       properties:
+        attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
         message_id: {type: string, format: uuid}
         idempotency_key: {type: string}
         tenant: {type: string, description: Tenant slug}
@@ -13239,11 +13343,20 @@ components:
         state: {type: string, enum: [queued, handed_off, failed]}
         handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
         failure_reason: {type: string}
+    AttachedMessageStatus:
+      type: object
+      required: [protocol, outcome, content_mode]
+      properties:
+        protocol: {type: string, const: attached_messages_v1}
+        outcome: {type: string, enum: [queued, notification_only, offered, shown, completed, not_delivered, cancelled, expired, uncertain]}
+        content_mode: {type: string, enum: [attached_volatile, attached_notification]}
+        message_generation: {type: string, format: uuid}
     InboxMessageStatus:
       type: object
       additionalProperties: false
       required: [message_id, status, delivered_at, read_at, deliver_by]
       properties:
+        attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
         message_id: {type: string, format: uuid}
         status: {type: string, enum: [sent, delivered, read, not_delivered]}
         reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
@@ -13267,6 +13380,9 @@ components:
             id: {type: string, format: uuid}
             sender_principal_id: {type: string, format: uuid}
             sender_label: {type: string, description: Frozen at send time; returned for session-aware reads}
+            content_mode: {type: string, enum: [durable, attached_volatile, attached_notification]}
+            message_grant_id: {type: string, format: uuid}
+            message_deadline: {type: string, format: date-time}
             sent_event_id: {type: integer, format: int64}
             created_at: {type: string, format: date-time}
             acked_at: {type: [string, 'null'], format: date-time}
