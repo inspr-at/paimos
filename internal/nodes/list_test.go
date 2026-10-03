@@ -204,6 +204,20 @@ func assertTenantEmpty(t *testing.T, p tenant.Principal, path string) {
 }
 
 func TestList6000Performance(t *testing.T) {
+	testList6000Performance(t)
+}
+
+func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
+	newPrincipal(t, "previous-list-kind-statistics")
+	if _, err := appPool.Exec(t.Context(), `ANALYZE node_kinds`); err != nil {
+		t.Fatal(err)
+	}
+	traceListQueries(t)
+	testList6000Performance(t)
+}
+
+func testList6000Performance(t *testing.T) {
+	t.Helper()
 	p := newPrincipal(t, "large-list")
 	project := kindBySlug(t, p, "project")
 	ticket := kindBySlug(t, p, "ticket")
