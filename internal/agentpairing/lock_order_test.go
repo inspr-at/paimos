@@ -13,7 +13,7 @@ import (
 )
 
 // TestTenantTreePairingLockOrder inventories every direct advisory/tenant lock
-// and lock-helper call in these five packages. The shipped order is pairing ->
+// and lock-helper call in these six packages. The shipped order is pairing ->
 // tree -> tenant -> resource rows; access-only writers omit pairing/tree. Keep
 // the exact primitive sequences here: checking only callers missed the previous
 // inversions inside shared helpers. New call sites must join this inventory.
@@ -60,9 +60,20 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/occurrence.go:runNow":                  "recurrence.lock",
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",
 		"operatoractor/actor.go:EnsureWithProduction":       "tree tenant:UPDATE",
+		"delivery/store.go:fence":                           "project.Write",
+		"delivery/store.go:mutate":                          "delivery.fence",
+		"delivery/store.go:Plan":                            "delivery.Mutation",
+		"delivery/store.go:Rerank":                          "delivery.Mutation",
+		"delivery/store.go:PromoteRelease":                  "delivery.Mutation",
+		"delivery/store.go:SetEntryDeadline":                "delivery.Mutation",
+		"delivery/placement.go:Place":                       "delivery.Mutation",
+		"delivery/transition.go:Transition":                 "delivery.Mutation",
+		"delivery/transition.go:Publish":                    "delivery.Mutation publication.PublishTx",
+		"delivery/undo.go:undoPlacements":                   "delivery.fence",
+		"delivery/undo.go:undoRank":                         "delivery.fence",
 	}
 	got := map[string]string{}
-	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor"} {
+	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor", "delivery"} {
 		files, err := filepath.Glob(filepath.Join("..", pkg, "*.go"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("inventory %s: files=%d err=%v", pkg, len(files), err)
@@ -98,7 +109,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		}
 	}
 	if reflect.DeepEqual(got, want) {
-		t.Logf("verified %d lock sites across five packages", len(got))
+		t.Logf("verified %d lock sites across six packages", len(got))
 	}
 }
 
@@ -196,6 +207,16 @@ func lockOrderSequence(t *testing.T, pkg string, body *ast.BlockStmt) []string {
 			}
 			if pkg == "operatoractor" && name == "EnsureWithProduction" {
 				label = "operator.EnsureWithProduction"
+			}
+			if pkg == "delivery" {
+				switch name {
+				case "fence":
+					label = "delivery.fence"
+				case "s.mutate":
+					label = "delivery.Mutation"
+				case "statusautopilot.PublishTx":
+					label = "publication.PublishTx"
+				}
 			}
 			if label != "" {
 				sequence = append(sequence, label)
