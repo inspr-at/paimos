@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -24,7 +25,7 @@ import (
 )
 
 // Pause the review after its pairing lock, before workorders.Create takes the
-// tree lock. The queue mutation must wait for pairing without holding the tree.
+// resource rows. Queue mutation now waits at the shared tenant fence before tree/pairing.
 type reviewLockPause struct {
 	first  atomic.Bool
 	locked chan uint32
@@ -92,7 +93,7 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 	}()
 	for {
 		var waiting bool
-		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks held JOIN pg_locks waiting USING(locktype,database,classid,objid,objsubid) WHERE held.pid=$1 AND held.locktype='advisory' AND held.granted AND NOT waiting.granted)`, pid).Scan(&waiting)
+		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity a WHERE a.datname=current_database() AND $1::int=ANY(pg_blocking_pids(a.pid)) AND a.query LIKE '%FROM tenants WHERE%FOR NO KEY UPDATE%')`, pid).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,8 +102,9 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("queue did not wait for pairing lock")
-		case <-time.After(10 * time.Millisecond):
+			t.Fatal("queue did not wait for the shared tenant fence")
+		default:
+			runtime.Gosched()
 		}
 	}
 	close(pause.resume)
@@ -231,9 +233,8 @@ func TestTicketQueueTwoAgentsClaimOneRunExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestTicketQueueReadsPollAndTelemetryDoNotTakeTreeLock(t *testing.T) {
+func TestTicketQueueAndRunReadsDoNotTakeTreeLock(t *testing.T) {
 	f := setup(t)
-	run := f.claim(t, f.run(t, f.order(t, nil)))
 	ctx := tenant.WithPrincipal(t.Context(), f.person)
 	err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
@@ -246,8 +247,6 @@ func TestTicketQueueReadsPollAndTelemetryDoNotTakeTreeLock(t *testing.T) {
 		}{
 			{f.person, "GET", "/api/queue", nil},
 			{f.person, "GET", "/api/runs", nil},
-			{f.agent, "GET", "/api/runs/queued", nil},
-			{f.agent, "POST", "/api/runs/" + run.ID + "/telemetry", agentruns.Telemetry{Sequence: 1, Kind: "heartbeat"}},
 		} {
 			requestCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			body, _ := json.Marshal(tc.body)

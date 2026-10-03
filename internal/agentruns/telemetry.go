@@ -3,6 +3,7 @@
 package agentruns
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -13,6 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -146,32 +150,62 @@ func sameTelemetry(a, b Telemetry) bool {
 	}
 	return true
 }
-func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var t Telemetry
-	if err := workorders.Decode(r, &t); err != nil {
-		return nil, err
+
+type telemetryContextKey struct{}
+
+func lockTelemetryTarget(ctx context.Context, tx pgx.Tx, runID string) error {
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return err
 	}
-	if err := t.validate(); err != nil {
-		return nil, err
+	var target *string
+	if err := tx.QueryRow(ctx, `SELECT n.parent_id::text FROM agent_runs r JOIN nodes n ON n.id=r.work_order_id WHERE r.id=$1`, runID).Scan(&target); err != nil {
+		return err
+	}
+	if target != nil {
+		if _, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE id=$1 FOR UPDATE`, *target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// telemetryAuthority is repeated before setup and inside the final mutation.
+// Target/tree always precede order/run/account; replay checks precede setup.
+func telemetryAuthority(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, t Telemetry) (Run, workorders.Order, bool, error) {
+	var v Run
+	var o workorders.Order
+	var err error
+	if err := lockTelemetryTarget(ctx, tx, r.PathValue("runId")); err != nil {
+		return v, o, false, err
 	}
 	daemon, generation := r.Header.Get(DaemonHeader), r.Header.Get(GenerationHeader)
 	if !identifier(daemon) || !identifier(generation) {
-		return nil, workorders.Fail(400, "daemon fencing headers required")
+		return v, o, false, workorders.Fail(400, "daemon fencing headers required")
 	}
-	ctx := r.Context()
-	v, o, err := lockRun(ctx, tx, r.PathValue("runId"))
+	v, o, err = lockRun(ctx, tx, r.PathValue("runId"))
 	if err != nil {
-		return nil, err
+		return v, o, false, err
+	}
+	var project *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&project); err != nil {
+		return v, o, false, err
+	}
+	scope := authz.Scope{}
+	if project != nil {
+		scope.ProjectID = *project
+	}
+	if err := authz.RequireTx(ctx, tx, p, "run.telemetry", scope); err != nil {
+		return v, o, false, err
 	}
 	if v.DaemonID == nil || v.Generation == nil || *v.DaemonID != daemon || *v.Generation != generation {
-		return nil, workorders.Fail(409, "daemon generation conflict")
+		return v, o, false, workorders.Fail(409, "daemon generation conflict")
 	}
 	if err = claimPermission(ctx, tx, p, v); err != nil {
-		return nil, err
+		return v, o, false, err
 	}
 	if v.AccountID != nil {
 		if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, true); err != nil {
-			return nil, err
+			return v, o, false, err
 		}
 	}
 	var owner, accountDaemon string
@@ -180,42 +214,96 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	// not race between ownership verification and committing a running report.
 	if err = tx.QueryRow(ctx, `SELECT registered_by_principal_id::text,daemon_id,last_daemon_generation
 	 FROM agent_accounts WHERE id=$1 FOR UPDATE`, v.AccountID).Scan(&owner, &accountDaemon, &accountGeneration); err != nil {
-		return nil, err
+		return v, o, false, err
 	}
 	if owner != p.ID || accountDaemon != daemon || accountGeneration == nil || *accountGeneration != generation {
-		return nil, workorders.Fail(403, "current daemon account owner required")
+		return v, o, false, workorders.Fail(403, "current daemon account owner required")
 	}
 	// 0201 stores only numeric telemetry. The immutable R1 event preserves the
 	// complete canonical report for replay of status/model/error fields as well.
-	canonical, err := json.Marshal(t)
-	if err != nil {
-		return nil, err
-	}
 	var previous json.RawMessage
 	err = tx.QueryRow(ctx, `SELECT e.after->'report' FROM events e WHERE e.node_id=$1 AND e.type='run.telemetry'
 	 AND e.after->>'run_id'=$2 AND e.after->>'sequence'=$3 ORDER BY e.id DESC LIMIT 1`, o.NodeID, v.ID, strconv.FormatInt(t.Sequence, 10)).Scan(&previous)
 	if err == nil {
 		var old Telemetry
 		if err = json.Unmarshal(previous, &old); err != nil {
-			return nil, err
+			return v, o, false, err
 		}
 		if !sameTelemetry(old, t) {
-			return nil, workorders.Fail(409, "divergent telemetry replay")
+			return v, o, false, workorders.Fail(409, "divergent telemetry replay")
 		}
-		return v, nil
+		return v, o, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+		return v, o, false, err
 	}
 	var last int64
 	if err = tx.QueryRow(ctx, `SELECT coalesce(max(sequence),0) FROM run_telemetry WHERE run_id=$1`, v.ID).Scan(&last); err != nil {
-		return nil, err
+		return v, o, false, err
 	}
 	if t.Sequence <= last {
-		return nil, workorders.Fail(409, "telemetry sequence is not monotonic")
+		return v, o, false, workorders.Fail(409, "telemetry sequence is not monotonic")
 	}
 	if v.Status == "queued" || terminal(v.Status) {
-		return nil, workorders.Fail(409, "run is not live")
+		return v, o, false, workorders.Fail(409, "run is not live")
+	}
+	if t.Input > math.MaxInt64-v.InputTokens || t.Output > math.MaxInt64-v.OutputTokens || t.Cached > math.MaxInt64-v.CachedInputTokens || t.Reasoning > math.MaxInt64-v.ReasoningTokens || t.Cost > math.MaxInt64-v.Cost ||
+		v.CachedInputTokens > 1_000_000_000_000-t.Cached || v.ReasoningTokens > 1_000_000_000_000-t.Reasoning {
+		return v, o, false, workorders.Fail(400, "usage counter overflow")
+	}
+	if t.ReviewRange != nil && v.ReadOnlyReview {
+		return v, o, false, workorders.Fail(400, "reviewers cannot request recursive reviews")
+	}
+	return v, o, false, nil
+}
+
+func (m *module) prepareTelemetry(r *http.Request, p tenant.Principal) (*http.Request, error) {
+	var t Telemetry
+	if err := workorders.Decode(r, &t); err != nil {
+		return nil, err
+	}
+	if err := t.validate(); err != nil {
+		return nil, err
+	}
+	if !identifier(r.Header.Get(DaemonHeader)) || !identifier(r.Header.Get(GenerationHeader)) {
+		return nil, workorders.Fail(400, "daemon fencing headers required")
+	}
+	if t.ReviewRange != nil && m.reviews != nil {
+		if m.prepare == nil {
+			return nil, errors.New("completion catalog preparation collaborator required")
+		}
+		if err := modelregistry.PrepareCatalog(r.Context(), m.pool, p, modelregistry.CatalogPreparation{
+			Operation: modelregistry.CatalogCompletion, Request: r,
+			Authorize: func(ctx context.Context, tx pgx.Tx, current tenant.Principal) (bool, error) {
+				_, _, replay, err := telemetryAuthority(ctx, tx, r, current, t)
+				if err != nil || replay {
+					return false, err
+				}
+				return m.prepare(ctx, tx, current, r.PathValue("runId"), *t.ReviewRange)
+			},
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return r.WithContext(context.WithValue(r.Context(), telemetryContextKey{}, t)), nil
+}
+
+func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	t, ok := r.Context().Value(telemetryContextKey{}).(Telemetry)
+	if !ok {
+		return nil, errors.New("telemetry intent was not decoded")
+	}
+	ctx := r.Context()
+	v, o, replay, err := telemetryAuthority(ctx, tx, r, p, t)
+	if err != nil {
+		return nil, err
+	}
+	if replay {
+		return v, nil
+	}
+	canonical, err := json.Marshal(t)
+	if err != nil {
+		return nil, err
 	}
 	status := v.Status
 	if t.Status != "" {
@@ -228,13 +316,7 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if status == "starting" && v.Status != "starting" {
 		return nil, workorders.Fail(409, "run cannot return to starting")
 	}
-	if t.Input > math.MaxInt64-v.InputTokens || t.Output > math.MaxInt64-v.OutputTokens || t.Cached > math.MaxInt64-v.CachedInputTokens || t.Reasoning > math.MaxInt64-v.ReasoningTokens || t.Cost > math.MaxInt64-v.Cost ||
-		v.CachedInputTokens > 1_000_000_000_000-t.Cached || v.ReasoningTokens > 1_000_000_000_000-t.Reasoning {
-		return nil, workorders.Fail(400, "usage counter overflow")
-	}
-	if t.ReviewRange != nil && v.ReadOnlyReview {
-		return nil, workorders.Fail(400, "reviewers cannot request recursive reviews")
-	}
+	var pending []events.Change
 	before := v
 	model, evidence := v.EffectiveModel, v.ModelEvidence
 	if t.Model != "" {
@@ -257,23 +339,23 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	if m.usage != nil {
-		if err = m.usage(ctx, tx, p, v, t); err != nil {
+		if err = m.usage(ctx, tx, p, v, t, &pending); err != nil {
 			return nil, err
 		}
 	}
 	if terminal(v.Status) && v.AccountID != nil {
-		if err = agentpairing.FinishDrain(ctx, tx, *v.AccountID); err != nil {
+		if err = agentpairing.FinishDrainDeferred(ctx, tx, *v.AccountID, &pending); err != nil {
 			return nil, err
 		}
 	}
 	if err = armVendorRetry(ctx, tx, v); err != nil {
 		return nil, err
 	}
-	if err = workorders.BlockBudget(ctx, tx, p, o); err != nil {
+	if err = workorders.BlockBudgetDeferred(ctx, tx, p, o, &pending); err != nil {
 		return nil, err
 	}
 	if t.ReviewRange != nil && m.reviews != nil {
-		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange); err != nil {
+		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange, &pending); err != nil {
 			return nil, err
 		}
 	}
@@ -283,5 +365,11 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		Report   json.RawMessage `json:"report"`
 		Run      Run             `json:"run"`
 	}{v.ID, t.Sequence, canonical, v}
-	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.telemetry", before, after)
+	pending = append(pending, events.Change{NodeID: &o.NodeID, Type: "run.telemetry", Before: before, After: after})
+	for _, change := range pending {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return nil, err
+		}
+	}
+	return v, nil
 }

@@ -75,22 +75,22 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 	return err
 }
 
-func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	var n int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+		return nil, err
 	}
 	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+		return prepareAdditionalCatalog(ctx, tx, p)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
-		return err
+		return nil, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+		return nil, err
 	}
 	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+		return prepareAdditionalCatalog(ctx, tx, p)
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -101,7 +101,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ids[profile.Slug] = row.ID
 		seeded = append(seeded, row)
@@ -110,18 +110,18 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	for _, route := range defaultRoutes(profiles) {
 		id := ids[route.Slug]
 		if id == "" {
-			return fail(http.StatusInternalServerError, "catalog route is missing its profile")
+			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
 		}
 		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
 		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return err
+			return nil, err
 		}
 		routes = append(routes, stored)
 	}
-	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
+	return []events.Change{{Type: evSeeded, After: struct {
 		Profiles []Profile `json:"profiles"`
 		Routes   []Route   `json:"routes"`
-	}{seeded, routes})
+	}{seeded, routes}}}, nil
 }
 
 func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
@@ -255,15 +255,20 @@ func validateProfile(in profileWrite) error {
 	return nil
 }
 
-func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+func normalizeProfileWrite(in profileWrite) profileWrite {
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)
 	in.Effort = strings.TrimSpace(in.Effort)
+	return in
+}
+
+func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+	in = normalizeProfileWrite(in)
 	if err := validateProfile(in); err != nil {
 		return Profile{}, err
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := requireCatalog(ctx, tx); err != nil {
 		return Profile{}, err
 	}
 	out, err := insertProfile(ctx, tx, p.TenantID, in)
@@ -280,7 +285,7 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 	if incoming == nil {
 		return nil, fail(http.StatusBadRequest, "routes must be an array")
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := requireCatalog(ctx, tx); err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeRoutes(incoming, now)

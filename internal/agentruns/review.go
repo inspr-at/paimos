@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -18,6 +19,21 @@ import (
 // immutable review binding and an already selected, approved account. Public
 // RunCreate continues to restrict agents to their own ordinary runs.
 func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorders.Order, agentID, profileID, accountID string, personID *string, residency string, trace json.RawMessage) (Run, error) {
+	var pending []events.Change
+	run, err := QueueReviewDeferred(ctx, tx, p, o, agentID, profileID, accountID, personID, residency, trace, &pending)
+	if err != nil {
+		return run, err
+	}
+	for _, change := range pending {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return Run{}, err
+		}
+	}
+	return run, nil
+}
+
+// QueueReviewDeferred contributes resources and snapshots to its caller's batch.
+func QueueReviewDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorders.Order, agentID, profileID, accountID string, personID *string, residency string, trace json.RawMessage, pending *[]events.Change) (Run, error) {
 	if o.Kind != "review" || o.Review == nil || o.Review.ProfileID == nil || *o.Review.ProfileID != profileID || o.Assignee == nil || *o.Assignee != agentID || o.Review.ReviewerFamily == nil || *o.Review.ReviewerFamily == o.Review.AuthorFamily || !reviewgate.ValidFamily(o.Review.AuthorFamily) {
 		return Run{}, workorders.Fail(409, "independent review binding required")
 	}
@@ -42,5 +58,6 @@ func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorder
 	if _, err = tx.Exec(ctx, `UPDATE work_order_reviews SET run_id=$2 WHERE work_order_id=$1 AND run_id IS NULL`, o.NodeID, v.ID); err != nil {
 		return v, err
 	}
-	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v)
+	*pending = append(*pending, events.Change{NodeID: &o.NodeID, Type: "run.created", After: v})
+	return v, nil
 }

@@ -4,12 +4,22 @@
 // profile catalog, an ordered role ladder, and role resolution.
 //
 // New returns an httpapi.Module. The coordinator mounts it; this package does
-// not edit cmd/aeon. The first use of an empty registry seeds the classic
+// not edit cmd/aeon. The first use of an empty registry seeds the versioned
 // static catalog and its default ladders (scout, mechanical, build,
-// build-hard, review-gate) inside the caller's tenant transaction. Profiles
+// build-hard, review-gate) in a separately committed preparation transaction,
+// authorized under tenant/tree/pairing and registry fences for its initiating
+// operation. Missing required profiles are added without replacing saved policy;
+// intentionally empty role ladders stay empty. Injected resolvers are read-only
+// and return ErrCatalogNotReady for incomplete setup. Profiles
 // are insert-only. Replacing routes never rewrites a profile, so an expired
 // suppression leaves history intact and simply stops matching once valid_until
 // has passed.
+//
+// Boundary integration: the present checkout has no preference GET or placement
+// HTTP resolver. Their owners must call PrepareCatalog(CatalogRead) before their
+// read snapshot, with an adapter repeating current target/canonical-person
+// restrictions. Existing model list/legacy resolve/profile/whole-tenant replace
+// and both review entries are adapted here; ladder GET never initializes.
 //
 // Resolve walks the stored ladder. review-gate requires author_family and
 // skips that family.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -68,13 +69,16 @@ type Run struct {
 // UsageRecorder lets the account module settle its own allowance projections
 // atomically with accepted telemetry. It runs once for each new sequence, never
 // for replay, inside the existing tenant transaction. It must not commit or
-// start a second transaction. The coordinator supplies it when mounting both
+// start a second transaction or append events itself. It adds changes to the
+// caller-owned batch. The coordinator supplies it when mounting both
 // modules. A nil recorder performs no account settlement; production wiring
 // must supply the account module's recorder when account allowances are enabled.
-type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry) error
-type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) error
+type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry, *[]events.Change) error
+type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange, *[]events.Change) error
+type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
 	reviews CompletionReviewer
+	prepare CompletionPreparer
 	pool    *pgxpool.Pool
 	usage   UsageRecorder
 }
@@ -91,8 +95,8 @@ func New(pool *pgxpool.Pool, recorder ...UsageRecorder) httpapi.Module {
 }
 
 // NewWithReviews atomically requests a review when a builder reports its range.
-func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionReviewer) httpapi.Module {
-	return &module{pool: pool, usage: usage, reviews: reviews}
+func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionReviewer, prepare CompletionPreparer) httpapi.Module {
+	return &module{pool: pool, usage: usage, reviews: reviews, prepare: prepare}
 }
 func (m *module) Mount(mux *http.ServeMux) {
 	m.mountQueue(mux)
@@ -109,11 +113,16 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"POST /api/runs/{runId}/capacity-override", "run.create", false, 200, m.runNow},
 		{"POST /api/runs/{runId}/cancel", "run.create", false, 200, m.cancel},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
-		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {
 		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-			if err := agentpairing.Lock(r.Context(), tx); err != nil {
-				return nil, err
+			var lockErr error
+			if r.Method == http.MethodGet && route.pattern != "GET /api/runs/queued" {
+				lockErr = agentpairing.LockRead(r.Context(), tx)
+			} else {
+				lockErr = agentpairing.Lock(r.Context(), tx)
+			}
+			if lockErr != nil {
+				return nil, lockErr
 			}
 			if route.pattern == "POST /api/runs/{runId}/claim" {
 				if err := queueLock(r.Context(), tx); err != nil {
@@ -121,13 +130,27 @@ func (m *module) Mount(mux *http.ServeMux) {
 				}
 			}
 			v, err := route.fn(r, tx, p)
-			var pe *agentpairing.Error
-			if errors.As(err, &pe) {
-				return nil, workorders.Fail(pe.Status, pe.Code)
-			}
-			return v, err
+			return v, pairingRunError(err)
 		}))
 	}
+	mux.HandleFunc("POST /api/runs/{runId}/telemetry", workorders.EndpointPrepared(m.pool, "run.telemetry", true, 200,
+		func(r *http.Request, p tenant.Principal) (*http.Request, error) {
+			prepared, err := m.prepareTelemetry(r, p)
+			return prepared, pairingRunError(err)
+		},
+		func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+			out, err := m.telemetry(r, tx, p)
+			return out, pairingRunError(err)
+		}))
+}
+
+// Keep lifecycle refusals identical across prepared and ordinary run entries.
+func pairingRunError(err error) error {
+	var pe *agentpairing.Error
+	if errors.As(err, &pe) {
+		return workorders.Fail(pe.Status, pe.Code)
+	}
+	return err
 }
 
 // row_version is the run's own revision (AEON-449): a trigger bumps it inside every
@@ -200,10 +223,11 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	return v, err
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if err := retryVendorStops(r.Context(), tx, p); err != nil {
+	var pending []events.Change
+	if err := retryVendorStops(r.Context(), tx, p, &pending); err != nil {
 		return nil, err
 	}
-	if err := agentpairing.ExpireUnclaimedVerifications(r.Context(), tx); err != nil {
+	if err := agentpairing.ExpireUnclaimedVerificationsDeferred(r.Context(), tx, &pending); err != nil {
 		return nil, err
 	}
 	limit, err := workorders.Limit(r)
@@ -245,6 +269,12 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	rows.Close()
+	// Retry, expiry/drain and activity-note resources are complete before events.
+	for _, change := range pending {
+		if _, err := events.Append(r.Context(), tx, p, change); err != nil {
+			return nil, err
+		}
+	}
 	// The daemon poll is agent-only and does not compute per-run wait.
 	// People read that advisory on the run list and the run itself.
 	return out, nil

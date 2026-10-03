@@ -5247,7 +5247,7 @@ paths:
     post:
       operationId: requestTicketReview
       summary: Queue an independent managed review of a commit range
-      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection. Catalog preparation repeats current initiating-key and target permissions in its own fenced transaction. Review resources and their ordered events then commit atomically; replay retains the original immutable binding.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
@@ -6618,7 +6618,7 @@ paths:
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
-      description: Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch.
+      description: Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. The bounded report is decoded before catalog preparation. Eligible build completion, usage settlement, budget blocking, review resources and their ordered events commit together. Identical accepted sequence replay does not settle or queue twice; divergent replay is refused before setup.
       security: [{agentKey: []}]
       parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunTelemetry'}}}}
@@ -6667,6 +6667,7 @@ paths:
   /models:
     get:
       operationId: listModelProfiles
+      description: Catalog preparation commits separately under current read authority before the model snapshot is loaded. Denied preparation creates no profiles, routes or seed events.
       security: *auth
       responses:
         '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}

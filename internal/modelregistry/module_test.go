@@ -4,6 +4,8 @@ package modelregistry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -97,6 +99,9 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 		t.Fatalf("principal: %v", err)
 	}
 	dbtest.BindLegacy(t, testDB, tenantID, id)
+	if kind == "agent" && len(roles) > 0 {
+		dbtest.BindRole(t, testDB, tenantID, id, roles[0])
+	}
 	k := tenant.Person
 	if kind == "agent" {
 		k = tenant.Agent
@@ -116,6 +121,19 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 	}
 	if p != nil {
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), *p))
+		if p.Kind == tenant.Agent {
+			// A real scoped fixture key; current scopes are read from storage.
+			prefix := strings.ReplaceAll(p.ID, "-", "")
+			secret := "model-read-fixture"
+			sum := sha256.Sum256([]byte(secret))
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'fixture',$3,$4,ARRAY['models.read']) ON CONFLICT(prefix) DO NOTHING`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]))
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_"+secret)
+		}
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, r)
@@ -160,7 +178,7 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
 	member := addPrincipal(t, admin.TenantID, "person", "Mo", []string{"member"})
-	agent := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	agent := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
 	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
 
 	status, body := call(t, nil, http.MethodGet, "/api/models", "")
@@ -280,7 +298,7 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
-	agent := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	agent := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
 	luna := profileBySlug(profiles, "codex-luna-medium")
 	haiku := profileBySlug(profiles, "claude-haiku-medium")

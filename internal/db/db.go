@@ -83,6 +83,13 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 
 type transactionContextKey struct{}
 
+// HasTransaction identifies a retained outer transaction. Independent preparation
+// must refuse such a context instead of hiding a nested savepoint commit in it.
+func HasTransaction(ctx context.Context) bool {
+	_, ok := ctx.Value(transactionContextKey{}).(pgx.Tx)
+	return ok
+}
+
 // InTransaction groups sequential InTenant calls into one atomic unit. Each
 // tenant operation still enters its own savepoint and sets its RLS context.
 // Callers must pass the supplied context to every operation in the unit.

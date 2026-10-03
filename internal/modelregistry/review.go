@@ -52,6 +52,9 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if author == "" {
 		return out, fail(400, "known author family required")
 	}
+	if err := requireCatalog(ctx, tx); err != nil {
+		return out, err
+	}
 	chain, trace, requirement, err := placementTrace(ctx, tx, q)
 	if err != nil {
 		return out, err
@@ -63,9 +66,6 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		out.Trace.Blocked = "security review ladder not available (AEON-485)"
 		out.Trace.Hard = []string{"security_review"}
 		return out, nil
-	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
-		return out, err
 	}
 	steps, err := loadLadder(ctx, tx, out.Role)
 	if err != nil {

@@ -228,6 +228,15 @@ func TestPoliciesLadderStatementTimeout503NoPartialAnswer(t *testing.T) {
 func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "snapshot", "person", "Owner", []string{"admin"})
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := ensureCatalog(t.Context(), tx, p); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	displayRoutesFixture(t, p, 2)
 	old := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
 	now := time.Date(2026, 10, 2, 18, 0, 0, 0, time.UTC)
