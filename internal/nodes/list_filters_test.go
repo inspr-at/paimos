@@ -183,6 +183,24 @@ func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
 			t.Errorf("%s filtered node visits = %.0f, want one pass over 6001 nodes", name, visits)
 		}
 	}
+	// The response also loads planning for just this page. Check the actual
+	// subtree work, so an accidental scan of all 6000 tickets per selected
+	// parent fails even on a machine fast enough to meet the latency budget.
+	status, body := call(t, &p, http.MethodGet, path, "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	if len(page.Items) != 50 || page.Facets["kind"]["ticket"] != 2058 {
+		t.Fatal("stale-statistics fixture lost its filtered tickets or selected page")
+	}
+	ids := make([]string, len(page.Items))
+	for i, item := range page.Items {
+		ids[i] = item.ID
+	}
+	plan := logPagePlanningPerformancePlan(t, p, ids)
+	found, rows, visits := planningSubtreeWork(plan, false)
+	t.Logf("page subtree rows=%.0f, node visits=%.0f", rows, visits)
+	if !found || rows != float64(len(ids)) || visits > float64(2*len(ids)) {
+		t.Fatalf("page subtree work: found=%t rows=%.0f visits=%.0f, want %d roots and at most %d node visits", found, rows, visits, len(ids), 2*len(ids))
+	}
 }
 
 func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {

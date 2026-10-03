@@ -194,3 +194,92 @@ func safePerformancePlan(value any) any {
 		return nil
 	}
 }
+
+// Capture the real page-money statement, with the same RLS, rates and IDs as
+// loadPlanMicros. EXPLAIN runs only for this synthetic fixture, after timing.
+type pagePlanningExplainTx struct {
+	pgx.Tx
+	plan any
+}
+
+func (tx *pagePlanningExplainTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "planning_values AS MATERIALIZED") {
+		var raw []byte
+		if err := tx.Tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON, TIMING OFF) "+sql, args...).Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &tx.plan); err != nil {
+			return nil, err
+		}
+	}
+	return tx.Tx.Query(ctx, sql, args...)
+}
+func logPagePlanningPerformancePlan(t *testing.T, p tenant.Principal, ids []string) any {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), 12*time.Second)
+	defer cancel()
+	ctx = db.WithReadStatementTimeout(ctx, 5*time.Second)
+	var plan any
+	err := New(appPool, nil).(*Module).tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		seen, err := assigneeAudience(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		recording := &pagePlanningExplainTx{Tx: tx}
+		seeds, err := loadPlanRows(ctx, tx, ids, planningViewer(ctx, tx))
+		if err != nil {
+			return err
+		}
+		money, err := loadPlanMicros(ctx, recording, ids, seen, seeds)
+		if err != nil {
+			return err
+		}
+		if len(money) != len(ids) {
+			return fmt.Errorf("planning rows = %d, want %d", len(money), len(ids))
+		}
+		plan = safePerformancePlan(recording.plan)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("planning performance diagnostics failed: %T (statement timeout=%t)", err, db.IsStatementTimeout(err))
+	}
+	clean, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("page planning plan: %s", clean)
+	return plan
+}
+
+// Count node visits only within the subtree CTE. The fixture has no children,
+// so scanning all tenant tickets for every selected row is wasted work.
+func planningSubtreeWork(value any, subtree bool) (found bool, rows, visits float64) {
+	switch value := value.(type) {
+	case []any:
+		for _, item := range value {
+			f, r, v := planningSubtreeWork(item, subtree)
+			found = found || f
+			rows += r
+			visits += v
+		}
+	case map[string]any:
+		if value["Subplan Name"] == "CTE plan_sub" {
+			found = true
+			rows, _ = value["Actual Rows"].(float64)
+			subtree = true
+		}
+		if subtree && value["Relation Name"] == "nodes" {
+			n, _ := value["Actual Rows"].(float64)
+			removed, _ := value["Rows Removed by Filter"].(float64)
+			loops, _ := value["Actual Loops"].(float64)
+			visits += (n + removed) * loops
+		}
+		for _, key := range []string{"Plan", "Plans"} {
+			f, r, v := planningSubtreeWork(value[key], subtree)
+			found = found || f
+			rows += r
+			visits += v
+		}
+	}
+	return
+}
