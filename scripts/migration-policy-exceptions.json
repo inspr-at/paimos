@@ -55,6 +55,12 @@
       "sha256": "5b289f99f660914f99861c22ba126dc09983d48c2811e735aa08af66a956ecc6",
       "ticket": "AEON-641",
       "reason": "Additive tenant themes and owner-only selections, with a fixed Porcelain seed for existing and future tenants. The classifier conservatively flags the tenant-loop DO backfill, ON CONFLICT DO NOTHING in the seed function, and REVOKE EXECUTE on fixed SECURITY DEFINER seed helpers. The events SELECT policy restricts only the new theme.* namespace; existing event types and previous-binary writes are unchanged. No existing table, column, route or constraint is removed. Exact bytes require coordinator review before merge/release and do not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
+      "file": "1207_theme_principal_links.sql",
+      "sha256": "b36580b2db5f33313979904aade6ab21979b09144136a4011a58e657bd7824ab",
+      "ticket": "AEON-641",
+      "reason": "Preserve immutable theme owners, choice rows and append-only audit through current principal links. Only theme-specific policies and guards change; no existing data, non-theme policy, route or column is removed. ALTER POLICY and CREATE OR REPLACE FUNCTION require this exact-byte coordinator-reviewed exception before merge/release, plus normal previous-binary compatibility probes. It grants no approval or release authority."
     }
   ]
 }

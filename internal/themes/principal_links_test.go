@@ -64,6 +64,8 @@ func TestLinkedThemeOwnershipAuditAndUndo(t *testing.T) {
 	f := setup(t)
 	old := mustTheme(t, f.s, f.member, "Before linking", "personal")
 	created := lastEvent(t, f, "theme.created")
+	untouched := mustTheme(t, f.s, f.member, "Undo through canonical identity", "personal")
+	untouchedCreated := lastEvent(t, f, "theme.created")
 	linkPeople(t, f, f.member, f.other)
 	for _, p := range []tenant.Principal{f.member, f.other} {
 		got, err := f.s.Get(t.Context(), p, old.ID)
@@ -87,8 +89,11 @@ func TestLinkedThemeOwnershipAuditAndUndo(t *testing.T) {
 	if newTheme.OwnerPrincipalID == nil || *newTheme.OwnerPrincipalID != f.other.ID {
 		t.Fatalf("new theme did not use canonical owner: %+v", newTheme)
 	}
-	// A canonical member (without events.undo_other) can undo the alias's
-	// original creation; use a fresh, unchanged record to satisfy snapshot CAS.
+	// A canonical member (without events.undo_other) can undo the alias's creation.
+	undo(t, f, f.other, untouchedCreated, 201)
+	if _, err := f.s.Get(t.Context(), f.other, untouched.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("linked creation undo did not delete the theme: %v", err)
+	}
 	// The original creation is stale after edits; it must fail for CAS, not authority.
 	undo(t, f, f.other, created, 409)
 	unlinkPerson(t, f, f.member)
@@ -101,6 +106,45 @@ func TestLinkedThemeOwnershipAuditAndUndo(t *testing.T) {
 	if err := f.s.Delete(t.Context(), f.member, old.ID, got.Revision); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestLinkedSelectionsUseDeterministicAliasPriorityAndExplicitDefault(t *testing.T) {
+	f := setup(t)
+	a := mustTheme(t, f.s, f.member, "First alias", "personal")
+	b := mustTheme(t, f.s, f.other, "Second alias", "personal")
+	for _, c := range []struct {
+		person tenant.Principal
+		theme  Theme
+	}{{f.member, a}, {f.other, b}} {
+		if _, err := f.s.Select(t.Context(), c.person, SelectionInput{ThemeID: &c.theme.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linkPeople(t, f, f.member, f.owner)
+	linkPeople(t, f, f.other, f.owner)
+	winner := a
+	if f.other.ID < f.member.ID {
+		winner = b
+	}
+	for _, p := range []tenant.Principal{f.owner, f.member, f.other} {
+		assertActive(t, f, p, winner.ID, 1)
+	}
+	// Seed an explicit canonical choice to model the collision without editing
+	// either alias row. A saved null means default, never "no saved choice".
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision) VALUES($1,$2,NULL,7)`, f.owner.TenantID, f.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	def, err := f.s.Active(t.Context(), f.owner)
+	if err != nil || def.Theme.Scope != "default" || def.Revision != 7 {
+		t.Fatalf("explicit canonical default lost to aliases: %+v %v", def, err)
+	}
+	assertActive(t, f, f.member, def.Theme.ID, 7)
+	assertActive(t, f, f.other, def.Theme.ID, 7)
+	unlinkPerson(t, f, f.member)
+	unlinkPerson(t, f, f.other)
+	assertActive(t, f, f.member, a.ID, 1)
+	assertActive(t, f, f.other, b.ID, 1)
+	assertActive(t, f, f.owner, def.Theme.ID, 7)
 }
 
 func TestLinkedSelectionInheritanceCollisionAndUndo(t *testing.T) {
@@ -175,9 +219,20 @@ func TestUnlinkHidesASelectionFromTheFormerLinkedPerson(t *testing.T) {
 	assertPrivate(t, f, f.member, canonicalTheme, f.other.ID)
 	undo(t, f, f.member, selected, 201) // The alias's row returns to its own theme.
 	assertActive(t, f, f.member, old.ID, 3)
-	// A later choice keeps normal revision/CAS after the row is recovered.
-	if _, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: nil, Revision: 3}); err != nil {
+	// Another link/unlink leaves a before-snapshot that is now private. Undo
+	// must reject that restore, rather than report success or leak the theme.
+	linkPeople(t, f, f.member, f.other)
+	if _, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &canonicalTheme.ID, Revision: 3}); err != nil {
 		t.Fatal(err)
+	}
+	unlinkPerson(t, f, f.member)
+	if _, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: nil, Revision: 4}); err != nil {
+		t.Fatal(err)
+	}
+	undo(t, f, f.member, lastEvent(t, f, "theme.selected"), 409)
+	current, err := f.s.Active(t.Context(), f.member)
+	if err != nil || current.Theme.Scope != "default" || current.Revision != 5 {
+		t.Fatalf("private restore committed: %+v %v", current, err)
 	}
 }
 

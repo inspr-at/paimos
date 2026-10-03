@@ -108,6 +108,12 @@ paths:
         Read the active theme, selection revision and deletion notice. Requires
         profile.read or profile.portal_read. No saved choice (revision 0) follows the
         default. Agents may read this endpoint and receive the workspace default.
+        Linked identities retain their original theme ownership and choice rows.
+        The canonical person's saved choice wins, including an explicit default;
+        otherwise the linked person's choice with the lowest principal UUID wins.
+        Edits update that winning choice row, preserving other choices for unlink.
+        A choice that becomes private after unlink resolves to the default without
+        exposing the inaccessible theme ID or name; its revision remains usable.
         Accent dark null means derived by the appearance consumer (AEON-644);
         agent ring/size null retain the style's existing drawn defaults (AEON-643).
       security: [{session: []}, {agentKey: []}]
@@ -9511,7 +9517,7 @@ components:
         tenant_id: {type: string, format: uuid}
         name: {type: string, minLength: 1, maxLength: 80}
         scope: {type: string, enum: [default, workspace, personal]}
-        owner_principal_id: {type: [string, 'null'], format: uuid, description: Canonical person for personal themes; null means workspace-owned}
+        owner_principal_id: {type: [string, 'null'], format: uuid, description: 'Person owning a personal theme (canonical at creation); preserved through linking and unlinking. Null means workspace-owned'}
         values: {$ref: '#/components/schemas/ThemeValues'}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}

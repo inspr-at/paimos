@@ -28,6 +28,15 @@ revisions return 409. Personal writes require the owner and `profile.write`
 Personal records and their events remain owner-only, including for managers.
 The full schemas are in [the API contract](api/openapi.yaml).
 
+Linking people preserves theme owners and choice rows. Linked identities can
+read, edit and undo their shared personal themes; unlink restores each original
+owner's privacy. The canonical person's saved choice wins (including an explicit
+default); otherwise the alias choice with the lowest principal UUID wins. Choice
+edits update that winning row and keep other rows for unlink. If unlink makes a
+chosen theme private, the API returns the default without that theme's ID/name,
+retaining the selection revision for the next choice. Existing audit snapshots
+remain append-only and their audience follows current links.
+
 Each tenant starts with Porcelain, using the shipped light/dark accents and
 native agent artwork settings. Null accent dark means derived by the consumer;
 null agent ring/size means the chosen style's drawn default. Deletion is

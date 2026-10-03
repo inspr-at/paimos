@@ -83,8 +83,15 @@ func undoSelection(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 		return events.Change{}, err
 	}
 	var expected, restored Selection
-	if json.Unmarshal(e.After, &expected) != nil || json.Unmarshal(e.Before, &restored) != nil || expected.PrincipalID != id || restored.PrincipalID != id {
+	if json.Unmarshal(e.After, &expected) != nil || json.Unmarshal(e.Before, &restored) != nil ||
+		!validUUID(expected.PrincipalID) || expected.PrincipalID != restored.PrincipalID {
 		return events.Change{}, events.ErrForbidden
+	}
+	if err := writable(ctx, tx, p, "personal", &expected.PrincipalID); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return events.Change{}, events.ErrForbidden
+		}
+		return events.Change{}, err
 	}
 	if restored.ThemeID != nil {
 		if !validUUID(*restored.ThemeID) {
@@ -105,5 +112,5 @@ func undoSelection(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if err := saveSelection(ctx, tx, p.TenantID, restored); err != nil {
 		return events.Change{}, err
 	}
-	return events.Change{Type: "theme.selected", Before: current, After: restored, Metadata: audience(&id)}, nil
+	return events.Change{Type: "theme.selected", Before: current, After: restored, Metadata: audience(&restored.PrincipalID)}, nil
 }

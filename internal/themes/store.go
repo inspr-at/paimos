@@ -65,7 +65,15 @@ func writable(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope string, 
 	if err != nil {
 		return err
 	}
-	if owner == nil || *owner != id {
+	if owner == nil {
+		return authz.ErrForbidden
+	}
+	var owns bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1 AND id=$2
+		AND kind='person' AND status='active' AND coalesce(linked_to,id)=$3::uuid)`, p.TenantID, *owner, id).Scan(&owns); err != nil {
+		return err
+	}
+	if !owns {
 		return authz.ErrForbidden
 	}
 	return nil
@@ -303,11 +311,17 @@ func (s Store) Delete(ctx context.Context, p tenant.Principal, id string, revisi
 
 func selection(ctx context.Context, tx pgx.Tx, tenantID, principalID string, lock bool) (Selection, error) {
 	out := Selection{PrincipalID: principalID}
-	q := `SELECT theme_id::text,revision FROM theme_selections WHERE tenant_id=$1 AND principal_id=$2`
+	// Preserve physical ownership across links. A canonical saved choice (even
+	// explicit default) wins; otherwise choose the lowest alias UUID. LIMIT keeps
+	// the result bounded and every identity sees the same winning row.
+	q := `SELECT principal_id::text,theme_id::text,revision FROM theme_selections
+		WHERE tenant_id=$1 AND principal_id IN (SELECT id FROM principals
+			WHERE tenant_id=$1 AND kind='person' AND status='active' AND coalesce(linked_to,id)=$2::uuid)
+		ORDER BY (principal_id=$2::uuid) DESC,principal_id LIMIT 1`
 	if lock {
 		q += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, q, tenantID, principalID).Scan(&out.ThemeID, &out.Revision)
+	err := tx.QueryRow(ctx, q, tenantID, principalID).Scan(&out.PrincipalID, &out.ThemeID, &out.Revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -341,6 +355,12 @@ func active(ctx context.Context, tx pgx.Tx, p tenant.Principal) (Active, error) 
 		return out, nil
 	}
 	t, err := read(ctx, tx, p.TenantID, *s.ThemeID, true, false)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Unlink can make a previously selected personal theme private. Keep its
+		// CAS revision, but never expose the inaccessible ID/name or fail loading.
+		out.SelectedThemeID = nil
+		return out, nil
+	}
 	if err != nil {
 		return out, err
 	}
@@ -409,7 +429,7 @@ func (s Store) Select(ctx context.Context, p tenant.Principal, in SelectionInput
 		if err != nil {
 			return err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "theme.selected", Before: before, After: after, Metadata: audience(&id)})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "theme.selected", Before: before, After: after, Metadata: audience(&after.PrincipalID)})
 		return err
 	})
 	return out, err
