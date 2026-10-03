@@ -38,6 +38,7 @@ type ReadinessFactWrite struct {
 }
 
 type ReadinessFact struct {
+	recoveryRunID *string
 	legacyReading *capacity.Reading // Original legacy bucket/duration; never serialized.
 	ReadinessFactWrite
 	ReadingError       string     `json:"reading_error,omitempty"`
@@ -110,7 +111,7 @@ func (v ReadinessFactWrite) validate(now time.Time) error {
 
 // ReadinessResources is bounded and includes only the current binding.
 func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessResource, error) {
-	rows, err := tx.Query(ctx, `SELECT r.id::text,r.kind,m.binding_revision FROM account_readiness_memberships m JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 ORDER BY r.id LIMIT 17`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.kind,m.binding_revision FROM account_readiness_memberships m JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (r.identity_kind<>'person_confirmed' OR r.identity_key=encode(sha256(convert_to('quota:'||$3||':'||$4,'UTF8')),'hex')) ORDER BY r.id LIMIT 17`, a.ID, a.LinkRevision, a.Harness, a.QuotaPoolFingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +130,17 @@ func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessR
 	return out, rows.Err()
 }
 
+// Fact admission and reserved recovery use the same current authority: the
+// account plus its person-confirmed siblings, each at its current revision.
+// An obsolete confirmed identity cannot survive as a dangling membership.
+const currentReadinessResources = `SELECT m.resource_id FROM account_readiness_memberships m
+ JOIN agent_accounts member ON member.tenant_id=m.tenant_id AND member.id=m.account_id
+ JOIN account_readiness_resources resource ON resource.tenant_id=m.tenant_id AND resource.id=m.resource_id
+ WHERE m.account_id IN (` + quotaAccounts + `) AND m.binding_revision=member.link_revision
+ AND (resource.identity_kind<>'person_confirmed' OR resource.identity_key=encode(sha256(convert_to('quota:'||member.harness||':'||COALESCE(member.quota_pool_fingerprint,''),'UTF8')),'hex'))`
+
 func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY f.resource_id,f.window_key LIMIT 33`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f WHERE f.resource_id IN (`+currentReadinessResources+`) AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY 1,2 LIMIT 33`, a.ID, a.LinkRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +148,7 @@ func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 	out := []ReadinessFact{}
 	for rows.Next() {
 		var v ReadinessFact
-		if err := rows.Scan(&v.ResourceID, &v.WindowKey, &v.Source, &v.ObservedAt, &v.ResetsAt, &v.ReadingAt, &v.UsedPercent, &v.CreditState, &v.Remaining, &v.StopKind, &v.DenialReason, &v.ReadingError, &v.FailureCount, &v.CheckNextAttemptAt, &v.BackoffStep, &v.NextAttemptAt, &v.WaitID, &v.EarlyRecoveryUsed); err != nil {
+		if err := rows.Scan(&v.ResourceID, &v.WindowKey, &v.Source, &v.ObservedAt, &v.ResetsAt, &v.ReadingAt, &v.UsedPercent, &v.CreditState, &v.Remaining, &v.StopKind, &v.DenialReason, &v.ReadingError, &v.FailureCount, &v.CheckNextAttemptAt, &v.BackoffStep, &v.NextAttemptAt, &v.WaitID, &v.EarlyRecoveryUsed, &v.recoveryRunID); err != nil {
 			return nil, err
 		}
 		if v.ReadingAt != nil {
@@ -157,6 +167,21 @@ func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 // only be cleared by package B's evidenced successful recovery inference. An
 // ordinary check, null-cap response or unrelated bucket cannot clear it.
 func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFactWrite, now time.Time) error {
+	if v.UsedPercent == nil && v.Remaining == nil {
+		v.ReadingAt = nil
+	}
+	if v.StopKind == "money_402" && a.Harness == "pi" && a.Provider == "openrouter" {
+		var kind string
+		if err := tx.QueryRow(ctx, `SELECT kind FROM account_readiness_resources WHERE id=$1`, v.ResourceID).Scan(&kind); err != nil {
+			return err
+		}
+		if kind != "shared_balance" {
+			if err := tx.QueryRow(ctx, `SELECT r.id::text FROM account_readiness_resources r JOIN account_readiness_memberships m ON m.tenant_id=r.tenant_id AND m.resource_id=r.id WHERE m.account_id=$1 AND m.binding_revision=$2 AND r.kind='shared_balance' AND r.identity_kind='unresolved' ORDER BY r.id LIMIT 1`, a.ID, a.LinkRevision).Scan(&v.ResourceID); err != nil {
+				return err
+			}
+		}
+	}
+
 	if v.StopKind == "" {
 		v.StopKind = "none"
 	}
@@ -186,8 +211,8 @@ func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFa
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         ON CONFLICT(tenant_id,resource_id,window_key) DO UPDATE SET
         reported_by_account_id=EXCLUDED.reported_by_account_id,binding_revision=EXCLUDED.binding_revision,source=EXCLUDED.source,observed_at=EXCLUDED.observed_at,
-        reading_at=COALESCE(EXCLUDED.reading_at,account_readiness_facts.reading_at),used_percent=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.used_percent ELSE EXCLUDED.used_percent END,
-        remaining=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.remaining ELSE EXCLUDED.remaining END,credit_state=CASE WHEN EXCLUDED.reading_at IS NULL AND account_readiness_facts.credit_state='exhausted' THEN account_readiness_facts.credit_state ELSE EXCLUDED.credit_state END,
+        reading_at=COALESCE(EXCLUDED.reading_at,account_readiness_facts.reading_at),used_percent=COALESCE(EXCLUDED.used_percent,account_readiness_facts.used_percent),
+        remaining=COALESCE(EXCLUDED.remaining,account_readiness_facts.remaining),credit_state=CASE WHEN NOT $17 AND account_readiness_facts.credit_state='exhausted' THEN account_readiness_facts.credit_state ELSE EXCLUDED.credit_state END,
         resets_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none' AND account_readiness_facts.stop_kind<>'none') THEN account_readiness_facts.resets_at ELSE EXCLUDED.resets_at END,
         stop_kind=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.stop_kind ELSE EXCLUDED.stop_kind END,
         denial_reason=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.denial_reason ELSE EXCLUDED.denial_reason END,
