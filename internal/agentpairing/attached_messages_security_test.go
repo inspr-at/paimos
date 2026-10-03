@@ -3,6 +3,7 @@ package agentpairing_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -212,4 +215,138 @@ func TestAttachedDisabledExplicitNotesNeverPersist(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Both acceptance and the exported broker contract must retain the session
+// binding and active-state lock until the final transaction commits.
+func TestAttachedSessionValidityLockedThroughCommit(t *testing.T) {
+	for _, entry := range []string{"authorize", "validate-grant"} {
+		for _, change := range []string{"archive", "stop", "project", "principal", "harness", "host", "ticket"} {
+			t.Run(entry+"/"+change, func(t *testing.T) {
+				n := readyNotes(t)
+				mutation := noteSessionMutation(t, n, change)
+				pool, barrier, ctx := dbtest.BarrierPool(t, n.f.db.App, func(sql string) bool {
+					return strings.Contains(sql, "SELECT EXISTS(SELECT 1 FROM harness_sessions")
+				})
+				first := make(chan error, 1)
+				go func() { first <- validateNoteSession(ctx, pool, n, entry) }()
+				pid := barrier.Wait(t, ctx)
+				second := make(chan error, 1)
+				done := make(chan struct{})
+				go func() {
+					_, err := n.f.db.Admin.Exec(ctx, mutation, n.grant.Binding.SessionID)
+					second <- err
+					close(done)
+				}()
+				lock := dbtest.BlockedOrDone(t, ctx, n.f.db.Admin, pid, done)
+				barrier.Release()
+				if err := dbtest.Await(t, ctx, first); err != nil {
+					t.Fatal("valid session refused: ", err)
+				}
+				if err := dbtest.Await(t, ctx, second); err != nil {
+					t.Fatal("session mutation failed: ", err)
+				}
+				if lock != "transactionid" && lock != "tuple" {
+					t.Fatalf("session validity was not protected by a row lock (%q)", lock)
+				}
+				assertNoteSessionChanged(t, validateNoteSession(ctx, n.f.db.App, n, entry))
+			})
+		}
+	}
+}
+
+// A mutation that owns the row first must be observed after the lock wait.
+// An earlier unlocked snapshot cannot authorize acceptance or a broker offer.
+func TestAttachedSessionValidityRecheckedAfterConcurrentMutation(t *testing.T) {
+	for _, entry := range []string{"authorize", "validate-grant"} {
+		for _, change := range []string{"archive", "host"} {
+			t.Run(entry+"/"+change, func(t *testing.T) {
+				n := readyNotes(t)
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				tx, err := n.f.db.Admin.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(context.Background())
+				if _, err = tx.Exec(ctx, noteSessionMutation(t, n, change), n.grant.Binding.SessionID); err != nil {
+					t.Fatal(err)
+				}
+				pid := tx.Conn().PgConn().PID()
+				result := make(chan error, 1)
+				done := make(chan struct{})
+				go func() {
+					result <- validateNoteSession(ctx, n.f.db.App, n, entry)
+					close(done)
+				}()
+				lock := dbtest.BlockedOrDone(t, ctx, n.f.db.Admin, pid, done)
+				if err = tx.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				err = dbtest.Await(t, ctx, result)
+				if lock != "transactionid" && lock != "tuple" {
+					t.Fatalf("validation did not wait for the session mutation (%q)", lock)
+				}
+				assertNoteSessionChanged(t, err)
+			})
+		}
+	}
+}
+
+func validateNoteSession(ctx context.Context, pool *pgxpool.Pool, n notesFixture, entry string) error {
+	owner := tenant.Principal{ID: n.f.person, TenantID: n.f.tenantID, Kind: tenant.Person, BrowserSession: true, Name: "Owner"}
+	r := httptest.NewRequest("POST", origin+"/api/inbox/messages", nil).WithContext(tenant.WithPrincipal(ctx, owner))
+	r.Header.Set("Origin", origin)
+	ctx = attachedmsg.BrowserContext(r, origin, owner)
+	return db.InTenant(ctx, pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if entry == "validate-grant" {
+			_, err := n.s.ValidateGrant(ctx, tx, n.grant.Binding)
+			return err
+		}
+		_, err := n.s.Authorize(ctx, tx, owner, n.in.RequestID, attachedmsg.Send{Recipient: n.recipient, Project: n.grant.Binding.ProjectID, Session: &n.grant.Binding.SessionID, Generation: n.grant.Binding.Generation, Body: "validity test"})
+		return err
+	})
+}
+
+func assertNoteSessionChanged(t *testing.T, err error) {
+	t.Helper()
+	var refusal *attachedmsg.Error
+	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Code != "attachment_binding_changed" {
+		t.Fatalf("changed session was not refused for its binding: %v", err)
+	}
+}
+
+func noteSessionMutation(t *testing.T, n notesFixture, change string) string {
+	t.Helper()
+	assignment := ""
+	switch change {
+	case "archive":
+		assignment = "archived_at=clock_timestamp(),stopped_at=clock_timestamp(),phase='stopped',recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,recovery_actor_id=agent_principal_id,recovery_reason='fixture'"
+	case "stop":
+		assignment = "stopped_at=clock_timestamp(),phase='stopped'"
+	case "host":
+		assignment = "host=host||'-changed'"
+	case "harness":
+		assignment = "harness=CASE WHEN harness='claude' THEN 'codex' ELSE 'claude' END"
+	case "ticket":
+		assignment = "ticket_node_id=NULL,work_shape='unknown'"
+	case "principal":
+		assignment = "agent_principal_id='" + n.f.person + "'::uuid"
+	case "project":
+		project := attachedmsg.UUID()
+		err := db.InTenant(dbtest.Seed(t.Context()), n.f.db.App, n.f.tenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'OTHER-1','Other project' FROM node_kinds WHERE slug='project'`, n.f.tenantID, project)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assignment = "project_id='" + project + "'::uuid"
+	default:
+		t.Fatal("unknown session mutation: ", change)
+	}
+	return "UPDATE harness_sessions SET " + assignment + " WHERE id=$1"
 }

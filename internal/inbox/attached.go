@@ -31,6 +31,10 @@ func (m *module) tryAttached(ctx context.Context, p tenant.Principal, project st
 	if !m.attached.Enabled() && in.Generation != "" {
 		return true, msg, compat, attachedmsg.Fail(409, "feature_disabled")
 	}
+	// Disabled messaging preserves ordinary routing, even for live attachments.
+	if !m.attached.Enabled() {
+		return
+	}
 	var reserved string
 	err = db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if e := attachedmsg.Lock(ctx, tx); e != nil {

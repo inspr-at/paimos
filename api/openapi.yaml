@@ -13318,7 +13318,7 @@ components:
       properties:
         recipient_principal_id: {type: string, format: uuid}
         recipient_session_id: {type: string, format: uuid, description: 'Optional exact active recipient generation; stopped or archived sessions return 409.'}
-        recipient_message_generation: {type: string, format: uuid, description: 'Required for attached owner notes. Cannot be inherited by a new grant. Attached sends use 5-minute volatile payloads and may return 429 with Retry-After.'}
+        recipient_message_generation: {type: string, format: uuid, description: 'Required for attached owner notes. Explicit generations are refused when messaging is disabled; requests without a generation retain ordinary inbox routing in that mode. Cannot be inherited by a new grant. Attached sends use 5-minute volatile payloads and may return 429 with Retry-After.'}
         sender_session_id: {type: string, format: uuid, description: 'Optional active session owned by the authenticated sender; freezes its label.'}
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}

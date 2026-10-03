@@ -827,11 +827,6 @@ func TestAttachedInactiveRoutingPreservesInbox(t *testing.T) {
 					if session {
 						b["recipient_session_id"] = *v.SessionID
 					}
-					if mode == "nil" || mode == "disabled" || mode == "unqualified" {
-						f.call("POST", path, b, true, "", 409)
-						assertNoCanary(t, f, b["body"].(string))
-						continue
-					}
 					var msg inbox.Message
 					decodeResult(t, f.call("POST", path, b, true, "", 201), &msg)
 					if msg.Body != b["body"] || msg.ContentMode != "" {

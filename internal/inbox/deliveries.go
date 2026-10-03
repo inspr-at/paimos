@@ -180,10 +180,12 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		if err != nil {
 			return err
 		}
-		if request, err := attachedmsg.AttachmentForSend(ctx, tx, recipientCheck, in.RecipientSessionID); err != nil {
-			return err
-		} else if request != "" {
-			return attachedmsg.Fail(409, "attached_consent_required")
+		if m.base.attached.Enabled() {
+			if request, err := attachedmsg.AttachmentForSend(ctx, tx, recipientCheck, in.RecipientSessionID); err != nil {
+				return err
+			} else if request != "" {
+				return attachedmsg.Fail(409, "attached_consent_required")
+			}
 		}
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err

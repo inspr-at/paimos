@@ -48,7 +48,19 @@ func AttachmentForSend(ctx context.Context, tx pgx.Tx, recipient string, session
 	return id, e
 }
 func LoadAttachment(ctx context.Context, tx pgx.Tx, id string) (Attachment, error) {
-	// Caller holds the complete Lock prefix before any attachment/grant row.
+	// Caller holds the complete Lock prefix. Lock the session before any
+	// attachment/grant row, then validate its full tuple and active state below.
+	// Harness lifecycle/binding writers do not acquire the pairing fence; this
+	// shared row lock keeps every caller's validation current through commit.
+	var session string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions
+ WHERE id=(SELECT session_id FROM harness_attach_requests WHERE id=$1::uuid) FOR SHARE`, id).Scan(&session)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Attachment{}, Fail(409, "attachment_unavailable")
+	}
+	if err != nil {
+		return Attachment{}, err
+	}
 	var a Attachment
 	var live bool
 	var currentOwner, host, workspace, principal string
@@ -80,7 +92,7 @@ func LoadAttachment(ctx context.Context, tx pgx.Tx, id string) (Attachment, erro
 	if e != nil {
 		return a, e
 	}
-	if !bound {
+	if !bound || a.Session != session {
 		return a, Fail(409, "attachment_binding_changed")
 	}
 	owner := tenant.Principal{ID: a.Owner, TenantID: tenantID(ctx), Kind: tenant.Person}
@@ -156,7 +168,9 @@ func (s *Service) validate(ctx context.Context, tx pgx.Tx, a Attachment, g Grant
 }
 
 // ValidateGrant is the integration entrypoint for S2-3 offers/receipts. Caller
-// holds Lock; equality includes every nonce-binding field and current authority.
+// holds Lock and invokes this before any message/delivery/receipt row locks.
+// Session validity stays locked through commit; equality includes every
+// nonce-binding field and current authority.
 func (s *Service) ValidateGrant(ctx context.Context, tx pgx.Tx, expected Binding) (Grant, error) {
 	a, e := LoadAttachment(ctx, tx, expected.AttachRequestID)
 	if e != nil {

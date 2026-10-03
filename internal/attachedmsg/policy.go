@@ -73,10 +73,6 @@ func (s *Service) Authorize(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		out.Binding = g.Binding
 		out.GrantID = &g.ID
 	}
-	// Exact session row before any message/delivery/receipt lock.
-	if _, e = tx.Exec(ctx, `SELECT 1 FROM harness_sessions WHERE id=$1::uuid FOR SHARE`, a.Session); e != nil {
-		return out, e
-	}
 	if e = tx.QueryRow(ctx, `SELECT clock_timestamp()+interval '5 minutes'`).Scan(&out.Deadline); e != nil {
 		return out, e
 	}

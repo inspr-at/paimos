@@ -190,10 +190,12 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
 		}
-		if request, err := attachedmsg.AttachmentForSend(ctx, tx, in.Recipient, in.RecipientSessionID); err != nil {
-			return err
-		} else if request != "" {
-			return attachedmsg.Fail(409, "attached_consent_required")
+		if m.attached.Enabled() {
+			if request, err := attachedmsg.AttachmentForSend(ctx, tx, in.Recipient, in.RecipientSessionID); err != nil {
+				return err
+			} else if request != "" {
+				return attachedmsg.Fail(409, "attached_consent_required")
+			}
 		}
 		// UUIDs are fixed width, so this key aliases only when the idempotency
 		// key itself collides. Postgres text cannot store a NUL separator.

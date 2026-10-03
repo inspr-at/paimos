@@ -2523,10 +2523,16 @@ inject qualified fixtures; those fixtures are not production qualification.
 
 An explicit `recipient_message_generation` always selects an attached note,
 including when messaging is disabled or its attachment has ended. Such a send
-is volatile or refused; it never falls back to durable chat. Active attachments
-also enforce the policy when a caller omits the generation or session. Ordinary
-unattached messages retain their behavior. The final durable write rechecks
-attachment status under the same fence as activation, closing the lookup gap.
+is volatile or refused; it never falls back to durable chat. When messaging is
+fully enabled, active attachments also enforce the policy when a caller omits
+the generation or session. When disabled or unqualified, requests without a
+message generation retain ordinary inbox routing, including live watched
+attachments. The final durable write rechecks attachment status under the same
+fence as activation while messaging is enabled, closing the lookup gap.
+Session identity, project, principal, harness, host, ticket and active state are
+validated under a shared session row lock retained through commit. That lock
+is acquired before attachment and grant row locks; acceptance and broker
+validation use that same protected predicate.
 Both inbox send APIs (therefore CLI and MCP) use one attached-recipient policy.
 A person needs the exact computer ownership, live project permissions, current
 grant and `recipient_message_generation`. Agents can create only bounded
@@ -2562,7 +2568,7 @@ while the old process retains RAM. Missing transaction or any SQL error fails
 closed. Existing three-argument calls still compile but return no body. Never
 expose the result before that transaction commits; a rollback loses the taken
 body rather than replaying it. Lock order is pairing
-fence → tree → tenant, then compat advisory lock, attachment/grant, session, message,
+fence → tree → tenant, then compat advisory lock, session, attachment/grant, message,
 delivery, receipt, event counter. Publication follows the metadata commit;
 rollback discards the reservation. The service epoch binds the owning process.
 Restart/disabled/expired/revoked notes settle without automatic retry. Status
@@ -2581,6 +2587,16 @@ mutations at their intended assertions, including an actual durable-body leak
 when the disabled-note guard was removed. Exact source bytes were restored.
 The migration guard passed against `v261003065316.0.0`: 230 unique migration
 numbers, immutable published files, and expand-safe additions 1210–1212.
+
+Fix-round validation (2026-10-03): all 18 attachment tests and the inbox package
+passed locally. Barrier tests prove session row protection through commit and
+revalidation after concurrent archive/binding changes for acceptance and
+`ValidateGrant`. Removing the fixes on `424af4e9` makes the session-lock and
+disabled-routing regressions fail at their intended assertions. Web build,
+656 Node tests, 741 Vitest tests and all 17 `session-messages.spec.ts` Chromium
+checks passed; the browser checks used one supervised worker on macOS.
+The remote test host was off limits; Linux browser qualification and the
+consolidated release review remain with the coordinator.
 
 
 ### Removing ghost sessions (AEON-265)
