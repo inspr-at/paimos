@@ -90,7 +90,23 @@ func TestDeliveryNodeIdentityGuardCatchesCascadeAndPreservesRows(t *testing.T) {
 			t.Fatal("failed cascade partially moved subtree")
 		}
 		// Project soft deletion is inert; projections stay for restoration.
-		// Its own tree guard still requires live children to be dealt with first.
+		leafProject := insertNode(ctx, t, tx, f.visibilityFixture, "project", "LEAF-1", nil)
+		if _, err := tx.Exec(ctx, `INSERT INTO project_delivery(tenant_id,project_node_id,adopted_by) VALUES($1,$2,$3)`, f.tenant, leafProject, f.actor); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE id=$1`, leafProject); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, leafProject); err != nil {
+			return err
+		}
+		var retained int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM project_delivery WHERE project_node_id=$1`, leafProject).Scan(&retained); err != nil {
+			return err
+		}
+		if retained != 1 {
+			t.Fatal("project restore lost its planning mode")
+		}
 		if _, err := tx.Exec(ctx, `UPDATE project_releases SET state='abandoned',abandoned_at=now() WHERE release_node_id=$1`, f.nextRelease); err != nil {
 			return err
 		}
@@ -148,8 +164,8 @@ func TestDeliveryAdoptionJobJournalEvidenceAndBounds(t *testing.T) {
 			{"rollout_artifact_ref=repeat('a',513)", "delivery_adoption_jobs_rollout_artifact_ref_check"},
 			{"report_ref='report',report_digest='bad'", "delivery_adoption_jobs_report_digest_check"},
 			{"lease_generation=-1", "delivery_adoption_jobs_lease_generation_check"},
-			{"reserved_backup_bytes=-1", "delivery_adoption_jobs_reserved_backup_bytes_check"},
-			{"reserved_restore_slots=2", "delivery_adoption_jobs_reserved_restore_slots_check"},
+			{"reserved_backup_bytes=-1,resource_attempt_id=gen_random_uuid()", "delivery_adoption_jobs_reserved_backup_bytes_check"},
+			{"reserved_restore_slots=2,resource_attempt_id=gen_random_uuid()", "delivery_adoption_jobs_reserved_restore_slots_check"},
 			{"operation_journal='{}'::jsonb", "delivery_adoption_jobs_operation_journal_check"},
 			{"operation_journal='[]'::jsonb", "delivery_adoption_jobs_operation_journal_check"},
 			{"operation_journal='{\"operations\":[],\"credentials\":\"forbidden\"}'::jsonb", "delivery_adoption_jobs_operation_journal_check"},
@@ -159,8 +175,16 @@ func TestDeliveryAdoptionJobJournalEvidenceAndBounds(t *testing.T) {
 		} {
 			deliveryReject(t, ctx, tx, "23514", tc.check, `UPDATE delivery_adoption_jobs SET `+tc.set+` WHERE project_node_id=$1`, f.projectA)
 		}
-		for _, set := range []string{"lease_token=gen_random_uuid()", "lease_token=gen_random_uuid(),lease_until=now()", "state='applying'", "state='adopted'", "backup_verified_at=now()", "reserved_backup_bytes=1", "attempt_id=gen_random_uuid(),attempt_started_at=now(),attempt_deadline_at=now()+interval '16 minutes'"} {
-			deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE delivery_adoption_jobs SET `+set+` WHERE project_node_id=$1`, f.projectA)
+		for _, tc := range []struct{ set, check string }{
+			{"lease_token=gen_random_uuid(),lease_generation=1", "delivery_adoption_jobs_lease_pair"},
+			{"lease_token=gen_random_uuid(),lease_until=now()", "delivery_adoption_jobs_leased_generation"},
+			{"state='applying'", "delivery_adoption_jobs_recovery_proof"},
+			{"state='adopted',adopted_at=now()", "delivery_adoption_jobs_recovery_proof"},
+			{"backup_verified_at=now()", "delivery_adoption_jobs_backup_verification"},
+			{"reserved_backup_bytes=1", "delivery_adoption_jobs_resource_attempt"},
+			{"attempt_id=gen_random_uuid(),attempt_started_at=now(),attempt_deadline_at=now()+interval '16 minutes'", "delivery_adoption_jobs_attempt_deadline"},
+		} {
+			deliveryReject(t, ctx, tx, "23514", tc.check, `UPDATE delivery_adoption_jobs SET `+tc.set+` WHERE project_node_id=$1`, f.projectA)
 		}
 		op := map[string]any{"operation_key": "stable-key", "attempt_id": "old-attempt", "kind": "backup", "status": "intent", "provider_handle": "opaque-handle"}
 		journal := func(n int) string {

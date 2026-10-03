@@ -64,15 +64,15 @@ CREATE TABLE project_releases (
     FOREIGN KEY (tenant_id, project_node_id, included_in_release_id)
         REFERENCES project_releases(tenant_id, project_node_id, release_node_id),
     CHECK ((visibility = 'published') = (sequence IS NOT NULL)),
-    CHECK ((version_scheme IS NULL) = (version IS NULL)),
+    CONSTRAINT project_releases_version_pair CHECK ((version_scheme IS NULL) = (version IS NULL)),
     CHECK (visibility = 'published' OR (version IS NULL AND cut_at IS NULL AND reservation_basis IS NULL AND released_by IS NULL)),
-    CHECK ((build_authorized_by IS NULL) = (build_authorized_at IS NULL)),
-    CHECK (build_authorized_by IS NULL OR state = 'building'),
+    CONSTRAINT project_releases_build_authorization_pair CHECK ((build_authorized_by IS NULL) = (build_authorized_at IS NULL)),
+    CONSTRAINT project_releases_build_authorization_state CHECK (build_authorized_by IS NULL OR state = 'building'),
     CHECK ((state = 'released') = (released_at IS NOT NULL)),
     CHECK ((state = 'abandoned') = (abandoned_at IS NOT NULL)),
     CHECK (cut_at IS NULL OR (version IS NOT NULL AND state IN ('frozen', 'released', 'abandoned'))),
     CHECK (reservation_basis IS DISTINCT FROM 'history' OR reservation_ref = ''),
-    CHECK (state <> 'released' OR visibility <> 'published' OR origin = 'adopted_released'
+    CONSTRAINT project_releases_publication_proof CHECK (state <> 'released' OR visibility <> 'published' OR origin = 'adopted_released'
         OR (version IS NOT NULL AND cut_at IS NOT NULL AND reservation_basis IS NOT NULL)),
     CHECK (included_in_release_id IS NULL OR (visibility = 'internal' AND state = 'released' AND included_in_release_id <> release_node_id))
 );
@@ -127,7 +127,7 @@ CREATE TABLE project_release_note_snapshots (
     project_node_id uuid NOT NULL,
     release_node_id uuid NOT NULL,
     version text NOT NULL CHECK (octet_length(version) BETWEEN 1 AND 64),
-    snapshot jsonb NOT NULL CHECK ((
+    snapshot jsonb NOT NULL CONSTRAINT project_release_note_snapshots_payload_check CHECK ((
         jsonb_typeof(snapshot) = 'object'
         AND octet_length(snapshot::text) <= 12582912
         AND snapshot->>'schema' = 'aeon.release-note-snapshot.v1'

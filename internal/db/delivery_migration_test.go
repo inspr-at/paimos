@@ -183,7 +183,7 @@ func TestDeliveryTenantAndProjectPolicies(t *testing.T) {
 		f.run(t, func(ctx context.Context, tx pgx.Tx) error {
 			for _, r := range []struct{ project, release string }{{f.projectA, f.releaseA}, {f.projectB, f.releaseB}} {
 				if _, err := tx.Exec(ctx, `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot)
-					VALUES($1,$2,$3,'1.0.0',jsonb_build_object('schema','aeon.release-note-snapshot.v1','tenant_id',$1::text,'project_node_id',$2::text,'release_node_id',$3::text,'version','1.0.0','membership_source','ships_in.release_node_id','field_source','nodes.fields','frozen',true,'tickets','[]'::jsonb))`, f.tenant, r.project, r.release); err != nil {
+					VALUES($1::uuid,$2::uuid,$3::uuid,'1.0.0',jsonb_build_object('schema','aeon.release-note-snapshot.v1','tenant_id',$1::text,'project_node_id',$2::text,'release_node_id',$3::text,'version','1.0.0','membership_source','ships_in.release_node_id','field_source','nodes.fields','frozen',true,'tickets','[]'::jsonb))`, f.tenant, r.project, r.release); err != nil {
 					return err
 				}
 			}
@@ -276,8 +276,14 @@ func TestDeliveryReleaseGuardAndBounds(t *testing.T) {
 		for _, rank := range []string{"", "0", "V0", strings.Repeat("A", 33), "a-"} {
 			deliveryReject(t, ctx, tx, "23514", "project_releases_rank_check", `UPDATE project_releases SET rank=$2 WHERE release_node_id=$1`, f.nextRelease, rank)
 		}
-		for _, assignment := range []string{"revision=0", "creation_key=''", "creation_key=repeat('a',129)", "build_settings=jsonb_build_object('window',repeat('a',2049))", "build_authorized_by='" + f.actor + "'", "build_authorized_by='" + f.actor + "',build_authorized_at=now()"} {
-			deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE project_releases SET `+assignment+` WHERE release_node_id=$1`, f.releaseA)
+		for _, tc := range []struct{ assignment, check string }{
+			{"revision=0", "project_releases_revision_check"},
+			{"creation_key=''", "project_releases_creation_key_check"},
+			{"creation_key=repeat('a',129)", "project_releases_creation_key_check"},
+			{"build_settings=jsonb_build_object('window',repeat('a',2049))", "project_releases_build_settings_check"},
+			{"build_authorized_by='" + f.actor + "',build_authorized_at=now()", "project_releases_build_authorization_state"},
+		} {
+			deliveryReject(t, ctx, tx, "23514", tc.check, `UPDATE project_releases SET `+tc.assignment+` WHERE release_node_id=$1`, f.releaseA)
 		}
 		// Reserved v2 origins/sources are accepted by the database, not written by v1 stores.
 		internal := insertNode(ctx, t, tx, f.visibilityFixture, "release", "INT-1", &f.projectA)
@@ -296,6 +302,13 @@ func TestDeliveryReleaseGuardAndBounds(t *testing.T) {
 			return err
 		}
 		deliveryReject(t, ctx, tx, "P0001", "live release node", `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank) VALUES($1,$2,$3,4,'Y')`, f.tenant, f.projectA, bad)
+		legacy := insertNode(ctx, t, tx, f.visibilityFixture, "release", "HIST-1", &f.projectA)
+		if _, err := tx.Exec(ctx, `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state,released_at,origin) VALUES($1,$2,$3,4,'Y','released',now(),'adopted_released')`, f.tenant, f.projectA, legacy); err != nil {
+			return err
+		}
+		planning := insertNode(ctx, t, tx, f.visibilityFixture, "release", "HIST-2", &f.projectA)
+		// Only already-released adoption history is exempt from cut/publish proof.
+		deliveryReject(t, ctx, tx, "23514", "project_releases_publication_proof", `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state,released_at,origin) VALUES($1,$2,$3,5,'Z','released',now(),'adopted_planned')`, f.tenant, f.projectA, planning)
 		return nil
 	})
 }
@@ -341,14 +354,21 @@ var errDeliveryScenarioRollback = errors.New("delivery scenario rollback")
 func TestDeliveryCutDeadlineAndBuildAuthorization(t *testing.T) {
 	f := newDeliveryFixture(t, dbtest.Open(t), "delivery-cut")
 	f.exec(t, `UPDATE project_releases SET entry_closes_at=now() WHERE release_node_id=$1`, f.releaseA)
-	f.exec(t, `UPDATE project_releases SET state='building',build_authorized_by=$2,build_authorized_at=now() WHERE release_node_id=$1`, f.releaseA, f.actor)
+	f.exec(t, `UPDATE project_releases SET state='building' WHERE release_node_id=$1`, f.releaseA)
+	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+		deliveryReject(t, ctx, tx, "23514", "project_releases_build_authorization_pair", `UPDATE project_releases SET build_authorized_by=$2 WHERE release_node_id=$1`, f.releaseA, f.actor)
+		deliveryReject(t, ctx, tx, "23514", "project_releases_build_authorization_pair", `UPDATE project_releases SET build_authorized_at=now() WHERE release_node_id=$1`, f.releaseA)
+		return nil
+	})
+	f.exec(t, `UPDATE project_releases SET build_authorized_by=$2,build_authorized_at=now() WHERE release_node_id=$1`, f.releaseA, f.actor)
 	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
 		deliveryReject(t, ctx, tx, "P0001", "entry deadline", `UPDATE project_releases SET entry_closes_at=NULL WHERE release_node_id=$1`, f.releaseA)
-		deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE project_releases SET state='frozen' WHERE release_node_id=$1`, f.releaseA)
+		deliveryReject(t, ctx, tx, "23514", "project_releases_build_authorization_state", `UPDATE project_releases SET state='frozen' WHERE release_node_id=$1`, f.releaseA)
 		if _, err := tx.Exec(ctx, `UPDATE project_releases SET state='frozen',build_authorized_by=NULL,build_authorized_at=NULL WHERE release_node_id=$1`, f.releaseA); err != nil {
 			return err
 		}
-		deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE project_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.releaseA)
+		deliveryReject(t, ctx, tx, "23514", "project_releases_publication_proof", `UPDATE project_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.releaseA)
+		deliveryReject(t, ctx, tx, "23514", "project_releases_version_pair", `UPDATE project_releases SET version_scheme='legacy' WHERE release_node_id=$1`, f.releaseA)
 		if _, err := tx.Exec(ctx, `UPDATE project_releases SET version='1.0.0+old',version_scheme='legacy',cut_at=clock_timestamp() WHERE release_node_id=$1`, f.releaseA); err != nil {
 			return err
 		}

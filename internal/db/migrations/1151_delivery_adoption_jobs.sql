@@ -76,23 +76,23 @@ CREATE TABLE delivery_adoption_jobs (
     FOREIGN KEY (tenant_id, project_node_id) REFERENCES nodes(tenant_id, id),
     FOREIGN KEY (tenant_id, executing_principal_id) REFERENCES principals(tenant_id, id),
     FOREIGN KEY (tenant_id, authorizing_principal_id) REFERENCES principals(tenant_id, id),
-    CHECK ((lease_token IS NULL) = (lease_until IS NULL)),
-    CHECK (lease_token IS NULL OR lease_generation > 0),
+    CONSTRAINT delivery_adoption_jobs_lease_pair CHECK ((lease_token IS NULL) = (lease_until IS NULL)),
+    CONSTRAINT delivery_adoption_jobs_leased_generation CHECK (lease_token IS NULL OR lease_generation > 0),
     CHECK ((attempt_id IS NULL) = (attempt_started_at IS NULL)),
     CHECK ((attempt_id IS NULL) = (attempt_deadline_at IS NULL)),
-    CHECK (attempt_deadline_at IS NULL OR (attempt_deadline_at > attempt_started_at
+    CONSTRAINT delivery_adoption_jobs_attempt_deadline CHECK (attempt_deadline_at IS NULL OR (attempt_deadline_at > attempt_started_at
         AND attempt_deadline_at <= attempt_started_at + interval '15 minutes')),
     CHECK ((report_ref IS NULL) = (report_digest IS NULL)),
     CHECK ((backup_ref IS NULL) = (backup_digest IS NULL)),
     CHECK ((restore_evidence_ref IS NULL) = (restore_evidence_digest IS NULL)),
     CHECK ((failed_report_ref IS NULL) = (failed_report_digest IS NULL)),
-    CHECK (backup_verified_at IS NULL OR (backup_ref IS NOT NULL AND restore_evidence_ref IS NOT NULL
+    CONSTRAINT delivery_adoption_jobs_backup_verification CHECK (backup_verified_at IS NULL OR (backup_ref IS NOT NULL AND restore_evidence_ref IS NOT NULL
         AND source_fingerprint IS NOT NULL AND evidence_attempt_id IS NOT NULL)),
-    CHECK (state NOT IN ('applying', 'adopted') OR (backup_verified_at IS NOT NULL
+    CONSTRAINT delivery_adoption_jobs_recovery_proof CHECK (state NOT IN ('applying', 'adopted') OR (backup_verified_at IS NOT NULL
         AND report_ref IS NOT NULL AND NOT report_incomplete AND recovery_pin_manifest_ref IS NOT NULL
         AND attempt_id IS NOT NULL AND evidence_attempt_id = attempt_id)),
-    CHECK (state <> 'adopted' OR adopted_at IS NOT NULL),
-    CHECK ((reserved_backup_bytes = 0 AND reserved_restore_slots = 0) OR resource_attempt_id IS NOT NULL)
+    CONSTRAINT delivery_adoption_jobs_adopted_time CHECK (state <> 'adopted' OR adopted_at IS NOT NULL),
+    CONSTRAINT delivery_adoption_jobs_resource_attempt CHECK ((reserved_backup_bytes = 0 AND reserved_restore_slots = 0) OR resource_attempt_id IS NOT NULL)
 );
 CREATE INDEX delivery_adoption_jobs_claim_idx ON delivery_adoption_jobs(tenant_id, next_attempt_at, project_node_id)
     WHERE state IN ('pending', 'retry_wait');

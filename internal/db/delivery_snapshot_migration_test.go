@@ -30,13 +30,13 @@ func TestDeliverySnapshotImmutabilityBoundsAndReleasedOutcomes(t *testing.T) {
 	}
 	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
 		q := `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',$4::jsonb)`
-		deliveryReject(t, ctx, tx, "23514", "snapshot_check", q, f.tenant, f.projectA, f.releaseA, `{}`)
-		deliveryReject(t, ctx, tx, "23514", "snapshot_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{tickets}','{}'::jsonb))`, f.tenant, f.projectA, f.releaseA, string(b))
-		deliveryReject(t, ctx, tx, "23514", "snapshot_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{version}','"2.0.0"'::jsonb))`, f.tenant, f.projectA, f.releaseA, string(b))
-		deliveryReject(t, ctx, tx, "23514", "snapshot_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{tickets}',(SELECT jsonb_agg('{}'::jsonb) FROM generate_series(1,5001))))`, f.tenant, f.projectA, f.releaseA, string(b))
-		deliveryReject(t, ctx, tx, "23514", "snapshot_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',$4::jsonb||jsonb_build_object('oversized',repeat('a',12582913)))`, f.tenant, f.projectA, f.releaseA, string(b))
+		deliveryReject(t, ctx, tx, "23514", "project_release_note_snapshots_payload_check", q, f.tenant, f.projectA, f.releaseA, `{}`)
+		deliveryReject(t, ctx, tx, "23514", "project_release_note_snapshots_payload_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{tickets}','{}'::jsonb))`, f.tenant, f.projectA, f.releaseA, string(b))
+		deliveryReject(t, ctx, tx, "23514", "project_release_note_snapshots_payload_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{version}','"2.0.0"'::jsonb))`, f.tenant, f.projectA, f.releaseA, string(b))
+		deliveryReject(t, ctx, tx, "23514", "project_release_note_snapshots_payload_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{tickets}',(SELECT jsonb_agg('{}'::jsonb) FROM generate_series(1,5001))))`, f.tenant, f.projectA, f.releaseA, string(b))
+		deliveryReject(t, ctx, tx, "23514", "project_release_note_snapshots_payload_check", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',$4::jsonb||jsonb_build_object('oversized',repeat('a',12582913)))`, f.tenant, f.projectA, f.releaseA, string(b))
 		// Stored project is bound to the release FK as well as the JSON header.
-		deliveryReject(t, ctx, tx, "23503", "foreign key constraint", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1,$2,$3,'1.0.0',jsonb_set($4::jsonb,'{project_node_id}',to_jsonb($2::text)))`, f.tenant, f.projectB, f.releaseA, string(b))
+		deliveryReject(t, ctx, tx, "23503", "foreign key constraint", `INSERT INTO project_release_note_snapshots(tenant_id,project_node_id,release_node_id,version,snapshot) VALUES($1::uuid,$2::uuid,$3::uuid,'1.0.0',jsonb_set($4::jsonb,'{project_node_id}',to_jsonb($2::text)))`, f.tenant, f.projectB, f.releaseA, string(b))
 		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.principal_ids',$1,true)`, "{"+f.actor+"}"); err != nil {
 			return err
 		}
@@ -79,9 +79,9 @@ func TestDeliveryAdoptionCheckpointRequiresBoundRecoveryEvidence(t *testing.T) {
 		if _, err := tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET evidence_attempt_id=attempt_id,backup_verified_at=now() WHERE project_node_id=$1`, f.projectA); err != nil {
 			return err
 		}
-		deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE delivery_adoption_jobs SET state='applying',evidence_attempt_id=gen_random_uuid() WHERE project_node_id=$1`, f.projectA)
-		deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE delivery_adoption_jobs SET state='applying',report_incomplete=true WHERE project_node_id=$1`, f.projectA)
-		deliveryReject(t, ctx, tx, "23514", "check constraint", `UPDATE delivery_adoption_jobs SET state='applying',recovery_pin_manifest_ref=NULL WHERE project_node_id=$1`, f.projectA)
+		deliveryReject(t, ctx, tx, "23514", "delivery_adoption_jobs_recovery_proof", `UPDATE delivery_adoption_jobs SET state='applying',evidence_attempt_id=gen_random_uuid() WHERE project_node_id=$1`, f.projectA)
+		deliveryReject(t, ctx, tx, "23514", "delivery_adoption_jobs_recovery_proof", `UPDATE delivery_adoption_jobs SET state='applying',report_incomplete=true WHERE project_node_id=$1`, f.projectA)
+		deliveryReject(t, ctx, tx, "23514", "delivery_adoption_jobs_recovery_proof", `UPDATE delivery_adoption_jobs SET state='applying',recovery_pin_manifest_ref=NULL WHERE project_node_id=$1`, f.projectA)
 		if _, err := tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state='applying' WHERE project_node_id=$1`, f.projectA); err != nil {
 			return err
 		}
