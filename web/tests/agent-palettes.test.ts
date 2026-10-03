@@ -10,15 +10,18 @@ import { normalizeAgentState } from '../src/lib/agentSignals.ts'
 
 const css = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 function block(source: string, selector: string) {
-  const start = source.indexOf(`${selector} {`)
-  assert.ok(start >= 0, `missing ${selector}`)
-  const body = source.slice(start + selector.length + 2, source.indexOf('}', start))
+  // These token rules use simple selectors; match one complete list member,
+  // so adding a preview selector or wrapping the list cannot hide the rule.
+  const rules = source.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)
+  const rule = [...rules].find(match => match[1]!.split(',').some(member => member.trim() === selector))
+  assert.ok(rule, `missing ${selector}`)
+  const body = rule[2]!
   return Object.fromEntries([...body.matchAll(/--([\w-]+):\s*([^;]+);/g)].map(match => [match[1]!, match[2]!.trim()]))
 }
 const states = css('../src/styles/agent-states.css'), tokens = css('../src/styles/tokens.css')
 const themes = {
-  light: { ...block(tokens, ':root, :root[data-theme="light"]'), ...block(states, ':root') },
-  dark: { ...block(tokens, ':root, :root[data-theme="light"]'), ...block(tokens, ':root[data-theme="dark"]'), ...block(states, ':root'), ...block(states, ':root[data-theme="dark"]') },
+  light: { ...block(tokens, ':root'), ...block(states, ':root') },
+  dark: { ...block(tokens, ':root'), ...block(tokens, ':root[data-theme="dark"]'), ...block(states, ':root'), ...block(states, ':root[data-theme="dark"]') },
 }
 type Theme = keyof typeof themes
 function resolve(theme: Theme, value: string): string {
@@ -56,6 +59,31 @@ function oklab([r, g, b]: Rgb): Rgb {
 const simulate = (value: Rgb, matrix: number[][]) => matrix.map(row => Math.min(1, Math.max(0, row[0]! * value[0] + row[1]! * value[1] + row[2]! * value[2]))) as Rgb
 const distance = (a: Rgb, b: Rgb) => { const p = oklab(a), q = oklab(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) * 100 }
 const stateColours = ['working', 'waiting', 'throttled', 'problem', 'inactive'] as const
+
+test('CSS token rules match complete selectors in reordered and wrapped lists', () => {
+  const source = `
+    /* :root { --canvas: #000000; } */
+    .agent-theme-preview.darkish { --canvas: #111111; }
+    :root[data-theme="light"] { --canvas: #222222; }
+    .agent-theme-preview,
+    :root,
+    .agent-theme-preview.light { --canvas: #fffefa; --ink: #203c3d; }
+    .agent-theme-preview.dark,
+    :root[data-theme="dark"]{ --canvas: #101e20; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --canvas: #101e20; }
+    }
+  `
+  const light = { canvas: '#fffefa', ink: '#203c3d' }
+  for (const selector of [':root', '.agent-theme-preview', '.agent-theme-preview.light']) {
+    assert.deepEqual(block(source, selector), light)
+  }
+  const dark = { canvas: '#101e20' }
+  for (const selector of [':root[data-theme="dark"]', '.agent-theme-preview.dark', ':root:not([data-theme="light"])']) {
+    assert.deepEqual(block(source, selector), dark)
+  }
+  assert.throws(() => block(source, '.missing'), { message: 'missing .missing' })
+})
 
 test('five named palettes, with the saved colour-blind choice read as Deutan', () => {
   assert.deepEqual(AGENT_PALETTES.map(option => option.id), ['standard', 'protan', 'deutan', 'tritan', 'monochrome'])
