@@ -165,9 +165,18 @@ func TestLifecycleCASAuditFallbackAndUndo(t *testing.T) {
 		t.Fatalf("undo values: %+v %v", personal, err)
 	}
 	undo(t, f, f.member, e, 409)
-	chosen, err := f.s.Select(ctx, f.member, SelectionInput{ThemeID: &personal.ID})
+	upperID := strings.ToUpper(personal.ID)
+	chosen, err := f.s.Select(ctx, f.member, SelectionInput{ThemeID: &upperID})
 	if err != nil || chosen.Theme.ID != personal.ID || chosen.Revision != 1 {
 		t.Fatalf("select: %+v %v", chosen, err)
+	}
+	var selected Selection
+	if err := json.Unmarshal(lastEvent(t, f, "theme.selected").After, &selected); err != nil || selected.ThemeID == nil || *selected.ThemeID != personal.ID {
+		t.Fatalf("non-canonical selection audit: %+v %v", selected, err)
+	}
+	selectedEvents := eventCount(t, f)
+	if chosen, err := f.s.Select(ctx, f.member, SelectionInput{ThemeID: &personal.ID, Revision: 1}); err != nil || chosen.Revision != 1 || eventCount(t, f) != selectedEvents {
+		t.Fatalf("UUID spelling changed selection: %+v %v", chosen, err)
 	}
 	if _, err := f.s.Select(ctx, f.member, SelectionInput{ThemeID: &workspace.ID}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("selection CAS: %v", err)

@@ -105,7 +105,7 @@ type SelectionInput struct {
 
 func validUUID(s string) bool {
 	var id pgtype.UUID
-	return len(s) == 36 && id.Scan(s) == nil && id.Valid
+	return len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' && id.Scan(s) == nil && id.Valid
 }
 func validName(s string) bool {
 	if !utf8.ValidString(s) || strings.TrimSpace(s) != s || utf8.RuneCountInString(s) < 1 || utf8.RuneCountInString(s) > 80 {

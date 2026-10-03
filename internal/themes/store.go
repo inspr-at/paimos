@@ -380,9 +380,13 @@ func (s Store) Select(ctx context.Context, p tenant.Principal, in SelectionInput
 			return err
 		}
 		if in.ThemeID != nil {
-			if _, err := read(ctx, tx, p.TenantID, *in.ThemeID, false, true); err != nil {
+			target, err := read(ctx, tx, p.TenantID, *in.ThemeID, false, true)
+			if err != nil {
 				return err
 			}
+			// Snapshot the canonical UUID spelling returned by Postgres so an
+			// uppercase request cannot cause a false CAS/undo conflict later.
+			in.ThemeID = &target.ID
 		}
 		before, err := selection(ctx, tx, p.TenantID, id, true)
 		if err != nil {

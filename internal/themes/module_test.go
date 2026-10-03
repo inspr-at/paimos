@@ -4,11 +4,14 @@ package themes
 import (
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type deadlineWriter struct {
@@ -74,5 +77,24 @@ func TestInputDeadlineFailureStopsBeforeRead(t *testing.T) {
 	var out CreateInput
 	if input(w, r, &out, "name", "scope") || w.Code != 500 {
 		t.Fatalf("expected deadline failure, HTTP %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMalformedThemeIDsFailBeforeDatabaseWork(t *testing.T) {
+	mux := http.NewServeMux()
+	New(nil).Mount(mux)
+	p := tenant.Principal{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", TenantID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Kind: tenant.Person}
+	// pgtype.UUID.Scan strips these separator positions without validating
+	// them. Reject this spelling before it reaches a SQL UUID conversion.
+	bad := "00000000x0000x4000x8000x000000000001"
+	for _, tc := range []struct{ method, path, body string }{
+		{"GET", "/api/themes/" + bad, ""},
+		{"GET", "/api/themes?after=" + bad, ""},
+		{"PUT", "/api/me/theme", `{"theme_id":"` + bad + `","revision":0}`},
+	} {
+		expect(t, call(t, mux, p, tc.method, tc.path, tc.body), 400)
+	}
+	if !validUUID(strings.ToUpper(p.ID)) {
+		t.Fatal("valid uppercase UUID rejected")
 	}
 }
