@@ -217,7 +217,8 @@ func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	// The adoption event binds the immutable report. Placement.source describes
 	// the latest edit, so a legitimate rerank, move or rollover may replace it.
 	var ref, digest string
-	if err := tx.QueryRow(ctx, `SELECT after->>'report_ref',after->>'report_digest' FROM events WHERE node_id=$1 AND type='delivery.adopted' ORDER BY id DESC LIMIT 1`, project).Scan(&ref, &digest); err != nil {
+	var adoptionEvent int64
+	if err := tx.QueryRow(ctx, `SELECT id,after->>'report_ref',after->>'report_digest' FROM events WHERE tenant_id=$2 AND node_id=$1 AND type='delivery.adopted' ORDER BY id DESC LIMIT 1`, project, p.TenantID).Scan(&adoptionEvent, &ref, &digest); err != nil {
 		return err
 	}
 	if s.reports == nil || !digestRE.MatchString(digest) {
@@ -251,20 +252,78 @@ func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Princip
 		return err
 	}
 	defer rows.Close()
+	missing := []string{}
 	for rows.Next() {
 		var id, release string
 		var retained bool
 		if err = rows.Scan(&id, &release, &retained); err != nil {
 			return err
 		}
-		if adopted[id] != release || !retained {
+		if adopted[id] != release {
 			out.MissingArchiveMembers++
+		} else if !retained {
+			missing = append(missing, id)
 		} else {
 			out.AdoptedMembers++
 		}
 		delete(adopted, id)
 	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	removed, err := verifyRemovedMembers(ctx, tx, p.TenantID, adoptionEvent, missing)
+	if err != nil {
+		return err
+	}
+	out.AdoptedMembers += removed
+	out.MissingArchiveMembers += len(missing) - removed
 	// A missing archive reference is also a lost part of the adoption evidence.
 	out.MissingArchiveMembers += len(adopted)
-	return rows.Err()
+	return nil
+}
+
+// A project move removes ranked backlog rows and Undo returns them unranked.
+// The latest membership mutation after the immutable adoption event must
+// explain each absent row; an old removal cannot excuse a later lost placement.
+// Move snapshots include descendants. Undo binds to that exact original event,
+// while placement Undo records an explicit zero-revision tail in its after image.
+func verifyRemovedMembers(ctx context.Context, tx pgx.Tx, tenantID string, adoptionEvent int64, missing []string) (int, error) {
+	if len(missing) == 0 {
+		return 0, nil
+	}
+	// At most 5,000 candidates, one latest event per candidate, within the
+	// verification snapshot's statement and transaction deadlines. Only booleans
+	// leave SQL; arbitrary event snapshots are never decoded or copied into Go.
+	rows, err := tx.Query(ctx, `SELECT coalesce(latest.removed,false)
+	 FROM unnest($1::uuid[]) AS candidate(item_id)
+	 LEFT JOIN LATERAL (
+	   SELECT CASE WHEN e.type='ships_in.changed' THEN
+	     e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text,'revision',0))
+	     ELSE true END AS removed
+	   FROM events e LEFT JOIN events original ON original.tenant_id=e.tenant_id AND original.id=e.undo_of
+	     AND original.type=e.type AND original.id>$2 AND original.id<e.id
+	   WHERE e.tenant_id=$3 AND e.id>$2 AND (
+	     (e.type='ships_in.changed' AND e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text)))
+	     OR (e.type IN ('node.moved','node.project_moved','node.bulk_changed') AND
+	       (CASE WHEN e.undo_of IS NULL THEN e.before ELSE original.before END)->'ships_in_before_move'
+	         @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text))))
+	   ORDER BY e.id DESC LIMIT 1
+	 ) latest ON true LIMIT 5000`, missing, adoptionEvent, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	removed := 0
+	for rows.Next() {
+		var explained bool
+		if err = rows.Scan(&explained); err != nil {
+			return 0, err
+		}
+		if explained {
+			removed++
+		}
+	}
+	return removed, rows.Err()
 }

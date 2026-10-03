@@ -58,7 +58,10 @@ storage recovers recognized interrupted atomic writes under the project lock
 while retaining committed payloads and refusing unexpected storage items.
 Verification binds retained memberships to the immutable adoption report, so
 later authorized reranking, release moves and rollover can change placement
-source without losing adoption evidence.
+source without losing adoption evidence. Authorized project moves and Undo may
+remove the ranked backlog row while preserving its journey archive; verification
+requires the latest post-adoption membership event to explain that absence.
+Unrecorded placement deletions and missing archive references still fail.
 
 Tests use durable fake providers and private PostgreSQL restore copies. Native
 provider acceptance and the instance release/rollback record remain deployment
