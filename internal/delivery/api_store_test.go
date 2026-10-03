@@ -112,10 +112,15 @@ func TestCumulativeCaptureCutWindowCarryForwardAndReopenedWait(t *testing.T) {
 
 func TestAdoptedReleasedNotesWithoutCaptureStayUnavailable(t *testing.T) {
 	f := newStoreFixture(t)
-	id := f.item(t, "task", "TSK-1", "done", f.release, "V")
+	var release string
+	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+		release = f.node(t, ctx, tx, "release", "REL-3", f.project)
+		_, err := tx.Exec(ctx, `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,state,rank,released_at,origin) VALUES($1,$2,$3,3,'released','F',$4,'adopted_released')`, f.tenant, f.project, release, f.clock)
+		return err
+	})
+	id := f.item(t, "task", "TSK-1", "done", release, "V")
 	f.exec(t, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, id, benefitFields)
-	f.exec(t, `UPDATE project_releases SET state='released',released_at=$2,origin='adopted_released' WHERE release_node_id=$1`, f.release, f.clock)
-	result, err := f.store.NoteSnapshot(t.Context(), f.person, f.project, f.release)
+	result, err := f.store.NoteSnapshot(t.Context(), f.person, f.project, release)
 	if err != nil {
 		t.Fatal(err)
 	}
