@@ -12,6 +12,9 @@ admission and node identity (including project cascades). Item admission checks
 kind and liveness on insert or an explicit item-id assignment; normal rollover
 can maintain deleted members and members whose kind changed in the backlog.
 Adopted inserts exempt only liveness, preserving historical tombstones.
+Ordinary cuts set version, scheme and cut timestamp together; adopted released
+history may retain a version without a known cut timestamp. The immutable cut
+tuple cannot leave a versioned ordinary release stranded without its timestamp.
 
 The job's `operation_journal` has one `operations` array (at most eight entries,
 16 KiB), with required operation key, attempt identity, kind and status. It
@@ -33,7 +36,8 @@ CHECK/unique/FK bounds and snapshot trigger reuse. The P1 inventory entries use
 AEON-490's registry format in `internal/dsar/inventory.json`; when integrating
 that independently developed kit, union these entries with its complete
 inventory rather than replacing either set. The P1 schema test checks every
-new column's classification. `node --test scripts/delivery-migrations.test.mjs`
+new column's classification on the five delivery tables, including when the
+inventory contains unrelated tables. `node --test scripts/delivery-migrations.test.mjs`
 probes the actual migration-policy classifier without any exception.
 
 AEON-452 keeps `1088_more_harnesses.sql` as one numbered migration but commits

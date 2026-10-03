@@ -71,6 +71,8 @@ CREATE TABLE project_releases (
     CHECK ((state = 'released') = (released_at IS NOT NULL)),
     CHECK ((state = 'abandoned') = (abandoned_at IS NOT NULL)),
     CHECK (cut_at IS NULL OR (version IS NOT NULL AND state IN ('frozen', 'released', 'abandoned'))),
+    -- Ordinary cuts assign the whole immutable tuple; adopted history may lack its timestamp.
+    CONSTRAINT project_releases_version_cut_pair CHECK (version IS NULL OR cut_at IS NOT NULL OR origin = 'adopted_released'),
     CHECK (reservation_basis IS DISTINCT FROM 'history' OR reservation_ref = ''),
     CONSTRAINT project_releases_publication_proof CHECK (state <> 'released' OR visibility <> 'published' OR origin = 'adopted_released'
         OR (version IS NOT NULL AND cut_at IS NOT NULL AND reservation_basis IS NOT NULL)),

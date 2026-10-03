@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -229,12 +230,36 @@ func TestDeliveryDSARInventoryCoversEveryNewColumn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("delivery inventory", func(t *testing.T) {
+		assertDeliveryDSARInventory(t, d, b)
+	})
+	// The workspace inventory also contains account-scoped data with no project
+	// locator. Unioning it must still check every column of all five P1 tables.
+	var workspaceEntries []json.RawMessage
+	if err := json.Unmarshal(b, &workspaceEntries); err != nil {
+		t.Fatal(err)
+	}
+	workspaceEntries = append(workspaceEntries, json.RawMessage(`{"table":"account_allowance_windows","export":"starts_at ends_at allowance used reserved","metadata":"tenant_id id account_id","locator":"id account_id","hold":"audit-review"}`))
+	union, err := json.Marshal(workspaceEntries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("workspace inventory union", func(t *testing.T) {
+		assertDeliveryDSARInventory(t, d, union)
+	})
+}
+
+func assertDeliveryDSARInventory(t *testing.T, d *dbtest.DB, b []byte) {
+	t.Helper()
 	var entries []struct{ Table, Export, Review, Secret, Metadata, Subjects, Locator, Hold string }
 	if err := json.Unmarshal(b, &entries); err != nil {
 		t.Fatal(err)
 	}
 	byTable := make(map[string]map[string]string)
 	for _, e := range entries {
+		if !slices.Contains(deliveryTables, e.Table) {
+			continue
+		}
 		columns := make(map[string]string)
 		for class, list := range map[string]string{"personal": e.Export, "review": e.Review, "secret": e.Secret, "metadata": e.Metadata} {
 			for _, col := range strings.Fields(list) {
