@@ -172,8 +172,18 @@ paths:
       description: >-
         Requires questions.ask and questions.read in an accessible project. Authenticated principal
         is the asker; an optional session must be that principal's active generation in this project.
+        Ask writes revalidate current project permissions and authenticated key activity/scopes
+        inside the final transaction under access/key locks.
         Request IDs are scoped to tenant/project/asker. An identical retry returns the same question;
-        changed input returns 409. anyway_reason deliberately skips future matching, never permissions.
+        changed input returns 409. anyway_reason deliberately skips reuse and merging, never permissions.
+        Exact ordinary Q&A matches may join an open question or an active Always answer in the same
+        tenant/project/ticket scope. Option IDs and all option text must agree; option order may differ.
+        Context, findings, blocked work and effective outcome must agree. Source-linked requests and
+        requirement/doctrine suggestions never participate. No similarity-based answer is inferred.
+        Reused memberships carry From the record provenance and immediate inbox/comment deadlines;
+        no additional outcome effect or human-answer grace is created. Always publication belongs to P4.
+        Each matching item accepts at most 100 askers; a full item starts a separate question.
+        An anyway question stays separate while open; a later human-approved Always can be reused.
         Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
         Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
       security: [{session: []}, {agentKey: []}]
@@ -183,7 +193,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/QuestionInput'}
       responses:
-        '201': {description: Stored question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '201': {description: Stored asker membership in a fresh or matching question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '200': {description: Idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -245,7 +255,7 @@ paths:
         '200': {description: Recorded answer with pending delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'code revision_conflict, replay_conflict or correction_unavailable'}
+        '409': {description: 'code revision_conflict or replay_conflict'}
         '422': {description: 'code outcome_unavailable'}
   /decision-desk:
     get:
@@ -6655,7 +6665,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: sendProjectMessage
-      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent, so a reply to it is not found.
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent. An addressed person authenticated by session cookie, without Authorization or agent attribution, may answer it with inbox.manage, questions.read and questions.decide permission; this returns a pending Decision Desk answer. Every unauthorized or mismatched held reply uses the same not-found response as an unknown parent.
       requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
@@ -9334,7 +9344,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.6']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.7']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -9392,12 +9402,32 @@ components:
         meanwhile: {type: string, enum: [carries_on, parked, paused, stopped]}
         meanwhile_text: {type: string, maxLength: 2000}
         blocked_node_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
         suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
         ticket_id: {type: string, format: uuid}
         session_id: {type: string, format: uuid, description: Verified original public harness generation; never an arbitrary attribution UUID}
         source_request_id: {type: string, format: uuid, description: Optional owned inbox_compat_messages ID in this project and exact session}
         source_handover_id: {type: string, format: uuid, description: Reserved for a verified AEON-524 adapter; currently returns source_unavailable}
         anyway_reason: {type: string, minLength: 1, maxLength: 2000}
+    QuestionDoctrineTarget:
+      type: object
+      additionalProperties: false
+      required: [source_id, path, rule_key, rule_sha256]
+      properties:
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        tldr_en: {type: string, maxLength: 300}
+        tldr_de: {type: string, maxLength: 300}
+    QuestionOutcomeAvailability:
+      type: object
+      required: [outcome, available, why]
+      properties:
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        available: {type: boolean}
+        why: {type: string, description: Unavailable stamps have no shortcut; do not treat the stored suggestion as permission.}
+        mapping_present: {type: boolean, description: Cheap Doctrine mapping hint; the exact source and guard are validated only when deciding and applying.}
     QuestionDecisionInput:
       type: object
       additionalProperties: false
@@ -9409,6 +9439,8 @@ components:
         answer: {type: string, maxLength: 8000, description: Required for a custom answer; omit to use the option answer}
         reason: {type: string, maxLength: 2000}
         outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        ticket_revision: {type: string, format: date-time, description: Optional ticket updated_at from the screen; changes before commit conflict. The server also snapshots it for delayed application.}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
     QuestionAsker:
       type: object
       required: [id, principal_id, request_id, reply_root_id, comment_node_id, created_at, input]
@@ -9421,6 +9453,15 @@ components:
         comment_node_id: {type: string, format: uuid, description: Linked ticket or the question node for ticketless asks}
         created_at: {type: string, format: date-time}
         input: {$ref: '#/components/schemas/QuestionInput'}
+        from_record: {$ref: '#/components/schemas/QuestionReuse'}
+    QuestionReuse:
+      type: object
+      description: Immutable per-asker provenance retained when the answer is later corrected. The active source decision reuse_count increments once per new membership, never on replay or delivery retry.
+      required: [label, decision_id, revision]
+      properties:
+        label: {type: string, const: From the record}
+        decision_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 2}
     QuestionAnswer:
       type: object
       required: [id, revision, answer, outcome, decided_by, created_at, deliver_after]
@@ -9434,6 +9475,28 @@ components:
         decided_by: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
         deliver_after: {type: string, format: date-time}
+        replaces: {type: string, format: uuid, description: Previously dispatched answer replaced by this correction; immutable history is retained.}
+    QuestionEffectData:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket_id: {type: string, format: uuid}
+        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; person edits are preserved and flagged for review.}
+        knowledge_id: {type: string, format: uuid}
+        doctrine_id: {type: string, format: uuid, description: Pending AEON-444 inbox draft; publication needs the existing person-only action.}
+        supersedes: {type: string, format: uuid, description: Earlier outcome effect ID}
+        superseded_by: {type: string, format: uuid, description: Replacing outcome effect ID}
+        retryable: {type: boolean, description: False means automatic retry is stopped; review the failure and decide a new revision.}
+        review_required:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            required: [kind, ref, why]
+            properties:
+              kind: {type: string, enum: [criterion, doctrine]}
+              ref: {type: string}
+              why: {type: string}
     QuestionPending:
       type: object
       required: [id, revision, kind, state, deliver_after]
@@ -9446,6 +9509,12 @@ components:
         deliver_after: {type: string, format: date-time}
         effect_ref: {type: string}
         error_code: {type: string}
+        error_message: {type: string, description: Safe explanation of a failed effect; retryable effects recheck authority; final conflicts require a new decision.}
+        effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
+        receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
+        receipt_failure: {type: string}
+        delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
     Question:
       type: object
       required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]
@@ -9460,6 +9529,7 @@ components:
         askers: {type: array, items: {$ref: '#/components/schemas/QuestionAsker'}}
         answer: {$ref: '#/components/schemas/QuestionAnswer'}
         pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
+        outcomes: {type: array, items: {$ref: '#/components/schemas/QuestionOutcomeAvailability'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     QuestionPage:
@@ -13998,10 +14068,20 @@ components:
         handover: {$ref: '#/components/schemas/HarnessHandover'}
         resume_requested_at: {type: string, format: date-time}
         successor_session_id: {type: string, format: uuid}
+    DeskAnswerReference:
+      type: object
+      required: [question_id, answer_id, revision]
+      description: Durable answer pointer. Fetch private answer text through the authorized question status API.
+      properties:
+        question_id: {type: string, format: uuid}
+        answer_id: {type: string, format: uuid}
+        revision: {type: integer}
+        replaces: {type: string, format: uuid}
     HarnessContinuation:
       type: object
       required: [succeeds_session_id, handover, brief]
       properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         succeeds_session_id: {type: string, format: uuid}
         handover: {$ref: '#/components/schemas/HarnessHandover'}
         brief: {type: string, description: 'Full continuation brief built from the durable handover, never truncated to the metadata brief label.'}
@@ -14031,6 +14111,7 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         service_tier: {$ref: '#/components/schemas/ServiceTier'}
         service_tier_revision: {type: integer, minimum: 0}
         service_tier_request: {type: [string, 'null'], enum: [default, fast, fastest, null], description: Pending agent-requested tier available on session list rows without opening the panel.}
@@ -15940,7 +16021,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
-              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, ticket]}
+              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, decision, ticket]}
               kind: {type: string, enum: [knowledge, ticket]}
               slug: {type: string}
               title: {type: string}
@@ -15960,7 +16041,7 @@ components:
               label: {type: string}
     KnowledgeType:
       type: string
-      enum: [runbook, guideline, memory, external-system, related-project]
+      enum: [runbook, guideline, memory, external-system, related-project, decision]
     KnowledgeStatus:
       type: string
       description: active is stored as backlog, archived as cancelled; any other stored state reads as active.

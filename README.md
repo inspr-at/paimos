@@ -1138,7 +1138,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.6`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.7`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.7 adds optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -2722,7 +2722,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.6`, declared by the response-only
+The reporter contract is `harness-session/2.7`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
@@ -2867,11 +2867,72 @@ Generic node/knowledge CRUD cannot modify question/decision authority.
 Questions and immutable answer revisions use protected nodes plus tenant/project
 projections. Each asker retains input, principal, exact original session, source
 request, reply-root UUID and comment destination (ticket, or question node).
-The reply root is a reserved correlation identity, not yet a public inbox message:
-P3 must bind the answering person and materialize the inbox counterpart before
-using `tell --reply-to`. No synthetic recipient or newer generation is guessed.
-P1 person answers support Once and record revision-bound pending inbox/comment/
-outcome effects with a database-clock ten-second deadline. They do not dispatch
-messages or claim successful delivery. Always/Requirement/Doctrine publication,
-verified handover sources and post-dispatch corrections require the later adapters;
-unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
+The dispatcher materializes each reserved reply root as a held counterpart for
+its answering person. The original request is never released or executed.
+Person answers use a database-clock ten-second grace window; edits restart it.
+A bounded durable dispatcher serializes with edits and commits each asker's inbox
+and comment effects independently. Revisions dispatched before a change remain
+in the log; the new typed correction names its `replaces` answer ID. The inbox
+outbox state `delivered` means dispatched, while `receipt_state` reports `queued`,
+`handed_off`, or `failed`. CLI status distinguishes dispatch from receiver proof.
+
+A signed-in addressed person with inbox management and question permissions can
+use `tell --reply-to UUID --session-cookie-file PATH` on a held request. The
+file contains only the `aeon_session` cookie value; the command uses the selected
+instance URL (or `AEON_URL` / `PAIMOS_URL`), sends that cookie without an
+Authorization header, and ignores ambient agent keys and sender sessions.
+This records the answer/outbox and settles the request atomically, returning
+`status: pending`, a question ID, revision and deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
+permission approvals keep their existing immediate semantics. Desk dispatch and
+ordinary replies reserve the obligation, message, delivery and receipt rows
+before appending events. Migration 1117 permits event references to be filled
+in within that transaction and rejects incomplete reservations at commit.
+
+The additive `harness-session/2.7` response contract includes optional `desk_answers`
+references; registration and heartbeat request requirements remain unchanged.
+Ended generations retain bounded durable answer references. Only a verified
+same-project/principal continuation receives the latest answer; an absent
+successor stays visibly `successor_pending`. Continuation briefs carry references
+whose private text is resolved through authorized `ask status`, preventing
+harness metadata readers from gaining question content. No old process is woken.
+Outcome effects (AEON-565) apply after the finalized grace revision. Once keeps
+an immutable Decided record. Always publishes a protected Knowledge entry of type
+`decision`, using the existing knowledge list/filter/resolve/graph surfaces and
+CLI taxonomy. A correction immediately withdraws and archives the earlier Always
+answer, independently of grace or failure of its replacement; lineage remains.
+Withdrawing an active Decision requires `knowledge.write` on its project,
+including when correcting to Once.
+Requirement appends one criterion with its exact answer marker, preserves the
+other ticket fields, and compares the captured ticket revision before writing.
+Concurrent edits leave a visible `ticket_revision_conflict`; decide again after
+reviewing the ticket. Requirement is unavailable for list or structured criteria.
+Corrections replace only the exact tracked criterion; edited or removed criteria
+remain untouched and appear in `effect_data.review_required` on the new effect.
+Missing, moved or otherwise non-editable prior tickets also require review;
+their criteria stay untouched while the rest of the correction applies.
+Carried reviews retain each distinct kind and reference. Refreshing a review's
+reason on a later correction preserves the reason on superseded effect revisions.
+Doctrine requires `doctrine: {source_id, path, rule_key, rule_sha256, tldr_en?,
+tldr_de?}` on the question or person decision. It creates only a pending AEON-444
+inbox draft; the existing person-only submit/dismiss and AEON-319 publication gates
+remain authoritative. Dismissed and expired drafts are already retired. Published
+or person-edited proposals remain untouched and appear in `review_required`; the
+rest of the answer can apply, and the existing Doctrine path governs any manual
+correction. This review provenance carries across later answers; a Doctrine
+correction requiring that review creates no new draft; a person must handle
+the correction through the existing Doctrine path.
+CLI status reads the current proposal lifecycle, including dismissal and promotion.
+No rule is described as changed merely by proposing.
+Status exposes `outcomes` with availability and a why for disabled stamps, plus
+per-revision `effect_data` and safe failure explanations. Availability reads load
+permissions once and report a cheap Doctrine `mapping_present` hint; exact mapping
+and quotation checks run when deciding and applying. Expensive inbox preparation
+runs before the tenant mutation fence, then rechecks authority and cache versions
+inside the write. Transient failures retry with current permissions, including
+`stale_source` preparation races and an expired `public_main_unavailable` cache.
+Each transient failure schedules its next attempt 30 seconds later. A stale
+public-main cache keeps retrying until it is refreshed or the answer is replaced.
+Permanent conflicts expose `retryable: false` and require a reviewed new decision; failed
+outcome writes never appear applied. Encoded Doctrine inputs exceeding the
+4096-byte persistence bound return 422 and are stored only for Doctrine.
+`source_handover_id` remains unavailable pending its verified ask-source adapter.

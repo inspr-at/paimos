@@ -188,9 +188,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		go aithemaHost.Run(ctx)
 	}
 
+	questionsMod := questions.New(pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
-		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, inbox.WithHeldReplyBridge(questionsMod.ReplyHeld))
 		if err != nil {
 			closeListener()
 			return fmt.Errorf("messaging: %w", err)
@@ -320,6 +321,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,
 		},
 	})
+	questionsMod.WithDoctrine(doctrineMod)
+	go questionsMod.Run(ctx)
 	go doctrineMod.EnsurePrivateGuards(ctx)
 	go doctrineMod.RunOutcomeAnalysis(ctx)
 	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
@@ -378,7 +381,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
-			questions.New(pool),
+			questionsMod,
 			decisiondesk.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),

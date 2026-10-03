@@ -267,6 +267,12 @@ jobs:
         run: npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1
       - working-directory: web
         run: npm run build
+      - name: Install browser for Decision Knowledge regressions
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Decision Knowledge history and presentation regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/knowledge.spec.ts --grep 'Decision entries' --workers=1 --trace=retain-on-failure
       - name: Access scope and role helper tests
         working-directory: web
         run: node --experimental-strip-types --test tests/access.test.ts tests/agent-login.test.ts

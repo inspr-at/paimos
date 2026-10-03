@@ -291,7 +291,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1117_desk_delivery.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -346,6 +346,30 @@ test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review 
 
 });
 
+test('desk delivery relaxation is pinned and rejects altered constraint enforcement', () => {
+  const file = '1117_desk_delivery.sql';
+  const sql = readFileSync(new URL('../internal/db/migrations/' + file, import.meta.url), 'utf8');
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = manifest.exceptions.find(entry => entry.file === file);
+  assert.equal(entry.ticket, 'AEON-564');
+  assert.equal(entry.sha256, createHash('sha256').update(sql).digest('hex'));
+  assert.match(entry.reason, /Previous-binary writers continue supplying non-null event IDs at INSERT/);
+  assert.match(entry.reason, /coordinator review before merge\/release/);
+  const exceptions = {schema: manifest.schema, exceptions: [entry]};
+  const files = new Map([[file, sql]]);
+  assert.match(checkMigrations(files).join('\n'), /1117_desk_delivery.sql: non-allowlisted/);
+  assert.deepEqual(checkMigrations(files, new Map(), null, {exceptions}), []);
+  for (const altered of [
+    sql.replace('DEFERRABLE INITIALLY DEFERRED', 'DEFERRABLE INITIALLY IMMEDIATE'),
+    sql.replace("USING ERRCODE='23502'", "USING ERRCODE='23514'"),
+    sql.replace('WHERE tenant_id=$1 AND id=$2 AND sent_event_id IS NULL', 'WHERE false'),
+  ]) {
+    const problems = checkMigrations(new Map([[file, altered]]), new Map(), null, {exceptions});
+    assert.ok(problems.includes(`${file}: exception migration changed; add a new migration instead`));
+    assert.ok(problems.some(problem => problem.startsWith(`${file}: non-allowlisted`)));
+  }
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -354,7 +378,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1117_desk_delivery.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 
