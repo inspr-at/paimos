@@ -6,7 +6,7 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
-import type { ThemeRecord } from '../src/lib/themes'
+import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 
 const shots = resolve('test-results/aeon-643')
 const initial = (): ThemeRecord => ({
@@ -19,18 +19,18 @@ async function mock(page: Page, admin = true) {
   data.preferences['agent-state'] = { palette: 'protan', yellowMinutes: 7, redMinutes: 19 }
   await mockWork(page, data, { admin })
   await mockSettings(page, settingsData())
-  const state = { theme: initial(), items: [initial()], selectionRevision: 0, selectedThemeId: null as string | null, writes: [] as ThemeRecord[], fail: false }
+  const state = { theme: initial(), items: [initial()], selectionRevision: 0, selectedThemeId: null as string | null, fallbackNotice: null as ActiveTheme['fallback_notice'], writes: [] as ThemeRecord[], deletes: [] as string[], fail: false }
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
     const method = route.request().method()
-    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: state.selectedThemeId, revision: state.selectionRevision, fallback_notice: null })
+    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: state.selectedThemeId, revision: state.selectionRevision, fallback_notice: state.fallbackNotice })
     if (path === '/api/me/theme') {
       if (method === 'PUT') {
         const body = route.request().postDataJSON()
         expect(body.revision).toBe(state.selectionRevision)
         const target = state.items.find(item => item.id === body.theme_id)
         expect(target).toBeDefined()
-        state.theme = target!; state.selectedThemeId = target!.id; state.selectionRevision++
+        state.theme = target!; state.selectedThemeId = target!.id; state.selectionRevision++; state.fallbackNotice = null
       }
       return route.fulfill({ json: active() })
     }
@@ -43,6 +43,17 @@ async function mock(page: Page, admin = true) {
       return route.fulfill({ json: created })
     }
     if (path === `/api/themes/${state.theme.id}`) {
+      if (method === 'DELETE') {
+        expect(new URL(route.request().url()).searchParams.get('revision')).toBe(String(state.theme.revision))
+        expect(state.theme.scope).not.toBe('default')
+        if (state.fail) return route.fulfill({ status: 500, json: { error: 'write failed' } })
+        state.deletes.push(state.theme.id)
+        state.fallbackNotice = { deleted_theme_id: state.theme.id, deleted_theme_name: state.theme.name }
+        state.items = state.items.filter(item => item.id !== state.theme.id)
+        state.theme = initial()
+        // Real deletion leaves the selected (now deleted) ID and CAS unchanged.
+        return route.fulfill({ status: 204 })
+      }
       if (method === 'PATCH') {
         state.writes.push(route.request().postDataJSON())
         if (state.fail) return route.fulfill({ status: 500, json: { error: 'write failed' } })
@@ -54,6 +65,53 @@ async function mock(page: Page, admin = true) {
     return route.fallback()
   })
   return { state, data }
+}
+
+for (const returning of [false, true]) {
+  test(`Delete reconciles the workspace fallback after navigation${returning ? ' away and back with a stale read' : ''}`, async ({ page }) => {
+    const { state } = await mock(page)
+    const personal: ThemeRecord = { ...initial(), id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Sprite theme', scope: 'personal', owner_principal_id: 'p1', values: { ...initial().values, agents: { ...initial().values.agents, avatar: 'sprite' } } }
+    state.items.push(personal); state.theme = personal; state.selectedThemeId = personal.id; state.selectionRevision = 7
+    let release!: () => void, reached!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const requested = new Promise<void>(resolve => { reached = resolve })
+    await page.route(`**/api/themes/${personal.id}?*`, async route => {
+      if (route.request().method() === 'DELETE') { reached(); await held }
+      await route.fallback()
+    })
+    await page.goto('/settings/theme#agents')
+    await expect(page.getByRole('radio', { name: 'Sprite', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: 'Delete Sprite theme', exact: true }).click()
+    await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+    await requested
+    await page.getByRole('link', { name: 'Projects', exact: true }).click()
+    await expect(page.locator('.theme-section')).toHaveCount(0)
+    let finishRead!: () => void, readReached!: () => void
+    const readHeld = new Promise<void>(resolve => { finishRead = resolve })
+    const readRequested = new Promise<void>(resolve => { readReached = resolve })
+    if (returning) {
+      let firstRead = true
+      const stale = { theme: structuredClone(personal), default_theme_id: initial().id, selected_theme_id: personal.id, revision: 7, fallback_notice: null }
+      await page.route('**/api/me/theme', async route => {
+        if (route.request().method() === 'GET' && firstRead) { firstRead = false; readReached(); await readHeld; return route.fulfill({ json: stale }) }
+        await route.fallback()
+      })
+      await page.evaluate(async () => { await (await import('/src/router.ts')).router.push('/settings/theme#agents') })
+      await readRequested
+    }
+    expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
+    release()
+    await expect.poll(() => state.deletes).toEqual([personal.id])
+    await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+    expect(state.selectionRevision).toBe(7)
+    expect(state.selectedThemeId).toBe(personal.id)
+    if (returning) {
+      finishRead()
+      await expect(page.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
+      await expect(page.locator('.theme-status')).toContainText('workspace default')
+      expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+    }
+  })
 }
 
 async function captureAgents(page: Page, width: number, mode: string) {

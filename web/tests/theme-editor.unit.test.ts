@@ -183,7 +183,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 const mutations = ['select', 'save', 'rename', 'delete', 'duplicate'] as const
-const interleavings = ['mounted', 'navigation', 'remount-old', 'remount-committed', 'newer-selection', 'away-and-back', 'newer-record', 'different-person', 'same-person-new-session', 'mounted-new-session', 'old-read', 'failure', 'mounted-failure'] as const
+const interleavings = ['mounted', 'navigation', 'remount-old', 'remount-committed', 'newer-selection', 'away-and-back', 'newer-record', 'mounted-newer-selection', 'mounted-away-and-back', 'mounted-newer-record', 'different-person', 'same-person-new-session', 'mounted-new-session', 'old-read', 'failure', 'mounted-failure'] as const
 it.each(mutations.flatMap(mutation => interleavings.map(interleaving => ({ mutation, interleaving }))))('$mutation reconciles through $interleaving', async ({ mutation, interleaving }) => {
   const scope = effectScope()
   const editor = scope.run(() => useThemeEditor())!
@@ -208,8 +208,9 @@ it.each(mutations.flatMap(mutation => interleavings.map(interleaving => ({ mutat
       : mutation === 'delete' ? editor.remove(record()) : editor.save()
     await flush()
     expect(mutation === 'delete' ? themes.deleteTheme : mutation === 'save' || mutation === 'rename' ? themes.updateTheme : themes.selectTheme).toHaveBeenCalledOnce()
-    if (interleaving !== 'mounted' && interleaving !== 'mounted-new-session' && interleaving !== 'mounted-failure') scope.stop()
+    if (interleaving !== 'mounted' && !interleaving.startsWith('mounted-')) scope.stop()
     let expected: ThemeRecord['values']['agents']['avatar'] | undefined = result.theme.values.agents.avatar
+    let newer: ActiveTheme | undefined
     const remount = async (value: ActiveTheme) => {
       vi.mocked(themes.getActiveTheme).mockResolvedValue(value)
       const next = effectScope(); others.push(next)
@@ -220,9 +221,9 @@ it.each(mutations.flatMap(mutation => interleavings.map(interleaving => ({ mutat
     }
     if (interleaving === 'remount-old') await remount(active())
     if (interleaving === 'remount-committed') await remount(result)
-    if (interleaving === 'newer-selection') { await remount(active(record('theme-c', 'quill'), 9)); expected = 'quill' }
-    if (interleaving === 'away-and-back') { await remount(active(record(), 9)); expected = 'robot-1' }
-    if (interleaving === 'newer-record') { await remount({ ...result, theme: record(result.theme.id, 'quill', 3) }); expected = 'quill' }
+    if (interleaving === 'newer-selection' || interleaving === 'mounted-newer-selection') { newer = active(record('theme-c', 'quill'), 9); await remount(newer); expected = 'quill' }
+    if (interleaving === 'away-and-back' || interleaving === 'mounted-away-and-back') { newer = active(record(), 9); await remount(newer); expected = 'robot-1' }
+    if (interleaving === 'newer-record' || interleaving === 'mounted-newer-record') { newer = { ...result, theme: record(result.theme.id, 'quill', 3) }; await remount(newer); expected = 'quill' }
     if (interleaving === 'different-person') { resetAgentTheme('tenant/bob'); expected = undefined }
     if (interleaving === 'same-person-new-session' || interleaving === 'mounted-new-session') { resetAgentTheme(); resetAgentTheme('tenant/alice'); expected = undefined }
     const staleRead = deferred<ActiveTheme>()
@@ -249,6 +250,10 @@ it.each(mutations.flatMap(mutation => interleavings.map(interleaving => ({ mutat
       expect(editor.draft.value).toEqual(result.theme)
       expect(editor.error.value).toBe('')
       expect(editor.busy.value).toBe(false)
+    } else if (mutation === 'delete' && ['mounted-newer-selection', 'mounted-away-and-back', 'mounted-newer-record'].includes(interleaving)) {
+      expect(editor.active.value?.theme).toEqual(newer!.theme)
+      expect(editor.draft.value).toEqual(newer!.theme)
+      expect(editor.message.value).toBe(newer!.theme.id === 'default' ? 'Deleted. You are using the workspace default.' : 'Deleted.')
     } else {
       expect(editor.active.value?.theme.id).toBe('theme-a')
       expect(editor.active.value?.theme.revision).toBe(1)

@@ -129,7 +129,16 @@ export function useThemeEditor() {
         try {
           const chosen = await themes.getActiveTheme()
           const accepted = reconcile({ kind: 'delete', active: chosen, themeId: captured.id })
-          if (accepted && current()) { install(accepted); message.value = 'Deleted. You are using the workspace default.' }
+          if (current()) {
+            // A newer choice may already have won while the fallback was read.
+            // The shared read fence returns that record instead of leaving this
+            // mounted editor blank or installing the obsolete fallback.
+            const displayed = accepted ?? reconcile({ kind: 'read', active: chosen })
+            if (displayed) {
+              install(displayed)
+              message.value = displayed.theme.id === displayed.default_theme_id ? 'Deleted. You are using the workspace default.' : 'Deleted.'
+            }
+          }
         }
         catch { if (current()) error.value = 'Deleted, but the workspace default could not be loaded. Try again.' }
       }
