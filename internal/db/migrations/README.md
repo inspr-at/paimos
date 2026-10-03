@@ -212,10 +212,12 @@ index with the first-line `aeon:no-transaction` marker. The runner accepts exact
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
 
-AEON-613 reserves **1136** for quota warning settings and durable receipts. The
-shared scratch ledger was read before reservation (highest reserved: 1135).
-The reservation is also recorded on AEON-613; the coordinator must mirror it to
-the shared ledger because workers may author only inside their own repository.
+AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
+replacing unpublished migration 1136. The current shared ledger assigns
+1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
+The replacement reservations are recorded on AEON-613 before renaming; the
+coordinator must mirror 1147/1148 to the shared ledger because workers may
+author only inside their own repository. The settings/receipt SQL is unchanged.
 
 DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.
 Classify `quota_warning_settings` as metadata, located by `(tenant_id)`.
@@ -224,9 +226,10 @@ identity, reading time, remaining percentage, reset, threshold and recovery),
 located by `(tenant_id,id)`, when merging with the inventory branch. These
 records contain no credentials, local paths or raw vendor responses.
 
-AEON-613 fix2 reserves **1137** for `account_quota_warning_observations` before
-creating the migration. This stores the latest measured quota/window state,
-including healthy readings, separately from notification receipts in 1136.
+AEON-613 fix5 reserves **1148** for `account_quota_warning_observations`,
+replacing unpublished migration 1137. This stores the latest measured
+quota/window state, including healthy readings, separately from notification
+receipts in 1147. Only its filename and receipt-migration comment change.
 The reservation is recorded on AEON-613; the coordinator must mirror it to the
 shared ledger under the same ownership boundary. Existing receipts remain
 unchanged, and current availability resumes with the next fresh measurement.

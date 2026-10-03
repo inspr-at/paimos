@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-613: current measured availability and its quota/window watermark are
--- independent of reset/threshold notification deduplication receipts (1136).
+-- independent of reset/threshold notification deduplication receipts (1147).
 -- Retain historical receipts; do not reconstruct healthy readings from them.
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE account_quota_warning_observations (
