@@ -25,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -109,6 +110,7 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
+	serviceTier      string
 	capacityParser   capacity.Parser
 	capacityModel    string
 	lastCapacity     []capacity.Reading
@@ -148,6 +150,9 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	p.eventMu.Unlock()
 	if ended {
 		return ErrNotOwned
+	}
+	if op == "tier" {
+		return p.changeTier(ctx, text)
 	}
 	inbox := op == "inbox"
 	if inbox {
@@ -225,7 +230,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-agentd", "title": "AEON agentd", "version": "1"}, "capabilities": map[string]any{"experimentalApi": true}}); err != nil {
 		return fail(err)
 	}
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}); err != nil {
+	if err := p.sendContext(op, map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}); err != nil {
 		return fail(err)
 	}
 	expectedEmail := strings.TrimSpace(a.Emails[r.AccountKey])
@@ -259,7 +264,10 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		Effort string `json:"reasoningEffort"`
 	}
 	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
-	config := map[string]any{}
+	config := map[string]any{"service_tier": "default"}
+	if r.ServiceTier != "" {
+		config["service_tier"] = map[string]string{"default": "default", "fast": "fast", "fastest": "ultrafast"}[r.ServiceTier]
+	}
 	if r.Rules != "" {
 		// This limits the repository AGENTS.md chain, not developer instructions.
 		// Preserve Codex's default allowance when the delivered rules are smaller.
@@ -552,7 +560,7 @@ func (p *cursorProcess) Control(ctx context.Context, op, text string) error {
 		return ErrNotOwned
 	default:
 	}
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": p.sessionID}}); err != nil {
+	if err := p.sendContext(ctx, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": p.sessionID}}); err != nil {
 		return err
 	}
 	select {
@@ -691,7 +699,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	p.eventMu.Unlock()
 	cp.promptID = strconv.FormatInt(p.next.Add(1), 10)
 	id, _ := strconv.ParseInt(cp.promptID, 10, 64)
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
+	if err := p.sendContext(op, map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
 		return fail(err)
 	}
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
@@ -763,6 +771,7 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 }
 
 type claudeProcess struct {
+	serviceTier   string
 	answerMu      sync.Mutex
 	answer        string
 	managedPolicy bool
@@ -791,7 +800,7 @@ func (p *claudeProcess) Wait() error {
 func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
-	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" {
+	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" && op != "tier" {
 		return ErrUnsupported
 	}
 	correlation, err := randomID()
@@ -902,6 +911,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			EffectiveModel  string             `json:"effective_model"`
 			EffectiveEffort string             `json:"effective_effort"`
 			ModelEvidence   string             `json:"model_evidence_status"`
+			ServiceTier     string             `json:"service_tier"`
 			InputTokens     int64              `json:"input_tokens_total"`
 			OutputTokens    int64              `json:"output_tokens_total"`
 			CachedTokens    *int64             `json:"cached_input_tokens_total"`
@@ -982,7 +992,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			default:
 			}
 		case "settings_changed":
-			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort})
+			if servicetier.Valid(frame.ServiceTier) {
+				cp.serviceTier = frame.ServiceTier
+			}
+			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort, HarnessTier: frame.ServiceTier})
 		case "budget_exhausted":
 			if frame.Reason == "token_budget_exhausted" || frame.Reason == "turn_budget_exhausted" {
 				observe(AdapterEvent{BudgetExhausted: frame.Reason})
@@ -1009,6 +1022,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			reports := claudeModelReports(frame.Models)
 			for i := range reports {
 				report := reports[i]
+				report.ServiceTier = cp.serviceTier
+				if report.ServiceTier == "" {
+					report.ServiceTier = "default"
+				}
 				observe(AdapterEvent{SessionUsage: &report})
 			}
 		case "tool_started":
@@ -1026,11 +1043,11 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
-		return p.failStart(err)
-	}
 	op, cancel := operationContext(ctx)
 	defer cancel()
+	if err := p.sendContext(op, map[string]any{"op": "start", "service_tier": "default", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
+		return p.failStart(err)
+	}
 	select {
 	case <-cp.ready:
 		started = true

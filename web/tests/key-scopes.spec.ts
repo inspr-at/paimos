@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { accessWorld, mockAccess, DEPLOYER } from './access-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const agent = (page: Page) => page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'pharos-deployer' })
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'Edit scopes for pharos-deployer' })
@@ -149,8 +150,9 @@ test('people without keys.manage have no scope edit action', async ({ page }) =>
   await expect(page.getByRole('button', { name: /^Edit scopes/ })).toHaveCount(0)
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`scopes fit ${width}px in ${theme} with keyboard access`, async ({ page }, testInfo) => {
+const scopeLayouts = [{ width: 1600 }, { width: 1440 }, { width: 390 }, { width: 390, wideFont: true }]
+for (const theme of ['light', 'dark'] as const) for (const { width, wideFont } of scopeLayouts) {
+  test(`scopes fit ${width}px in ${theme} with keyboard access${wideFont ? ' (wide system font)' : ''}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: theme })
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const errors = watchErrors(page)
@@ -160,8 +162,29 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await agent(page).getByRole('button', { name: /^Edit scopes/ }).scrollIntoViewIfNeeded()
     await page.screenshot({ path: join(dir, `keys-${width}-${theme}.png`), fullPage: true })
     await edit(page)
-    await sheet(page).getByRole('checkbox', { name: /nodes\.write/ }).check()
-    await expect(sheet(page).getByRole('region', { name: 'Confirm role changes' })).toBeVisible()
+    const dialog = sheet(page)
+    // OS font metrics differ; a wider font must not expand the action on role confirmation.
+    if (wideFont) await page.addStyleTag({ content: '.actions .btn { font-family: monospace; }' })
+    const scope = dialog.getByRole('checkbox', { name: /nodes\.write/ })
+    await expectStableControls({
+      controls: {
+        frame: dialog,
+        cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }),
+        save: dialog.locator('.actions .primary'),
+        actions: dialog.locator('.actions'),
+        lifetime: dialog.getByRole('radiogroup'),
+        presets: dialog.locator('.preset-actions'),
+        scope,
+        row: dialog.locator('.scope-row').filter({ has: page.getByRole('checkbox', { name: /nodes\.write/ }) }),
+      },
+      scrollAreas: { sheet: dialog, body: dialog.locator('.sheet-body') },
+      interactions: [{ name: 'confirm role extension', run: async () => {
+        await scope.check()
+        await expect(dialog.getByRole('region', { name: 'Confirm role changes' })).toBeVisible()
+      } }],
+    })
+    // Actions stay at the top; the long role explanation is in the scrolling body.
+    await sheet(page).getByRole('region', { name: 'Confirm role changes' }).scrollIntoViewIfNeeded()
     const confirmation = await sheet(page).getByRole('region', { name: 'Confirm role changes' }).boundingBox()
     expect(confirmation!.y + confirmation!.height).toBeLessThanOrEqual(width === 390 ? 844 : 1000)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

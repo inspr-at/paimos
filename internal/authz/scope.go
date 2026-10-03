@@ -26,6 +26,7 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/recurrences":                        true,
 	"GET /api/decision-desk":                      true,
 	"GET /api/journey/next-actions":               true,
 	"GET /api/queue":                              true,
@@ -117,6 +118,7 @@ var ProjectDecidedRoutes = map[string]bool{
 	"POST /api/outcomes":                                         true,
 	"POST /api/relations":                                        true,
 	"POST /api/knowledge":                                        true,
+	"POST /api/recurrences":                                      true,
 }
 
 // Product release notes are the same for everyone; they are not tenant data.
@@ -131,6 +133,8 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["recurrenceId"] != "":
+		return "recurrence", values["recurrenceId"]
 	case values["questionId"] != "":
 		return "node", values["questionId"]
 	case values["nodeId"] != "":
@@ -236,6 +240,11 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	var query string
 	args := []any{id}
 	switch kind {
+	case "recurrence":
+		if !uuidPattern.MatchString(id) {
+			return "", nil
+		}
+		query = `SELECT project_id::text FROM recurrences WHERE id=$1::uuid`
 	case "node":
 		if !uuidPattern.MatchString(id) {
 			return "", nil
