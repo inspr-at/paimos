@@ -211,3 +211,15 @@ transaction after 1100 releases its exclusive lock; 1102 builds the unique conte
 index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
+
+AEON-619 (1138) adds tenant-RLS product settings and per-product project links.
+It records the previously selected product as the explicit default, preserves
+published products in `legacy` participation, and binds existing browser ballots
+to their original product. New products are unpublished with participation
+`disabled`; registered activation is refused until B3+B8+B7's reviewed gate.
+Legacy portal/pacing tables and response fields remain. The old pace row mirrors
+into its bound product link; new writes keep the default's legacy adapter current.
+The tenant-loop backfill and mirror delete have an exact-byte policy exception
+for coordinator review. DSAR inventory is absent at this base; these new settings
+and link identifiers are tenant metadata, while ballot hashes remain pseudonymous
+personal data under the existing vote-table contract.

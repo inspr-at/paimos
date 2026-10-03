@@ -134,13 +134,21 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 	var releases []publicRelease
 	var roadmapItems []publicRoadmapItem
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal read"), m.pool, tenantID, func(tx pgx.Tx) error {
-		loaded, loadErr := loadPortal(r.Context(), tx)
+		ctx := context.WithValue(r.Context(), productSlugContextKey{}, r.PathValue("productSlug"))
+		loaded, loadErr := loadPortal(ctx, tx)
+		if loaded.Product != nil {
+			product, err := publicProduct(ctx, tx, r.PathValue("productSlug"), false)
+			if err != nil {
+				return err
+			}
+			ctx = context.WithValue(ctx, productContextKey{}, product.ProductID)
+		}
 		if loadErr != nil {
 			return loadErr
 		}
 		doc = loaded
 		if doc.Product != nil && kind != publicReleasesKind {
-			roadmapItems, loadErr = loadPublicRoadmap(r.Context(), tx)
+			roadmapItems, loadErr = loadPublicRoadmap(ctx, tx)
 			if loadErr != nil {
 				return loadErr
 			}
@@ -149,7 +157,7 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 		if kind == publicCatalog || kind == publicRoadmapKind || doc.Product == nil || !doc.ReleaseHistory {
 			return nil
 		}
-		releases, loadErr = loadPublicReleases(r.Context(), tx)
+		releases, loadErr = loadPublicReleases(ctx, tx)
 		return loadErr
 	})
 	if errors.Is(err, errClosed) {
@@ -180,7 +188,7 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, renderLlms(slug, doc, releases))
+		_, _ = io.WriteString(w, renderLlmsForProduct(slug, r.PathValue("productSlug"), doc, releases))
 	default:
 		write(w, http.StatusOK, doc)
 	}
@@ -196,17 +204,23 @@ func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {
 	if err != nil {
 		return doc, err
 	}
-	var id, key, title, body string
-	err = tx.QueryRow(ctx, `
-		SELECT n.id::text, n.key, left(n.title, 300), left(n.body, 4000)
-		FROM nodes n
-		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE k.slug = 'portal_product' AND n.parent_id IS NULL AND n.deleted_at IS NULL AND n.state = 'published'
-		ORDER BY n.position, n.key
-		LIMIT 1`).Scan(&id, &key, &title, &body)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return doc, nil
+	product, err := publicProduct(ctx, tx, productSlugForContext(ctx), false)
+	if errors.Is(err, errClosed) && productSlugForContext(ctx) == "" {
+		var configured bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM portal_products WHERE is_default)`).Scan(&configured); err != nil {
+			return doc, err
+		}
+		if !configured {
+			return doc, nil
+		}
 	}
+	if err != nil {
+		return doc, err
+	}
+	id := product.ProductID
+	ctx = context.WithValue(ctx, productContextKey{}, id)
+	var key, title, body string
+	err = tx.QueryRow(ctx, `SELECT key,left(title,300),left(body,4000) FROM nodes WHERE id=$1::uuid`, id).Scan(&key, &title, &body)
 	if err != nil {
 		return doc, err
 	}
@@ -259,12 +273,12 @@ func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {
 
 	rows, err = tx.Query(ctx, `
 		SELECT n.key, left(n.title, 300), left(n.body, 4000),
-		       coalesce((SELECT sum(v.weight)::bigint FROM portal_votes v WHERE v.tenant_id = n.tenant_id AND v.wish_id = n.id), 0)
+		       CASE WHEN $2::text='legacy' THEN coalesce((SELECT sum(v.weight)::bigint FROM portal_votes v WHERE v.tenant_id = n.tenant_id AND v.wish_id = n.id AND v.product_id=$1::uuid), 0) ELSE 0 END
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
 		WHERE k.slug = 'portal_wish' AND n.parent_id = $1::uuid AND n.deleted_at IS NULL AND n.state = 'published'
 		ORDER BY n.position, n.key
-		LIMIT 500`, id)
+		LIMIT 500`, id, product.Policy)
 	if err != nil {
 		return doc, err
 	}
@@ -363,20 +377,17 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "not found")
 		return
 	}
-	ballotValue, minted, err := ballotValue(r)
-	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "portal unavailable")
-		return
-	}
+	var ballot string
+	var minted bool
 	var votes int64
 	var created bool
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal vote"), m.pool, tenantID, func(tx pgx.Tx) error {
-		open, err := portalOpen(r.Context(), tx)
-		if err != nil || !open {
-			if err != nil {
-				return err
-			}
-			return errClosed
+		product, err := publicWriteProduct(r.Context(), tx, r.PathValue("productSlug"))
+		if err != nil {
+			return err
+		}
+		if err := allowParticipation(product, true); err != nil {
+			return err
 		}
 		var wishID string
 		err = tx.QueryRow(r.Context(), `
@@ -387,17 +398,22 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 			JOIN node_kinds pk ON pk.tenant_id = parent.tenant_id AND pk.id = parent.kind_id
 			WHERE k.slug = 'portal_wish' AND pk.slug = 'portal_product'
 			  AND parent.parent_id IS NULL AND parent.deleted_at IS NULL AND parent.state = 'published'
-			  AND n.deleted_at IS NULL AND n.state = 'published' AND n.key = $1`, wishKey).Scan(&wishID)
+			  AND n.deleted_at IS NULL AND n.state = 'published' AND n.key = $1 AND parent.id=$2::uuid
+            FOR NO KEY UPDATE OF n`, wishKey, product.ProductID).Scan(&wishID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errClosed
 		}
 		if err != nil {
 			return err
 		}
+		ballot, minted, err = ballotValue(r)
+		if err != nil {
+			return err
+		}
 		tag, err := tx.Exec(r.Context(), `
-			INSERT INTO portal_votes(tenant_id, wish_id, voter_hash, weight)
-			VALUES ($1::uuid, $2::uuid, $3, 1)
-			ON CONFLICT (tenant_id, wish_id, voter_hash) DO NOTHING`, tenantID, wishID, hash(ballotValue+":"+wishID))
+			INSERT INTO portal_votes(tenant_id, wish_id, voter_hash, weight,product_id)
+			VALUES ($1::uuid, $2::uuid, $3, 1,$4::uuid)
+			ON CONFLICT (tenant_id, wish_id, voter_hash) DO NOTHING`, tenantID, wishID, hash(ballot+":"+wishID), product.ProductID)
 		if err != nil {
 			return err
 		}
@@ -415,10 +431,15 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return tx.QueryRow(r.Context(), `SELECT coalesce(sum(weight),0)::bigint FROM portal_votes WHERE wish_id=$1::uuid`, wishID).Scan(&votes)
+		return tx.QueryRow(r.Context(), `SELECT coalesce(sum(weight),0)::bigint FROM portal_votes WHERE wish_id=$1::uuid AND product_id=$2::uuid`, wishID, product.ProductID).Scan(&votes)
 	})
 	if errors.Is(err, errClosed) {
 		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	var se statusError
+	if errors.As(err, &se) {
+		fail(w, se.status, se.msg)
 		return
 	}
 	if err != nil {
@@ -431,7 +452,7 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if minted {
-		m.setBallot(w, ballotValue)
+		m.setBallot(w, ballot)
 	}
 	status := http.StatusOK
 	if created {

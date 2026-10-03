@@ -5,7 +5,9 @@ import AppIcon from '../components/AppIcon.vue'
 import { setPageTitle } from '../lib/brand'
 import { resilientFetch } from '../lib/api'
 
-const props = defineProps<{ tenantSlug: string }>()
+const props = defineProps<{ tenantSlug: string; productSlug?: string }>()
+const pageBase = computed(() => `/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
+const apiBase = computed(() => `/api/public/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
 
 interface RoadmapItem {
   pill_en: string
@@ -101,7 +103,7 @@ async function load() {
   error.value = ''
   missing.value = false
   try {
-    const response = await resilientFetch(`/api/public/portal/${encodeURIComponent(props.tenantSlug)}/roadmap`, {
+    const response = await resilientFetch(`${apiBase.value}/roadmap`, {
       credentials: 'omit',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
@@ -124,7 +126,7 @@ async function load() {
   }
 }
 
-watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
+watch(() => [props.tenantSlug, props.productSlug], () => { void load() }, { immediate: true })
 </script>
 
 <template>
@@ -149,7 +151,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
       </template>
       <template v-else>
         <nav class="jumps" aria-label="Portal">
-          <router-link class="jump" :to="`/portal/${tenantSlug}`"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
+          <router-link class="jump" :to="pageBase"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
         </nav>
         <p class="eyebrow">Product portal</p>
         <h1>What's coming</h1>
@@ -169,7 +171,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
           </section>
         </div>
         <footer class="colophon">
-          <a class="colophon-link" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+          <a class="colophon-link" :href="`${pageBase}/llms.txt`">llms.txt</a>
         </footer>
       </template>
     </div>

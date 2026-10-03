@@ -141,7 +141,13 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 	}
 	var out any
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockPortalTenant(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
+			return err
+		}
+		if err := lockPortalTree(r.Context(), tx); err != nil {
 			return err
 		}
 		// The market row guard allows publication only after this person check.
@@ -149,7 +155,14 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 			return err
 		}
 		var applyErr error
-		out, applyErr = fn(r.Context(), tx, p)
+		ctx := r.Context()
+		if id := r.PathValue("productId"); id != "" {
+			if !uuidPattern.MatchString(id) {
+				return errClosed
+			}
+			ctx = context.WithValue(ctx, productContextKey{}, id)
+		}
+		out, applyErr = fn(ctx, tx, p)
 		return applyErr
 	})
 	if errors.Is(err, authz.ErrForbidden) {
@@ -159,6 +172,10 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 	var se statusError
 	if errors.As(err, &se) {
 		fail(w, se.status, se.msg)
+		return
+	}
+	if errors.Is(err, errClosed) {
+		fail(w, http.StatusNotFound, "not found")
 		return
 	}
 	if errors.Is(err, errNoProduct) {
@@ -460,17 +477,14 @@ func (m *Module) submitCorrection(w http.ResponseWriter, r *http.Request) {
 	}
 	discarded := strings.TrimSpace(in.Website) != ""
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal correction"), m.pool, tenantID, func(tx pgx.Tx) error {
-		open, err := portalOpen(r.Context(), tx)
-		if err != nil || !open {
-			if err != nil {
-				return err
-			}
-			return errClosed
-		}
-		productID, err := publishedProduct(r.Context(), tx)
+		product, err := publicWriteProduct(r.Context(), tx, r.PathValue("productSlug"))
 		if err != nil {
 			return err
 		}
+		if err := allowParticipation(product, false); err != nil {
+			return err
+		}
+		productID := product.ProductID
 		if discarded {
 			return nil
 		}
@@ -510,6 +524,11 @@ func (m *Module) submitCorrection(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errClosed) {
 		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	var se statusError
+	if errors.As(err, &se) {
+		fail(w, se.status, se.msg)
 		return
 	}
 	if err != nil {
@@ -919,18 +938,19 @@ func appendProductEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, prod
 }
 
 func portalProductID(ctx context.Context, tx pgx.Tx) (string, error) {
-	var id string
-	err := tx.QueryRow(ctx, `
-		SELECT n.id::text
-		FROM nodes n
-		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE k.slug = 'portal_product' AND n.parent_id IS NULL AND n.deleted_at IS NULL
-		ORDER BY (n.state = 'published') DESC, n.position, n.key
-		LIMIT 1`).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) || !uuidPattern.MatchString(id) {
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if id := productForContext(ctx); id != "" {
+		p, err := loadProductSettings(ctx, tx, id, false)
+		if err != nil {
 			return "", err
 		}
+		return p.ProductID, nil
+	}
+	var id string
+	err := tx.QueryRow(ctx, `SELECT p.product_id::text FROM portal_products p
+        JOIN nodes n ON n.tenant_id=p.tenant_id AND n.id=p.product_id
+        JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+        WHERE p.is_default AND n.parent_id IS NULL AND n.deleted_at IS NULL AND k.slug='portal_product'`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errNoProduct
 	}
 	return id, err

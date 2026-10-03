@@ -126,6 +126,12 @@ func (m *Module) moderate(w http.ResponseWriter, r *http.Request, fn func(contex
 	}
 	var item portalEdit
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockPortalTenant(r.Context(), tx); err != nil {
+			return err
+		}
+		if err := lockPortalTree(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}

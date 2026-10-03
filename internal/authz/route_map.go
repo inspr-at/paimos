@@ -24,6 +24,33 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	// AEON-619: additive product-scoped routes.
+	"GET /api/portal/products/{productId}/pace":                      "settings.manage",
+	"PUT /api/portal/products/{productId}/pace":                      "settings.manage",
+	"GET /api/portal/products/{productId}/market":                    "settings.manage",
+	"GET /api/portal/products/{productId}/settings":                  "settings.manage",
+	"PUT /api/portal/products/{productId}/settings":                  "settings.manage",
+	"GET /api/public/portal/{tenantSlug}/participation":                                  "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}":                         "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/catalog":                 "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/wishes":                  "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/comparison":              "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/pace":                    "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/participation":           "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/catalog.json":            "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/llms.txt":                "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/releases":                "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/roadmap":                 "public",
+	"GET /api/public/portal/{tenantSlug}/products/{productSlug}/roadmap.json":            "public",
+	"POST /api/public/portal/{tenantSlug}/products/{productSlug}/wishes":                 "public",
+	"POST /api/public/portal/{tenantSlug}/products/{productSlug}/wishes/{wishKey}/votes": "public",
+	"POST /api/public/portal/{tenantSlug}/products/{productSlug}/corrections":            "public",
+	"GET /portal/{tenantSlug}/products/{productSlug}":                                    "public",
+	"GET /portal/{tenantSlug}/products/{productSlug}/roadmap":                            "public",
+	"GET /portal/{tenantSlug}/products/{productSlug}/llms.txt":                           "public",
+	"GET /portal/{tenantSlug}/products/{productSlug}/catalog.json":                       "public",
+	"GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json":                       "public",
+
 	"GET /api/agents/plan":                         "agents.plan.read",
 	"GET /api/recurrences":                         "recurrences.manage",
 	"POST /api/recurrences":                        "recurrences.manage",

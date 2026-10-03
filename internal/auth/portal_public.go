@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/authz"
 )
 
 // Catalog, release history, roadmap, llms.txt, catalog.json and roadmap.json
@@ -36,6 +38,10 @@ func publicPortalRequest(r *http.Request) bool {
 	kind := portalPublicKind(r)
 	if kind == "" {
 		return false
+	}
+	// Product routes must remain exact public declarations as well.
+	if strings.Contains(r.URL.Path, "/products/") || strings.HasSuffix(r.URL.Path, "/participation") {
+		return r.Pattern == "" || authz.PatternIsPublic(r.Pattern) && r.Pattern == portalCanonicalPattern(r)
 	}
 	switch r.Pattern {
 	case "":
@@ -75,6 +81,25 @@ func portalPublicKind(r *http.Request) string {
 		return ""
 	}
 	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) >= 7 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && portalSlugPattern.MatchString(parts[4]) && parts[5] == "products" && portalSlugPattern.MatchString(parts[6]) {
+		clone := *r
+		u := *r.URL
+		clone.URL = &u
+		suffix := strings.Join(parts[7:], "/")
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && (suffix == "catalog" || suffix == "wishes" || suffix == "comparison" || suffix == "pace") {
+			suffix = ""
+		}
+		u.Path = "/api/public/portal/" + parts[4]
+		if suffix != "" {
+			u.Path += "/" + suffix
+		}
+		u.RawPath = ""
+		return portalPublicKind(&clone)
+	}
+	if len(parts) == 6 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && portalSlugPattern.MatchString(parts[4]) && parts[5] == "participation" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		return "participation"
+	}
+
 	if len(parts) == 5 && parts[1] == "api" && parts[2] == "public" && parts[3] == "portal" && portalSlugPattern.MatchString(parts[4]) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			return "read"
@@ -123,4 +148,24 @@ func portalPublicKind(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// Build the one declaration matching a validated canonical path; arbitrary
+// public patterns do not turn a different route into a portal route.
+func portalCanonicalPattern(r *http.Request) string {
+	parts := strings.Split(r.URL.Path, "/")
+	method := r.Method
+	if method == http.MethodHead {
+		method = http.MethodGet
+	}
+	parts[4] = "{tenantSlug}"
+	if len(parts) >= 7 && parts[5] == "products" {
+		parts[6] = "{productSlug}"
+	}
+	for i := 5; i+1 < len(parts); i++ {
+		if parts[i] == "wishes" && i+2 < len(parts) && parts[i+2] == "votes" {
+			parts[i+1] = "{wishKey}"
+		}
+	}
+	return method + " " + strings.Join(parts, "/")
 }

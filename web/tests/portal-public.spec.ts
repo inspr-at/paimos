@@ -47,6 +47,10 @@ async function install(page: Page, missing = false) {
       return
     }
     if (url.pathname.startsWith('/api/public/portal/')) {
+      if (url.pathname.endsWith('/participation') && !missing) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ policy: 'legacy', voting_enabled: true, wish_intake_enabled: true, corrections_enabled: true, registered_available: false, anonymous_history: [] }) })
+        return
+      }
       if (route.request().method() === 'POST') {
         posted.push({ method: route.request().method(), body: route.request().postData(), path: url.pathname })
         const accepted = url.pathname.endsWith('/wishes') || url.pathname.endsWith('/corrections')
@@ -239,4 +243,14 @@ test('a closed portal reads as unavailable', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'This portal is not available' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Catalog' })).toHaveCount(0)
   await expectFits(page)
+})
+
+test('disabled participation keeps the catalog readable and has no input controls', async ({ page }) => {
+  await install(page)
+  await page.route('**/api/public/portal/*/participation', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ policy: 'disabled', voting_enabled: false, wish_intake_enabled: false, corrections_enabled: false, registered_available: false, anonymous_history: [] }) }))
+  await page.goto('/portal/harbour')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByText('Participation is currently unavailable. The catalog remains open for reading.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Vote for Owner assembly on a phone' })).toHaveCount(0)
+  await expect(page.locator('.portal input, .portal textarea')).toHaveCount(0)
 })

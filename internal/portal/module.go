@@ -55,6 +55,13 @@ func New(pool *pgxpool.Pool, secureCookies bool, macKey []byte) *Module {
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/portal/products/{productId}/pace", m.readPace)
+	mux.HandleFunc("PUT /api/portal/products/{productId}/pace", m.writePace)
+	mux.HandleFunc("GET /api/portal/products/{productId}/market", m.readMarket)
+	mux.HandleFunc("GET /api/portal/products/{productId}/settings", m.readProductSettings)
+	mux.HandleFunc("PUT /api/portal/products/{productId}/settings", m.writeProductSettings)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/participation", m.readParticipation)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/participation", m.readParticipation)
 	mux.HandleFunc("GET /api/portal/settings", m.readSettings)
 	mux.HandleFunc("PATCH /api/portal/settings", m.updateSettings)
 	mux.HandleFunc("POST /api/portal/wishes/{wishId}/publish", m.publishWish)
@@ -75,6 +82,19 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/portal/pace", m.readPace)
 	mux.HandleFunc("PUT /api/portal/pace", m.writePace)
 	mux.HandleFunc("PUT /api/portal/wishes/{wishId}/fulfillment", m.writeFulfillment)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/catalog", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/wishes", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/comparison", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/pace", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/catalog.json", m.catalogFile)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/llms.txt", m.llms)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/releases", m.releases)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/roadmap", m.roadmap)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/roadmap.json", m.roadmap)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/products/{productSlug}/wishes", m.submitWish)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/products/{productSlug}/wishes/{wishKey}/votes", m.vote)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/products/{productSlug}/corrections", m.submitCorrection)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}", m.read)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/catalog.json", m.catalogFile)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/llms.txt", m.llms)
@@ -89,6 +109,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 // MountPublic serves the same public files at the site root. The patterns are
 // exact, so the Vue page at /portal/{tenantSlug} stays on the SPA.
 func (m *Module) MountPublic(mux *http.ServeMux) {
+	mux.HandleFunc("GET /portal/{tenantSlug}/products/{productSlug}/llms.txt", m.llms)
+	mux.HandleFunc("GET /portal/{tenantSlug}/products/{productSlug}/catalog.json", m.catalogFile)
+	mux.HandleFunc("GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json", m.roadmap)
 	mux.HandleFunc("GET /portal/{tenantSlug}/llms.txt", m.llms)
 	mux.HandleFunc("GET /portal/{tenantSlug}/catalog.json", m.catalogFile)
 	mux.HandleFunc("GET /portal/{tenantSlug}/roadmap.json", m.roadmap)
@@ -201,6 +224,9 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	var settings portalSettings
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockPortalTenant(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}
