@@ -98,3 +98,41 @@ func TestTierUsageTestFormatting(t *testing.T) {
 		previousLine = line
 	}
 }
+
+func TestTierModelTimeKeepsToolAndWaitTime(t *testing.T) {
+	u := SessionModelUsage{ModelTimeMS: usagePtr(int64(600000)), TierSegments: []TierUsageSegment{
+		{ModelTimeMS: usagePtr(int64(200000)), SpeedFactor: usagePtr(1.0)},
+		{ModelTimeMS: usagePtr(int64(400000)), SpeedFactor: usagePtr(2.0)},
+	}}
+	got := tierModelTime(u, 900000, usagePtr(2.0))
+	if got == nil || *got != 800000 {
+		t.Fatalf("model scaled incorrectly: %v", got)
+	}
+	u.TierSegments[1].ModelTimeMS = nil
+	if tierModelTime(u, 900000, usagePtr(2.0)) != nil {
+		t.Fatal("missing model time became an estimate")
+	}
+	if tierModelTime(u, 100, usagePtr(2.0)) != nil {
+		t.Fatal("invalid measured duration became an estimate")
+	}
+	if projectTierCost("2.400000000000", usagePtr(2.0)) == nil || *projectTierCost("2.400000000000", usagePtr(2.0)) != "4.800000000000" {
+		t.Fatal("price projection rounded incorrectly")
+	}
+}
+func TestTierRunCostRequiresFrozenPricesAndTier(t *testing.T) {
+	tier := "fast"
+	u := SessionModelUsage{BillingMode: "api", EstimatedCostUSD: usagePtr("4.800000000000"), PriceVersion: usagePtr(int64(1)), InputTokens: usagePtr(int64(2400000)), OutputTokens: usagePtr(int64(0)), CachedInputTokens: usagePtr(int64(0)), TierSegments: []TierUsageSegment{{Tier: &tier, PriceMultiplier: usagePtr(2.0)}}}
+	price := ModelPrice{InputUSDPerMillion: "1", OutputUSDPerMillion: "1", CachedInputUSDPerMillion: "1"}
+	cost := tierRunCost(u, price, "run")
+	if cost == nil || cost.DefaultCost != "2.400000000000" || cost.Segments[0].Multiplier != 2 {
+		t.Fatalf("cost lost frozen multiplier: %+v", cost)
+	}
+	u.TierSegments[0].PriceMultiplier = nil
+	if tierRunCost(u, price, "run") != nil {
+		t.Fatal("unknown multiplier projected")
+	}
+	u.BillingMode = "subscription"
+	if tierRunCost(u, price, "run") != nil {
+		t.Fatal("subscription became USD bill")
+	}
+}

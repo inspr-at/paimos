@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -81,7 +82,10 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+		if err := ensureAdditionalCatalog(ctx, tx, p); err != nil {
+			return err
+		}
+		return upgradeCatalog(ctx, tx, p)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
 		return err
@@ -90,7 +94,10 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+		if err := ensureAdditionalCatalog(ctx, tx, p); err != nil {
+			return err
+		}
+		return upgradeCatalog(ctx, tx, p)
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -118,6 +125,9 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		}
 		routes = append(routes, stored)
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return err
+	}
 	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
 		Profiles []Profile `json:"profiles"`
 		Routes   []Route   `json:"routes"`
@@ -125,6 +135,15 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 }
 
 func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertProfileWithState(ctx, tx, tenantID, in, true)
+}
+
+// Discovery records a pin without granting it to wildcard accounts.
+func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertProfileWithState(ctx, tx, tenantID, in, false)
+}
+
+func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite, enabled bool) (Profile, error) {
 	var out Profile
 	overrides := map[string]string{}
 	if in.DisplayName != "" {
@@ -143,9 +162,9 @@ func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWr
 	err = tx.QueryRow(ctx, `
 		INSERT INTO model_profiles
 			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true, $9::jsonb)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
 		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, string(raw)).
+		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled, string(raw)).
 		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
 	if err == nil {
 		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
@@ -158,9 +177,17 @@ func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWr
 	return out, err
 }
 
+// Only these constant identifiers enter SQL; the caller's role is never SQL.
+func roleRoutesTable(role string) string {
+	if role == "review-gate-security" {
+		return "model_security_role_routes"
+	}
+	return "model_role_routes"
+}
+
 func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO model_role_routes (tenant_id, role, priority, profile_id, state, reason, valid_until)
+		INSERT INTO `+roleRoutesTable(route.Role)+` (tenant_id, role, priority, profile_id, state, reason, valid_until)
 		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
 		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
 	return err
@@ -205,7 +232,7 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string) ([]Profile, erro
 func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM model_role_routes
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes
 		ORDER BY role, priority, profile_id`)
 	if err != nil {
 		return nil, err
@@ -311,6 +338,9 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 		return before, nil
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
 		return nil, err
 	}
 	for _, route := range normalized {

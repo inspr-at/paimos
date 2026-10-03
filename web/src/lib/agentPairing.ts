@@ -104,11 +104,12 @@ export interface PairingEnrollment {
 }
 
 export type HarnessReason = string
-export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart'; command: string }
-export interface AccountAttention { account_id: string; reason: string }
+export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart' | 'permissions'; command: string }
+export interface AccountAttention { account_id: string; reason: string; reason_detail?: string }
 export interface HarnessDetail {
   state: HarnessStatus
   reason?: HarnessReason
+  reason_detail?: string
   fix?: HarnessFix
   attention_accounts?: AccountAttention[]
   /** Full count of enrolled accounts that need a fix, or a lower bound when an older report stopped at five names. */
@@ -1025,8 +1026,28 @@ function harnessCode(value: unknown): string | undefined {
 
 const PIN_REASONS = ['dependency_invalid', 'pin_missing', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe']
 
-function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
+// Mirror agentsetup.SafeProbeDetail: raw command output and local paths never
+// become public copy, even when a newer or malformed report supplies them.
+const PROBE_DETAILS = new Set([
+  'the approved account profile is missing',
+  'the approved account profile is not a physical directory',
+  'the approved account profile is not private (requires mode 0700)',
+  'the default Claude profile is not private (requires mode 0700)',
+  'the sign-in command could not start or finish',
+  'the sign-in command returned an unreadable or incomplete answer',
+  'the approved account identity is missing',
+  'the sign-in answer did not identify the account',
+  'the sign-in command exited unsuccessfully',
+])
+function probeDetail(reason: unknown, detail: unknown, harness: string): string | undefined {
+  if (reason === 'login_required' && detail === "the approved account is signed out in the daemon's view") return detail
+  if (detail === 'the default Claude profile is not private (requires mode 0700)' && harness !== 'claude') return undefined
+  return reason === 'probe_failed' && typeof detail === 'string' && PROBE_DETAILS.has(detail) ? detail : undefined
+}
+
+function harnessFix(harness: string, reason?: HarnessReason, detail?: string): HarnessFix | undefined {
   if (!['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode'].includes(harness)) return
+  if (harness === 'claude' && probeDetail(reason, detail, harness) === 'the default Claude profile is not private (requires mode 0700)') return { kind: 'permissions', command: 'chmod 700 "$HOME/.claude"' }
   // repin replaces Claude's shared pins; add-harness renews another harness's blocked pin.
   if (PIN_REASONS.includes(reason ?? '')) {
     return harness === 'claude'
@@ -1046,7 +1067,7 @@ export function harnessRecovery(harness: string, reason: string): HarnessFix | u
 interface AttentionReport { accounts: AccountAttention[]; count: number; truncated: boolean }
 
 function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
-  return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
+  return detail && ['ready', 'blocked', 'login_required'].includes(detail.state) ? detail.attention_accounts ?? [] : []
 }
 
 // Parsed details already carry attention_truncated when a five-name list had no count.
@@ -1061,7 +1082,7 @@ function attentionReport(detail: HarnessDetail | undefined): AttentionReport | u
 function attentionFix(harness: string, items: AccountAttention[]): string {
   const commands: string[] = []
   for (const item of items) {
-    const command = harnessFix(harness, item.reason)?.command ?? ''
+    const command = harnessFix(harness, item.reason, item.reason_detail)?.command ?? ''
     if (command && !commands.includes(command)) commands.push(command)
   }
   return commands.join(' · ')
@@ -1073,7 +1094,23 @@ export function describeHarnessFix(view: HarnessView, harness: string): string {
   if (!detail) return ''
   const attention = attentionItems(detail)
   if (attention.length) return attentionFix(harness, attention)
-  return ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
+  return ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason, detail.reason_detail)?.command ?? '' : ''
+}
+
+/** Only this account's failure: a ready sibling must not inherit its fix. */
+export function describeEnrollmentDiagnostic(view: HarnessView, enrollment: { account_id: string; harness: string }): { hint: string; command: string } | null {
+  if (view.computer_state !== 'connected') return null
+  const detail = harnessDetail(view, enrollment.harness)
+  const report = attentionReport(detail)
+  const sole = view.enrollments?.filter(item => item.harness === enrollment.harness && item.state !== 'revoked')
+  const item = report ? report.accounts.find(item => item.account_id === enrollment.account_id)
+    : detail && ['blocked', 'login_required'].includes(detail.state) && sole?.length === 1 && sole[0]?.account_id === enrollment.account_id ? detail : undefined
+  if (!item) return null
+  const cause = probeDetail(item.reason, item.reason_detail, enrollment.harness)
+  return {
+    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : 'sign-in check failed: '}${cause}.` : '',
+    command: harnessFix(enrollment.harness, item.reason, cause)?.command ?? '',
+  }
 }
 
 const HARNESS_HINTS: Record<string, string> = {
@@ -1142,15 +1179,22 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
 }
 
 /** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
-export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string }): string {
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState }): string {
   if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, enrollment.harness)
   const attention = attentionReport(detail)
-  if (!attention) return describeHarnessStatus(view, enrollment.harness)
-  const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
-  if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
-  if (!attention.truncated && attention.count === attention.accounts.length) return freshLabel(view, 'Ready')
-  return freshLabel(view, 'Needs attention')
+  let status = describeHarnessStatus(view, enrollment.harness)
+  if (attention) {
+    const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
+    if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
+    if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
+    status = freshLabel(view, 'Ready')
+  }
+  if (status && status !== 'Ready') return status
+  const verification = enrollment.verification_state
+  if (verification && VERIFICATION_ACTIVE.includes(verification)) return freshLabel(view, verification === 'queued' ? 'Verification queued' : 'Verifying account')
+  if (verification && VERIFICATION_FAILED.includes(verification)) return freshLabel(view, 'Verification failed')
+  return status
 }
 
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
@@ -1620,8 +1664,8 @@ function attentionTotal(value: unknown, enrolled: number): number | undefined {
   return value
 }
 
-function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
-  if (!Array.isArray(raw) || enrolled.size < 2) return
+function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown, harness: string, allowAll = false): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
+  if (!Array.isArray(raw) || enrolled.size < (allowAll ? 1 : 2)) return
   const seen = new Set<string>()
   const items: AccountAttention[] = []
   for (const entry of raw) {
@@ -1631,11 +1675,12 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
     const reason = harnessCode(item.reason)
     if (!id || !reason || !enrolled.has(id) || seen.has(id)) continue
     seen.add(id)
-    items.push({ account_id: id, reason })
+    const reasonDetail = probeDetail(reason, item.reason_detail, harness)
+    items.push({ account_id: id, reason, ...(reasonDetail ? { reason_detail: reasonDetail } : {}) })
   }
   items.sort((a, b) => a.account_id < b.account_id ? -1 : a.account_id > b.account_id ? 1 : 0)
-  if (items.length === 0 || items.length >= enrolled.size) return
-  const declared = attentionTotal(declaredCount, enrolled.size)
+  if (items.length === 0 || (!allowAll && items.length >= enrolled.size)) return
+  const declared = attentionTotal(declaredCount, enrolled.size + (allowAll ? 1 : 0))
   let count = items.length
   // Five or more names without a total may be the old cap: absence is not readiness.
   // A declared total equal to the list, including exactly five, is complete.
@@ -1644,7 +1689,7 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
     count = declared
     truncated = true
   }
-  if (count >= enrolled.size) return
+  if (!allowAll && count >= enrolled.size) return
   return { accounts: items, count, truncated }
 }
 
@@ -1700,13 +1745,14 @@ function parseView(data: unknown): PairingView {
       const reason = harnessCode(item.reason)
       if (item.reason && !reason) continue
       const enrolled = new Set(view.enrollments.filter(entry => entry.harness === harness && entry.state !== 'revoked').map(entry => entry.account_id))
-      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated) : undefined
+      const attention = ['ready', 'blocked', 'login_required'].includes(state) ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated, harness, state !== 'ready') : undefined
       // A ready or draining detail keeps no top-level reason. Valid attention
       // still survives a mistaken reason so the partial block stays visible.
       if (['ready', 'draining'].includes(state) && reason && !attention) continue
       const storedReason = ['ready', 'draining'].includes(state) ? undefined : reason
-      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason) : undefined
-      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
+      const reasonDetail = ['blocked', 'login_required'].includes(state) ? probeDetail(storedReason, item.reason_detail, harness) : undefined
+      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason, reasonDetail) : undefined
+      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(reasonDetail ? { reason_detail: reasonDetail } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
     }
   }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)
