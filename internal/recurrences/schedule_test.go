@@ -31,6 +31,9 @@ func TestCalendarEdges(t *testing.T) {
 		{"skipped civil day", "FREQ=DAILY", "09:00", "Pacific/Apia", "2011-12-28", "2011-12-29T19:00:00Z", []string{"2011-12-30T19:00:00Z"}},
 		{"weekly default anchor", "FREQ=WEEKLY", "09:00", "UTC", "2026-10-05", "2026-10-02T12:00:00Z", []string{"2026-10-05T09:00:00Z", "2026-10-12T09:00:00Z"}},
 		{"month default anchor", "FREQ=MONTHLY", "09:00", "UTC", "2026-01-31", "2026-01-31T09:00:00Z", []string{"2026-03-31T09:00:00Z"}},
+		{"two months", "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1", "09:00", "Europe/Vienna", "2026-10-02", "2026-10-02T12:00:00Z", []string{"2026-12-01T08:00:00Z", "2027-02-01T08:00:00Z"}},
+		{"quarterly last day", "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1", "09:00", "UTC", "2026-10-02", "2026-10-31T09:00:00Z", []string{"2027-01-31T09:00:00Z", "2027-04-30T09:00:00Z"}},
+		{"six months anchor retained", "FREQ=MONTHLY;INTERVAL=6;BYMONTHDAY=1", "09:00", "UTC", "2026-10-02", "2027-04-01T09:00:00Z", []string{"2027-10-01T09:00:00Z", "2028-04-01T09:00:00Z"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			trigger := Trigger{Kind: "time", RRULE: tc.rule, TimeOfDay: tc.clock, Timezone: tc.zone, StartDate: tc.start}
@@ -122,6 +125,27 @@ func TestMonthlyIntervalValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSixMonthSpringGapWalksPastOneYear(t *testing.T) {
+	trigger := Trigger{Kind: "time", RRULE: "FREQ=MONTHLY;INTERVAL=6;BYMONTHDAY=31", StartDate: "2023-03-01", Timezone: "Europe/Vienna", TimeOfDay: "02:30"}
+	s, err := parseSchedule(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// September has no 31st, and March 31 2024 at 02:30 does not exist.
+	// The next real occurrence is two years after the prior one.
+	before := timestamp(t, "2023-03-31T00:30:00Z")
+	after := timestamp(t, "2025-03-31T00:30:00Z")
+	if next, err := s.next(before); err != nil || !next.Equal(after) {
+		t.Errorf("next %s, want %s: %v", next, after, err)
+	}
+	if latest, err := s.latest(after.Add(-time.Minute)); err != nil || !latest.Equal(before) {
+		t.Errorf("latest %s, want %s: %v", latest, before, err)
+	}
+	if preview, err := Preview(trigger, before, 1); err != nil || len(preview) != 1 || !preview[0].Equal(after) {
+		t.Errorf("preview %v, want [%s]: %v", preview, after, err)
+	}
+}
 func TestTemplateVariablesAndBounds(t *testing.T) {
 	for _, s := range []string{"{{unknown}}", "{{ occurrence }}", "{{date", "oops}}"} {
 		if validateVariables(s) == nil {
@@ -131,6 +155,9 @@ func TestTemplateVariablesAndBounds(t *testing.T) {
 	got := render("#{{occurrence}} {{date}} {{release_name}} {{release_version}}", 3, timestamp(t, "2026-10-02T23:30:00Z"), Trigger{Kind: "time", Timezone: "Europe/Vienna"}, "Sonde", "261002081219.0.0")
 	if got != "#3 2026-10-03 Sonde 261002081219.0.0" {
 		t.Fatal(got)
+	}
+	if got := render("{{date}}", 1, timestamp(t, "2026-10-02T23:30:00Z"), Trigger{Kind: "event", EventTimezone: "Europe/Vienna"}, "", ""); got != "2026-10-03" {
+		t.Fatalf("event date %s", got)
 	}
 	in := Input{ProjectID: "10000000-0000-4000-8000-000000000001", ParentID: "10000000-0000-4000-8000-000000000002", Template: Template{Title: "Sweep {{occurrence}}"}, Trigger: Trigger{Kind: "time", RRULE: "FREQ=DAILY", Timezone: "UTC", TimeOfDay: "09:00"}}
 	if err := in.normalize(timestamp(t, "2026-10-02T12:00:00Z")); err != nil {
@@ -147,5 +174,19 @@ func TestTemplateVariablesAndBounds(t *testing.T) {
 	in.Template.Title = strings.Repeat("a", 513)
 	if in.normalize(time.Now()) == nil {
 		t.Fatal("unbounded title")
+	}
+}
+
+func TestEventMorningFollowsLocalDateAcrossDST(t *testing.T) {
+	trigger := Trigger{Kind: "event", EventStart: "morning", EventTimezone: "Europe/Vienna"}
+	for _, tc := range []struct{ published, want string }{
+		{"2026-10-24T21:30:00Z", "2026-10-25T05:00:00Z"},
+		{"2026-10-24T23:30:00Z", "2026-10-26T05:00:00Z"},
+		{"2026-03-28T22:30:00Z", "2026-03-29T04:00:00Z"},
+	} {
+		got := eventTime(trigger, timestamp(t, tc.published))
+		if got.Format(time.RFC3339) != tc.want {
+			t.Fatalf("published %s: got %s, want %s", tc.published, got, tc.want)
+		}
 	}
 }

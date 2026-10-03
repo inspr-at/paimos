@@ -43,8 +43,8 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
   const fromParentId = item.parent_id
   const since = rows.shown(item.id)?.updated_at ?? item.updated_at
   const sent = rows.mark()
-  const conflict = (latest: WorkNode) => {
-    rows.adoptNode(latest, sent)
+  const conflict = (latest: WorkNode, authoritative: boolean) => {
+    rows.adoptNode(latest, sent, { authoritative })
     rows.reshow(item.id)
     toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
     return 'conflict' as const
@@ -55,7 +55,8 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
     catch (e) {
       if (!(e instanceof APIError) || e.status !== 412) throw e
       const current = e.body.node as WorkNode | undefined
-      return conflict(current && typeof current.updated_at === 'string' ? current : await getNode(item.id))
+      const partial = current && typeof current.updated_at === 'string'
+      return conflict(partial ? current : await getNode(item.id), !partial)
     }
     // The answer is in the row store (this tab's write); the parent chip and
     // the epic a list groups by are known here, for this answer's revision

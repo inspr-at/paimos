@@ -51,6 +51,12 @@
       "reason": "Replace the last-owner trigger function's tenant FOR UPDATE fence with FOR NO KEY UPDATE to preserve access-writer serialization while allowing tenant foreign-key key-share checks. The last-active-owner restriction, trigger signature and existing data remain unchanged; no table, column or route is removed. CREATE OR REPLACE FUNCTION is conservatively outside the classifier allowlist. This exact-byte exception requires coordinator review before merge/release; it does not grant acceptance or skip previous-binary compatibility probes."
     },
     {
+      "file": "1122_recurrence_event_visibility.sql",
+      "sha256": "bcb1f9237f97973511b4f0c70da9fb48f1814b8e75c8de29ad9f816f5414a3a9",
+      "ticket": "AEON-573",
+      "reason": "Additive recurrence retirement state, tenant-scoped tombstone backfill, and project event visibility. Complete snapshots stay unchanged; only validated workspace tags at template.tags are omitted from definition reference walks, with other references and event domains preserved. ALTER POLICY, trigger replacement and the one-time reference backfill follow the existing 0823 migration pattern and are conservatively outside the classifier allowlist. This owned, unpublished migration and exact-byte exception are exposed in draft PR #188 for coordinator review; regressions cover hidden deletion events, workspace-tag history, and project/reference/workspace boundaries. Previous-binary compatibility is measured in CI; no merge or release authority is granted."
+    },
+    {
       "file": "1206_themes.sql",
       "sha256": "5b289f99f660914f99861c22ba126dc09983d48c2811e735aa08af66a956ecc6",
       "ticket": "AEON-641",
