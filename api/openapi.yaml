@@ -3455,11 +3455,18 @@ paths:
         never display a summary forwarded by the requesting agent. A sibling key,
         another computer or tenant, an inactive pairing or a consumed, superseded,
         expired or signer-mismatched challenge cannot retrieve it. No proof in URLs.
+        AEON-580 implements this endpoint; AEON-581 consumes it. The computer must
+        be the workstation bound to the challenged key, with a pinned confirmation
+        key. Never return nonce, digest or summary through the agent's 428 response.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
       security: [{agentKey: []}]
       parameters:
         - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
-        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent.}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent or logged.}
       responses:
         '200':
           description: Original challenge for this computer; Cache-Control no-store
@@ -3477,6 +3484,7 @@ paths:
                   computer_id: {type: string, format: uuid}
         '403': {description: Paired runtime and device proof required}
         '404': {description: Challenge unavailable for this computer}
+        '410': {description: Challenge expired or already consumed}
   /agent-keys/{id}/owner-workstation:
     put:
       operationId: setOwnerWorkstationKey
@@ -6130,7 +6138,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. Model and effort reports update the current generation without re-registration; omitted values preserve the accepted identity. The current generation's worker lease is required. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
       requestBody:
         required: true
         content:
@@ -6827,7 +6835,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity is revalidated against current admission; a resource-scoped recovery permit is required only while a recoverable stop remains. Manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -9457,6 +9465,24 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    StepUpRequired:
+      type: object
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+    AgentdStepUpChallenge:
+      type: object
+      additionalProperties: false
+      required: [summary, nonce, action_digest, expires_at, computer_id]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 256, description: Server-generated plain summary; bounded to 256 UTF-8 bytes without control or format characters}
+        nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+        action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        expires_at: {type: string, format: date-time, description: At most five minutes after issue}
+        computer_id: {type: string, format: uuid}
     QuestionOption:
       type: object
       additionalProperties: false

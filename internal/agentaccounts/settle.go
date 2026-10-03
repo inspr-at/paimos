@@ -32,6 +32,7 @@ type reservationRow struct {
 // A second call with the same telemetry is a no-op. A later call may only
 // increase settled usage.
 func Settle(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string) error {
+	ctx = tenantContext(ctx, actor)
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return err
@@ -46,6 +47,12 @@ func Settle(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string
 		}
 		now, err := dbNow(ctx, tx)
 		if err != nil {
+			return err
+		}
+		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
+			return err
+		}
+		if err := settleRecovery(ctx, tx, run, now); err != nil {
 			return err
 		}
 		if err = learnRun(ctx, tx, a, run.ID, now); err != nil {
@@ -134,6 +141,13 @@ func Release(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID, daem
 	case "queued", "completed", "failed", "cancelled", "ownership_lost":
 	default:
 		return fail(http.StatusConflict, "live run keeps its reservation")
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := releaseRecovery(ctx, tx, run, now); err != nil {
+		return err
 	}
 	rows, err := lockReservations(ctx, tx, run.ID)
 	if err != nil {
