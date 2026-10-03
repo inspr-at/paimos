@@ -145,8 +145,18 @@ paths:
       description: >-
         Requires questions.ask and questions.read in an accessible project. Authenticated principal
         is the asker; an optional session must be that principal's active generation in this project.
+        Ask writes revalidate current project permissions and authenticated key activity/scopes
+        inside the final transaction under access/key locks.
         Request IDs are scoped to tenant/project/asker. An identical retry returns the same question;
-        changed input returns 409. anyway_reason deliberately skips future matching, never permissions.
+        changed input returns 409. anyway_reason deliberately skips reuse and merging, never permissions.
+        Exact ordinary Q&A matches may join an open question or an active Always answer in the same
+        tenant/project/ticket scope. Option IDs and all option text must agree; option order may differ.
+        Context, findings, blocked work and effective outcome must agree. Source-linked requests and
+        requirement/doctrine suggestions never participate. No similarity-based answer is inferred.
+        Reused memberships carry From the record provenance and immediate inbox/comment deadlines;
+        no additional outcome effect or human-answer grace is created. Always publication belongs to P4.
+        Each matching item accepts at most 100 askers; a full item starts a separate question.
+        An anyway question stays separate while open; a later human-approved Always can be reused.
         Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
         Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
       security: [{session: []}, {agentKey: []}]
@@ -156,7 +166,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/QuestionInput'}
       responses:
-        '201': {description: Stored question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '201': {description: Stored asker membership in a fresh or matching question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '200': {description: Idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9033,6 +9043,15 @@ components:
         comment_node_id: {type: string, format: uuid, description: Linked ticket or the question node for ticketless asks}
         created_at: {type: string, format: date-time}
         input: {$ref: '#/components/schemas/QuestionInput'}
+        from_record: {$ref: '#/components/schemas/QuestionReuse'}
+    QuestionReuse:
+      type: object
+      description: Immutable per-asker provenance retained when the answer is later corrected. The active source decision reuse_count increments once per new membership, never on replay or delivery retry.
+      required: [label, decision_id, revision]
+      properties:
+        label: {type: string, const: From the record}
+        decision_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 2}
     QuestionAnswer:
       type: object
       required: [id, revision, answer, outcome, decided_by, created_at, deliver_after]
