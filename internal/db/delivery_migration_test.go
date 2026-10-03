@@ -378,11 +378,22 @@ func TestDeliveryCutDeadlineAndBuildAuthorization(t *testing.T) {
 		if _, err := tx.Exec(ctx, `UPDATE project_releases SET state='released',released_at=clock_timestamp(),reservation_basis='attested',reservation_ref='person assertion',released_by=$2 WHERE release_node_id=$1`, f.releaseA, f.actor); err != nil {
 			return err
 		}
-		// Even an abandoned version cannot be reused by the next release.
+		// Published versions remain reserved across release states.
 		if _, err := tx.Exec(ctx, `UPDATE project_releases SET state='frozen' WHERE release_node_id=$1`, f.nextRelease); err != nil {
 			return err
 		}
 		deliveryReject(t, ctx, tx, "23505", "project_releases_version_idx", `UPDATE project_releases SET version='1.0.0+old',version_scheme='legacy',cut_at=now() WHERE release_node_id=$1`, f.nextRelease)
+		if _, err := tx.Exec(ctx, `UPDATE project_releases SET version='2.0.0',version_scheme='legacy',cut_at=now() WHERE release_node_id=$1`, f.nextRelease); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE project_releases SET state='abandoned',abandoned_at=now() WHERE release_node_id=$1`, f.nextRelease); err != nil {
+			return err
+		}
+		third := insertNode(ctx, t, tx, f.visibilityFixture, "release", "CUT-3", &f.projectA)
+		if _, err := tx.Exec(ctx, `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state) VALUES($1,$2,$3,3,'X','frozen')`, f.tenant, f.projectA, third); err != nil {
+			return err
+		}
+		deliveryReject(t, ctx, tx, "23505", "project_releases_version_idx", `UPDATE project_releases SET version='2.0.0',version_scheme='legacy',cut_at=now() WHERE release_node_id=$1`, third)
 		return nil
 	})
 }
