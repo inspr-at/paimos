@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -69,6 +70,7 @@ type Config struct {
 	ReviewAppKeyFile        string
 	ReviewAppTenantID       string
 	ReviewAppRepository     string
+	ReviewWebhookSecret     []byte // Host-owned HMAC key; never logged or tenant-writable.
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -107,6 +109,13 @@ func FromEnv() (Config, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
+	}
+	if file := os.Getenv("AEON_REVIEW_WEBHOOK_SECRET_FILE"); file != "" {
+		secret, err := reviewWebhookSecret(file)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.ReviewWebhookSecret = secret
 	}
 	var modeErr error
 	cfg.StatusAutopilot, modeErr = StatusAutopilotMode()
@@ -163,6 +172,32 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+func reviewWebhookSecret(file string) ([]byte, error) {
+	invalid := errors.New("AEON_REVIEW_WEBHOOK_SECRET_FILE requires a private physical file with 32–4096 bytes")
+	physical, err := filepath.EvalSymlinks(file)
+	if err != nil || !filepath.IsAbs(file) || physical != file {
+		return nil, invalid
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, invalid
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, invalid
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil || len(raw) > 4096 {
+		return nil, invalid
+	}
+	secret := strings.TrimSpace(string(raw))
+	if len(secret) < 32 {
+		return nil, invalid
+	}
+	return []byte(secret), nil
 }
 
 // StatusAutopilotMode is also read by transactional publication hooks, which

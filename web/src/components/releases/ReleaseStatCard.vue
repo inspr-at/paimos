@@ -18,7 +18,7 @@ const index = ref(0)
 const stat = computed(() => props.stats[Math.min(index.value, props.stats.length - 1)])
 const reduce = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(reduce.matches)
-const stopped = ref(reduce.matches)
+const stopped = ref(reducedMotion.value)
 const paused = computed(() => stopped.value || reducedMotion.value)
 const hovered = ref(false)
 const focused = ref(false)
@@ -29,16 +29,22 @@ watch(() => props.stats.length, n => { if (index.value >= n) index.value = 0 })
 
 let last = Date.now()
 let timer: ReturnType<typeof setInterval> | undefined
+function syncReducedMotion() {
+  // Reading matches can precede (or consume) Chromium's change detection.
+  // Keep the control and live-region state in sync with every live read.
+  reducedMotion.value = reduce.matches
+  if (reducedMotion.value) { stopped.value = true; elapsed.value = 0 }
+}
 function tick() {
+  syncReducedMotion()
   const now = Date.now(), step = Math.min(250, Math.max(0, now - last))
   last = now
-  if (reduce.matches || paused.value || hovered.value || focused.value || document.hidden || props.stats.length < 2) return
+  if (paused.value || hovered.value || focused.value || document.hidden || props.stats.length < 2) return
   elapsed.value += step
   if (elapsed.value >= ROTATE_MS) { index.value = (index.value + 1) % props.stats.length; elapsed.value = 0 }
 }
-const onReduce = (event: MediaQueryListEvent) => { reducedMotion.value = event.matches; if (event.matches) { stopped.value = true; elapsed.value = 0 } }
-onMounted(() => { last = Date.now(); timer = setInterval(tick, 100); reduce.addEventListener('change', onReduce) })
-onBeforeUnmount(() => { clearInterval(timer); reduce.removeEventListener('change', onReduce) })
+onMounted(() => { reduce.addEventListener('change', syncReducedMotion); syncReducedMotion(); last = Date.now(); timer = setInterval(tick, 100) })
+onBeforeUnmount(() => { clearInterval(timer); reduce.removeEventListener('change', syncReducedMotion) })
 
 // An arrow is a person choosing: the card stops moving by itself.
 function go(delta: number) {
@@ -47,7 +53,7 @@ function go(delta: number) {
   stopped.value = true
   elapsed.value = 0
 }
-function toggle() { stopped.value = reduce.matches || !stopped.value; elapsed.value = 0 }
+function toggle() { syncReducedMotion(); stopped.value = reducedMotion.value || !stopped.value; elapsed.value = 0 }
 function focusOut(event: FocusEvent) { if (!card.value?.contains(event.relatedTarget as Node | null)) focused.value = false }
 
 // The stat's leading icon, on the 24 grid of the design.

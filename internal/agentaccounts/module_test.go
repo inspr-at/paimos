@@ -231,6 +231,16 @@ func scalar(t *testing.T, p tenant.Principal, query string, args ...any) int64 {
 	return n
 }
 
+// Quota-detail fixtures explicitly own their account; administrator status
+// alone no longer grants another person's usage after decision 8.
+func ownFixtureAccount(t *testing.T, owner tenant.Principal, a *Account) {
+	t.Helper()
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE id=$1`, a.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.OwnerPersonID = &owner.ID
+}
+
 func accountsMod() httpapi.Module { return New(appPool) }
 
 func windowBody(start, end time.Time, unit string, allowance int64, pace string) string {
@@ -412,6 +422,7 @@ func TestAllowanceProvisionalWithoutMeasuredUnit(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"local","harness":"codex","daemon_id":"daemon","label":"Codex"}`, http.StatusCreated, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
 	start, end := time.Now().Add(-time.Minute).UTC(), time.Now().Add(time.Hour).UTC()
 	for _, unit := range []string{"requests", "cost_micros"} {

@@ -197,6 +197,7 @@ func groupAccount(t *testing.T, mod httpapi.Module, admin, runner tenant.Princip
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{
 		"account_key": key, "harness": "codex", "daemon_id": daemon, "label": label,
 	}), 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+account.ID+"/probe", encoded(t, map[string]any{
 		"daemon_id": daemon, "daemon_generation": "g1", "available": true, "host_label": host,
 	}), 200, &account)

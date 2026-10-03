@@ -52,6 +52,40 @@ func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
 	check(foreign.TenantID, "anthropic", until.Add(time.Minute), 0)
 }
 
+func TestCatalogRejectsLegacyFamilyAndAcceptsAllAuthors(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "family-catalog", "person", "Fixture", []string{"admin"})
+	mod := accountsMod()
+	for _, family := range []string{"openai", "anthropic", "xai", "cursor", "google", "local"} {
+		t.Run(family, func(t *testing.T) {
+			callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog?role=review-gate&author_family="+family, "", 200, nil)
+		})
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		var id string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'legacy-grok','1','grok','anthropic','grok-4.7','xhigh','frontier') RETURNING id::text`, admin.TenantID).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',1,$2)`, admin.TenantID, id); err != nil {
+			return err
+		}
+		for _, role := range []string{"review-gate", "build"} {
+			profiles, err := catalogProfiles(t.Context(), tx, role, "xai", time.Now())
+			if err != nil {
+				return err
+			}
+			for _, profile := range profiles {
+				if profile.ID == id {
+					t.Errorf("%s catalog offered mislabelled Grok", role)
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
@@ -88,6 +122,7 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		t.Helper()
 		var a Account
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", fmt.Sprintf(`{"account_key":%q,"harness":"codex","daemon_id":%q,"label":"Initial"}`, key, daemon), 201, &a)
+		ownFixtureAccount(t, admin, &a)
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true,"host_label":"Studio"}`, daemon), 200, nil)
 		callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+a.ID+"/windows", windowBody(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
 		return a
