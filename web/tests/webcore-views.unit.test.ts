@@ -91,6 +91,41 @@ it('S8-014: a failed second search labels retained results and exposes retry unt
 })
 
 describe('S8-012: hours preview uses the submitted start instant', () => {
+  it('retains the chosen cost unit during incremental start typing and revalidates the completed UTC day', async () => {
+    const prior = process.env.TZ; process.env.TZ = 'Europe/Vienna'
+    try {
+      const units = ['other', 'chosen'].map(id => ({ node: { id, title: id, state: 'new' }, rates: [{ unit: 'hour', currency: 'EUR', effective_from: id === 'chosen' ? '2026-10-02' : '2020-01-01', effective_until: null }] }))
+      const rateOn = vi.fn((id: string, _unit: string, _currency: string, on: string) => units.find(unit => unit.node.id === id)?.rates.some(r => r.effective_from <= on) ? { bill_amount: '120.0000', currency: 'EUR' } : null)
+      const logs: { costUnitId: string; startedAt: string }[] = []
+      const view = mountView('../src/components/business/LogTimeBar.vue', {
+        '../../lib/api': { listNodes: vi.fn() }, '../../lib/recents': { recents: [] }, '../../lib/week': week,
+        './duration': duration, './money': money,
+        '../../stores/business': { useBusiness: () => ({ costUnits: units, costUnit: (id: string) => units.find(unit => unit.node.id === id), rateOn }) },
+      }, { days: [new Date(2026, 9, 2)], suggestions: [], busy: false, preset: { id: 'ticket', key: 'T-1', title: 'Ticket' }, onLog: (log: typeof logs[number]) => logs.push(log) })
+      apps.push(view.app); await settle()
+      const cost = view.find(el => el.props['aria-label'] === 'Cost unit')
+      const start = view.find(el => el.props['aria-label'] === 'Start time (optional)')
+      const form = view.find(el => el.tag === 'form')
+      ;(cost.props['onUpdate:modelValue'] as (v: string) => void)('chosen')
+      ;(view.find(el => el.props['aria-label'] === 'Duration').props['onUpdate:modelValue'] as (v: string) => void)('15m')
+      await settle()
+      expect(cost.props.value).toBe('chosen')
+      for (const value of ['9', '9:', '9:3', '9:30']) {
+        ;(start.props['onUpdate:modelValue'] as (v: string) => void)(value); await settle()
+        expect(cost.props.value, `selection after typing ${value}`).toBe('chosen')
+        expect(cost.children.filter(el => el.tag === 'option')).toHaveLength(3)
+        if (value === '9:') {
+          ;(form.props.onSubmit as (e: unknown) => void)({ preventDefault() {} })
+          expect(logs).toHaveLength(0)
+        }
+      }
+      ;(form.props.onSubmit as (e: unknown) => void)({ preventDefault() {} })
+      expect(logs).toEqual([expect.objectContaining({ costUnitId: 'chosen', startedAt: new Date(2026, 9, 2, 9, 30).toISOString() })])
+      ;(start.props['onUpdate:modelValue'] as (v: string) => void)('0:30'); await settle()
+      expect(cost.props.value).toBe('other')
+      expect(rateOn.mock.calls.at(-1)?.[3]).toBe('2026-10-01')
+    } finally { if (prior === undefined) delete process.env.TZ; else process.env.TZ = prior }
+  })
   it.each([
     ['Europe/Vienna', 30, '2026-10-01', false], ['Europe/Vienna', 30, '2026-10-01', true],
     ['America/Los_Angeles', 23 * 60 + 30, '2026-10-03', false], ['America/Los_Angeles', 23 * 60 + 30, '2026-10-03', true],

@@ -3,6 +3,44 @@ import { expect, test } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { accessWorld, ME, mockAccess } from './access-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
+import { businessData, mockBusiness } from './business-fixtures'
+import { expectStableControls } from './helpers/stable'
+
+for (const width of [390, 1024, 1440]) for (const scheme of ['light', 'dark'] as const) {
+  test(`start-time typing keeps the cost unit and controls stable (${width}, ${scheme})`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme: scheme })
+    await mockWork(page, fixtures())
+    const data = businessData()
+    data.units.find(unit => unit.id === 'cu-design')!.title = 'Gestaltung und technische Dokumentation für internationale Kunden'
+    const calls = await mockBusiness(page, data)
+    await page.goto('/business/hours')
+    if (width <= 720) await page.getByRole('button', { name: 'Log time', exact: true }).click()
+    const form = page.getByRole('form', { name: 'Log time' })
+    const cost = form.getByRole('combobox', { name: 'Cost unit' })
+    const start = form.getByRole('textbox', { name: 'Start time (optional)' })
+    const duration = form.getByRole('textbox', { name: 'Duration' })
+    const log = form.getByRole('button', { name: 'Log', exact: true })
+    await expect(cost.locator('option')).toHaveCount(3)
+    await cost.selectOption('cu-design')
+    await duration.fill('15m')
+    await expectStableControls({
+      controls: { 'Cost unit': cost, 'Start time': start, Duration: duration, Log: log, 'Ticket selector': form.getByRole('button', { name: /^Ticket:/ }) },
+      scrollAreas: { 'Log time': form },
+      interactions: ['9', '9:', '9:3', '9:30'].map(value => ({
+        name: `type ${value}`,
+        run: async () => {
+          await start.fill(value)
+          await expect(start).toHaveValue(value)
+          await expect(cost).toHaveValue('cu-design')
+          await expect(cost.locator('option')).toHaveCount(3)
+        },
+      })),
+    })
+    expect(calls.filter(call => call.method === 'POST' && call.path === '/api/time-entries')).toHaveLength(0)
+    await page.screenshot({ path: `test-results/aeon-theme-webcore-fix2/hours-${width}-${scheme}.png`, fullPage: true })
+  })
+}
 
 test('timing failures restore confirmed values, keep both controls anchored and retry the requested value', async ({ page }) => {
   await mockWork(page, fixtures())

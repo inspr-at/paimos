@@ -86,8 +86,11 @@ const newSeconds = computed(() => seed ? (durationChanged.value ? seconds.value 
 const utcDay = computed(() => {
   return newStart.value ? newStart.value.toISOString().slice(0, 10) : seedStart?.toISOString().slice(0, 10) ?? ''
 })
+// Keep selector choices while a time such as "9:" is incomplete. Rates and
+// submission still use the actual start; a completed time revalidates choices.
+const eligibilityDay = computed<string>(previous => newStart.value ? utcDay.value : previous ?? '')
 const inForce = (r: { unit: string; currency: string; effective_from: string; effective_until: string | null }) =>
-  r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= utcDay.value && (!r.effective_until || r.effective_until > utcDay.value)
+  r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= eligibilityDay.value && (!r.effective_until || r.effective_until > eligibilityDay.value)
 // Hourly cost units with a rate on that day (in the entry's currency when correcting).
 const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && unit.rates.some(inForce))))
 watch(hourly, units => { if (!seed && !units.some(unit => unit.node.id === costUnitId.value)) costUnitId.value = units.length === 1 ? units[0].node.id : '' }, { immediate: true })
