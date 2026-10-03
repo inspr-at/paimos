@@ -19,6 +19,7 @@ import { toggleIn, toggleOut } from '../../src/lib/ticketList'
 
 const anchor = ref<HTMLElement>()
 const opened = ref('')
+const singleEpic = new URLSearchParams(location.search).has('single-epic')
 const selected = ref<string[]>([])
 const chosen = ref('')
 const standalone = ref(longName)
@@ -37,14 +38,15 @@ function exclude(value: string) { selected.value = toggleOut(selected.value, val
       <button v-for="picker in ['epic', 'label', 'option', 'relation']" :key="picker" class="btn" type="button" @click="opened = picker">{{ picker }}</button>
     </nav>
     <button ref="anchor" class="btn anchor" type="button" @click="opened = ''">Close picker</button>
-    <section><h2>Standalone name</h2><p v-clip-tip class="standalone">{{ standalone }}</p><button class="btn" @click="standalone = standalone === longName ? 'Kurz' : longName">Change name</button></section>
+    <!-- Own the Tab stop so lifecycle checks keep focus even after unclipping. -->
+    <section><h2>Standalone name</h2><p v-clip-tip class="standalone" tabindex="0">{{ standalone }}</p><button class="btn" @click="standalone = standalone === longName ? 'Kurz' : longName">Change name</button></section>
     <section><h2>Children</h2><ChildList :children="[item, { ...item, id: 'n-short', key: 'PHAROS-12', title: 'Kurz' }]" :loading="false" :editable="false" child-label="ticket" :progress="{ done: 0, total: 2, percent: 0 }" :add="async () => null" @open="chosen = $event" /></section>
     <section><h2>Filter</h2><FacetOptions dimension="tag" :options="options" :selected="selected" @toggle="toggle" @exclude="exclude" /></section>
     <section><h2>Agent state</h2><LiveLine :views="[view]" :now="Date.now()" loaded @open="chosen = $event" /></section>
     <section><h2>Ticket properties</h2><TicketProperties :item="item" :editable="false" layout="column" :now="Date.now()" /></section>
     <section><h2>Computers</h2><ConnectedComputers :permissions="permissions" embedded /></section>
     <p role="status">{{ chosen }}</p>
-    <EpicPicker v-if="opened === 'epic'" :anchor="anchor ?? null" project-id="p-pharos" current="n-epic" subject="PHAROS-11" allow-none @choose="chosen = $event?.key ?? ''" @close="opened = ''" />
+    <EpicPicker v-if="opened === 'epic'" :anchor="anchor ?? null" project-id="p-pharos" current="n-epic" subject="PHAROS-11" :allow-none="!singleEpic" @choose="chosen = $event?.key ?? ''" @close="opened = ''" />
     <LabelMenu v-if="opened === 'label'" :anchor="anchor ?? null" :labels="[{ name: longName, color: 'blue', on: 0 }, { name: 'Kurz', color: '', on: 0 }]" :count="2" @close="opened = ''" @apply="chosen = 'applied'" />
     <OptionMenu v-if="opened === 'option'" :anchor="anchor ?? null" title="Assignee" subject="PHAROS-11" kind="assignee" :options="options" current="short" @choose="chosen = $event" @close="opened = ''" />
     <RelationPicker v-if="opened === 'relation'" :anchor="anchor ?? null" subject="PHAROS-11" self-id="n-1" project-key="PHAROS" :related="[]" :link="async () => { chosen = 'linked'; return null }" @close="opened = ''" />

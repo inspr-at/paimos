@@ -16,6 +16,7 @@ const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 let focusObserver: MutationObserver | undefined
+let sourceObserver: MutationObserver | undefined
 
 function find(node: EventTarget | null): HTMLElement | null {
   if (!(node instanceof Element)) return null
@@ -28,7 +29,19 @@ function find(node: EventTarget | null): HTMLElement | null {
 }
 async function show(element: HTMLElement) {
   const value = element.dataset.tip
-  if (!value) return
+  if (!value || !element.isConnected) { hide(); return }
+  clearTimeout(timer)
+  if (target !== element) {
+    sourceObserver?.disconnect()
+    sourceObserver = new MutationObserver(() => {
+      if (target !== element) return
+      if (!element.isConnected || !element.dataset.tip) hide()
+      else if (element.dataset.tip !== text.value) void show(element)
+    })
+    // Observe removals too: a record can leave the DOM without pointerout or
+    // focusout. Attribute filtering keeps unrelated name updates inexpensive.
+    sourceObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tip'] })
+  }
   target = element
   layer.value = element.closest<HTMLElement>('dialog[open]')
   text.value = value
@@ -52,7 +65,7 @@ async function show(element: HTMLElement) {
   x.value = Math.round(Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8))
   y.value = Math.round(below.value ? rect.bottom + 8 : rect.top - height - 8)
 }
-function hide() { clearTimeout(timer); target = null; text.value = '' }
+function hide() { clearTimeout(timer); sourceObserver?.disconnect(); target = null; text.value = '' }
 function over(event: PointerEvent) {
   if (event.pointerType === 'touch') return
   const element = find(event.target)
@@ -60,21 +73,40 @@ function over(event: PointerEvent) {
   hide()
   if (element) timer = setTimeout(() => void show(element), 380)
 }
+function revealFocus(focused: Element) {
+  if (document.activeElement !== focused || !focused.matches(':focus-visible')) return
+  const element = find(focused)
+  if (element?.dataset.tip) void show(element)
+  else hide()
+}
 function focusIn(event: FocusEvent) {
   focusObserver?.disconnect()
   const focused = event.target
   if (!(focused instanceof Element)) return
-  const reveal = () => {
-    if (document.activeElement !== focused || !focused.matches(':focus-visible')) return
-    const element = find(focused)
-    if (element) void show(element)
-    else hide()
+  let name = find(focused)
+  let value = name?.dataset.tip
+  // Async results may mount at the same active index; resize/text observers
+  // may make that row clipped later. Remember the source identity and value
+  // so tooltip DOM mutations cannot reopen a deliberately dismissed tip.
+  focusObserver = new MutationObserver(() => {
+    const current = find(focused)
+    const currentValue = current?.dataset.tip
+    if (current === name && currentValue === value) return
+    name = current; value = currentValue
+    revealFocus(focused)
+  })
+  focusObserver.observe(document.body, { childList: true, subtree: true, attributes: true,
+    attributeFilter: ['aria-activedescendant', 'data-tip', 'data-clip-tip'] })
+  revealFocus(focused)
+}
+function keydown(event: KeyboardEvent) {
+  hide()
+  // An arrow at a list boundary need not change aria-activedescendant.
+  // Refresh after the owning component has processed that navigation.
+  if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+    const focused = document.activeElement
+    if (focused?.hasAttribute('aria-activedescendant')) void nextTick(() => revealFocus(focused))
   }
-  // Grids and comboboxes keep focus on their root while arrows change the
-  // active row. Reveal its clipped name without adding extra Tab stops.
-  focusObserver = new MutationObserver(reveal)
-  focusObserver.observe(focused, { attributes: true, attributeFilter: ['aria-activedescendant'] })
-  reveal()
 }
 function focusOut() { focusObserver?.disconnect(); hide() }
 function touch(event: MouseEvent) {
@@ -90,7 +122,7 @@ onMounted(() => {
   document.addEventListener('focusout', focusOut)
   document.addEventListener('pointerdown', hide)
   document.addEventListener('click', touch)
-  document.addEventListener('keydown', hide)
+  document.addEventListener('keydown', keydown)
   document.addEventListener('scroll', hide, true)
 })
 onBeforeUnmount(() => {
@@ -99,9 +131,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('focusout', focusOut)
   document.removeEventListener('pointerdown', hide)
   document.removeEventListener('click', touch)
-  document.removeEventListener('keydown', hide)
+  document.removeEventListener('keydown', keydown)
   document.removeEventListener('scroll', hide, true)
-  clearTimeout(timer)
+  hide()
   focusObserver?.disconnect()
 })
 </script>

@@ -20,7 +20,7 @@ async function keyboardTip(page: Page, control: Locator, text: string) {
   await control.focus()
   await expect(page.locator('.tooltip')).toHaveText(text)
 }
-async function setupHarness(page: Page, theme: string) {
+async function setupHarness(page: Page, theme: string, query = '') {
   const data = fixtures()
   data.preferences.theme = { choice: theme }
   data.nodes.find(node => node.id === 'n-epic')!.title = longName
@@ -32,7 +32,7 @@ async function setupHarness(page: Page, theme: string) {
     pairingView({ computer_id: '33333333-3333-4333-8333-333333333333', computer_name: longComputer, computer_state: 'connected', state: 'redeemed', setup_state: 'connected', connectivity: 'online', local_processes: 'drained', local_cleanup: 'confirmed' }),
     pairingView({ computer_id: '33333333-3333-4333-8333-333333333334', request_id: '11111111-1111-4111-8111-111111111112', computer_name: longComputer, computer_state: 'revoked', state: 'revoked', local_processes: 'drained', local_cleanup: 'confirmed' }),
   ] } }))
-  await page.goto('/tests/clip-tip-harness.html')
+  await page.goto(`/tests/clip-tip-harness.html${query}`)
   await expect(page.getByRole('heading', { name: 'Ganze Namen' })).toBeVisible()
   await expect(page.locator('.agent-name')).toHaveText(longAgent)
   await expect(page.locator('.computer .name')).toHaveText(longComputer)
@@ -112,6 +112,100 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       }
       expect(errors).toEqual([])
     })
+
+    test('lifecycle: delayed single epic discloses while search keeps focus', async ({ page }) => {
+      const errors = watchErrors(page)
+      await setupHarness(page, theme, '?single-epic')
+      let release!: () => void
+      let started!: () => void
+      const requested = new Promise<void>(resolve => { started = resolve })
+      const response = new Promise<void>(resolve => { release = resolve })
+      const epic = { ...fixtures().nodes.find(node => node.id === 'n-epic')!, title: longName }
+      await page.route('**/api/nodes?*', async route => {
+        started()
+        await response
+        await route.fulfill({ json: { items: [epic], next_cursor: null } })
+      })
+      await page.getByRole('button', { name: 'epic', exact: true }).focus()
+      await page.keyboard.press('Enter')
+      await requested
+      const search = page.getByRole('combobox', { name: 'Find an epic' })
+      await expect(search).toBeFocused()
+      await expect(search).toHaveAttribute('aria-activedescendant', 'epic-option-0')
+      await expect(page.getByRole('option')).toHaveCount(0)
+      await expectStableControls({ controls: { search }, interactions: [
+        { name: 'single delayed result mounts', run: async () => {
+          release()
+          await expect(page.getByRole('option')).toHaveCount(1)
+          await expect(search).toBeFocused()
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+        } },
+        { name: 'arrow at unchanged index', run: async () => {
+          await search.press('ArrowDown')
+          await expect(search).toHaveAttribute('aria-activedescendant', 'epic-option-0')
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+        } },
+      ] })
+      await noOverflow(page)
+      await page.screenshot({ path: `${shots}/lifecycle-epic-${width}-${theme}.png`, fullPage: true })
+      expect(errors).toEqual([])
+    })
+
+    for (const mode of ['hover', 'keyboard'] as const) {
+      for (const transition of ['name', 'unclipped', 'removed'] as const) {
+        test(`lifecycle: ${mode} disclosure follows ${transition} without refocus`, async ({ page }) => {
+          const errors = watchErrors(page)
+          await setupHarness(page, theme)
+          const name = page.locator('.standalone')
+          if (mode === 'hover') await name.hover()
+          else {
+            await page.getByRole('button', { name: 'Close picker' }).focus()
+            await page.keyboard.press('Tab')
+            await expect(name).toBeFocused()
+          }
+          await expect(page.locator('.tooltip')).toHaveText(longName)
+          const nextName = `Neuer Datensatz — ${longName}`
+          const checkInteraction = async () => {
+            if (mode === 'keyboard') await expect(name).toBeFocused()
+            else expect(await name.evaluate(el => el.matches(':hover'))).toBe(true)
+          }
+          const change = page.getByRole('button', { name: 'Change name' })
+          await expectStableControls({
+            controls: transition === 'removed' ? { change } : { name, change },
+            interactions: [{ name: `source ${transition}`, run: async () => {
+              // No pointer movement, focus change or click masks the source
+              // transition. The fixture owns its Tab stop even when unclipped.
+              if (transition === 'removed') {
+                await name.evaluate(el => {
+                  // Replace the record in its existing slot, as a virtualized
+                  // list does, so source removal cannot shift nearby controls.
+                  const replacement = el.cloneNode(false) as HTMLElement
+                  replacement.removeAttribute('data-tip')
+                  replacement.removeAttribute('data-clip-tip')
+                  replacement.removeAttribute('tabindex')
+                  replacement.textContent = 'Datensatz entfernt'
+                  el.replaceWith(replacement)
+                })
+                await expect(page.locator('.tooltip')).toHaveCount(0)
+              } else {
+                await name.evaluate((el, text) => { el.textContent = text }, transition === 'name' ? nextName : 'Kurz')
+                await checkInteraction()
+                if (transition === 'name') {
+                  await expect(name).toHaveAttribute('data-tip', nextName)
+                  await expect(page.locator('.tooltip')).toHaveText(nextName)
+                } else {
+                  await expect(name).not.toHaveAttribute('data-tip')
+                  await expect(page.locator('.tooltip')).toHaveCount(0)
+                }
+              }
+            } }],
+          })
+          await noOverflow(page)
+          await page.screenshot({ path: `${shots}/lifecycle-${mode}-${transition}-${width}-${theme}.png`, fullPage: true })
+          expect(errors).toEqual([])
+        })
+      }
+    }
 
     test('ticket titles keep the existing two-line phone layout and reveal full desktop names', async ({ page }) => {
       const data = fixtures(); data.preferences.theme = { choice: theme }
