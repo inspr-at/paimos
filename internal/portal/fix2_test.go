@@ -332,7 +332,7 @@ func TestPortalPermissionRevokedDuringBodyRead(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE NOWAIT`, tid); err != nil {
 			return err
 		}
-		tag, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1::uuid AND project_id IS NULL`, admin.ID)
+		tag, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='workspace'`, admin.ID)
 		if err != nil {
 			return err
 		}
