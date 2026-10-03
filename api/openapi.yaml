@@ -11720,12 +11720,13 @@ components:
         short_name: {type: string, maxLength: 48}
     ReleaseNoteSnapshot:
       type: object
+      description: Stored captures retain their original membership provenance after project adoption. Historical journey and manifest captures keep the 16 MiB decoder ceiling; new ships_in captures are limited to 12 MiB and 5000 members.
       required: [schema, tenant_id, project_node_id, release_node_id, version, version_scheme, release_revision, captured_at, membership_source, field_source, tickets]
       properties:
         schema: {type: string, const: aeon.release-note-snapshot.v1}
         tenant_id: {type: string, format: uuid}
         project_node_id: {type: string, format: uuid}
-        release_node_id: {type: string, description: Journey release UUID; empty for a version-keyed manifest backfill}
+        release_node_id: {type: string, description: Release UUID in its original journey or ships_in provenance; empty for a version-keyed manifest backfill}
         version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
         version_scheme: {type: string}
         release_revision: {type: integer, minimum: 1}

@@ -230,6 +230,17 @@ func (s *Store) NoteSnapshot(ctx context.Context, p tenant.Principal, project, r
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// Adoption preserves immutable journey captures in their original
+		// table. Prefer those exact bytes over a preview or missing-notes gap;
+		// never relabel their membership source or read current ticket fields.
+		err = tx.QueryRow(ctx, `SELECT snapshot FROM journey_release_note_snapshots WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3`, p.TenantID, project, release).Scan(&out.Raw)
+		if err == nil {
+			_, err = releasehistory.ProjectNotesFromSnapshot(out.Raw, releasehistory.ProjectSnapshotBinding{TenantID: p.TenantID, ProjectID: project, ReleaseID: release, VersionScheme: r.VersionScheme, Version: r.Version}, "database-snapshot")
+			return err
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		if r.State == "released" || r.State == "abandoned" {
 			out.Unavailable = true
 			return nil
