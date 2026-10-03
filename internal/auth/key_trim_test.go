@@ -632,8 +632,8 @@ func TestKeyTrimOppositeProposalsFenceCompleteKeyBatch(t *testing.T) {
 	pool, barrier, ctx := dbtest.BarrierPool(t, m.pool, func(sql string) bool {
 		return strings.Contains(sql, "pg_advisory_xact_lock(hashtextextended($1,615))")
 	})
-	first := *m
-	first.pool = pool
+	// Share fixture dependencies without copying the module's mutex or OIDC state.
+	first := &Module{pool: pool, inTenant: m.inTenant, trimNow: m.trimNow}
 	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
 	go func() { _, err := first.proposeKeyTrim(ctx, agents[0], keys[1].ID, in); firstDone <- err }()
 	holder := barrier.Wait(t, ctx)
