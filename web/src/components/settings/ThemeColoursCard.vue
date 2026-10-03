@@ -37,12 +37,12 @@ function markerColour(mode: ColourMode) {
   if (choice.source === 'neutral') return mode === 'light' ? '#7c8c8d' : '#8aa3a2'
   return mode === 'light' ? choice.custom ?? '#8547b0' : derivedDark(choice.custom ?? '#8547b0')
 }
-watch(() => [props.draft.id, props.editable], () => { picker.value = null })
+watch([() => props.draft.id, () => props.editable], () => { picker.value = null })
 </script>
 <template>
-  <SettingsCard :title="`Colours · ${draft.name || 'Untitled theme'}`" icon="sun" anchor="colours">
+  <SettingsCard title="Colours" icon="sun" anchor="colours">
     <template #lead>Primary and secondary accents, and the mark on recurring tickets. Only the preview changes until Save.</template>
-    <p class="permission-note">{{ editable ? (draft.scope === 'workspace' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : 'Read-only workspace theme. Duplicate it to make your own.' }}</p>
+    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ editable ? (draft.scope === 'workspace' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope === 'workspace' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
     <div class="editor-grid">
       <div class="colour-controls">
         <div v-for="accent in accents" :key="accent.key" class="colour-field">
@@ -75,7 +75,7 @@ watch(() => [props.draft.id, props.editable], () => { picker.value = null })
   </SettingsCard>
 </template>
 <style scoped>
-.permission-note { color: var(--ink-2); font-size: 12px; margin-bottom: 16px; }
+.permission-note { color: var(--ink-2); font-size: 12px; height: 54px; margin-bottom: 16px; overflow-y: auto; }.permission-note strong { color: var(--ink); }
 .editor-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 24px; }
 .colour-controls { min-width: 0; }
 .colour-field { padding: 16px 0; border-top: 1px solid var(--line); }
@@ -104,4 +104,5 @@ h3 { font-size: 13px; font-weight: 600; }
 .preview-progress { padding: 12px; color: var(--preview-primary); }.preview-progress > div { margin-top: 6px; height: 4px; background: rgba(128,128,128,.2); border-radius: 4px; }.preview-progress i { display: block; width: 65%; height: 100%; background: var(--preview-primary); border-radius: 4px; }.preview-link { color: var(--preview-primary); }
 @container (max-width: 640px) { .editor-grid { grid-template-columns: minmax(0, 1fr); } .previews { grid-template-columns: repeat(2, minmax(0, 1fr)); } .previews > p { grid-column: 1 / -1; } }
 @media (max-width: 600px) { .editor-grid, .previews { grid-template-columns: minmax(0, 1fr); }.text-link { min-height: 44px; }.contrast-lines p { min-height: 44px; } }
+@media (pointer: coarse) { .text-link { min-height: 44px; }.contrast-lines p { min-height: 44px; } }
 </style>

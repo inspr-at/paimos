@@ -94,10 +94,11 @@ export function useThemeEditor() {
   async function newTheme() {
     const id = active.value?.default_theme_id
     if (!id || dirty.value || !selfWrite.value) return
+    const started = epoch
     // Read the actual default even when it lives on a later list page.
     await perform(async current => { const source = await themes.getTheme(id); if (current()) merge(source) })
     const source = items.value.find(item => item.id === id)
-    if (source && !error.value) await duplicate(source)
+    if (started === epoch && source && !error.value) await duplicate(source)
   }
   async function remove(theme: ThemeRecord) {
     if (dirty.value || !editable(theme) || theme.id === active.value?.default_theme_id) return
