@@ -563,6 +563,20 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+CI runs on pushes to `main`, pull requests, merge-queue check requests and manual
+dispatches. A new push to `main` cancels superseded main CI runs to free runner
+capacity (AEON-585). Main's group is separate from PR and merge-queue groups:
+PRs keep their existing per-PR cancellation, while each queue and manual run
+keeps a unique group. Required checks remain `go`, `web`, `release-check` and
+`e2e`; the external `gate/cross-family` status is unchanged.
+
+The separate release rehearsal already cancels superseded runs per ref. Release
+tag builds still require a successful `release-image-check.yml` rehearsal for
+the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
+does not satisfy that gate. Main validation is retained, including when a merge
+group tested the same tree. Workflow policy tests live in
+`scripts/ci-runner-guard` and `scripts/releaseworkflow`.
+
 The ordinary activity tests check exact pagination through 240 same-ticket
 imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
 imported events, plus the node index definition. They impose no latency budget.
