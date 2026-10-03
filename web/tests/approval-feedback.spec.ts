@@ -51,12 +51,12 @@ const idOf = (data: Awaited<ReturnType<typeof setup>>['data'], scope: string) =>
 function expectSmoothFold(tops: number[], before: { height: number; gap: number }, removals: { jump: number }[]) {
   // Keep the original geometry and per-frame limits for the real removal too.
   const moved = tops[0] - tops[tops.length - 1]
-  expect(Math.abs(moved - (before.height + before.gap))).toBeLessThanOrEqual(1.5)
-  expect(Math.max(...tops) - tops[0]).toBeLessThanOrEqual(1.5)
+  expect(Math.abs(moved - (before.height + before.gap))).toBeLessThanOrEqual(0.5)
+  expect(Math.max(...tops) - tops[0]).toBeLessThanOrEqual(0.5)
   const steps = tops.slice(1).map((top, index) => tops[index] - top)
   expect(steps.filter(step => step > 0.5).length).toBeGreaterThanOrEqual(6)
   expect(Math.max(...steps), 'no single-frame jump, including actual removal').toBeLessThan(moved * 0.5)
-  expect(Math.max(...removals.map(removal => removal.jump)), 'no snap at actual removal').toBeLessThanOrEqual(1.5)
+  expect(Math.max(...removals.map(removal => removal.jump)), 'no snap at actual removal').toBeLessThanOrEqual(0.5)
 }
 
 const foldCases = [false, true].flatMap(eventless => [false, true].map(emptyHistory => ({ eventless, emptyHistory, premature: false })))
@@ -222,7 +222,7 @@ test.describe('with motion', () => {
       const main = document.getElementById('main')!
       const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop) }
       const seen = new WeakSet<Animation>()
-      const transitions: { animation: CSSTransition; target: Element | null; started: number; duration: number; finished: boolean }[] = []
+      const transitions: { animation: CSSTransition; target: Element | null; started: number; duration: number; currentTime: number; finished: boolean }[] = []
       let properties: string[] = []
       const removals: { kind: 'card' | 'section'; remaining: number; jump: number; at: number }[] = []
       let settledCard: Element | null = null
@@ -235,17 +235,24 @@ test.describe('with motion', () => {
           if (!Number.isFinite(duration) || duration <= 0 || duration > 1000) throw new Error('Expected bounded, positive layout transitions')
           animation.pause()
           animation.currentTime = 0
-          transitions.push({ animation, target: (animation.effect as KeyframeEffect).target, started: Date.now(), duration, finished: false })
+          transitions.push({ animation, target: (animation.effect as KeyframeEffect).target, started: Date.now(), duration, currentTime: 0, finished: false })
           properties.push(animation.transitionProperty)
         }
       }
       const record = () => {
         capture()
+        // Keep the actual CSS position before removal cancels the animation.
+        // transitionend can run partway through clock.runFor(), after advance()
+        // put CSS at its end but before the JS clock reaches the frame's end.
+        // Date.now() then wrongly reports unfinished motion (AEON-636).
+        for (const entry of transitions) {
+          if (typeof entry.animation.currentTime === 'number') entry.currentTime = entry.animation.currentTime
+        }
         const card = section.querySelector('.item.settled')
         for (const [kind, target] of [['card', settledCard], ['section', section]] as const) {
           if (!target || target.isConnected || removals.some(removal => removal.kind === kind)) continue
           const remaining = Math.max(0, ...transitions.filter(entry => entry.target === target)
-            .map(entry => entry.duration - (Date.now() - entry.started)))
+            .map(entry => entry.duration - entry.currentTime))
           removals.push({ kind, remaining, jump: Math.abs(tops[tops.length - 1] - (next.getBoundingClientRect().top + main.scrollTop)), at: Date.now() })
         }
         settledCard ??= card
@@ -262,20 +269,24 @@ test.describe('with motion', () => {
         takeProperties: () => { const result = properties; properties = []; return result },
         advance: (ms: number) => {
           capture()
-          for (const { animation, started, duration, finished } of transitions) {
-            if (finished || animation.playState === 'idle') continue
-            animation.currentTime = Math.min(Date.now() + ms - started, duration)
+          for (const entry of transitions) {
+            if (entry.finished || entry.animation.playState === 'idle') continue
+            entry.currentTime = Math.min(Date.now() + ms - entry.started, entry.duration)
+            entry.animation.currentTime = entry.currentTime
           }
           // Sample immediately before the matching JS tick can remove anything.
           sample()
         },
-        afterTimers: () => {
+        afterTimers: async () => {
           record()
+          const completions: Promise<void>[] = []
           for (const entry of transitions) {
-            if (entry.finished || entry.animation.playState === 'idle' || Date.now() - entry.started < entry.duration) continue
-            entry.finished = true
+            if (entry.finished || entry.animation.playState === 'idle' || entry.currentTime < entry.duration) continue
+            const completed = entry.animation.finished
             entry.animation.finish()
+            completions.push(completed.then(() => { entry.finished = true }))
           }
+          await Promise.all(completions)
           record()
         },
       }
@@ -336,7 +347,7 @@ test.describe('with motion', () => {
       expect(removals.find(removal => removal.kind === 'section')!.jump).toBeGreaterThan(1.5)
       expect(() => expectSmoothFold(tops, before, removals)).toThrow('no snap at actual removal')
     } else {
-      expect(removals.every(removal => removal.remaining === 0)).toBe(true)
+      expect(removals.map(removal => removal.remaining), 'CSS motion completed before each removal').toEqual([0, 0])
       expectSmoothFold(tops, before, removals)
     }
   })
