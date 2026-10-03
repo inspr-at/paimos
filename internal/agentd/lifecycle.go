@@ -141,6 +141,23 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	return s.lifecycleAt(accountID, time.Now())
 }
 
+// SetPairingFailure reports a skipped poll without overwriting per-harness
+// holds or durable fences. Recovery gives unprobed accounts a fresh wait.
+func (s *Supervisor) SetPairingFailure(detail string) {
+	detail = agentsetup.SafePairingDetail(detail)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if detail == "" && s.pairingFailure != "" {
+		now := s.capacityNow()
+		for _, a := range s.accounts {
+			if !s.probedAccounts[a.ID] {
+				s.probePendingSince[a.ID] = now
+			}
+		}
+	}
+	s.pairingFailure = detail
+}
+
 func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
@@ -180,7 +197,9 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 				issue = s.dependencyErrors[a.ID]
 				reason = s.dependencyReasons[a.ID]
 			}
-			if issue != "" {
+			if s.pairingFailure != "" {
+				status, reason = "blocked", agentsetup.PairingSyncFailed
+			} else if issue != "" {
 				v.HarnessErrors[a.Harness] = issue
 				status = "blocked"
 				if reason == "" {
@@ -225,6 +244,9 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 		}
 		v.AccountStatuses[a.ID], _ = agentsetup.HarnessReport(a.Harness, status, reason)
 		v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.probeReasonDetails[a.ID])
+		if reason == agentsetup.PairingSyncFailed {
+			v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.pairingFailure)
+		}
 		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason, detail: v.AccountStatuses[a.ID].ReasonDetail})
 	}
 	assignHarnessReports(&v, perHarness)

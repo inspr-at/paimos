@@ -45,7 +45,7 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
-	// Now supplies the capacity scheduler clock; deadlines still use contexts.
+	// Now supplies the capacity and pairing-recovery clocks; deadlines still use contexts.
 	Now func() time.Time
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
@@ -175,6 +175,7 @@ type Supervisor struct {
 	signInUnverified       map[string]bool
 	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
 	probeReasonDetails     map[string]string // Allowlisted explanations, protected by mu.
+	pairingFailure         string            // Allowlisted cause; guarded by mu, independent of harness holds.
 	harnessHoldReasons     map[string]string
 	dependencyReasons      map[string]string
 	harnessHolds           map[string]string

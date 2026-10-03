@@ -21,6 +21,9 @@ const (
 const maxProbeDetail = 160
 
 func SafeProbeDetail(reason, detail string) string {
+	if reason == PairingSyncFailed {
+		return SafePairingDetail(detail)
+	}
 	if reason == "login_required" && detail == ProbeSignedOut {
 		return detail
 	}

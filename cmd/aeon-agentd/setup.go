@@ -78,6 +78,15 @@ func (l localPairing) Fence(ctx context.Context, daemon, account string) (agents
 	}
 	if l.supervisor != nil {
 		s, e := l.supervisor.Drain(agentd.DrainRequest{DaemonID: daemon, AccountID: account})
+		if errors.Is(e, agentd.ErrScope) && account != "" {
+			// Historical tombstones need a durable fence even after their
+			// runtime binding disappears. Preserve actual process/settlement
+			// evidence; absence from the runtime is not proof of cleanup.
+			status := l.supervisor.Lifecycle(account)
+			if _, enrolled := status.AccountStatuses[account]; status.DaemonID == daemon && !enrolled {
+				return localStatus(status), nil
+			}
+		}
 		return localStatus(s), e
 	}
 	client, err := l.client()

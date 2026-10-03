@@ -221,6 +221,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
+	diagnostics := pairedDiagnostics{}
 	for {
 		if stopping || ctx.Err() != nil {
 			stopping = true
@@ -241,17 +242,9 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		}
 		// Lifecycle reconciliation is required before every fresh dispatch;
 		// the independent tombstone proof still works after key revocation.
-		err = syncPairing(op, root, c.Origin, s)
-		if err == nil {
-			next, _, readErr := agentsetup.ReadRuntime(root)
-			if readErr == nil {
-				// Claude repins and dependency repairs hold only Claude;
-				// identity or binding changes still stop the daemon.
-				c, readErr = pollPairedRuntime(op, s, root, c, next)
-				if errors.Is(readErr, errStopDaemon) {
-					stopping = true
-				}
-			}
+		c, err = pairedPollIteration(op, s, root, c, &diagnostics)
+		if errors.Is(err, errStopDaemon) {
+			stopping = true
 		}
 		cancel()
 		select {
@@ -260,6 +253,40 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		case <-ticker.C:
 		}
 	}
+}
+
+// The vocabulary bounds both log contents and the lifetime deduplication set.
+// Repeated failures remain visible in status without flooding service stderr.
+type pairedDiagnostics struct{ seen map[string]bool }
+
+func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string) {
+	detail = agentsetup.SafePairingDetail(detail)
+	s.SetPairingFailure(detail)
+	if detail == "" || d.seen[detail] {
+		return
+	}
+	if d.seen == nil {
+		d.seen = map[string]bool{}
+	}
+	d.seen[detail] = true
+	slog.Warn("agentd pairing diagnostic", "reason", agentsetup.PairingSyncFailed, "cause", detail)
+}
+
+func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig, diagnostics *pairedDiagnostics) (agentsetup.RuntimeConfig, error) {
+	if err := syncPairing(ctx, root, c.Origin, s); err != nil {
+		diagnostics.report(s, agentsetup.PairingFailureDetail(err))
+		return c, err
+	}
+	next, _, err := agentsetup.ReadRuntime(root)
+	if err != nil {
+		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable)
+		return c, err
+	}
+	current, err := pollPairedRuntime(ctx, s, root, c, next)
+	if err != nil {
+		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable)
+	}
+	return current, err
 }
 
 func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, next agentsetup.RuntimeConfig, adapters []agentd.Adapter) error {
@@ -366,6 +393,7 @@ func adaptersExceptClaude(adapters []agentd.Adapter) []agentd.Adapter {
 }
 
 type pairedRuntimeSupervisor interface {
+	SetPairingFailure(string)
 	SetHarnessHoldWithReason(string, string, string)
 	RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error
 	PinHealthMatches([]agentd.EnrolledAccount) bool
@@ -382,6 +410,7 @@ var errStopDaemon = errors.New("paired daemon must stop")
 func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
 	current, err := refreshPairedRuntime(ctx, s, root, c, next)
 	if err == nil {
+		s.SetPairingFailure("")
 		_ = s.PollOnce(ctx)
 	}
 	return current, err

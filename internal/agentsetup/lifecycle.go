@@ -141,7 +141,13 @@ func (e *Engine) applyFences(ctx context.Context, s *snapshot, v View) error {
 
 // SyncFences is the daemon-side reconnect operation. It neither unloads its own
 // service nor acknowledges cleanup. The separate helper owns those steps.
-func (e *Engine) SyncFences(ctx context.Context) error {
+func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
+	cause := PairingLocalUnavailable
+	defer func() {
+		if resultErr != nil {
+			resultErr = &pairingSyncError{err: resultErr, detail: cause}
+		}
+	}()
 	if err := e.Store.Lock(); err != nil {
 		return err
 	}
@@ -159,13 +165,16 @@ func (e *Engine) SyncFences(ctx context.Context) error {
 			proof.Progress = observedProgress(s.View, local)
 		}
 	}
+	cause = PairingServerUnavailable
 	v, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return err
 	}
+	cause = PairingViewInvalid
 	if err = validateView(s, v, false); err != nil {
 		return err
 	}
+	cause = PairingFenceUnavailable
 	if err = e.applyFences(ctx, s, v); err != nil {
 		return err
 	}
@@ -174,6 +183,7 @@ func (e *Engine) SyncFences(ctx context.Context) error {
 	prefix := s.View.RuntimePrefix
 	s.View = v
 	s.View.RuntimePrefix = prefix
+	cause = PairingLocalUnavailable
 	return e.save(s, false)
 }
 
