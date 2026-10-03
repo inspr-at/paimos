@@ -161,25 +161,35 @@ func TestAttachedDisabledExplicitNotesNeverPersist(t *testing.T) {
 			n.f.messages = []*attachedmsg.Service{disabled}
 			n.f.rebuildHandler()
 			for _, compat := range []bool{false, true} {
-				for _, route := range []string{"live", "omitted-session", "wrong-session", "detached"} {
+				// Start with the detached case: weakening the explicit-note refusal
+				// must prove a durable body leak, rather than a different live fence error.
+				for _, route := range []string{"detached", "live", "omitted-session", "wrong-session"} {
 					canary := "disabled-note-canary-" + attachedmsg.UUID()
 					body := n.body(attachedmsg.UUID(), canary, compat)
+					state := "active"
+					if route == "detached" {
+						state = "detached"
+					}
+					if _, err := n.f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET state=$2 WHERE id=$1`, n.in.RequestID, state); err != nil {
+						t.Fatal(err)
+					}
 					switch route {
 					case "omitted-session":
 						delete(body, "recipient_session_id")
 					case "wrong-session":
 						body["recipient_session_id"] = attachedmsg.UUID()
-					case "detached":
-						if _, err := n.f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET state='detached' WHERE id=$1`, n.in.RequestID); err != nil {
-							t.Fatal(err)
-						}
+					}
+					w := httptest.NewRecorder()
+					n.f.h.ServeHTTP(w, n.f.request("POST", n.path(compat), body, true, ""))
+					assertNoCanary(t, n.f, canary)
+					if w.Code != 409 {
+						t.Fatalf("explicit disabled note status %d want 409", w.Code)
 					}
 					var refusal struct{ Code string }
-					decodeResult(t, n.f.call("POST", n.path(compat), body, true, "", 409), &refusal)
+					decodeResult(t, w, &refusal)
 					if refusal.Code != "feature_disabled" {
 						t.Fatalf("wrong refusal: %s", refusal.Code)
 					}
-					assertNoCanary(t, n.f, canary)
 				}
 			}
 			// An unrelated ordinary recipient retains its durable inbox behavior.

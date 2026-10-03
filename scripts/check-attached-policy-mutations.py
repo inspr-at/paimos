@@ -40,6 +40,26 @@ MUTATIONS = [
     ("event sender cast", "internal/db/migrations/1212_attached_event_privacy.sql", "(\"after\"->>'sender_principal_id')=ANY(aeon_current_principals()::text[])", "(\"after\"->>'sender_principal_id')::uuid=ANY(aeon_current_principals())", "./internal/agentpairing", "TestAttachedEventPrivacyMalformedSender"),
 ]
 
+# Reject fixture, timeout and unrelated failures as evidence. Each weakened
+# invariant must reach the exact assertion it is meant to challenge.
+ASSERTIONS = {
+    "owner predicate": "another person/admin injected",
+    "send generation": "status 201 want 409",
+    "recipient tuple": "wrong principal accepted",
+    "consent digest": "status 200 want 409",
+    "messaging signature": "status 200 want 403",
+    "payload tuple": "wrong tuple",
+    "payload replay": "payload replayed",
+    "agent body clearing": "agent body retained in volatile store",
+    "disabled explicit fallback": "payload persisted in",
+    "live session lease": "status 409 want 201",
+    "notification memory isolation": "notification consumed owner capacity",
+    "notification rate isolation": "status 429 want 201",
+    "take terminal row": "Take row guard failed for shown",
+    "take row deadline": "Take row guard failed for deadline",
+    "event sender cast": "invalid input syntax for type uuid",
+}
+
 for label, file, before, after, package, test in MUTATIONS:
     path = ROOT / file
     original = path.read_bytes()
@@ -53,7 +73,7 @@ for label, file, before, after, package, test in MUTATIONS:
             cwd=ROOT, env={**os.environ, "GOMAXPROCS": "2"}, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180,
         )
-        if result.returncode == 0 or f"--- FAIL: {test}" not in result.stdout:
+        if result.returncode == 0 or f"--- FAIL: {test}" not in result.stdout or ASSERTIONS[label] not in result.stdout:
             # Do not print request bodies or credentials from a failing fixture.
             raise SystemExit(f"{label}: SURVIVED or failed outside its assertion")
         print(f"KILLED: {label} ({test})", flush=True)
