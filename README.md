@@ -61,6 +61,11 @@ later authorized reranking, release moves and rollover can change placement
 source without losing adoption evidence. Authorized project moves and Undo may
 remove the ranked backlog row while preserving its journey archive; verification
 requires the latest post-adoption membership event to explain that absence.
+The check reads evidence through the configured executor bound to the adoption
+job after authorizing the original project reader, and returns only aggregate
+verification counts. Destination projects and events remain hidden from that
+reader. Undo records the placements it actually removes, including backlog
+rankings created after the original move.
 Unrecorded placement deletions and missing archive references still fail.
 
 Tests use durable fake providers and private PostgreSQL restore copies. Native

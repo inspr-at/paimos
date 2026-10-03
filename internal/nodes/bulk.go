@@ -676,11 +676,17 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			}
 		}
 	}
+	var shipsMoved []shipsMoveSnapshot
 	for i, want := range after.Items {
 		old := before.Items[i]
 		now := current[want.ID]
 		if !sameString(old.ParentID, now.ParentID) {
-			if _, err := shipsInBeforeMove(ctx, tx, now.ID, old.ParentID); err != nil {
+			removed, err := shipsInBeforeMove(ctx, tx, now.ID, old.ParentID)
+			if err != nil {
+				return events.Change{}, events.ErrConflict
+			}
+			shipsMoved = append(shipsMoved, removed...)
+			if len(shipsMoved) > 5000 {
 				return events.Change{}, events.ErrConflict
 			}
 		}
@@ -721,5 +727,5 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 		was = append(was, snapOf(now))
 		restored = append(restored, snapOf(latest))
 	}
-	return events.Change{Type: evNodeBulkChanged, Before: bulkBatch{Items: was}, After: bulkBatch{Items: restored}}, nil
+	return events.Change{Type: evNodeBulkChanged, Before: bulkBatch{Items: was, ShipsIn: shipsMoved}, After: bulkBatch{Items: restored}}, nil
 }

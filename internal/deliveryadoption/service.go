@@ -126,11 +126,7 @@ func (s *Service) snapshot(ctx context.Context, p tenant.Principal, fn func(pgx.
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var creator any
-	if p.KeyCreatorID != "" {
-		creator = p.KeyCreatorID
-	}
-	if _, err = tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+	if err = enterSnapshotPrincipal(ctx, tx, p); err != nil {
 		return err
 	}
 	if err = limits(ctx, tx, "15s"); err != nil {
@@ -140,6 +136,15 @@ func (s *Service) snapshot(ctx context.Context, p tenant.Principal, fn func(pgx.
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func enterSnapshotPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	var creator any
+	if p.KeyCreatorID != "" {
+		creator = p.KeyCreatorID
+	}
+	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator)
+	return err
 }
 
 // DryRun is read-only; callers cannot supply mappings or recovery references.

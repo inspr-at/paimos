@@ -214,6 +214,45 @@ func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Princip
 		out.Incomplete = true
 		return nil
 	}
+	// The request already passed releases.read for the original project. Its
+	// reader may no longer see a member or the destination references in move
+	// events. Use only the configured executor bound to this adopted job, within
+	// the same read-only snapshot. No destination data leaves this aggregate
+	// check, and the caller's visibility (including its key creator) is restored.
+	a, ok := s.authority(p.TenantID)
+	if !ok {
+		return ErrPrerequisite
+	}
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_adoption_jobs
+	 WHERE tenant_id=$1 AND project_node_id=$2 AND instance_id=$3 AND migration_version=$4
+	 AND state='adopted' AND executing_principal_id=$5 AND authorizing_principal_id=$6
+	 AND rollout_authorization_ref=$7)`, p.TenantID, project, s.cfg.Instance, Migration, a.Executor.ID, a.Authorizer.ID, a.Reference).Scan(&bound); err != nil {
+		return err
+	}
+	if !bound {
+		return ErrPrerequisite
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1 AND id=$2 AND kind=$3 AND status='active')`, p.TenantID, a.Executor.ID, string(a.Executor.Kind)).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return authz.ErrForbidden
+	}
+	if err := enterSnapshotPrincipal(ctx, tx, a.Executor); err != nil {
+		return err
+	}
+	if err := authz.RequireTx(ctx, tx, a.Executor, "releases.read", authz.Scope{ProjectID: project}); err != nil {
+		return err
+	}
+	if err := s.verifyMembersWithAuthority(ctx, tx, a.Executor, project, out); err != nil {
+		return err
+	}
+	return enterSnapshotPrincipal(ctx, tx, p)
+}
+
+func (s *Service) verifyMembersWithAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, out *Verification) error {
 	// The adoption event binds the immutable report. Placement.source describes
 	// the latest edit, so a legitimate rerank, move or rollover may replace it.
 	var ref, digest string
@@ -287,8 +326,9 @@ func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Princip
 // A project move removes ranked backlog rows and Undo returns them unranked.
 // The latest membership mutation after the immutable adoption event must
 // explain each absent row; an old removal cannot excuse a later lost placement.
-// Move snapshots include descendants. Undo binds to that exact original event,
-// while placement Undo records an explicit zero-revision tail in its after image.
+// Move and Undo snapshots record actual removals, including descendants and
+// placements created after the original move. Earlier Undo events also bind to
+// the original snapshot; placement Undo records a zero-revision after image.
 func verifyRemovedMembers(ctx context.Context, tx pgx.Tx, tenantID string, adoptionEvent int64, missing []string) (int, error) {
 	if len(missing) == 0 {
 		return 0, nil
@@ -307,8 +347,8 @@ func verifyRemovedMembers(ctx context.Context, tx pgx.Tx, tenantID string, adopt
 	   WHERE e.tenant_id=$3 AND e.id>$2 AND (
 	     (e.type='ships_in.changed' AND e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text)))
 	     OR (e.type IN ('node.moved','node.project_moved','node.bulk_changed') AND
-	       (CASE WHEN e.undo_of IS NULL THEN e.before ELSE original.before END)->'ships_in_before_move'
-	         @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text))))
+	       (e.before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text))
+	        OR original.before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text)))))
 	   ORDER BY e.id DESC LIMIT 1
 	 ) latest ON true LIMIT 5000`, missing, adoptionEvent, tenantID)
 	if err != nil {
