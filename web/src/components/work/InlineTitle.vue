@@ -1,17 +1,20 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { SaveResult } from '../../lib/useTicket'
 import AppIcon from '../AppIcon.vue'
 
 // The ticket title: click or press e to edit; Enter saves, Escape cancels.
 // A conflict keeps the draft and shows the title someone else saved.
-const props = defineProps<{ value: string; editable: boolean; save: (value: string) => Promise<SaveResult>; large?: boolean }>()
+const props = defineProps<{ recordId?: string; value: string; editable: boolean; save: (value: string) => Promise<SaveResult>; large?: boolean }>()
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const conflict = ref(false)
 const area = ref<HTMLTextAreaElement>()
+let generation = 0
+function discard() { generation++; editing.value = false; draft.value = ''; saving.value = false; conflict.value = false }
+watch(() => props.recordId, discard, { flush: 'sync' })
 const dirty = computed(() => editing.value && draft.value.trim() !== props.value)
 
 function grow() { const el = area.value; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
@@ -24,19 +27,21 @@ async function commit() {
   const title = draft.value.replace(/\s+/g, ' ').trim()
   if (!title) { area.value?.focus(); return }
   if (title === props.value && !conflict.value) { editing.value = false; return }
+  const request = generation
   saving.value = true
   const result = await props.save(title)
+  if (request !== generation) return
   saving.value = false
   if (result === 'ok') { editing.value = false; conflict.value = false }
   else if (result === 'conflict') { conflict.value = true; await nextTick(); area.value?.focus() }
 }
-function cancel() { editing.value = false; conflict.value = false }
+function cancel() { discard() }
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Enter') { event.preventDefault(); void commit() }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
 function blur() { if (!saving.value && !conflict.value) { if (dirty.value) void commit(); else editing.value = false } }
-defineExpose({ start, isDirty: () => dirty.value, editing })
+defineExpose({ start, isDirty: () => dirty.value, editing, discard })
 </script>
 
 <template>

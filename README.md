@@ -2040,6 +2040,18 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+Ticket drafts belong to a record and are cleared when Discard is accepted;
+opening that same ticket as a full page keeps its comment draft. Knowledge,
+customer, quote-version and session-chat reads ignore results from a previous
+record. Hours approval displays entries and digest from one stable read, then
+uses that displayed revision and digest after confirmation. Account changes
+cancel pending preference reads, timers and writes and clear earlier toast
+actions. Changing person or workspace, or starting sign-out, cancels open
+confirmation dialogs so their captured actions cannot proceed in the new session.
+CRM and quote mutation responses carry `X-Aeon-Event-Ids`, listing the
+exact accepted events in undo order. Undo uses only this receipt; missing
+receipts and intervening changes refuse Undo without a latest-event lookup.
+
 Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
 4096 pixels per side, with a square crop up to 2048 pixels. Attachment images
 accept up to 16,777,216 pixels and 8192 pixels per side, in addition to the

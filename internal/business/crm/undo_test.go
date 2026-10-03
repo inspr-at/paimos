@@ -164,3 +164,39 @@ func TestCustomerArchiveListAndUndo(t *testing.T) {
 	}
 	undoEvent(t, f, eventOf(t, f, EventCustomerVisibility), 409)
 }
+
+// The receipt of the first accepted write must never rebind to the second write.
+func TestCustomerUndoReceiptSurvivesInterveningMutation(t *testing.T) {
+	f := setup(t)
+	withUndo(t, &f)
+	w := jsonRequest(t, f, f.admin, "POST", "/api/crm/organisations", map[string]any{"name": "Original"})
+	expect(t, w, 201)
+	var c Customer
+	if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil {
+		t.Fatal(err)
+	}
+	w = jsonRequest(t, f, f.admin, "PATCH", "/api/crm/organisations/"+c.ID, map[string]any{"name": "First", "expected_revision": c.Revision})
+	expect(t, w, 200)
+	receipt := w.Header().Get(events.MutationEventHeader)
+	first := eventOf(t, f, "crm.customer_updated")
+	if receipt != strconv.FormatInt(first.ID, 10) {
+		t.Fatalf("receipt %q does not identify accepted event %d", receipt, first.ID)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil {
+		t.Fatal(err)
+	}
+	w = jsonRequest(t, f, f.admin, "PATCH", "/api/crm/organisations/"+c.ID, map[string]any{"name": "Second", "expected_revision": c.Revision})
+	expect(t, w, 200)
+	if w.Header().Get(events.MutationEventHeader) == receipt {
+		t.Fatal("distinct mutations share a receipt")
+	}
+	expect(t, request(f.handler, f.admin, "POST", "/api/events/"+receipt+"/undo", ""), 409)
+	w = request(f.handler, f.admin, "GET", "/api/crm/organisations/"+c.ID, "")
+	expect(t, w, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Name != "Second" {
+		t.Fatalf("Undo reverted the later change: %s", c.Name)
+	}
+}

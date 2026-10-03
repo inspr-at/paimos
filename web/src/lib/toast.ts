@@ -9,14 +9,18 @@ export interface ToastRelease { version: string; name?: string; before: string; 
 export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
 export const toasts = reactive<Toast[]>([])
 let next = 1
+let ownerEpoch = 0
+export function resetToasts() { ownerEpoch++; toasts.splice(0) }
+export function captureToastOwner() { const started = ownerEpoch; return () => started === ownerEpoch }
 
 // Short, dismissible confirmations. Errors stay a little longer than info. A sticky
 // toast stays until it is acted on or dismissed; a keyed one replaces its earlier self.
 export function toast(message: string, options: { tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string; release?: ToastRelease } = {}) {
   if (options.key) { const earlier = toasts.find(item => item.key === options.key); if (earlier) dismiss(earlier.id) }
+  const current = captureToastOwner()
   const item: Toast = {
     id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key, release: options.release,
-    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])],
+    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])].map(action => ({ ...action, run: () => { if (current()) action.run() } })),
   }
   toasts.push(item)
   // Sticky toasts are kept when the stack is full; the oldest passing one goes.
