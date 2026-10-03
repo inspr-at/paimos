@@ -3,11 +3,13 @@ package deliveryadoption
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/delivery"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -111,5 +113,37 @@ func TestVerificationCountsRetainedPlacementInHiddenDestination(t *testing.T) {
 	f.sql(t, `DELETE FROM ships_in WHERE item_node_id=$1`, member)
 	// The placement event in the hidden destination supersedes the old move;
 	// an unexplained deletion there must still be detected from the source.
+	requireAdoptionVerification(t, f, reader, 1, 1)
+}
+
+func TestVerificationDoesNotAttributeDepartedDescendantToAncestorUndo(t *testing.T) {
+	f, reader, member := adoptedReaderFixture(t)
+	root := f.node(t, "epic", "EP-1", f.project, "open")
+	f.sql(t, `UPDATE nodes SET parent_id=$2 WHERE id=$1`, member, root)
+	destination := f.node(t, "project", "DST-1", "", "open")
+	j := f.prepare(t, destination)
+	if _, err := f.s.apply(t.Context(), f.a, j); err != nil {
+		t.Fatal(err)
+	}
+	store := delivery.NewStore(f.d.App)
+	if _, err := store.Place(t.Context(), f.p, f.project, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: f.project, ExpectedRevision: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	nodes.New(f.d.App, nil).Mount(mux)
+	events.New(f.d.App, events.WithUndoHandlers(nodes.UndoHandlers())).Mount(mux)
+	ancestorMove := adoptionMove(t, f, mux, "subtree", root, destination)
+	// The member leaves the ancestor before its Undo. Its new placement can
+	// no longer be removed by returning that ancestor to the original project.
+	adoptionMove(t, f, mux, "move", member, destination)
+	if _, err := store.Place(t.Context(), f.p, destination, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: destination, ExpectedRevision: 0}}); err != nil {
+		t.Fatal(err)
+	}
+	f.sql(t, `DELETE FROM ships_in WHERE item_node_id=$1`, member)
+	adoptionMutationRequest(t, mux, f.p, fmt.Sprintf("/api/events/%d/undo", ancestorMove), "", http.StatusCreated)
+	if f.count(t, `SELECT count(*) FROM nodes WHERE id=$1 AND project_id=$2`, member, destination) != 1 || f.count(t, `SELECT count(*) FROM events WHERE undo_of=$1 AND coalesce(jsonb_array_length(before->'ships_in_before_move'),0)=0`, ancestorMove) != 1 {
+		t.Fatal("ancestor Undo unexpectedly moved or removed the departed descendant")
+	}
+	requireAdoptionVerification(t, f, f.p, 1, 1)
 	requireAdoptionVerification(t, f, reader, 1, 1)
 }
