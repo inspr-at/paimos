@@ -100,6 +100,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       if (request === generation) learnLabels(page)
       return [dimension, page.facets?.[facet] ?? {}] as const
     })
+    const settledExtras = Promise.allSettled(extras)
     try {
       const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
       if (!page) return
@@ -117,7 +118,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     } finally {
       if (request === generation) loading.value = false
     }
-    const settled = await Promise.allSettled(extras)
+    const settled = await settledExtras
     if (request !== generation) return
     for (let index = 0; index < settled.length; index++) {
       if (settled[index].status === 'rejected' && countedDimensions[index] === 'ships_in') facetErrors.ships_in = 'Release counts could not be loaded. Try again.'

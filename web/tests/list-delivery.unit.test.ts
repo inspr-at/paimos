@@ -59,3 +59,26 @@ it('delivery placement changes are structural for the held live-list layout', ()
   expect(placeKey(row, filters)).not.toBe(placeKey({ ...row, delivery_order: { ...row.delivery_order!, rank: 'a' } }, filters))
   expect(placeKey(row, filters)).not.toBe(placeKey({ ...row, delivery_order: { ...row.delivery_order!, release_rank: 'D' } }, filters))
 })
+
+it('handles a failed facet while the main list read is still pending', async () => {
+  let complete!: (page: ListPage) => void
+  let entered!: () => void
+  const enteredMain = new Promise<void>(resolve => { entered = resolve })
+  const main = new Promise<ListPage>(resolve => { complete = resolve })
+  const list = useTicketList(ref('project'), ref(filtersFromQuery({ ships_in: release })), {
+    fetchList: async query => {
+      if (query.facets?.includes('ships_in')) throw new Error('facet failed first')
+      entered()
+      return main
+    },
+  })
+  const pending = list.load()
+  await enteredMain
+  // Cross an event-loop boundary while the row read is held at the barrier.
+  // Vitest rejects an unhandled promise rejection at this point.
+  await new Promise<void>(resolve => setImmediate(resolve))
+  complete({ items: [], next_cursor: null })
+  await pending
+  expect(list.facetErrors.ships_in).toContain('could not be loaded')
+  expect(list.loading.value).toBe(false)
+})

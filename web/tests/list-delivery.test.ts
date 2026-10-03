@@ -4,6 +4,8 @@ import assert from 'node:assert/strict'
 import type { DeliveryOrder, ListItem } from '../src/lib/api.ts'
 import { apiParams, clearedFilters, compareRows, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, valueLabel, viewShape } from '../src/lib/ticketList.ts'
 import { parseSort } from '../src/lib/work.ts'
+import { queueFilteredNodes } from '../src/lib/queueFilter.ts'
+import type { QueueSnapshot } from '../src/lib/workQueue.ts'
 
 const releaseA = '11111111-1111-4111-8111-111111111111'
 const releaseB = '22222222-2222-4222-8222-222222222222'
@@ -59,4 +61,18 @@ test('facet choices retain UUID identity and positions while counts change', () 
   assert.equal(valueLabel('ships_in', 'none'), 'No release (backlog)')
   const sameNames = facetOptions('ships_in', { [releaseA]: 2, [releaseB]: 3 }, [], new Map(), undefined, { releases: { [releaseA]: 'Same', [releaseB]: 'Same' } })
   assert.deepEqual(sameNames.map(option => option.value), ['none', releaseA, releaseB])
+})
+
+test('Queued composes membership facets and labels without treating journey work as backlog', async () => {
+  const items = [row('second', placed('B', 'a')), row('first', placed('B', 'Z')), row('backlog', placed(null, null)), row('journey')]
+  const snapshot = { items: items.map(item => ({ ticket_id: item.id })), manual_order: false, capacity: { hours: 5, total: 2 } } as QueueSnapshot
+  const queries: import('../src/lib/api.ts').ListQuery[] = []
+  const page = await queueFilteredNodes({ state: ['queued'], facets: ['ships_in'], sort: 'order' }, snapshot, async query => {
+    queries.push(query)
+    return { items: items.filter(item => query.ids?.includes(item.id)), next_cursor: null, facet_labels: { ships_in: { [releaseA]: 'Release 122', [releaseB]: 'Unrelated' } } }
+  })
+  assert.deepEqual(queries[0].facets, ['ships_in'])
+  assert.deepEqual(page.facets?.ships_in, { [releaseA]: 2, none: 1 })
+  assert.deepEqual(page.facet_labels?.ships_in, { [releaseA]: 'Release 122' })
+  assert.deepEqual(page.items.map(item => item.id), ['first', 'second', 'backlog', 'journey'])
 })
