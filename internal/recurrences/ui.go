@@ -19,45 +19,7 @@ import (
 // retains receipts and ticket provenance; event visibility never decides whether
 // the definition can be read, resumed or scheduled.
 func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
-	if !ok {
-		return
-	}
-	var in struct {
-		Revision int64 `json:"expected_revision"`
-	}
-	if !decode(w, r, &in) {
-		return
-	}
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if _, err := lock(r.Context(), tx, p.TenantID, false); err != nil {
-			return err
-		}
-		before, err := load(r.Context(), tx, r.PathValue("recurrenceId"), false)
-		if err != nil {
-			return err
-		}
-		if err = manage(r.Context(), tx, p, before.ProjectID); err != nil {
-			return err
-		}
-		if in.Revision < 1 || in.Revision != before.Revision {
-			return workorders.Fail(409, "recurrence revision changed")
-		}
-		now, err := m.clock(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		out, err := scanRecurrence(tx.QueryRow(r.Context(), `UPDATE recurrences SET paused=true,retired_at=$2,revision=revision+1,updated_at=$2 WHERE id=$1 RETURNING `+recurrenceColumns, before.ID, now))
-		if err != nil {
-			return err
-		}
-		return record(r.Context(), tx, p, before.ProjectID, "recurrence.deleted", before, out)
-	})
-	if err != nil {
-		reply(w, 204, nil, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	m.setPaused(w, r, true, true)
 }
 
 func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {

@@ -137,6 +137,44 @@ func TestUIRetiredSchedulerClaimIgnoresReactivatedRow(t *testing.T) {
 	}
 }
 
+func TestUIRetirePausedRecurrenceWritesTombstone(t *testing.T) {
+	f := setup(t)
+	r := f.create(f.input())
+	path := "/api/recurrences/" + r.ID
+	f.call(f.p, "POST", path+"/pause", map[string]int{"expected_revision": 1}, 200)
+	// Repeating pause is a no-op, but retiring the paused row is still a write.
+	f.call(f.p, "POST", path+"/pause", map[string]int{"expected_revision": 2}, 200)
+	f.call(f.p, "DELETE", path, map[string]int{"expected_revision": 1}, 409)
+	if current := f.get(r.ID); !current.Paused || current.Revision != 2 {
+		t.Fatalf("stale retirement changed the paused recurrence: %+v", current)
+	}
+	f.now = f.now.Add(time.Hour)
+	if body := f.call(f.p, "DELETE", path, map[string]int{"expected_revision": 2}, 204); len(body) != 0 {
+		t.Fatalf("retirement returned a body: %s", body)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var paused bool
+		var revision int64
+		var retiredAt time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT paused,revision,retired_at FROM recurrences WHERE id=$1`, r.ID).Scan(&paused, &revision, &retiredAt); err != nil {
+			return err
+		}
+		if !paused || revision != 3 || !retiredAt.Equal(f.now) {
+			t.Fatalf("retirement state: paused=%v revision=%d retired_at=%s", paused, revision, retiredAt)
+		}
+		var pauseEvents, deletedEvents int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE type='recurrence.paused'),count(*) FILTER (WHERE type='recurrence.deleted' AND before->>'paused'='true' AND before->>'revision'='2' AND after->>'revision'='3') FROM events WHERE after->>'id'=$1`, r.ID).Scan(&pauseEvents, &deletedEvents); err != nil {
+			return err
+		}
+		if pauseEvents != 1 || deletedEvents != 1 {
+			t.Fatalf("lifecycle events: paused=%d deleted=%d, want one each", pauseEvents, deletedEvents)
+		}
+		return nil
+	})
+	f.call(f.p, "DELETE", path, map[string]int{"expected_revision": 3}, 404)
+	f.call(f.p, "POST", path+"/resume", map[string]int{"expected_revision": 3}, 404)
+}
+
 func TestUIRetirementDoesNotDependOnEventVisibility(t *testing.T) {
 	f := setup(t)
 	in := f.input()

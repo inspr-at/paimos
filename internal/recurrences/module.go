@@ -347,9 +347,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	})
 	reply(w, 200, out, err)
 }
-func (m *Module) pause(w http.ResponseWriter, r *http.Request)  { m.setPaused(w, r, true) }
-func (m *Module) resume(w http.ResponseWriter, r *http.Request) { m.setPaused(w, r, false) }
-func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused bool) {
+func (m *Module) pause(w http.ResponseWriter, r *http.Request)  { m.setPaused(w, r, true, false) }
+func (m *Module) resume(w http.ResponseWriter, r *http.Request) { m.setPaused(w, r, false, false) }
+
+// All lifecycle changes share the same tree/access fence and live authorization.
+// Retirement must still write its tombstone when the recurrence is already paused.
+func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retire bool) {
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -376,12 +379,19 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused bool) 
 			return workorders.Fail(409, "recurrence revision changed")
 		}
 		out = before
-		if before.Paused == paused {
+		if !retire && before.Paused == paused {
 			return nil
 		}
 		now, err := m.clock(r.Context(), tx)
 		if err != nil {
 			return err
+		}
+		if retire {
+			out, err = scanRecurrence(tx.QueryRow(r.Context(), `UPDATE recurrences SET paused=true,retired_at=$2,revision=revision+1,updated_at=$2 WHERE id=$1 RETURNING `+recurrenceColumns, before.ID, now))
+			if err != nil {
+				return err
+			}
+			return record(r.Context(), tx, p, before.ProjectID, "recurrence.deleted", before, out)
 		}
 		next := before.NextAt
 		cursor := before.EventCursor
@@ -406,6 +416,10 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused bool) 
 		}
 		return record(r.Context(), tx, p, out.ProjectID, typ, before, out)
 	})
+	if retire && err == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	reply(w, 200, out, err)
 }
 func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
