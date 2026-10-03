@@ -315,6 +315,10 @@ func (m *Module) handleListKeyTrims(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	if err != nil {
+		m.trimReply(w, 0, nil, err)
+		return
+	}
 	out := map[string]any{"items": items, "has_more": hasMore}
 	if hasMore {
 		out["next_cursor"] = items[len(items)-1].ID
