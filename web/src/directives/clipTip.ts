@@ -25,7 +25,7 @@ function restore(element: HTMLElement, name: string, value: string | null) {
 }
 
 /** Use on the text that clips, with an optional full-text string. TooltipHost
- * finds that text from its owning button/link/label on focus and touch too.
+ * finds that text from its owning button/link/label on focus and long press.
  * Standalone names become a Tab stop only while clipped. No layout is changed.
  */
 export const vClipTip: ObjectDirective<HTMLElement, string | undefined> = {
