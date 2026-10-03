@@ -4375,6 +4375,63 @@
           "group": "features"
         }
       ]
+    },
+    "261003065316.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 121,
+      "snapshot_sha256": "ce847e4173ab7eb8c9c78d5ca549a3f03099e1f2765ddf79ecb9abc40c6053af",
+      "captured_at": "2026-10-03T06:53:22Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-436",
+          "pill_en": "Session tier details",
+          "pill_de": "Servicestufen je Sitzung",
+          "benefit_en": "Session details show the reported service tier and why other tiers are unavailable. Fast and Fastest are currently not offered.",
+          "benefit_de": "Die Sitzungsdetails zeigen die gemeldete Servicestufe und warum andere Stufen nicht verfügbar sind. Fast und Fastest werden derzeit nicht angeboten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-478",
+          "pill_en": "Clear budget coverage",
+          "pill_de": "Klare Budget-Abdeckung",
+          "benefit_en": "Morning Briefing keeps permitted account budget windows visible when coverage is partial, and labels withheld or truncated coverage.",
+          "benefit_de": "Das Morgenbriefing zeigt erlaubte Konto-Budgetfenster auch bei unvollständiger Abdeckung und kennzeichnet zurückgehaltene oder gekürzte Angaben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-557",
+          "pill_en": "Referenced files retained",
+          "pill_de": "Referenzierte Dateien bleiben",
+          "benefit_en": "File cleanup now checks references to profile images and quote confirmation PDFs before deleting stored files.",
+          "benefit_de": "Die Dateibereinigung prüft jetzt Verweise auf Profilbilder und Angebotsbestätigungs-PDFs, bevor sie gespeicherte Dateien löscht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-567",
+          "pill_en": "Decision Desk",
+          "pill_de": "Entscheidungen im Überblick",
+          "benefit_en": "Open Decision Desk from Agents to review questions and approval requests one at a time, with ticket context and recorded answers.",
+          "benefit_de": "Öffne den Decision Desk unter Agents, um Fragen und Freigabeanfragen einzeln mit Ticket-Kontext und gespeicherten Antworten durchzugehen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-578",
+          "pill_en": "Full access key presets",
+          "pill_de": "Voller Zugriff per Vorgabe",
+          "benefit_en": "Full access selects agent scopes allowed by both your permissions and the agent’s role. You can edit an active key’s scopes and expiry, including Never, without replacing it.",
+          "benefit_de": "Voller Zugriff wählt Agent-Berechtigungen innerhalb deiner Berechtigungen und der Agent-Rolle aus. Bei einem aktiven Schlüssel kannst du Berechtigungen und Ablaufdatum einschließlich „Nie“ ändern, ohne ihn zu ersetzen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-605",
+          "pill_en": "Attach recovery guidance",
+          "pill_de": "Hilfe bei Verknüpfungsproblemen",
+          "benefit_en": "Known session attach refusals show a reason and recovery step in English or German. Unknown refusals direct you to daemon status and server logs.",
+          "benefit_de": "Bei bekannten Ablehnungsgründen zeigt die Sitzungsverknüpfung eine Ursache und einen nächsten Schritt auf Deutsch oder Englisch. Bei unbekannten Gründen verweist sie auf den Daemon-Status und die Serverprotokolle.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
