@@ -165,6 +165,8 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, out)
 }
 func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, project string, in compatSend) (CompatMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if handled, _, msg, err := m.base.tryAttached(ctx, p, project, attachedInput{Recipient: in.To, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo, Thread: in.ThreadID, Level: in.Level, Action: in.ActionRequest, Expects: in.ExpectsReply, Compat: true}); handled || err != nil {
 		return msg, err
 	}

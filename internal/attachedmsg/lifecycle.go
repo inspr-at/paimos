@@ -66,7 +66,10 @@ func Revoke(ctx context.Context, tx pgx.Tx, p tenant.Principal, request string) 
 	if e = rows.Err(); e != nil {
 		return nil, e
 	}
-	rows, e = tx.Query(ctx, `SELECT id::text FROM inbox_messages WHERE message_grant_id=ANY($1::uuid[]) AND attached_outcome IN ('queued','offered','shown') ORDER BY id`, grants)
+	// Current grants accept at most five pending notes. Keep settlement bounded
+	// for upgraded databases too; revoked authority and the RAM purge cover all
+	// notes immediately, while Sweep can finish any remaining metadata.
+	rows, e = tx.Query(ctx, `SELECT id::text FROM inbox_messages WHERE message_grant_id=ANY($1::uuid[]) AND attached_outcome IN ('queued','offered','shown') ORDER BY id LIMIT 1024`, grants)
 	if e != nil {
 		return nil, e
 	}
@@ -171,16 +174,24 @@ func (s *Service) Run(ctx context.Context, pool *pgxpool.Pool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		rows, e := pool.Query(ctx, `SELECT id::text FROM tenants WHERE id>$1::uuid ORDER BY id LIMIT 100`, after)
+		pageCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		rows, e := pool.Query(pageCtx, `SELECT id::text FROM tenants WHERE id>$1::uuid ORDER BY id LIMIT 100`, after)
+		var ids []string
 		if e == nil {
-			var ids []string
 			for rows.Next() {
 				var id string
-				if rows.Scan(&id) == nil {
-					ids = append(ids, id)
+				if e = rows.Scan(&id); e != nil {
+					break
 				}
+				ids = append(ids, id)
+			}
+			if e == nil {
+				e = rows.Err()
 			}
 			rows.Close()
+		}
+		cancel()
+		if e == nil {
 			if len(ids) == 0 {
 				after = "00000000-0000-0000-0000-000000000000"
 			} else {

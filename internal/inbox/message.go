@@ -180,6 +180,8 @@ func normalizeSend(p tenant.Principal, recipient, body, key string, reply *strin
 }
 
 func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Message, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if handled, msg, _, err := m.tryAttached(ctx, p, "", attachedInput{Expires: in.Expires, Recipient: in.Recipient, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo}); handled || err != nil {
 		return msg, err
 	}

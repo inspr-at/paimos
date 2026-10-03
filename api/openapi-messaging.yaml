@@ -15,7 +15,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Send'}
       responses:
-        '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/Message'}}}}
+        '201': {description: Accepted message; attached notes retain only metadata, content: {application/json: {schema: {$ref: '#/components/schemas/Message'}}}}
         '429': {description: Attached note quota exceeded, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retry}}}
         '409': {description: Idempotency conflict or session ended}
     get:
