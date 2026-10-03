@@ -26,6 +26,7 @@ type Principal struct {
 	Roles          []string // e.g. "admin", "member"
 	Scopes         []string // authenticated agent key's outer permission ceiling
 	KeyCreatorID   string   // creator's live binding further narrows an agent key
+	KeyID          string   // authenticating key metadata ID; never a prefix or credential
 }
 
 type ctxKey struct{}

@@ -10,7 +10,7 @@ function continuationRead(): DeskRead {
   const q = question(), item = questionItem(q, 'Aeon'), sources = emptySources()
   sources.questions.set(item.id, q)
   return { items: [item], sources, warnings: [], hasMore: { open: true, answered: false },
-    questionPositions: { open: { pages: 1, cursors: [] }, answered: undefined }, projectNames: new Map([['project', 'Aeon']]) }
+    questionPositions: { open: { pages: 1, cursors: [] }, answered: undefined }, projectNames: new Map([['project', 'Aeon']]), nextKeyTrims: {} }
 }
 const heldRequest = (id: string) => ({ id, sender_principal_id: 'agent', recipient_principal_id: 'person', to: 'person', body: 'Please steer', sent_event_id: 1,
   is_action_request: true, expects_reply: true, delivery_level: 'simple' as const, status: 'held' as const, reply_obligation: 'open' as const })
