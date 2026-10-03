@@ -7,6 +7,7 @@ import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
 import type { ThemeRecord } from '../src/lib/themes'
+import { inkOn } from '../src/lib/themeValues'
 
 const shots = resolve('test-results/aeon-643')
 const initial = (): ThemeRecord => ({
@@ -54,6 +55,8 @@ async function captureAgents(page: Page, width: number, mode: string) {
 
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
   test(`${width} ${mode}: nine avatars, stable controls, isolated state previews and saved appearance`, async ({ page }) => {
+    // Many control samples and screenshots share one test; this only guards hangs.
+    test.setTimeout(120_000)
     const { state, data } = await mock(page)
     data.preferences.theme = { choice: mode }
     await page.setViewportSize({ width, height: 1000 })
@@ -115,6 +118,13 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await expect(page.locator('#agents').getByRole('slider')).toHaveCount(0)
     await expect(page.getByRole('spinbutton', { name: 'Yellow after (minutes)' })).toHaveValue('7')
     await expect(page.getByRole('spinbutton', { name: 'Red after (minutes)' })).toHaveValue('19')
+    const yellow = page.getByRole('spinbutton', { name: 'Yellow after (minutes)' })
+    const persisted = page.waitForResponse(response => response.url().endsWith('/api/preferences/agent-state') && response.request().method() === 'PUT')
+    await yellow.fill('8')
+    await yellow.blur()
+    expect((await persisted).ok()).toBe(true)
+    expect(data.preferences['agent-state']).toMatchObject({ palette: 'protan', yellowMinutes: 8, redMinutes: 19 })
+    expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.palette)).toBe('tritan')
     await page.locator('#agents').screenshot({ path: resolve(shots, `personal-${width}-${mode}.png`) })
   })
 }
@@ -147,8 +157,36 @@ test('members can preview a workspace theme but cannot change it; reduced motion
   expect(await card.evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
 })
 
+test('each preview chooses glyph ink from its own fill in every palette and page mode', async ({ page }) => {
+  await mock(page)
+  await page.goto('/settings/theme#agents')
+  const card = page.locator('#agents')
+  for (const mode of ['light', 'dark']) {
+    await page.evaluate(async mode => (await import('/src/lib/theme.ts')).setTheme(mode, false), mode)
+    for (const palette of ['Standard', 'Protan', 'Deutan', 'Tritan', 'Monochrome']) {
+      const option = card.getByRole('radio', { name: palette, exact: true })
+      await option.click()
+      await expect(option).toBeChecked()
+      const glyphs = card.locator('.agent-theme-preview .agent-state-mark')
+      await expect(glyphs).toHaveCount(12)
+      const marks = await glyphs.evaluateAll(nodes => nodes.map(el => ({
+        fill: getComputedStyle(el.firstElementChild!).fill, ink: getComputedStyle(el.lastElementChild!).stroke,
+      })))
+      expect(marks).toHaveLength(12)
+      for (const mark of marks) {
+        const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(mark.fill)
+        expect(channels, `${mode}/${palette}: ${mark.fill}`).not.toBeNull()
+        const fill = '#' + channels!.slice(1).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')
+        const expected = inkOn(fill)
+        expect(mark.ink, `${mode}/${palette}: ${mark.fill}`).toBe(`rgb(${[1, 3, 5].map(i => parseInt(expected.slice(i, i + 2), 16)).join(', ')})`)
+      }
+    }
+  }
+})
+
 
 test('visible screenshots and Personal agent behaviour controls stay stable in all viewport modes', async ({ page }) => {
+  test.setTimeout(120_000)
   const { state, data } = await mock(page)
   for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 })

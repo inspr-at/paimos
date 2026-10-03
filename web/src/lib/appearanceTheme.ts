@@ -18,6 +18,16 @@ export function validThemeValues(value: unknown): value is ThemeValues {
     (v.recurring_marker.custom === null || isHexColour(v.recurring_marker.custom)) &&
     (v.recurring_marker.source !== 'custom' || isHexColour(v.recurring_marker.custom)) && !!v.agents && isAgentPalette(v.agents.palette)
 }
+export function agentPaletteInkTokens(styles: Pick<CSSStyleDeclaration, 'getPropertyValue'>): Record<string, string> {
+  const tokens: Record<string, string> = {}
+  for (const palette of AGENT_PALETTES) for (const state of ['working', 'waiting', 'throttled', 'problem', 'inactive']) {
+    const token = `--agent-${palette.id}-${state}`
+    const colour = styles.getPropertyValue(token).trim()
+    const resolved = colour.startsWith('var(') ? styles.getPropertyValue(colour.slice(4, -1)).trim() : colour
+    if (isHexColour(resolved)) tokens[`${token}-ink`] = inkOn(resolved)
+  }
+  return tokens
+}
 // The same function serves a saved selection, saved edit and mode/OS changes.
 // Editors apply only an accepted server response; drafts use themeTokens on their preview.
 export function applyAppearanceTheme(values: ThemeValues, dark = currentDark) {
@@ -37,13 +47,7 @@ export function renderAppearanceTheme(dark: boolean) {
     const colour = styles.getPropertyValue(`--${name}`).trim()
     if (isHexColour(colour)) tokens[`--${name}-on`] = inkOn(colour)
   }
-  for (const palette of AGENT_PALETTES) for (const state of ['working', 'waiting', 'throttled', 'problem', 'inactive']) {
-    const token = `--agent-${palette.id}-${state}`
-    const colour = styles.getPropertyValue(token).trim()
-    // Monochrome aliases resolve via the neutral ink tokens.
-    const resolved = colour.startsWith('var(') ? styles.getPropertyValue(colour.slice(4, -1)).trim() : colour
-    if (isHexColour(resolved)) tokens[`${token}-ink`] = inkOn(resolved)
-  }
+  Object.assign(tokens, agentPaletteInkTokens(styles))
   for (const [key, value] of Object.entries(tokens)) root.style.setProperty(key, value)
   applied = Object.keys(tokens)
 }

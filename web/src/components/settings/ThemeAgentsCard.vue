@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, onMounted, ref, useId } from 'vue'
+import { agentPaletteInkTokens } from '../../lib/appearanceTheme'
 import type { ThemeRecord } from '../../lib/themes'
 import type { AgentThemeAppearance } from '../../lib/agentTheme'
 import { AGENT_PALETTES, type AgentPalette } from '../../lib/agentPalettes'
@@ -12,6 +13,12 @@ import SettingsCard from './SettingsCard.vue'
 const props = defineProps<{ draft: ThemeRecord; editable: boolean; readOnly?: boolean }>()
 const emit = defineEmits<{ change: [draft: ThemeRecord] }>()
 const id = useId(), avatarGrid = ref<HTMLElement>()
+const previewSurfaces = ref<HTMLElement[]>([])
+onMounted(() => {
+  for (const surface of previewSurfaces.value) {
+    for (const [token, ink] of Object.entries(agentPaletteInkTokens(getComputedStyle(surface)))) surface.style.setProperty(token, ink)
+  }
+})
 const appearance = computed(() => props.draft.values.agents)
 const available = new Set(availableVariants.map(variant => variant.id))
 const families = [{ id: 'indicator', name: 'Indicator' }, { id: 'robot', name: 'Robots' }, { id: 'creative', name: 'Creative' }] as const
@@ -108,7 +115,7 @@ function radioKeys(event: KeyboardEvent, options: readonly string[], current: st
       </div>
       <aside class="previews" aria-label="Agents preview">
         <p class="eyebrow">Every state · light and dark</p>
-        <section v-for="mode in modes" :key="mode" class="agent-theme-preview" :class="mode" :aria-label="`${mode} agents preview`">
+        <section v-for="mode in modes" :key="mode" ref="previewSurfaces" class="agent-theme-preview" :class="mode" :aria-label="`${mode} agents preview`">
           <header><strong>{{ mode === 'light' ? 'Light' : 'Dark' }}</strong><span>Live agent</span></header>
           <div class="live-row"><LiveBot :theme-agents="appearance" :size="32" id="theme-live" /><div><strong>aeon-643-agentcard</strong><span>Working on AEON-643 · 12 min</span></div></div>
           <div class="states"><div v-for="item in states" :key="item.state" class="state-preview" :data-preview-state="item.state"><LiveBot :theme-agents="appearance" :state="item.state" :size="32" :id="`theme-${item.state}`" /><span>{{ item.label }}</span></div></div>
