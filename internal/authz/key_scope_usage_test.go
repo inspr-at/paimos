@@ -25,7 +25,8 @@ func TestScopeUsageDebounceKeyIsolationAndDeniedGrant(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Usage',ARRAY['admin']) RETURNING id::text`, tid).Scan(&p.ID); err != nil {
 			return err
 		}
-		if err := dbtest.BindLegacyTx(ctx, tx, tid, p.ID); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+		 SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='admin'`, tid, p.ID); err != nil {
 			return err
 		}
 		// Test fixture metadata only: these keys never authenticate.
@@ -74,8 +75,16 @@ func TestScopeUsageDebounceKeyIsolationAndDeniedGrant(t *testing.T) {
 		t.Fatal("debounce failed to advance at one minute")
 	}
 	authctx := BindPool(tenant.WithPrincipal(t.Context(), p), d.App)
-	if err := Require(authctx, "nodes.write", Scope{}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("wrong denied-scope error: %v", err)
+	if err := Require(authctx, "nodes.read", Scope{}); err != nil {
+		t.Fatalf("fixture cannot grant its retained scope: %v", err)
+	}
+	if err := Require(authctx, "nodes.write", Scope{}); err != nil {
+		var denied *denial
+		if !errors.Is(err, ErrForbidden) || !errors.As(err, &denied) || denied.reason != "missing_key_scope" {
+			t.Fatalf("wrong denied-scope error: %v", err)
+		}
+	} else {
+		t.Fatal("missing key scope was granted")
 	}
 	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
 		var count int
