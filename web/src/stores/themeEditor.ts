@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { captureAgentThemeSave, captureAgentThemeSelection, installAgentTheme } from '../lib/agentTheme'
+import { captureAgentThemeReconciliation } from '../lib/agentTheme'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { can } from '../lib/authz'
@@ -22,7 +22,6 @@ export function useThemeEditor() {
   const clone = (theme: ThemeRecord) => JSON.parse(JSON.stringify(theme)) as ThemeRecord
   function install(current: ActiveTheme) {
     active.value = current; draft.value = clone(current.theme)
-    installAgentTheme(current.theme.values.agents, current)
     merge(current.theme)
     if (current.fallback_notice) message.value = `${current.fallback_notice.deleted_theme_name} was deleted. You are using the workspace default.`
   }
@@ -34,7 +33,8 @@ export function useThemeEditor() {
   async function perform(fn: (current: () => boolean) => Promise<void>) {
     if (busy.value || !identity.value) return
     const started = epoch, person = identity.value
-    const current = () => started === epoch && identity.value === person
+    const { sameSession } = captureAgentThemeReconciliation()
+    const current = () => started === epoch && identity.value === person && sameSession()
     busy.value = true; error.value = ''; message.value = ''
     try { await fn(current) }
     catch (failure) {
@@ -43,9 +43,12 @@ export function useThemeEditor() {
   }
   async function load() {
     await perform(async current => {
+      const { reconcile } = captureAgentThemeReconciliation()
       const [page, chosen] = await Promise.all([themes.listThemes(), themes.getActiveTheme()])
       if (!current()) return
-      items.value = page.items; cursor.value = page.next_cursor; conflict.value = false; install(chosen)
+      const accepted = reconcile({ kind: 'read', active: chosen })
+      if (!accepted) return
+      items.value = page.items; cursor.value = page.next_cursor; conflict.value = false; install(accepted)
     })
   }
   async function more() {
@@ -60,21 +63,22 @@ export function useThemeEditor() {
   async function choose(theme: ThemeRecord) {
     if (!active.value || dirty.value || !selfWrite.value) return
     const revision = active.value.revision, id = theme.id
-    const reconcile = captureAgentThemeSelection(id, revision)
+    const { reconcile } = captureAgentThemeReconciliation(revision)
     await perform(async current => {
       const chosen = await themes.selectTheme(id, revision)
-      if (reconcile(chosen) && current()) install(chosen)
+      const accepted = reconcile({ kind: 'select', active: chosen, themeId: id })
+      if (accepted && current()) install(accepted)
     })
   }
   async function save() {
     if (!draft.value || !dirty.value || !valid.value || !editable(draft.value) || conflict.value) return
     const captured = clone(draft.value)
-    const reconcile = captureAgentThemeSave(captured.id, active.value!.revision)
+    const { reconcile } = captureAgentThemeReconciliation(active.value!.revision)
     await perform(async current => {
       const saved = await themes.updateTheme(captured)
-      reconcile(saved)
-      if (!current() || draft.value?.id !== captured.id) return
-      merge(saved); active.value!.theme = saved; draft.value = clone(saved); message.value = 'Saved.'
+      const accepted = reconcile({ kind: 'save', theme: saved })
+      if (!accepted || !current() || draft.value?.id !== captured.id) return
+      install(accepted); message.value = 'Saved.'
     })
   }
   function discard() {
@@ -85,16 +89,17 @@ export function useThemeEditor() {
   async function duplicate(source: ThemeRecord) {
     if (dirty.value || !selfWrite.value) return
     const captured = clone(source), selectionRevision = active.value?.revision
+    const { sameSession, reconcile } = captureAgentThemeReconciliation(selectionRevision)
     const name = `${[...captured.name].slice(0, 73).join('')} copy`
     await perform(async current => {
       const created = await themes.duplicateTheme(captured, name)
-      if (!current()) return
+      if (!current() || !sameSession()) return
       merge(created); message.value = 'Duplicated.'
       if (selectionRevision === undefined) return
-      const reconcile = captureAgentThemeSelection(created.id, selectionRevision)
       try {
         const chosen = await themes.selectTheme(created.id, selectionRevision)
-        if (reconcile(chosen) && current()) install(chosen)
+        const accepted = reconcile({ kind: 'select', active: chosen, themeId: created.id })
+        if (accepted && current()) install(accepted)
       } catch (failure) {
         if (current()) error.value = `The copy was created, but could not be selected. ${failure instanceof Error ? failure.message : 'Try again.'}`
       }
@@ -103,22 +108,29 @@ export function useThemeEditor() {
   async function newTheme() {
     const id = active.value?.default_theme_id
     if (!id || dirty.value || !selfWrite.value) return
+    const started = epoch
     // Read the actual default even when it lives on a later list page.
     await perform(async current => { const source = await themes.getTheme(id); if (current()) merge(source) })
+    if (started !== epoch) return
     const source = items.value.find(item => item.id === id)
     if (source && !error.value) await duplicate(source)
   }
   async function remove(theme: ThemeRecord) {
     if (dirty.value || !editable(theme) || theme.id === active.value?.default_theme_id) return
-    const captured = clone(theme)
+    const captured = clone(theme), revision = active.value?.revision, wasActive = active.value?.theme.id === theme.id
+    const { sameSession, reconcile } = captureAgentThemeReconciliation(revision)
     await perform(async current => {
       await themes.deleteTheme(captured)
-      if (!current()) return
-      items.value = items.value.filter(item => item.id !== captured.id); message.value = 'Deleted.'
-      if (active.value?.theme.id === captured.id) {
+      if (!sameSession()) return
+      if (current()) { items.value = items.value.filter(item => item.id !== captured.id); message.value = 'Deleted.' }
+      if (wasActive) {
         // Deletion succeeded even if the subsequent fallback read fails.
-        active.value = null; draft.value = null
-        try { const chosen = await themes.getActiveTheme(); if (current()) { install(chosen); message.value = 'Deleted. You are using the workspace default.' } }
+        if (current() && active.value?.theme.id === captured.id && active.value.revision === revision) { active.value = null; draft.value = null }
+        try {
+          const chosen = await themes.getActiveTheme()
+          const accepted = reconcile({ kind: 'delete', active: chosen, themeId: captured.id })
+          if (accepted && current()) { install(accepted); message.value = 'Deleted. You are using the workspace default.' }
+        }
         catch { if (current()) error.value = 'Deleted, but the workspace default could not be loaded. Try again.' }
       }
     })

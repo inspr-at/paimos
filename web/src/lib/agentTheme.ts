@@ -17,47 +17,68 @@ export const agentTheme = ref<AgentThemeAppearance | null>(null)
 // session is bound, a missing/failed theme never resurrects another person's cache.
 export const agentThemeBound = ref(false)
 let person = '', epoch = 0, identityEpoch = 0
-let selection: { themeId: string; revision: number; themeRevision: number } | null = null
+let selection: ActiveTheme | null = null
 export function resetAgentTheme(identity = '') {
   epoch++; identityEpoch++; person = identity; selection = null; agentTheme.value = null; agentThemeBound.value = true
 }
 export function installAgentTheme(value: AgentThemeAppearance, current?: ActiveTheme) {
   if (current && selection && (current.revision < selection.revision ||
-      (current.revision === selection.revision && current.theme.id === selection.themeId && current.theme.revision < selection.themeRevision))) return
+      (current.revision === selection.revision && current.theme.id === selection.theme.id && current.theme.revision < selection.theme.revision))) return false
   epoch++; agentTheme.value = { ...value }
-  selection = current ? { themeId: current.theme.id, revision: current.revision, themeRevision: current.theme.revision } : null
+  selection = current ?? null
+  return true
 }
-// A committed write outlives its editor. Reconcile only the same session and
-// selected record/CAS generation, and never overwrite a newer record revision.
-export function captureAgentThemeSave(themeId: string, revision: number) {
-  const started = identityEpoch, owner = person
-  return (saved: ThemeRecord) => {
-    if (started !== identityEpoch || owner !== person || !owner || saved.id !== themeId ||
-        selection?.themeId !== themeId || selection.revision !== revision || selection.themeRevision > saved.revision) return
-    epoch++; selection.themeRevision = saved.revision; agentTheme.value = { ...saved.values.agents }
+type ThemeReconciliation =
+  | { kind: 'read'; active: ActiveTheme }
+  | { kind: 'save'; theme: ThemeRecord }
+  | { kind: 'select' | 'delete'; active: ActiveTheme; themeId: string }
+// Reads and committed writes share one session/selection fence, independent of
+// editor lifetime. Keep the full accepted record so a stale editor read can use
+// the reconciled result instead of showing obsolete controls or a blank editor.
+export function captureAgentThemeReconciliation(revision?: number) {
+  const started = identityEpoch, owner = person, readEpoch = epoch, before = selection
+  const sameSession = () => started === identityEpoch && owner === person && !!owner
+  function reconcile(change: ThemeReconciliation): ActiveTheme | null {
+    if (!sameSession()) return null
+    if (change.kind === 'read') {
+      if (readEpoch === epoch) installAgentTheme(change.active.theme.values.agents, change.active)
+      return selection
+    }
+    if (!selection || revision === undefined) return null
+    let chosen: ActiveTheme
+    if (change.kind === 'save') {
+      const saved = change.theme
+      if (before?.theme.id !== saved.id || selection.theme.id !== saved.id ||
+          selection.revision !== revision || selection.theme.revision > saved.revision) return null
+      chosen = { ...selection, theme: saved }
+    } else {
+      chosen = change.active
+      if (change.kind === 'select') {
+        if (chosen.theme.id !== change.themeId || chosen.revision < revision ||
+            (selection.revision !== revision && selection.revision !== chosen.revision) ||
+            (selection.revision === chosen.revision && selection.theme.id !== change.themeId)) return null
+      } else {
+        // Deletion changes the effective theme without advancing selection CAS.
+        // Accept only this deletion's fallback, never a later choice/undo.
+        if (before?.theme.id !== change.themeId || chosen.revision !== revision ||
+            chosen.theme.id !== chosen.default_theme_id || chosen.selected_theme_id !== change.themeId ||
+            chosen.fallback_notice?.deleted_theme_id !== change.themeId || selection.revision !== revision ||
+            (selection.theme.id !== change.themeId && selection.theme.id !== chosen.theme.id) ||
+            (selection.theme.id === change.themeId && selection.theme.revision > before.theme.revision)) return null
+      }
+    }
+    return installAgentTheme(chosen.theme.values.agents, chosen) ? chosen : null
   }
-}
-// Selection commits also outlive the editor. A response may reconcile the
-// captured CAS or an already-loaded result, but never a different selection.
-export function captureAgentThemeSelection(themeId: string, revision: number) {
-  const started = identityEpoch, owner = person
-  return (chosen: ActiveTheme) => {
-    if (started !== identityEpoch || owner !== person || !owner || chosen.theme.id !== themeId || chosen.revision < revision ||
-        !selection || (selection.revision !== revision && selection.revision !== chosen.revision) ||
-        (selection.revision === chosen.revision && (selection.themeId !== themeId || selection.themeRevision > chosen.theme.revision))) return false
-    installAgentTheme(chosen.theme.values.agents, chosen)
-    return true
-  }
+  return { sameSession, reconcile }
 }
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)
-  const started = ++epoch
+  ++epoch
+  const { reconcile } = captureAgentThemeReconciliation()
   try {
     const response = await api('/me/theme')
     if (!response.ok) return
     const active = await response.json()
-    if (started === epoch && person === identity && active?.theme?.values?.agents) {
-      installAgentTheme(active.theme.values.agents, active)
-    }
+    if (active?.theme?.values?.agents) reconcile({ kind: 'read', active })
   } catch { /* A failed load leaves the neutral default, never a stale person. */ }
 }
