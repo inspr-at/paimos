@@ -410,6 +410,9 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 	if err = require(ctx, tx, p, "chat.receive", s.ProjectID); err != nil {
 		return s, err
 	}
+	if err = workerKeyTx(ctx, tx, r, p); err != nil {
+		return s, err
+	}
 	if _, err = tx.Exec(ctx, `SELECT set_config('aeon.chat_conversation_id',$1,true)`, id); err != nil {
 		return s, err
 	}

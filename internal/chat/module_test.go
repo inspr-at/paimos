@@ -155,6 +155,18 @@ func TestDurableIdentityAndPrivateRoleHandover(t *testing.T) {
 	bob := f.thread(t, f.bob, f.role(t, f.bob, f.project, "lead", "lead"))
 	project := f.thread(t, f.alice, f.role(t, f.alice, f.secondProject, "lead", "lead"))
 	worker := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "aeon-618-r2"))
+	foreign := f.thread(t, f.foreign, f.role(t, f.foreign, f.foreignProject, "lead", "lead"))
+	expect(t, f.call(f.alice, "GET", "/api/chat-threads/"+foreign.ID, nil, ""), 404)
+	expect(t, f.call(f.foreign, "POST", "/api/projects/"+f.foreignProject+"/chat-threads/resolve", map[string]string{"role_id": role.ID}, ""), 404)
+	bobSession, bobLease := f.session(t, f.bob, f.project, "coordinator", "unmanaged")
+	f.bind(t, f.bob, bob, bobSession, "0")
+	bobProof := WorkerBindingRequest{ConversationID: bob.ID, SessionID: bobSession, BindingEpoch: "1"}
+	decode[Thread](t, f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", bobProof, bobLease))
+	workerSession, _ := f.session(t, f.alice, f.project, "worker", "unmanaged")
+	f.bind(t, f.alice, worker, workerSession, "0")
+	otherWorker := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "aeon-618-r3"))
+	expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+otherWorker.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": workerSession}, ""), 409)
+
 	if bob.ID == thread.ID || project.ID == thread.ID || worker.ID == thread.ID {
 		t.Fatal("people/projects/assignments merged")
 	}
@@ -168,6 +180,7 @@ func TestDurableIdentityAndPrivateRoleHandover(t *testing.T) {
 		t.Fatal("binding invented readiness or changed conversation")
 	}
 	proof := WorkerBindingRequest{ConversationID: thread.ID, SessionID: first, BindingEpoch: "1"}
+	expect(t, f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", bobProof, lease), 404)
 	w := f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", proof, lease)
 	verified := decode[Thread](t, w)
 	if verified.ID != thread.ID {
@@ -191,11 +204,18 @@ func TestDurableIdentityAndPrivateRoleHandover(t *testing.T) {
 	forged.BindingEpoch = "2"
 	expect(t, f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", forged, lease), 404)
 	expect(t, f.call(f.alice, "POST", "/api/chat-deliveries/binding/resolve", proof, lease), 404)
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['harness.worker'] WHERE principal_id=$1`, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", proof, lease), 404)
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1`, f.agent.ID, f.agent.Scopes); err != nil {
+		t.Fatal(err)
+	}
 	noScope := f.agent
 	noScope.Scopes = []string{"inbox.send"}
 	expect(t, f.call(noScope, "POST", "/api/chat-deliveries/binding/resolve", proof, lease), 404)
 	expect(t, f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", map[string]string{"harness_session_ref": first, "role_id": role.ID}, lease), 400)
-	expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+worker.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": first}, ""), 404)
+	expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+worker.ID+"/binding", map[string]string{"expected_epoch": "1", "session_id": first}, ""), 404)
 	second, secondLease := f.session(t, f.alice, f.project, "coordinator", "unmanaged")
 	expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+thread.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": second}, ""), 409)
 	successor := f.bind(t, f.alice, thread, second, "1")

@@ -17,6 +17,8 @@ AEON-618 R1 introduces a separate `chat-v1` identity contract in
 packages may opt in with `chat.New(pool, chat.Options{Enabled: true})`.
 This foundation does not enable chat delivery, wake, history migration or
 native process controls. Existing inbox, session and CLI contracts stay intact.
+History, read-marker, delivery, receipt, cancellation and stream definitions
+are reserved contracts marked `x-aeon-package` for R2/R3; R1 does not mount them.
 
 A person creates their own project role, resolves its lasting conversation,
 and selects an existing external inbox registration using the expected binding
