@@ -303,7 +303,7 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     }
     const event = world.events.find(candidate => candidate.id === id)
     if (!event) {
-      if (decision) return json(route, 201, { id: ++world.counter.event })
+      if (decision) return json(route, 201, { id: ++world.counter.event, undo_of: id })
       return route.fallback()
     }
     if (!event) return route.fallback()
@@ -314,7 +314,7 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     else Object.assign(entry, structuredClone(event.before!), { deleted: false })
     entry.updated_at = tick()
     world.events.push({ id: ++world.counter.event, node_id: entry.id, type: event.type, before: event.after, after: structuredClone(entry), undo_of: id })
-    return json(route, 201, { id: world.counter.event })
+    return json(route, 201, { id: world.counter.event, undo_of: id })
   })
   return calls
 }

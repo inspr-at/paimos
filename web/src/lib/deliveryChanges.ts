@@ -14,6 +14,7 @@ export interface DeliveryActions {
   begin(): string
   commit(identity: string, change: DeliveryCommit): boolean
   failed(identity: string): void
+  receipt(identity: string, eventId: number | null): boolean
 }
 export const DELIVERY_ACTIONS: InjectionKey<DeliveryActions> = Symbol('delivery-actions')
 const KNOWLEDGE_EVENTS = ['knowledge.created', 'knowledge.updated', 'knowledge.deleted', 'knowledge.learning_accepted', 'knowledge.learning_dismissed', 'knowledge.learning_drafted']
@@ -90,6 +91,12 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
     identity: () => identity.value,
     begin() { inFlight++; return identity.value },
     failed(captured) { if (captured === identity.value) { inFlight = Math.max(0, inFlight - 1); flushBuffered() } },
+    receipt(captured, eventId) {
+      if (captured !== identity.value) return false
+      remember(eventId)
+      inFlight = Math.max(0, inFlight - 1); flushBuffered()
+      return true
+    },
     commit(captured, change) {
       if (captured !== identity.value) return false
       error.value = ''

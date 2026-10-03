@@ -272,7 +272,7 @@ test('deleting an entry asks, leaves and can be undone', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete guideline' }).click()
   await expect(page).toHaveURL('/p/PHAROS/knowledge?view=entries')
   await expect(page.getByText('Write for people, not for the log')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Undo' }).click()
+  await page.locator('.toast').getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(rows(page).filter({ hasText: 'Write for people, not for the log' })).toBeVisible()
 })
 

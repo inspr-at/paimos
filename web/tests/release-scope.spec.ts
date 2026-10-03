@@ -2,6 +2,7 @@
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, mockView } from './work-fixtures'
+import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { PlanningRelease } from '../src/lib/deliveryPlanning'
 const id = '11111111-1111-4111-8111-111111111112'
@@ -247,4 +248,43 @@ for (const width of [390,1024,1440]) for (const theme of ['light','dark']) test(
     {name:'authoritative Undo refusal',run:async()=>{await undo.click();await expect(page.locator('.delivery-notice')).toContainText('Release order changed again');await expect(undo).toBeEnabled()}},
   ]})
   refused=false;await undo.click();await expect(names.first()).toContainText(longName);await expect(apply).toBeVisible();await expect(page.locator('.delivery-notice button')).toBeDisabled()
+})
+
+for (const ordering of ['echo first', 'response first']) test(`own Knowledge archive and Undo correlate receipts (${ordering})`, async ({ page }) => {
+  const h = await setup(page), world = knowledgeWorld()
+  await mockKnowledge(page, world)
+  const note = world.entries.find(entry => entry.id === 'k-deploy')!
+  const full = (event_id: number) => ({ ...note, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, kind: 'runbook', state: note.status, excerpt: '', link_count: note.links.length, event_id })
+  const emit = (id: number, undo_of?: number) => page.evaluate(event => {
+    (window as unknown as { emitDelivery(event: unknown): void }).emitDelivery(event)
+  }, { id, type: 'knowledge.updated', undo_of, actor_principal_id: 'me', node_changes: [{ id: note.id, project_id: 'p-pharos', change: 'updated' }] })
+  await page.route('**/api/knowledge/k-deploy', async route => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    note.status = 'archived'; note.updated_at = '2026-10-04T00:00:00Z'
+    if (ordering === 'echo first') await emit(101)
+    await route.fulfill({ json: full(101) })
+  })
+  await page.route('**/api/events/101/undo', async route => {
+    note.status = 'active'; note.updated_at = '2026-10-04T00:01:00Z'
+    if (ordering === 'echo first') await emit(102, 101)
+    await route.fulfill({ status: 201, json: { id: 102, undo_of: 101 } })
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`/p/PHAROS/knowledge?ships_in=${id}&entry=runbook/deploy-release`)
+  await expect(page.locator('.e-body')).toBeVisible()
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
+  await expect(page.locator('.e-note').filter({ hasText: 'Archived:' })).toBeVisible()
+  if (ordering === 'response first') await emit(101)
+  const apply = page.locator('.k-count').getByRole('button', { name: /change.*Apply/, includeHidden: true })
+  await expect(apply).toHaveCount(0)
+  await page.locator('.toast').getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.locator('.e-note').filter({ hasText: 'Archived:' })).toHaveCount(0)
+  if (ordering === 'response first') await emit(102, 101)
+  await expect(apply).toHaveCount(0)
+  await emit(103)
+  await expect(apply).toHaveCount(1)
+  await page.getByRole('button', { name: 'Close the preview', exact: true }).click()
+  await expect(apply).toBeVisible()
+  expect(h.errors).toEqual([])
 })

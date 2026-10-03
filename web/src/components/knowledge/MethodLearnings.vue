@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { confirmAction } from '../../lib/confirm'
 import {
   KnowledgeError, acceptLearning, dismissLearning, draftLearning, listLearnings, undoKnowledge,
   type KnowledgeEntry, type KnowledgeItem, type MethodLearning, type SensitiveRange,
 } from '../../lib/knowledge'
+import { DELIVERY_ACTIONS } from '../../lib/deliveryChanges'
 import { can } from '../../lib/authz'
 import { listLayers, listSets, ROLE_LABEL, writeBlock, type Caller, type RuleLayer, type RuleSet, type RoleName } from '../../lib/rules'
 import { useSession } from '../../stores/session'
@@ -22,6 +23,7 @@ const props = defineProps<{
   person: boolean
   now: number
 }>()
+const deliveryActions = inject(DELIVERY_ACTIONS, undefined)
 const emit = defineEmits<{ accepted: [entry: KnowledgeEntry]; reverted: []; emptied: [] }>()
 
 const inboxPreview = 3
@@ -240,7 +242,7 @@ async function saveDraft() {
   busy.value = true
   dialogError.value = ''
   try {
-    const decision = await draftLearning(item.id, confirming.value ? { layer_id: layer, set_id: set, confirm_not_sensitive: true } : { layer_id: layer, set_id: set })
+    const decision = await draftLearning(item.id, confirming.value ? { layer_id: layer, set_id: set, confirm_not_sensitive: true } : { layer_id: layer, set_id: set }, deliveryActions)
     const before = items.value.slice()
     items.value = items.value.filter(row => row.id !== item.id)
     close(false)
@@ -268,7 +270,7 @@ async function accept() {
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const decision = await acceptLearning(item.id, entry.id, since, confirming.value)
+        const decision = await acceptLearning(item.id, entry.id, since, confirming.value, deliveryActions)
         const before = items.value.slice()
         items.value = items.value.filter(row => row.id !== item.id)
         if (decision.entry) emit('accepted', decision.entry)
@@ -303,7 +305,7 @@ async function dismiss(item: MethodLearning) {
   if (!ok) return
   busy.value = true
   try {
-    const decision = await dismissLearning(item.id)
+    const decision = await dismissLearning(item.id, deliveryActions)
     const before = items.value.slice()
     items.value = items.value.filter(row => row.id !== item.id)
     busy.value = false
@@ -318,7 +320,7 @@ async function dismiss(item: MethodLearning) {
 
 async function undo(eventId: number) {
   try {
-    await undoKnowledge(eventId)
+    await undoKnowledge(eventId, deliveryActions)
     await load()
     emit('reverted')
     toast('Undone.')
