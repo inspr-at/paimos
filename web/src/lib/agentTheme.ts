@@ -43,8 +43,10 @@ export function captureAgentThemeSelection(themeId: string, revision: number) {
   const started = identityEpoch, owner = person
   return (chosen: ActiveTheme) => {
     if (started !== identityEpoch || owner !== person || !owner || chosen.theme.id !== themeId || chosen.revision < revision ||
-        !selection || (selection.revision !== revision && selection.revision !== chosen.revision)) return
+        !selection || (selection.revision !== revision && selection.revision !== chosen.revision) ||
+        (selection.revision === chosen.revision && (selection.themeId !== themeId || selection.themeRevision > chosen.theme.revision))) return false
     installAgentTheme(chosen.theme.values.agents, chosen)
+    return true
   }
 }
 export async function restoreAgentTheme(identity: string) {

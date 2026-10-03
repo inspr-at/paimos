@@ -63,8 +63,7 @@ export function useThemeEditor() {
     const reconcile = captureAgentThemeSelection(id, revision)
     await perform(async current => {
       const chosen = await themes.selectTheme(id, revision)
-      reconcile(chosen)
-      if (current()) install(chosen)
+      if (reconcile(chosen) && current()) install(chosen)
     })
   }
   async function save() {
@@ -95,8 +94,7 @@ export function useThemeEditor() {
       const reconcile = captureAgentThemeSelection(created.id, selectionRevision)
       try {
         const chosen = await themes.selectTheme(created.id, selectionRevision)
-        reconcile(chosen)
-        if (current()) install(chosen)
+        if (reconcile(chosen) && current()) install(chosen)
       } catch (failure) {
         if (current()) error.value = `The copy was created, but could not be selected. ${failure instanceof Error ? failure.message : 'Try again.'}`
       }

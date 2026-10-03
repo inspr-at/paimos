@@ -102,7 +102,7 @@ it('an old active-theme read completing after Save cannot undo reconciliation', 
   next.stop()
 })
 
-async function pendingSelection(duplicate = false) {
+async function pendingSelection(duplicate = false, dispose = true) {
   const scope = effectScope()
   const editor = scope.run(() => useThemeEditor())!
   await flush()
@@ -113,8 +113,8 @@ async function pendingSelection(duplicate = false) {
   const selecting = duplicate ? editor.duplicate(record()) : editor.choose(target)
   await flush()
   expect(themes.selectTheme).toHaveBeenCalledWith('theme-b', 7)
-  scope.stop()
-  return { editor, selecting, release, target }
+  if (dispose) scope.stop()
+  return { editor, selecting, release, target, scope }
 }
 for (const duplicate of [false, true]) {
   const operation = duplicate ? 'duplicate-and-select' : 'selection'
@@ -130,12 +130,47 @@ for (const duplicate of [false, true]) {
     release(active(target, 8)); await selecting
     expect(agentTheme.value).toBeNull()
   })
+  it(`a mounted editor cannot bypass ${operation} identity-session guards`, async () => {
+    const { editor, selecting, release, target, scope } = await pendingSelection(duplicate, false)
+    resetAgentTheme(); resetAgentTheme('tenant/alice')
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value).toBeNull()
+    expect(editor.active.value!.theme.id).toBe('theme-a')
+    scope.stop()
+  })
   it(`ignores ${operation} after a newer selection loads`, async () => {
     const { selecting, release, target } = await pendingSelection(duplicate)
     vi.mocked(themes.getActiveTheme).mockResolvedValue(active(record('theme-c', 'quill'), 9))
     const next = effectScope(); next.run(() => useThemeEditor()); await flush()
     release(active(target, 8)); await selecting
     expect(agentTheme.value?.avatar).toBe('quill')
+    next.stop()
+  })
+  it(`ignores ${operation} after selecting away and back`, async () => {
+    const { selecting, release, target } = await pendingSelection(duplicate)
+    vi.mocked(themes.getActiveTheme).mockResolvedValue(active(record(), 9))
+    const next = effectScope(); next.run(() => useThemeEditor()); await flush()
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value?.avatar).toBe('robot-1')
+    next.stop()
+  })
+  it(`${operation} cannot overwrite a newer revision of its committed result`, async () => {
+    const { selecting, release, target } = await pendingSelection(duplicate)
+    vi.mocked(themes.getActiveTheme).mockResolvedValue(active(record('theme-b', 'quill', 3), 8))
+    const next = effectScope(); next.run(() => useThemeEditor()); await flush()
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value?.avatar).toBe('quill')
+    next.stop()
+  })
+  it(`an old active-theme read cannot undo committed ${operation}`, async () => {
+    const { selecting, release, target } = await pendingSelection(duplicate)
+    let read!: (value: ActiveTheme) => void
+    vi.mocked(themes.getActiveTheme).mockImplementation(() => new Promise(resolve => { read = resolve }))
+    const next = effectScope(); next.run(() => useThemeEditor())
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value?.avatar).toBe('sprite')
+    read(active()); await flush()
+    expect(agentTheme.value?.avatar).toBe('sprite')
     next.stop()
   })
 }

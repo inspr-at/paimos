@@ -19,13 +19,29 @@ async function mock(page: Page, admin = true) {
   data.preferences['agent-state'] = { palette: 'protan', yellowMinutes: 7, redMinutes: 19 }
   await mockWork(page, data, { admin })
   await mockSettings(page, settingsData())
-  const state = { theme: initial(), writes: [] as ThemeRecord[], fail: false }
+  const state = { theme: initial(), items: [initial()], selectionRevision: 0, selectedThemeId: null as string | null, writes: [] as ThemeRecord[], fail: false }
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
     const method = route.request().method()
-    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: null, revision: 0, fallback_notice: null })
-    if (path === '/api/me/theme') return route.fulfill({ json: active() })
-    if (path === '/api/themes') return route.fulfill({ json: { items: [state.theme], next_cursor: null } })
+    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: state.selectedThemeId, revision: state.selectionRevision, fallback_notice: null })
+    if (path === '/api/me/theme') {
+      if (method === 'PUT') {
+        const body = route.request().postDataJSON()
+        expect(body.revision).toBe(state.selectionRevision)
+        const target = state.items.find(item => item.id === body.theme_id)
+        expect(target).toBeDefined()
+        state.theme = target!; state.selectedThemeId = target!.id; state.selectionRevision++
+      }
+      return route.fulfill({ json: active() })
+    }
+    if (path === '/api/themes') return route.fulfill({ json: { items: state.items.map(item => item.id === state.theme.id ? state.theme : item), next_cursor: null } })
+    if (path.endsWith('/duplicate') && method === 'POST') {
+      const source = state.items.find(item => path === `/api/themes/${item.id}/duplicate`)
+      expect(source).toBeDefined()
+      const created = { ...structuredClone(source!), id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: route.request().postDataJSON().name, scope: 'personal' as const, owner_principal_id: 'p1', revision: 1 }
+      state.items.push(created)
+      return route.fulfill({ json: created })
+    }
     if (path === `/api/themes/${state.theme.id}`) {
       if (method === 'PATCH') {
         state.writes.push(route.request().postDataJSON())
@@ -205,3 +221,30 @@ test('Save reconciles appearance after navigating away from Theme while the resp
   await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
   expect(state.writes).toHaveLength(1)
 })
+
+for (const duplicate of [false, true]) {
+  test(`${duplicate ? 'Duplicate-and-select' : 'Selection'} reconciles appearance after navigating away while the response is pending`, async ({ page }) => {
+    const { state } = await mock(page)
+    const source: ThemeRecord = { ...initial(), id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Sprite theme', scope: 'personal', owner_principal_id: 'p1', values: { ...initial().values, agents: { ...initial().values.agents, avatar: 'sprite' } } }
+    state.items.push(source)
+    let release!: () => void, reached!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const requested = new Promise<void>(resolve => { reached = resolve })
+    await page.route('**/api/me/theme', async route => {
+      if (route.request().method() === 'PUT') { reached(); await held }
+      await route.fallback()
+    })
+    await page.goto('/settings/theme#agents')
+    await expect(page.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: `${duplicate ? 'Duplicate' : 'Use'} Sprite theme`, exact: true }).click()
+    await requested
+    await page.getByRole('link', { name: 'Projects', exact: true }).click()
+    await expect(page.locator('.theme-section')).toHaveCount(0)
+    expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+    release()
+    await expect.poll(() => state.theme.values.agents.avatar).toBe('sprite')
+    await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
+    expect(state.selectedThemeId).toBe(duplicate ? 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' : source.id)
+    expect(state.selectionRevision).toBe(1)
+  })
+}
