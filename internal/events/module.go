@@ -178,6 +178,9 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 				return err
 			}
 			result.Window = &window
+			if err := redactAccountEvents(ctx, tx, p, result.Items); err != nil {
+				return err
+			}
 			return attachNodeChanges(ctx, tx, p.TenantID, result.Items)
 		}
 		// Quote events use the quote-scoped collaboration stream, which rechecks
@@ -217,6 +220,9 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := redactAccountEvents(ctx, tx, p, result.Items); err != nil {
 			return err
 		}
 		return attachNodeChanges(ctx, tx, p.TenantID, result.Items)
@@ -395,7 +401,15 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		}
 		change.UndoOf = &id
 		result, err = Append(r.Context(), tx, p, change)
-		return err
+		if err != nil {
+			return err
+		}
+		items := []Event{result}
+		if err := redactAccountEvents(r.Context(), tx, p, items); err != nil {
+			return err
+		}
+		result = items[0]
+		return nil
 	})
 	if err != nil {
 		failure(w, err)

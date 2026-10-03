@@ -214,10 +214,10 @@ test('sign-in and offline pools pause with the one fixing step', () => {
   assert.deepEqual(todayCell(quiet.rows[0], accountPlan(quiet.rows[0], now)), { kind: 'quiet', text: 'reading unavailable' })
   assert.equal(sourceLine(quiet.rows[0], now), 'Codex reported · 2 min ago'.replace('Codex', 'Grok'))
   const [none] = pools([acct('p', 'Pi on hsb1', 'pi')], [])
-  assert.equal(plainText(poolSentence(none, now, TZ)), 'No reading yet — starts with the first run.')
+  assert.equal(plainText(poolSentence(none, now, TZ)), "Pi doesn't show its limit · one run at a time by day")
   assert.equal(sourceLine(none.rows[0], now), '')
   const [next] = pools([acct('p', 'Pi on hsb1', 'pi')], [{ ...cap('p', []), awaiting_reading: true }])
-  assert.equal(plainText(poolSentence(next, now, TZ)), 'No reading yet — starts with the next run.')
+  assert.equal(plainText(poolSentence(next, now, TZ)), "Pi doesn't show its limit · one run at a time by day")
   assert.equal(sourceLine(next.rows[0], now), '')
 })
 
@@ -415,4 +415,18 @@ test('displayed account command round trips in fish, zsh and bash with arbitrary
   }
   assert.equal(accountUseCommand({ id: '$(false)', harness: 'claude' }), '')
   assert.equal(accountUseCommand({ id, harness: 'claude;false' }), '')
+})
+
+
+test('AEON-623: unsupported quota readers say so before learning or first work', () => {
+  for (const harness of ['cursor', 'grok', 'pi']) {
+    for (const awaiting_reading of [false, true]) {
+      const [pool] = pools([acct(harness, harness, harness)], [{ ...cap(harness, []), awaiting_reading }])
+      assert.match(plainText(poolSentence(pool, now, TZ)), /doesn't show its limit · one run at a time by day/)
+      assert.doesNotMatch(plainText(poolSentence(pool, now, TZ)), /first run|next run|No reading yet/)
+    }
+  }
+  const [codex] = pools([acct('c', 'Codex', 'codex')], [])
+  assert.match(plainText(poolSentence(codex, now, TZ)), /No reading yet — readings need a managed run/)
+  assert.doesNotMatch(plainText(poolSentence(codex, now, TZ)), /automatically|idle/)
 })

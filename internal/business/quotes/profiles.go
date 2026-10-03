@@ -4,9 +4,7 @@ package quotes
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -14,8 +12,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -657,49 +653,8 @@ func safeProfileSVG(raw []byte) bool {
 // Profile fonts and safe SVGs have their own strict validator above. The
 // general attachment upload deliberately does not accept those media types.
 // Keep the same tenant/hash file layout so Store.Open can serve the asset.
-func putProfileAsset(ctx context.Context, tenantID string, raw []byte, kind, filesDir string) (attachments.Prepared, error) {
-	if kind == "image/png" {
-		return (attachments.Store{FilesDir: filesDir}).Put(ctx, tenantID, bytes.NewReader(raw))
-	}
-	hash := sha256.Sum256(raw)
-	digest := hex.EncodeToString(hash[:])
-	root := filesDir
-	if root == "" {
-		root = os.Getenv("AEON_FILES_DIR")
-	}
-	if root == "" {
-		root = "./data/files"
-	}
-	directory := filepath.Join(root, tenantID, digest[:2], digest[2:4])
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return attachments.Prepared{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return attachments.Prepared{}, err
-	}
-	tmp, err := os.CreateTemp(directory, "profile-*")
-	if err != nil {
-		return attachments.Prepared{}, err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return attachments.Prepared{}, err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return attachments.Prepared{}, err
-	}
-	if err := tmp.Close(); err != nil {
-		return attachments.Prepared{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return attachments.Prepared{}, err
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(directory, digest)); err != nil {
-		return attachments.Prepared{}, err
-	}
-	return attachments.Prepared{SHA256: digest, ContentType: kind, Size: int64(len(raw))}, nil
+func putProfileAsset(ctx context.Context, tx pgx.Tx, tenantID string, raw []byte, kind, filesDir string) (attachments.Prepared, error) {
+	return (attachments.Store{FilesDir: filesDir}).PutProfileAsset(ctx, tx, tenantID, raw, kind)
 }
 
 func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
@@ -722,13 +677,12 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, bad("expected TTF, OTF, WOFF2, PNG or safe SVG"))
 		return
 	}
-	prepared, e := putProfileAsset(r.Context(), p.TenantID, raw, kind, "")
-	if e != nil {
-		respond(w, 0, nil, bad("asset storage rejected file"))
-		return
-	}
 	var out profileAsset
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
+		prepared, err := putProfileAsset(r.Context(), tx, p.TenantID, raw, kind, "")
+		if err != nil {
+			return err
+		}
 		out.SHA256 = prepared.SHA256
 		out.ContentType = kind
 		out.Size = prepared.Size

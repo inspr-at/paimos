@@ -112,6 +112,10 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		// keeps its existing independent thread cumulative delta settlement.
 		if p.usage != nil {
 			if report, err := p.usage.Observe(raw); err == nil && report != nil {
+				report.ServiceTier = p.serviceTier
+				if report.ServiceTier == "" {
+					report.ServiceTier = "default"
+				}
 				ev := AdapterEvent{SessionUsage: report}
 				// Only an exact, parser-validated usage model is vendor evidence.
 				// Arbitrary model-like text on other notifications is not metadata.
@@ -373,6 +377,10 @@ func (p *codexProcess) sealUsage(clean bool) {
 	p.invalid = p.invalid || !clean
 	if p.usage != nil {
 		for _, report := range p.usage.Finish(clean) {
+			report.ServiceTier = p.serviceTier
+			if report.ServiceTier == "" {
+				report.ServiceTier = "default"
+			}
 			p.observe(AdapterEvent{SessionUsage: &report})
 		}
 	}
