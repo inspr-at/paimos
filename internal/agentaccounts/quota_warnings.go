@@ -104,10 +104,11 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 	if err != nil {
 		return nil, err
 	}
-	// Local resources for a person-confirmed login pool use a stable quota
-	// key. Adding or removing a computer cannot replace its warning identity.
-	// Explicit shared resources keep A's resource identity; unconfirmed
-	// fingerprints never establish sharing.
+	// Local and person-confirmed resources for the same login pool use one
+	// stable quota key. Capacity checks may report either or both memberships;
+	// switching resource IDs cannot bypass newer recovery/reset evidence.
+	// Other shared resources keep their own identity; unconfirmed fingerprints
+	// never establish sharing.
 	resources, err := ReadinessResources(ctx, tx, a)
 	if err != nil {
 		return nil, err
@@ -122,7 +123,7 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		if err := tx.QueryRow(ctx, `SELECT identity_kind FROM account_readiness_resources WHERE id=$1`, r.ID).Scan(&identityKind); err != nil {
 			return nil, err
 		}
-		if a.QuotaPoolFingerprint != "" && identityKind == "account" && (r.Kind == "subscription_quota" || r.Kind == "key_cap") {
+		if a.QuotaPoolFingerprint != "" && (identityKind == "account" || identityKind == "person_confirmed") && (r.Kind == "subscription_quota" || r.Kind == "key_cap") {
 			quotaKeys[r.ID] = "pool:" + a.Harness + ":" + a.QuotaPoolFingerprint
 		}
 	}
