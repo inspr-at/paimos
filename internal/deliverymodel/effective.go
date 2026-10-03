@@ -26,7 +26,20 @@ const Effective = `(
  JOIN project_delivery d ON d.tenant_id=n.tenant_id AND d.project_node_id=n.project_id
  JOIN nodes p ON p.tenant_id=d.tenant_id AND p.id=d.project_node_id AND p.deleted_at IS NULL
  JOIN node_kinds pk ON pk.tenant_id=p.tenant_id AND pk.id=p.kind_id AND pk.slug='project'
- LEFT JOIN ships_in s ON s.tenant_id=n.tenant_id AND s.project_node_id=d.project_node_id AND s.item_node_id=n.id
- LEFT JOIN project_releases r ON r.tenant_id=s.tenant_id AND r.project_node_id=s.project_node_id AND r.release_node_id=s.release_node_id
+ -- Keep the optional placement and its release dependent on this item. With
+ -- stale import statistics, flattening these joins can scan all placements
+ -- and releases for every node before applying the item identity predicate.
+ -- Probe the unique tenant/item and tenant/release keys first; check project
+ -- membership outside each fence so a project-wide index cannot win the probe.
+ LEFT JOIN LATERAL (
+   SELECT * FROM ships_in
+   WHERE tenant_id=n.tenant_id AND item_node_id=n.id
+   OFFSET 0
+ ) s ON s.project_node_id=d.project_node_id
+ LEFT JOIN LATERAL (
+   SELECT project_node_id,rank,state FROM project_releases
+   WHERE tenant_id=s.tenant_id AND release_node_id=s.release_node_id
+   OFFSET 0
+ ) r ON r.project_node_id=s.project_node_id
  WHERE n.deleted_at IS NULL AND k.slug IN ('epic','ticket','task')
 )`
