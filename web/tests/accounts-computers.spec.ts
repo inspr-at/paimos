@@ -126,7 +126,7 @@ test('Check now says what came back: a failure as a failure, still nothing, then
   // Empty: the read worked and still has no reading.
   mode = 'empty'
   await codex.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'No reading yet — checked automatically while the account is idle.' })).toBeVisible()
+  await expect(toasts.filter({ hasText: 'No reading yet — readings need a managed run.' })).toBeVisible()
   await expect(codex.getByText('No reading yet', { exact: true })).toHaveCount(1)
   await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
   await expect(codex.getByRole('meter')).toHaveCount(0)

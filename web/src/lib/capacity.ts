@@ -370,7 +370,7 @@ export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', cla
 export const hidesCapacityLimit = (harness: string) => ['cursor', 'grok', 'pi'].includes(harness)
 export const unreportedCapacity = (harness: string) => hidesCapacityLimit(harness)
   ? `${HARNESS_NAME[harness] ?? harness} doesn't show its limit · one run at a time by day`
-  : harness === 'codex' ? 'No reading yet — checked automatically while the account is idle' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
+  : harness === 'codex' ? 'No reading yet — readings need a managed run' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
 /** The long window is the bar; the 5-hour window, when there is another, is the small line under it. */

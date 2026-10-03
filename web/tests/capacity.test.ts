@@ -427,5 +427,6 @@ test('AEON-623: unsupported quota readers say so before learning or first work',
     }
   }
   const [codex] = pools([acct('c', 'Codex', 'codex')], [])
-  assert.match(plainText(poolSentence(codex, now, TZ)), /checked automatically while the account is idle/)
+  assert.match(plainText(poolSentence(codex, now, TZ)), /No reading yet — readings need a managed run/)
+  assert.doesNotMatch(plainText(poolSentence(codex, now, TZ)), /automatically|idle/)
 })
