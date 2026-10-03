@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { tierEvidenceRefresh, type AgentEventIdentity } from '../lib/tierEvidenceLive'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, myPermissions } from '../lib/authz'
@@ -273,20 +274,25 @@ let stop: (() => void) | undefined
 const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
-let tierCatchUp = false
-function changed(event?: string) {
-  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
+const evidenceRefresh = tierEvidenceRefresh(() => selected.value?.session, session => {
+  void serviceTiers.load(session).catch(error => { serviceTiers.errors[session.id] = error instanceof Error ? error.message : 'Tier evidence unavailable.' })
+}, () => document.visibilityState !== 'hidden')
+function evidenceVisible() { if (document.visibilityState !== 'hidden') evidenceRefresh.notify() }
+function changed(event?: string, identity?: AgentEventIdentity) {
+  evidenceRefresh.notify(event, identity)
+  // Confirmation polling already tracks its own exact pending sessions.
+  if (!event) serviceTiers.reconcile()
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
   debounce = setTimeout(() => {
     debounce = undefined
-    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
     void agents.loadAll()
   }, 400)
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
   stopTierWatch = serviceTiers.watchPage()
+  document.addEventListener('visibilitychange', evidenceVisible)
   void agents.loadAll()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
@@ -295,6 +301,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
+  evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
