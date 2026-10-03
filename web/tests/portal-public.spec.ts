@@ -4,6 +4,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 // PORTAL_SHOTS names a directory. Unset, this file creates nothing at import.
 const shots = process.env.PORTAL_SHOTS ?? ''
+const legacyParticipation = { policy: 'legacy', voting_enabled: true, wish_intake_enabled: true, corrections_enabled: true, registered_available: false, anonymous_history: [] }
 
 async function capture(page: Page, name: string) {
   if (!shots) return
@@ -48,7 +49,7 @@ async function install(page: Page, missing = false) {
     }
     if (url.pathname.startsWith('/api/public/portal/')) {
       if (url.pathname.endsWith('/participation') && !missing) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ policy: 'legacy', voting_enabled: true, wish_intake_enabled: true, corrections_enabled: true, registered_available: false, anonymous_history: [] }) })
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(legacyParticipation) })
         return
       }
       if (route.request().method() === 'POST') {
@@ -155,6 +156,10 @@ test('status chips appear only past six features, and a wish is title and summar
       await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' })
       return
     }
+    if (url.pathname.endsWith('/participation')) {
+      await route.fulfill({ json: legacyParticipation })
+      return
+    }
     if (url.pathname.startsWith('/api/public/portal/') && route.request().method() === 'POST' && url.pathname.endsWith('/wishes')) {
       posted.push({ method: 'POST', body: route.request().postData(), path: url.pathname })
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ accepted: true }) })
@@ -253,4 +258,33 @@ test('disabled participation keeps the catalog readable and has no input control
   await expect(page.getByText('Participation is currently unavailable. The catalog remains open for reading.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Vote for Owner assembly on a phone' })).toHaveCount(0)
   await expect(page.locator('.portal input, .portal textarea')).toHaveCount(0)
+})
+
+test('a product address keeps navigation and writes on that product', async ({ page }) => {
+  const posted = await install(page)
+  await page.goto('/portal/harbour/products/second')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/portal/harbour/products/second/releases')
+  await expect(page.getByRole('link', { name: 'llms.txt' })).toHaveAttribute('href', '/portal/harbour/products/second/llms.txt')
+  await page.getByRole('button', { name: 'Vote for Owner assembly on a phone' }).click()
+  await expect(page.getByText('4 votes')).toBeVisible()
+  expect(posted).toHaveLength(1)
+  expect(posted[0].path).toBe('/api/public/portal/harbour/products/second/wishes/PWS-1/votes')
+  await page.getByLabel('Title').fill('Second product wish')
+  await page.getByLabel('Summary').fill('Keep this wish on the second product.')
+  await page.getByRole('button', { name: 'Send wish' }).click()
+  await expect(page.getByRole('status')).toHaveText('Sent for review.')
+  expect(posted).toHaveLength(2)
+  expect(posted[1].path).toBe('/api/public/portal/harbour/products/second/wishes')
+})
+
+test('an unavailable participation policy fails closed without closing the catalog', async ({ page }) => {
+  const posted = await install(page)
+  await page.route('**/api/public/portal/*/participation', route => route.fulfill({ status: 503, json: { error: 'portal unavailable' } }))
+  await page.goto('/portal/harbour')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByText('Participation is currently unavailable. The catalog remains open for reading.')).toBeVisible()
+  await expect(page.locator('.portal input, .portal textarea')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Vote for/ })).toHaveCount(0)
+  expect(posted).toHaveLength(0)
 })

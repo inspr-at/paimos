@@ -39,7 +39,6 @@ function storedLang(): 'en' | 'de' {
   try {
     return localStorage.getItem(langKey) === 'de' ? 'de' : 'en'
   } catch {
-    if (revision !== loadRevision || address !== apiBase.value) return
     return 'en'
   }
 }
@@ -109,6 +108,7 @@ async function load() {
     doc.value = document
     setPageTitle(doc.value.product ? 'Releases' : 'Nothing published yet')
   } catch {
+    if (revision !== loadRevision || address !== apiBase.value) return
     error.value = 'Releases could not be loaded.'
     doc.value = null
     setPageTitle('Releases')

@@ -35,7 +35,6 @@ function storedLang(): 'en' | 'de' {
   try {
     return localStorage.getItem(langKey) === 'de' ? 'de' : 'en'
   } catch {
-    if (revision !== loadRevision || address !== apiBase.value) return
     return 'en'
   }
 }
@@ -125,6 +124,7 @@ async function load() {
     doc.value = document
     setPageTitle(doc.value.product ? "What's coming" : 'Nothing published yet')
   } catch {
+    if (revision !== loadRevision || address !== apiBase.value) return
     error.value = 'The roadmap could not be loaded.'
     doc.value = null
     setPageTitle("What's coming")
