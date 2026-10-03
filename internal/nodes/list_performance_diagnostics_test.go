@@ -197,19 +197,30 @@ func safePerformancePlan(value any) any {
 }
 
 // Temporary fix4 diagnosis: log bounded static query categories, never arguments.
-type listQueryTrace struct{ t *testing.T }
+type listQueryTrace struct {
+	t         *testing.T
+	slow      *listTraceStart
+	principal tenant.Principal
+}
 type listTraceKey struct{}
 type listTraceStart struct {
 	start time.Time
 	sql   string
+	args  []any
+	p     tenant.Principal
 }
 
 func (tr *listQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	return context.WithValue(ctx, listTraceKey{}, listTraceStart{time.Now(), data.SQL})
+	p, _ := tenant.PrincipalFrom(ctx)
+	return context.WithValue(ctx, listTraceKey{}, listTraceStart{time.Now(), data.SQL, data.Args, p})
 }
 func (tr *listQueryTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryEndData) {
 	s := ctx.Value(listTraceKey{}).(listTraceStart)
 	d := time.Since(s.start)
+	if strings.Contains(s.sql, "planning_values AS") {
+		tr.slow = &s
+		tr.principal = s.p
+	}
 	if d < 5*time.Millisecond {
 		return
 	}
@@ -226,11 +237,39 @@ func traceListQueries(t *testing.T) {
 	t.Helper()
 	old := appPool
 	cfg := old.Config()
-	cfg.ConnConfig.Tracer = &listQueryTrace{t}
+	trace := &listQueryTrace{t: t}
+	cfg.ConnConfig.Tracer = trace
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	appPool = pool
-	t.Cleanup(func() { appPool = old; pool.Close() })
+	t.Cleanup(func() {
+		appPool = old
+		pool.Close()
+		if trace.slow == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(tenant.WithPrincipal(context.Background(), trace.principal), 10*time.Second)
+		defer cancel()
+		err := New(old, nil).(*Module).tx(ctx, trace.principal.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+			var raw []byte
+			if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON, TIMING OFF) "+trace.slow.sql, trace.slow.args...).Scan(&raw); err != nil {
+				return err
+			}
+			var plan any
+			if err := json.Unmarshal(raw, &plan); err != nil {
+				return err
+			}
+			clean, err := json.Marshal(safePerformancePlan(plan))
+			if err != nil {
+				return err
+			}
+			t.Logf("planning money plan: %s", clean)
+			return nil
+		})
+		if err != nil {
+			t.Errorf("planning explain failed: %T", err)
+		}
+	})
 }
