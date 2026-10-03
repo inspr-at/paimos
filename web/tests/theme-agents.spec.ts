@@ -68,7 +68,7 @@ async function mock(page: Page, admin = true) {
 }
 
 for (const returning of [false, true]) {
-  test(`Delete reconciles the workspace fallback after navigation${returning ? ' away and back with a stale read' : ''}`, async ({ page }) => {
+  test(`Delete reconciles the workspace fallback after navigation${returning ? ' away and back while it is pending' : ''}`, async ({ page }) => {
     const { state } = await mock(page)
     const personal: ThemeRecord = { ...initial(), id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Sprite theme', scope: 'personal', owner_principal_id: 'p1', values: { ...initial().values, agents: { ...initial().values.agents, avatar: 'sprite' } } }
     state.items.push(personal); state.theme = personal; state.selectedThemeId = personal.id; state.selectionRevision = 7
@@ -86,30 +86,25 @@ for (const returning of [false, true]) {
     await requested
     await page.getByRole('link', { name: 'Projects', exact: true }).click()
     await expect(page.locator('.theme-section')).toHaveCount(0)
-    let finishRead!: () => void, readReached!: () => void
-    const readHeld = new Promise<void>(resolve => { finishRead = resolve })
-    const readRequested = new Promise<void>(resolve => { readReached = resolve })
+    // Count the active-theme reads from here on: only the deletion's own fallback may follow.
+    const reads: string[] = []
+    page.on('request', request => { if (new URL(request.url()).pathname === '/api/me/theme' && request.method() === 'GET') reads.push(request.url()) })
     if (returning) {
-      let firstRead = true
-      const stale = { theme: structuredClone(personal), default_theme_id: initial().id, selected_theme_id: personal.id, revision: 7, fallback_notice: null }
-      await page.route('**/api/me/theme', async route => {
-        if (route.request().method() === 'GET' && firstRead) { firstRead = false; readReached(); await readHeld; return route.fulfill({ json: stale }) }
-        await route.fallback()
-      })
       await page.evaluate(async () => { await (await import('/src/router.ts')).router.push('/settings/theme#agents') })
-      await readRequested
+      // The shared editor still shows the record being deleted, busy, without a reload.
+      await expect(page.getByRole('radio', { name: 'Sprite', exact: true })).toBeChecked()
+      await expect(page.getByRole('radio', { name: 'Sprite', exact: true })).toBeDisabled()
     }
     expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
     release()
     await expect.poll(() => state.deletes).toEqual([personal.id])
     await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+    expect(reads).toHaveLength(1)
     expect(state.selectionRevision).toBe(7)
     expect(state.selectedThemeId).toBe(personal.id)
     if (returning) {
-      finishRead()
       await expect(page.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
       await expect(page.locator('.theme-status')).toContainText('workspace default')
-      expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
     }
   })
 }
