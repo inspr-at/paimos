@@ -71,7 +71,7 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
 
 <style scoped>
 .queue-glyph { color: var(--teal-ink); }
-.facet-options { display: grid; gap: 1px; }
+.facet-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .facet-option { position: relative; display: flex; align-items: center; min-height: 32px; border-radius: 8px; }
 .facet-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: inherit; padding: 0 6px 0 10px; font-size: 13.5px; cursor: pointer; }
 @media (hover: hover) { .facet-option:hover { background: var(--row-hover); } }

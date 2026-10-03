@@ -4216,6 +4216,7 @@ paths:
         - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
         - {name: cost_unit, in: query, description: 'Cost unit labels (case-insensitive) or none; ! excludes. Reads fields.cost_unit, else the imported fields.classic.cost_unit.', schema: {type: array, items: {type: string}}}
         - {name: release, in: query, description: 'Release labels (case-insensitive) or none; ! excludes. Reads fields.release.', schema: {type: array, items: {type: string}}}
+        - {name: ships_in, in: query, description: 'Release node UUIDs or none for releases-mode backlog (ranked and unranked); ! excludes. Journey-mode work has no placement and does not match none. At most 100 values; combines with every other list filter.', schema: {type: array, maxItems: 100, items: {type: string}}}
         - {name: human_check, in: query, description: 'pending or none; ! excludes. Pending means human_check contains non-empty text. Combines with other filters and applies to facets and pagination.', schema: {type: array, items: {type: string, enum: [pending, none, '!pending', '!none']}}}
         - {name: epic, in: query, description: 'Epic node IDs (matching their whole subtree, not the epic itself) or none for work under no epic; ! excludes.', schema: {type: array, items: {type: string}}}
         - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
@@ -4224,7 +4225,7 @@ paths:
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, ships_in, human_check. ships_in counts are keyed by release node UUID or none for releases-mode backlog, excluding journey-mode work; facet_labels supplies visible release titles. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -16844,6 +16845,12 @@ components:
           additionalProperties:
             type: object
             additionalProperties: {type: integer}
+        facet_labels:
+          type: object
+          description: Visible release titles keyed by UUID for the requested ships_in facet; counts remain in facets.
+          additionalProperties:
+            type: object
+            additionalProperties: {type: string}
     NodeListItem:
       allOf:
         - $ref: '#/components/schemas/Node'
@@ -16890,6 +16897,15 @@ components:
               properties:
                 name: {type: string}
                 key: {type: string}
+            delivery_order:
+              type: object
+              description: Effective releases-mode placement, present when order or ships_in is requested; absent for journey-mode work. Null release_id means backlog and null rank means the unranked tail.
+              required: [release_id, release_rank, rank, expedite]
+              properties:
+                release_id: {type: [string, 'null'], format: uuid}
+                release_rank: {type: [string, 'null']}
+                rank: {type: [string, 'null']}
+                expedite: {type: boolean}
             planning:
               $ref: '#/components/schemas/TicketPlanning'
     TreeEntry:
@@ -17566,7 +17582,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are order (releases-mode expedite first, release rank before backlog, item rank before unranked tail, created_at then id; journey-mode priority then created_at; rank keys use C collation), position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction

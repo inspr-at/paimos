@@ -4,6 +4,19 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
+Ticket lists offer **In release** independently of **Imported release**.
+`GET /api/nodes?ships_in=<release-node-UUID>|none&facets=ships_in&sort=order`
+filters by release identity or releases-mode backlog; prefix a value with `!`
+to exclude it. Facet counts cover the filtered result before pagination;
+`facet_labels.ships_in` supplies visible release titles. Release order puts
+expedited open work first, then container position, item rank, creation time
+and ID. Ranked backlog precedes the unranked tail. Journey projects retain
+priority and creation-time ordering and have no `ships_in` placement.
+Client ordering preserves timestamp microseconds. Requested list placement
+clears after a move into a journey project; reads that do not request placement
+retain the last known projection until an authoritative refresh.
+The URL and saved views preserve both filters and the chosen sort.
+
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)

@@ -28,6 +28,7 @@ var nodeWriters = map[string]string{
 	"business/quotes/drafts.go":         "typed quote loader",
 	"business/quotes/showcase_write.go": "typed quote showcase loader",
 	"business/quotes/undo.go":           "typed quote loader",
+	"delivery/settings.go":              "fenced typed release editor; title/body only",
 	"deliveryadoption/apply.go":         "fenced atomic adoption; default release title only",
 	"importer/offers/import.go":         "typed quote import",
 	"importer/users_backfill.go":        "RefuseReleaseNodes before assignments",

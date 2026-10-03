@@ -27,6 +27,7 @@ const props = defineProps<{
   knowledgeView?: 'entries' | 'graph'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
+  facetErrors?: Record<string, string>
   facetLoading?: boolean
   headerGraph?: boolean
 }>()
@@ -222,7 +223,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <slot name="journey" />
 
     <FacetMenu
-      v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
+      v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading" :error="facetErrors?.[open.dimension]"
       @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
     <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />

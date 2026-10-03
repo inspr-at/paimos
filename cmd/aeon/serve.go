@@ -335,6 +335,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	go reviewMod.RunStatusReporter(ctx)
+	adoptionWorker, err := deliveryadoption.FromEnvironment(ctx, pool, cfg.PublicURL)
+	if err != nil {
+		closeListener()
+		return fmt.Errorf("delivery adoption: %w", err)
+	}
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -388,7 +393,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
-			releases.New(pool),
+			releases.New(pool, releases.WithAdoptionReporting(adoptionWorker)),
 			statusAuto,
 			recurringWork,
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
@@ -414,11 +419,6 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)
-	}
-	adoptionWorker, err := deliveryadoption.FromEnvironment(ctx, pool, cfg.PublicURL)
-	if err != nil {
-		closeListener()
-		return fmt.Errorf("delivery adoption: %w", err)
 	}
 
 	if ln == nil {

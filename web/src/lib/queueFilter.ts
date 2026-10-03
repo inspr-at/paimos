@@ -14,11 +14,13 @@ export async function queueFilteredNodes(query: ListQuery, snapshot: QueueSnapsh
   const members = new Set(snapshot.items.map(item => item.ticket_id))
   const rows = new Map<string, ListItem>()
   const realStates = states.filter(state => state !== 'queued' && state !== '!queued')
-  const actual = { ...query, state: realStates, cursor: undefined, limit: 200, facets: undefined }
+  const actual = { ...query, state: realStates, cursor: undefined, limit: 200, facets: query.facets?.includes('ships_in') ? ['ships_in'] : undefined }
+  const releaseLabels: Record<string, string> = {}
   async function all(params: ListQuery) {
     let cursor: string | undefined
     do {
       const page = await read({ ...params, cursor })
+      Object.assign(releaseLabels, page.facet_labels?.ships_in)
       for (const row of page.items) if (!excluded || !members.has(row.id)) rows.set(row.id, row)
       cursor = page.next_cursor ?? undefined
     } while (cursor)
@@ -38,12 +40,13 @@ export async function queueFilteredNodes(query: ListQuery, snapshot: QueueSnapsh
   for (const facet of query.facets ?? []) {
     const counts: Record<string, number> = {}
     for (const row of items) {
-      const values = facet === 'kind' ? [row.kind_slug] : facet === 'state' ? [row.state] : facet === 'assignee' ? [row.assignee?.id ?? 'none'] : facet === 'priority' ? [row.priority ?? 'none'] : facet === 'tag' ? rowTags(row).map(tag => tag.name) : [String(row.fields[facet] ?? 'none')]
+      if (facet === 'ships_in' && !row.delivery_order) continue
+      const values = facet === 'ships_in' ? [row.delivery_order?.release_id ?? 'none'] : facet === 'kind' ? [row.kind_slug] : facet === 'state' ? [row.state] : facet === 'assignee' ? [row.assignee?.id ?? 'none'] : facet === 'priority' ? [row.priority ?? 'none'] : facet === 'tag' ? rowTags(row).map(tag => tag.name) : [String(row.fields[facet] ?? 'none')]
       for (const value of new Set(values.length ? values : ['none'])) counts[value] = (counts[value] ?? 0) + 1
     }
     facets[facet] = counts
   }
   const offset = /^queue:\d+$/.test(query.cursor ?? '') ? Number(query.cursor!.slice(6)) : 0
   const limit = query.limit ?? 200
-  return { items: items.slice(offset, offset + limit), next_cursor: offset + limit < items.length ? `queue:${offset + limit}` : null, ...(query.facets ? { facets } : {}) }
+  return { items: items.slice(offset, offset + limit), next_cursor: offset + limit < items.length ? `queue:${offset + limit}` : null, ...(query.facets ? { facets } : {}), ...(facets.ships_in ? { facet_labels: { ships_in: Object.fromEntries(Object.entries(releaseLabels).filter(([id]) => facets.ships_in[id] !== undefined)) } } : {}) }
 }

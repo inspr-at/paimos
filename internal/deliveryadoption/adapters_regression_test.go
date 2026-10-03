@@ -136,6 +136,9 @@ func TestReportRecoveryPreservesUnexpectedAndUnsafeItems(t *testing.T) {
 				err = os.Symlink(filepath.Join(dir, filepath.Base(ref)), path)
 			case "public-temp":
 				err = os.WriteFile(path, []byte("preserve"), 0644)
+				if err == nil {
+					err = os.Chmod(path, 0644)
+				}
 			}
 			if err != nil {
 				t.Fatal(err)
