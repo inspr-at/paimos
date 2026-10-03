@@ -74,6 +74,7 @@
         "internal/agentd/**",
         "internal/agentsetup/**",
         "internal/harness/**",
+        "internal/servicetier/**",
         "internal/harnesslaunch/**",
         "internal/agentdwire/**",
         "internal/ownedprocess/**",
