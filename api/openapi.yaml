@@ -9525,7 +9525,7 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 80, description: Trimmed name without control characters}
         scope: {type: string, enum: [workspace, personal]}
-        values: {$ref: '#/components/schemas/ThemeValues', description: If omitted, use Porcelain}
+        values: {$ref: '#/components/schemas/ThemeValues', description: 'If omitted, use Porcelain'}
     ThemeUpdate:
       type: object
       additionalProperties: false
