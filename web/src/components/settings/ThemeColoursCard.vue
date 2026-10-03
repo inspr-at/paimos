@@ -6,7 +6,10 @@ import { CARD_COLOURS, colourContrast, derivedDark, suggestColour, type ColourMo
 import SettingsCard from './SettingsCard.vue'
 import ThemeColourPicker from './ThemeColourPicker.vue'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ draft: ThemeRecord; editable: boolean }>()
+// `editable` enables the controls; `permitted` says whether the person may
+// change this theme at all, so a temporary lock (saving, a conflict) never
+// reads as a missing permission.
+const props = defineProps<{ draft: ThemeRecord; editable: boolean; permitted: boolean }>()
 const emit = defineEmits<{ change: [draft: ThemeRecord] }>()
 type AccentKey = 'primary' | 'secondary'
 type Pick = { accent: AccentKey; mode: ColourMode } | { marker: true }
@@ -42,7 +45,7 @@ watch([() => props.draft.id, () => props.editable], () => { picker.value = null 
 <template>
   <SettingsCard title="Colours" icon="sun" anchor="colours">
     <template #lead>Primary and secondary accents, and the mark on recurring tickets. Only the preview changes until Save.</template>
-    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ editable ? (draft.scope !== 'personal' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope !== 'personal' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
+    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ permitted ? (draft.scope !== 'personal' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope !== 'personal' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
     <div class="editor-grid">
       <div class="colour-controls">
         <div v-for="accent in accents" :key="accent.key" class="colour-field">

@@ -54,6 +54,7 @@ async function setupPaged(page: Page, options: { admin?: boolean; fail?: number 
   return data
 }
 const card = (page: Page) => page.locator('#colours')
+const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
 const bar = (page: Page) => page.getByRole('region', { name: 'Unsaved theme changes' })
 async function colour(page: Page, label: string, hex: string, screenshot?: string) {
   await page.getByRole('button', { name: label, exact: true }).click()
@@ -309,4 +310,85 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
   await bar(page).getByRole('button', { name: /^Save/ }).click()
   await expect(bar(page)).toHaveCount(0); await expect(status).toContainText('Saved.')
   expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
+})
+
+// review-642d 2: a conflicting delete keeps its confirmation in place with Delete
+// off; Reload closes it, and the retry needs a fresh confirmation and revision.
+for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) test(`delete confirmation stays still through a conflict and needs reconfirming after Reload (${width} ${mode})`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 950 })
+  const data = await setup(page, { fail: 409 })
+  await page.goto('/settings/theme')
+  await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+  const status = page.locator('.theme-status'), reload = page.getByRole('button', { name: 'Reload themes', exact: true })
+  const confirmation = page.getByRole('group', { name: 'Delete theme confirmation' })
+  const confirm = confirmation.getByRole('button', { name: 'Delete theme', exact: true }), keep = confirmation.getByRole('button', { name: 'Keep theme', exact: true })
+  const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
+  const newTheme = page.getByRole('button', { name: 'New theme', exact: true })
+  await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
+  await mkdir('test-results/aeon-642-delete', { recursive: true })
+  await expectStableControls({ controls: { confirmation, confirm, keep, status, primary, newTheme, duplicateContrast: page.getByRole('button', { name: 'Duplicate High contrast', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'conflicting delete keeps the confirmation and shows recovery in place', run: async () => {
+      await confirm.click()
+      await expect(status).toContainText('Copper changed elsewhere. Reload themes, then delete it again')
+      await expect(confirm).toBeDisabled(); await expect(keep).toBeEnabled(); await expect(reload).toBeVisible(); await expect(primary).toBeDisabled()
+      // A conflict locks the controls, but never reads as a missing permission.
+      await expect(card(page).locator('.permission-note')).toContainText('Your theme · only you see it.')
+    } },
+  ] })
+  await page.screenshot({ path: `test-results/aeon-642-delete/conflict-${width}-${mode}.png`, fullPage: true })
+  data.fail = 0; data.items.find(item => item.id === 'copper')!.revision++
+  await expectStableControls({ controls: { status, primary, newTheme, deleteCopper: page.getByRole('button', { name: 'Delete Copper', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'Reload closes the stale confirmation', run: async () => {
+      await reload.click()
+      await expect(confirmation).toHaveCount(0); await expect(reload).toBeHidden(); await expect(primary).toBeEnabled()
+      await expect(status).not.toContainText('changed elsewhere')
+    } },
+  ] })
+  await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
+  await confirm.click()
+  await expect(status).toContainText('Deleted. You are using the workspace default.')
+  expect(data.writes.map(write => write.method + ' ' + write.path)).toEqual(['DELETE /api/themes/copper', 'DELETE /api/themes/copper'])
+  expect(data.items.some(item => item.id === 'copper')).toBe(false)
+  await page.screenshot({ path: `test-results/aeon-642-delete/deleted-${width}-${mode}.png`, fullPage: true })
+})
+
+// review-642d 1: a duplication conflict goes through recovery, so pagination
+// keeps the banner and Reload until fresh state resolves it.
+test('duplication conflict keeps its banner and Reload through pagination', async ({ page }) => {
+  const data = await setupPaged(page, { fail: 409 }); await page.goto('/settings/theme')
+  const status = page.locator('.theme-status'), reload = page.getByRole('button', { name: 'Reload themes', exact: true })
+  const duplicate = page.getByRole('button', { name: 'Duplicate High contrast', exact: true })
+  await duplicate.click()
+  await expect(status).toContainText('High contrast changed elsewhere. Reload themes, then duplicate it again.')
+  await expect(duplicate).toBeDisabled(); await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeEnabled()
+  await expectStableControls({ controls: { reload, newTheme: page.getByRole('button', { name: 'New theme', exact: true }), duplicate }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'pagination keeps the duplication recovery', run: async () => {
+      await page.getByRole('button', { name: 'Load more themes', exact: true }).click()
+      await expect(page.locator('[data-theme-id="default"]')).toBeVisible()
+      await expect(status).toContainText('High contrast changed elsewhere'); await expect(reload).toBeVisible()
+    } },
+  ] })
+  data.fail = 0
+  await reload.click()
+  await expect(status).not.toContainText('changed elsewhere'); await expect(duplicate).toBeEnabled()
+  await duplicate.click()
+  await expect(card(page)).toContainText('High contrast copy')
+})
+
+// Navigation away and back keeps unsaved edits; the shared editor does not reload over them.
+test('unsaved edits survive navigating away and back; a clean return refreshes', async ({ page }) => {
+  const data = await setup(page); await page.goto('/settings/theme')
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  await expect(bar(page)).toBeVisible()
+  await sections(page).getByRole('link', { name: /^Personal/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await sections(page).getByRole('link', { name: /^Theme Colours/ }).click()
+  await expect(bar(page)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toContainText('#3a5fc4')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  data.items.find(item => item.id === 'copper')!.name = 'Copper renamed elsewhere'
+  await sections(page).getByRole('link', { name: /^Personal/ }).click()
+  await sections(page).getByRole('link', { name: /^Theme Colours/ }).click()
+  await expect(page.locator('[data-theme-id="copper"] .theme-name')).toHaveText('Copper renamed elsewhere')
 })

@@ -58,7 +58,7 @@ onBeforeUnmount(() => editor.leave())
         </div>
       </div>
     </SettingsCard>
-    <ThemeColoursCard v-if="draft" :draft="draft" :editable="canEdit" @change="editor.edit" />
+    <ThemeColoursCard v-if="draft" :draft="draft" :editable="canEdit" :permitted="editor.editable(draft)" @change="editor.edit" />
     <Teleport to="body">
       <div v-if="dirty && draft" class="theme-savebar" role="region" aria-label="Unsaved theme changes" @keydown="keys">
         <p>Unsaved changes to <strong>{{ draft.name || 'Untitled theme' }}</strong><span v-if="!valid"> · Enter a name of up to 80 characters.</span></p>
