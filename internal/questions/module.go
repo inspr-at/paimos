@@ -180,6 +180,13 @@ func (m *Module) handleList(w http.ResponseWriter, r *http.Request) {
 		result(w, 0, nil, fail(400, "invalid_request", "invalid state"))
 		return
 	}
-	page, err := m.list(r.Context(), p, project, state, limit, offset)
+	order, cursor := r.URL.Query().Get("order"), r.URL.Query().Get("cursor")
+	if (order != "" && order != "asc" && order != "desc") ||
+		(order == "desc" && (state != "answered" || offset != 0)) ||
+		(cursor != "" && order != "desc") || len(cursor) > 512 {
+		result(w, 0, nil, fail(400, "invalid_request", "invalid order or cursor"))
+		return
+	}
+	page, err := m.list(r.Context(), p, project, state, limit, offset, order, cursor)
 	result(w, 200, page, err)
 }

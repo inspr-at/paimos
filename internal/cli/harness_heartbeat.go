@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
@@ -156,8 +157,8 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Host, "host", 0, "non-secret host label")
 			fs.string(&o.Label, "label", 0, "session display label used until a name source has one")
-			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
-			fs.string(&o.Effort, "effort", 0, "reasoning effort, or AEON_EFFORT when omitted")
+			fs.string(&o.Model, "model", 0, "initial model, or AEON_MODEL; session transcript updates it")
+			fs.string(&o.Effort, "effort", 0, "initial reasoning effort, or AEON_EFFORT; session transcript updates it")
 			fs.string(&o.AccountLabel, "account-label", 0, "subscription or account display name (never a credential)")
 			fs.string(&o.HarnessVersion, "harness-version", 0, "harness version (defaults to a bounded local --version probe)")
 			fs.string(&o.Brief, "brief", 0, "short prompt file name or ticket key")
@@ -177,7 +178,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
-			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
+			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage, title and current model")
 			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, grok, gemini, or opencode")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
@@ -968,6 +969,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, errors.New("registration did not return a session id")
 	}
 	disk.SessionID = strings.ToLower(out.ID)
+	disk.ModelSent = true
+	disk.SentModel = heartbeatText(o.Model, 128)
+	disk.SentEffort = heartbeatText(o.Effort, 40)
 	bindHeartbeatWorktree(ctx, o, &disk)
 	if haveLabel {
 		disk.LabelSent = true
@@ -1169,16 +1173,13 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			delete(body, "display_label")
 		}
 	}
-	putText(body, "model", heartbeatText(o.Model, 128), true)
-	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
-	if session.disk.RequestedModel != "" && o.Model == session.disk.ModelFlagAtRequest && o.Effort == session.disk.EffortFlagAtRequest {
-		body["model"] = session.disk.RequestedModel
-		body["reasoning_effort"] = session.disk.RequestedEffort
-	} else {
-		session.disk.RequestedModel = ""
-		session.disk.RequestedEffort = ""
-	}
+	modelUpdate := putHeartbeatModel(ctx, o, session, body)
 
+	if model, ok := body["model"].(string); ok && model != "" {
+		if effort, ok := body["reasoning_effort"].(string); ok && modelreport.ValidTuple(model, effort) {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(session.id + "/advertised/" + model + "/" + effort), Harness: o.Harness, Model: model, Effort: effort, Status: "advertised"}}
+		}
+	}
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
@@ -1309,6 +1310,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
 	}
+	acceptHeartbeatModel(session, body, modelUpdate)
 	rt.printEstimateWarnings(response.Warnings, &session.disk.WarningAt, time.Now())
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
@@ -1579,6 +1581,7 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 			}
 			session.disk.RequestedModel, session.disk.RequestedEffort = model, effort
 			session.disk.ModelFlagAtRequest, session.disk.EffortFlagAtRequest = o.Model, o.Effort
+			session.disk.RequestedModelBaseline = captureHeartbeatModelBaseline(ctx, o, session)
 		}
 	}
 }

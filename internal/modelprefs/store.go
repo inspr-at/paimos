@@ -74,6 +74,14 @@ func orderedChain(raw []byte) ([]Scope, error) {
 	return out, nil
 }
 func LoadChain(ctx context.Context, tx pgx.Tx, personID *string, projectID string) ([]Scope, error) {
+	cache, _ := ctx.Value(chainCacheKey{}).(map[string][]Scope)
+	key := projectID + "|"
+	if personID != nil {
+		key += *personID
+	}
+	if chain, ok := cache[key]; ok {
+		return chain, nil
+	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT `+scopesJSON+` FROM (SELECT `+CanonicalPersonSQL("$1")+` AS person_id,
  (SELECT n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
@@ -81,7 +89,19 @@ func LoadChain(ctx context.Context, tx pgx.Tx, personID *string, projectID strin
 	if err != nil {
 		return nil, err
 	}
-	return orderedChain(raw)
+	chain, err := orderedChain(raw)
+	if err == nil && cache != nil {
+		cache[key] = chain
+	}
+	return chain, err
+}
+
+type chainCacheKey struct{}
+
+// WithChainCache is for one read-only transaction. Callers must discard it
+// before a preference write or another transaction; the scopes are immutable.
+func WithChainCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, chainCacheKey{}, map[string][]Scope{})
 }
 
 type Kind struct {

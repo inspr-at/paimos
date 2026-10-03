@@ -63,6 +63,7 @@ func timingBudgetNames(path string) []string {
 	return []string{
 		"TestList6000FiltersPerformance",
 		"TestList6000Performance",
+		"TestList6000PerformanceWithStaleKindStatistics",
 		"TestPlanningBulkUsagePerformance",
 	}
 }
@@ -355,7 +356,7 @@ func formatFile(items []Item, splitAbove, count int) string {
 	fmt.Fprintf(&b, "# Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.\n")
 	fmt.Fprintf(&b, "# A package added after that run is listed at 0ms until the next measurement.\n")
 	fmt.Fprintf(&b, "# A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.\n")
-	fmt.Fprintf(&b, "# TestList6000Performance, TestList6000FiltersPerformance and TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, in the hosted go-timing job.\n")
+	fmt.Fprintf(&b, "# %s are wall-clock budgets. Every shard skips them. They run once, with -p 1, in the hosted go-timing job.\n", strings.Join(timingBudgetNames(nodesPackage), ", "))
 	fmt.Fprintf(&b, "# Columns: shard milliseconds import-path [TestName]\n")
 	for _, it := range items {
 		if it.Test == "" {

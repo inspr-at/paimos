@@ -147,6 +147,12 @@ func locateUsageFile(o heartbeatOptions, source string) string {
 // Discovery belongs to the registered generation, including after a helper
 // restart. Pin its first match so another session cannot inherit its cursor.
 func resolveSessionHeartbeatUsage(o heartbeatOptions, session *heartbeatSession) (usageTarget, error) {
+	return resolveSessionHeartbeatUsageWithBinding(o, session, true)
+}
+
+// Model observation previews a POST and must not save proposed request state
+// while discovering its source. Usage reporting binds the source after success.
+func resolveSessionHeartbeatUsageWithBinding(o heartbeatOptions, session *heartbeatSession, bind bool) (usageTarget, error) {
 	if session == nil || o.UsageFile != "" || o.Transcript != "" || o.UsageID != "" || validUUID(o.SourceSession) {
 		return resolveHeartbeatUsage(o)
 	}
@@ -167,7 +173,7 @@ func resolveSessionHeartbeatUsage(o heartbeatOptions, session *heartbeatSession)
 		return resolveHeartbeatUsage(o)
 	}
 	target, err := resolveHeartbeatUsage(o)
-	if err == nil && target.Path != "" {
+	if bind && err == nil && target.Path != "" {
 		session.disk.UsageSource, session.disk.UsagePath = source, target.Path
 		if err = saveHeartbeatSession(session); err != nil {
 			return usageTarget{}, err

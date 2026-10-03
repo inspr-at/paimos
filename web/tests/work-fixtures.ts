@@ -49,6 +49,8 @@ export interface MockOptions {
   failPatch?: boolean
   conflictOn?: string
   bigProject?: number
+  // Cap an API page for pagination specs without generating hundreds of tickets.
+  listPageSize?: number
   failUpload?: boolean
   // The signed-in person is a workspace admin (shared project groups).
   admin?: boolean
@@ -628,7 +630,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
           for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1
         }
       }
-      const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
+      const limit = Math.min(Number(query.get('limit') ?? 50), options.listPageSize ?? Infinity), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
       const pageRows = rows.slice(offset, offset + limit)
       return route.fulfill({ json: { items: pageRows.map(n => item(n, data, options.liveStatus === 403, !options.readOnly && options.liveStatus !== 403)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }

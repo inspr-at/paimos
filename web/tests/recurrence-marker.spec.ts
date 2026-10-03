@@ -39,6 +39,26 @@ async function setup(page: Page, manage = true, locale = 'en-GB') {
 test.describe('touch permission changes', () => {
   test.use({ hasTouch: true })
 
+  for (const width of [1024, 1440]) {
+    test(`coarse-pointer list keeps the recurring marker and title still at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      const { errors } = await setup(page)
+      await page.goto('/p/PHAROS?sort=key&group=none')
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const icon = row(page).locator('.ticket-type-icon')
+      await expect(icon.locator('.recurrence-dot')).toBeVisible()
+      await expectStableControls({
+        controls: { 'type slot': icon, 'ticket title': row(page).locator('.title-link'), 'clicked row': row(page) },
+        interactions: [
+          { name: 'hover marker', run: () => icon.hover() },
+          { name: 'keyboard focus marker', run: () => icon.focus() },
+        ],
+        scrollAreas: { list: page.locator('.table-card') },
+      })
+      expect(errors).toEqual([])
+    })
+  }
+
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const change of ['grant', 'revoke'] as const) {
     test(`${change} keeps the recurring pill and ticket content still at ${width}px in ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })

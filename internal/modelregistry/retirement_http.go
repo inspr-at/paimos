@@ -68,6 +68,9 @@ func (m *Module) retirement(w http.ResponseWriter, r *http.Request) {
 			out["reason"] = in.Reason
 			ev = "model.profile_retired"
 		} else {
+			if before == nil {
+				return nil
+			}
 			if _, err := tx.Exec(ctx, `DELETE FROM model_profile_retirements WHERE profile_id=$1`, id); err != nil {
 				return err
 			}
