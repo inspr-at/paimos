@@ -78,14 +78,21 @@ func nextPaceRevision(ctx context.Context, tx pgx.Tx) (int64, error) {
 }
 
 func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
+	var in paceWrite
+	if !m.decodeAdminInput(w, r, func() error {
+		var err error
+		in, err = decodePaceWrite(r)
+		if err != nil {
+			return statusError{http.StatusBadRequest, "invalid pace"}
+		}
+		return nil
+	}) {
+		return
+	}
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		productID, err := portalProductID(ctx, tx)
 		if err != nil {
 			return nil, err
-		}
-		in, err := decodePaceWrite(r)
-		if err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid pace"}
 		}
 		history := false
 		switch {
@@ -176,13 +183,21 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) writeFulfillment(w http.ResponseWriter, r *http.Request) {
+	var featureID string
+	var clear bool
+	if !m.decodeAdminInput(w, r, func() error {
+		var err error
+		featureID, clear, err = decodeOptionalID(r, "feature_id")
+		if err != nil {
+			return statusError{http.StatusBadRequest, "invalid wish"}
+		}
+		return nil
+	}) {
+		return
+	}
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		wishID := r.PathValue("wishId")
 		if !uuidPattern.MatchString(wishID) {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid wish"}
-		}
-		featureID, clear, err := decodeOptionalID(r, "feature_id")
-		if err != nil {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid wish"}
 		}
 		productID, err := portalProductID(ctx, tx)

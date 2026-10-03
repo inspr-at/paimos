@@ -45,9 +45,15 @@ func (m *Module) submitWish(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "cross-site wish denied")
 		return
 	}
-	in, err := decodeWish(r)
-	if err != nil {
-		fail(w, http.StatusBadRequest, "invalid wish")
+	var in wishIntake
+	if !decodePortalInput(w, r, func() error {
+		var err error
+		in, err = decodeWish(r)
+		if err != nil {
+			return statusError{http.StatusBadRequest, "invalid wish"}
+		}
+		return nil
+	}) {
 		return
 	}
 	title, summary, err := wishText(in.Title, in.Summary)
@@ -65,6 +71,9 @@ func (m *Module) submitWish(w http.ResponseWriter, r *http.Request) {
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal wish"), m.pool, tenantID, func(tx pgx.Tx) error {
 		product, err := publicWriteProduct(r.Context(), tx, r.PathValue("productSlug"))
 		if err != nil {
+			return err
+		}
+		if err := checkProductBinding(r, product); err != nil {
 			return err
 		}
 		if err := allowParticipation(product, false); err != nil {

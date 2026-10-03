@@ -74,10 +74,15 @@ func (m *Module) hideWish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) moderateWish(w http.ResponseWriter, r *http.Request, state, eventType string) {
-	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := emptyWishBody(r); err != nil {
-			return portalEdit{}, err
+			return err
 		}
+		return nil
+	}) {
+		return
+	}
+	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
 		id := r.PathValue("wishId")
 		if !uuidPattern.MatchString(id) {
 			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid wish"}
@@ -87,11 +92,16 @@ func (m *Module) moderateWish(w http.ResponseWriter, r *http.Request, state, eve
 }
 
 func (m *Module) editProduct(w http.ResponseWriter, r *http.Request) {
-	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
-		var in productWrite
+	var in productWrite
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil || (in.Title == nil && in.Summary == nil && in.Published == nil) {
-			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid product"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid product"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
 		id := r.PathValue("productId")
 		if !uuidPattern.MatchString(id) {
 			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid product"}
@@ -101,11 +111,16 @@ func (m *Module) editProduct(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) editFeature(w http.ResponseWriter, r *http.Request) {
-	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
-		var in featureWrite
+	var in featureWrite
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil || (in.Title == nil && in.Summary == nil && in.Status == nil && in.Legal == nil && in.Reason == nil && in.Live == nil) {
-			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid feature"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid feature"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
 		id := r.PathValue("featureId")
 		if !uuidPattern.MatchString(id) {
 			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid feature"}

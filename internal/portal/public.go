@@ -53,14 +53,15 @@ type portalWish struct {
 }
 
 type portalDocument struct {
-	productID      string
-	Product        *portalProduct        `json:"product"`
-	Catalog        []portalFeature       `json:"catalog"`
-	Wishes         []portalWish          `json:"wishes"`
-	Comparison     []portalComparisonRow `json:"comparison,omitempty"`
-	Pace           *portalPace           `json:"pace,omitempty"`
-	ReleaseHistory bool                  `json:"release_history,omitempty"`
-	Roadmap        bool                  `json:"roadmap,omitempty"`
+	productID       string
+	productRevision int64
+	Product         *portalProduct        `json:"product"`
+	Catalog         []portalFeature       `json:"catalog"`
+	Wishes          []portalWish          `json:"wishes"`
+	Comparison      []portalComparisonRow `json:"comparison,omitempty"`
+	Pace            *portalPace           `json:"pace,omitempty"`
+	ReleaseHistory  bool                  `json:"release_history,omitempty"`
+	Roadmap         bool                  `json:"roadmap,omitempty"`
 }
 
 type voteResult struct {
@@ -169,6 +170,9 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 	if releases == nil {
 		releases = []publicRelease{}
 	}
+	if doc.Product != nil {
+		w.Header().Set(portalBindingHeader, productBinding(doc.productID, doc.productRevision))
+	}
 	switch kind {
 	case publicRoadmapKind:
 		if roadmapItems == nil {
@@ -216,6 +220,7 @@ func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {
 	}
 	id := product.ProductID
 	doc.productID = id
+	doc.productRevision = product.Revision
 	ctx = context.WithValue(ctx, productContextKey{}, id)
 	var key, title, body string
 	err = tx.QueryRow(ctx, `SELECT key,left(title,300),left(body,4000) FROM nodes WHERE id=$1::uuid`, id).Scan(&key, &title, &body)
@@ -360,8 +365,12 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "cross-site vote denied")
 		return
 	}
-	if err := decodeVote(r); err != nil {
-		fail(w, http.StatusBadRequest, "invalid vote")
+	if !decodePortalInput(w, r, func() error {
+		if err := decodeVote(r); err != nil {
+			return statusError{http.StatusBadRequest, "invalid vote"}
+		}
+		return nil
+	}) {
 		return
 	}
 	wishKey := r.PathValue("wishKey")
@@ -382,6 +391,9 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal vote"), m.pool, tenantID, func(tx pgx.Tx) error {
 		product, err := publicWriteProduct(r.Context(), tx, r.PathValue("productSlug"))
 		if err != nil {
+			return err
+		}
+		if err := checkProductBinding(r, product); err != nil {
 			return err
 		}
 		if err := allowParticipation(product, true); err != nil {

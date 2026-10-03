@@ -74,6 +74,7 @@ interface Participation {
 }
 const participation = ref<Participation | null>(null)
 let loadRevision = 0
+const productBinding = ref('')
 const loading = ref(true)
 const missing = ref(false)
 const error = ref('')
@@ -126,6 +127,7 @@ async function load() {
   const revision = ++loadRevision
   const address = base.value
   participation.value = null
+  productBinding.value = ''
   loading.value = true
   error.value = ''
   missing.value = false
@@ -159,14 +161,16 @@ async function load() {
     if (!response.ok) throw new Error('unavailable')
     const document = await response.json() as PortalDocument
     if (revision !== loadRevision || address !== base.value) return
+    const binding = response.headers.get('X-Portal-Binding') ?? ''
     doc.value = document
-    if (document.product) {
+    if (document.product && /^[0-9a-f-]{36}:[1-9][0-9]*$/.test(binding)) {
       try {
-        const policyResponse = await resilientFetch(`${address}/participation`, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+        const policyResponse = await resilientFetch(`${address}/participation`, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', headers: { 'X-Portal-Binding': binding } })
         const policy = policyResponse.ok ? await policyResponse.json() as Participation : null
         if (revision !== loadRevision || address !== base.value) return
         // Missing/invalid policy never enables an input control.
-        participation.value = policy && ['disabled', 'legacy', 'registered'].includes(policy.policy) && typeof policy.voting_enabled === 'boolean' && typeof policy.wish_intake_enabled === 'boolean' && typeof policy.corrections_enabled === 'boolean' ? policy : null
+        participation.value = policyResponse.headers.get('X-Portal-Binding') === binding && policy && ['disabled', 'legacy', 'registered'].includes(policy.policy) && typeof policy.voting_enabled === 'boolean' && typeof policy.wish_intake_enabled === 'boolean' && typeof policy.corrections_enabled === 'boolean' ? policy : null
+        productBinding.value = participation.value ? binding : ''
       } catch {
         if (revision !== loadRevision || address !== base.value) return
         participation.value = null
@@ -205,6 +209,7 @@ async function sendCorrection() {
   if (!participation.value?.corrections_enabled) return
   const address = base.value
   const revision = loadRevision
+  const binding = productBinding.value
   const competitor = correctionCompetitor.value.trim()
   const aspect = correctionAspect.value.trim()
   const statement = correctionStatement.value.trim()
@@ -217,7 +222,7 @@ async function sendCorrection() {
       credentials: 'same-origin',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Binding': binding },
       body: JSON.stringify({
         competitor,
         aspect,
@@ -228,6 +233,7 @@ async function sendCorrection() {
     })
     if (revision !== loadRevision || address !== base.value) return
     if (response.status === 403 || response.status === 401) { participation.value = null; throw new Error('Participation is currently unavailable.') }
+    if (response.status === 409) { participation.value = null; throw new Error('The product changed. Reload the catalog before sending again.') }
     if (response.status === 429) throw new Error('Too many corrections from this network. Try again in a minute.')
     if (response.status === 404) throw new Error('This portal is not taking corrections.')
     if (!response.ok) throw new Error('The correction was not sent.')
@@ -253,6 +259,7 @@ async function sendWish() {
   if (!participation.value?.wish_intake_enabled) return
   const address = base.value
   const revision = loadRevision
+  const binding = productBinding.value
   const title = wishTitle.value.trim()
   const summary = wishSummary.value.trim()
   if (!title || !summary || wishing.value) return
@@ -264,11 +271,12 @@ async function sendWish() {
       credentials: 'same-origin',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Binding': binding },
       body: JSON.stringify({ title, summary, website: website.value }),
     })
     if (revision !== loadRevision || address !== base.value) return
     if (response.status === 403 || response.status === 401) { participation.value = null; throw new Error('Participation is currently unavailable.') }
+    if (response.status === 409) { participation.value = null; throw new Error('The product changed. Reload the catalog before sending again.') }
     if (response.status === 429) throw new Error('Too many wishes from this network. Try again in a minute.')
     if (response.status === 404) throw new Error('This portal is not taking wishes.')
     if (!response.ok) throw new Error('The wish was not sent.')
@@ -288,6 +296,7 @@ async function vote(wish: PortalWish) {
   if (!participation.value?.voting_enabled) return
   const address = base.value
   const revision = loadRevision
+  const binding = productBinding.value
   if (busy.value || voted.value[wish.key]) return
   busy.value = wish.key
   voteError.value = ''
@@ -297,11 +306,12 @@ async function vote(wish: PortalWish) {
       credentials: 'same-origin',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Binding': binding },
       body: '{}',
     })
     if (revision !== loadRevision || address !== base.value) return
     if (response.status === 403 || response.status === 401) { participation.value = null; throw new Error('Participation is currently unavailable.') }
+    if (response.status === 409) { participation.value = null; throw new Error('The product changed. Reload the catalog before sending again.') }
     if (response.status === 429) throw new Error('Too many votes from this network. Try again in a minute.')
     if (response.status === 404) throw new Error('This wish is not open for votes.')
     if (!response.ok) throw new Error('The vote was not saved.')
@@ -412,9 +422,9 @@ watch(() => [props.tenantSlug, props.productSlug], () => { void load() }, { imme
             <div class="hp" aria-hidden="true">
               <label>Website<input v-model="website" type="text" tabindex="-1" autocomplete="off" name="website" /></label>
             </div>
-            <p v-if="wishError" class="alert" role="alert">{{ wishError }}</p>
             <button class="vote" type="submit" :disabled="wishing || !wishTitle.trim() || !wishSummary.trim()"><AppIcon name="send" :size="14" />{{ wishing ? 'Sending…' : 'Send wish' }}</button>
           </form>
+          <p v-if="wishError" class="alert" role="alert">{{ wishError }}</p>
           <p v-if="wishSent" class="quiet" role="status">Sent for review.</p>
         </section>
 
@@ -446,9 +456,9 @@ watch(() => [props.tenantSlug, props.productSlug], () => { void load() }, { imme
             <div class="hp" aria-hidden="true">
               <label>Website<input v-model="correctionSite" type="text" tabindex="-1" autocomplete="off" name="website" /></label>
             </div>
-            <p v-if="correctionError" class="alert" role="alert">{{ correctionError }}</p>
             <button class="vote" type="submit" :disabled="correcting || !correctionCompetitor.trim() || !correctionAspect.trim() || correctionStatement.trim().length < 8"><AppIcon name="send" :size="14" />{{ correcting ? 'Sending…' : 'Send correction' }}</button>
           </form>
+          <p v-if="correctionError" class="alert" role="alert">{{ correctionError }}</p>
           <p v-if="correctionSent" class="quiet" role="status">Sent.</p>
         </section>
         <footer class="colophon">

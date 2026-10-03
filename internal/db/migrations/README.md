@@ -223,3 +223,17 @@ The tenant-loop backfill and mirror delete have an exact-byte policy exception
 for coordinator review. DSAR inventory is absent at this base; these new settings
 and link identifiers are tenant metadata, while ballot hashes remain pseudonymous
 personal data under the existing vote-table contract.
+
+AEON-619 fix round 2 keeps migration 1138 branch-only and updates its exact-byte
+exception for coordinator review. Nested and soft-deleted products are backfilled
+unpublished with participation disabled. Becoming an eligible root through move,
+restore or kind change registers settings idempotently; later moves and restores
+preserve the existing slug, default choice and participation settings.
+
+Catalog and participation responses expose `X-Portal-Binding` (`product UUID:settings
+revision`) without adding JSON fields. The public page echoes this binding on its
+policy read and every wish, correction and vote. Final writes compare it under the
+tenant/tree/product fences and return 409 without writing if the displayed product
+or settings revision changed. Older clients may omit it. Portal input decoders
+run before transaction locks and retain their byte limits, with a 10-second body
+read deadline; transactional authorization still runs under the tenant fence.

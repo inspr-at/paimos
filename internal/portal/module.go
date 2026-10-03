@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -177,6 +178,50 @@ func decodeJSON(r *http.Request, dest any) error {
 	return nil
 }
 
+const portalBodyTimeout = 10 * time.Second
+
+// Decode before opening a transaction. A byte cap alone does not stop a slow
+// sender; the socket deadline interrupts reads even when Body.Close would wait.
+func decodePortalInput(w http.ResponseWriter, r *http.Request, decode func() error) bool {
+	controller := http.NewResponseController(w)
+	err := controller.SetReadDeadline(time.Now().Add(portalBodyTimeout))
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
+	if err == nil {
+		defer controller.SetReadDeadline(time.Time{})
+	}
+	// Non-socket handlers (including isolated tests) still have a time bound.
+	var timer *time.Timer
+	if errors.Is(err, http.ErrNotSupported) && r.Body != nil {
+		timer = time.AfterFunc(portalBodyTimeout, func() { _ = r.Body.Close() })
+		defer timer.Stop()
+	}
+	if err := decode(); err != nil {
+		var se statusError
+		if errors.As(err, &se) {
+			fail(w, se.status, se.msg)
+		} else {
+			fail(w, http.StatusBadRequest, "invalid input")
+		}
+		return false
+	}
+	return true
+}
+
+func (m *Module) decodeAdminInput(w http.ResponseWriter, r *http.Request, decode func() error) bool {
+	publicHeaders(w)
+	if _, ok := m.person(w, r); !ok {
+		return false
+	}
+	if m.pool == nil {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
+	return decodePortalInput(w, r, decode)
+}
+
 func (m *Module) readSettings(w http.ResponseWriter, r *http.Request) {
 	publicHeaders(w)
 	p, ok := m.person(w, r)
@@ -218,8 +263,12 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in settingsWrite
-	if err := decodeJSON(r, &in); err != nil || in.Enabled == nil {
-		fail(w, http.StatusBadRequest, "invalid settings")
+	if !decodePortalInput(w, r, func() error {
+		if err := decodeJSON(r, &in); err != nil || in.Enabled == nil {
+			return statusError{http.StatusBadRequest, "invalid settings"}
+		}
+		return nil
+	}) {
 		return
 	}
 	var settings portalSettings

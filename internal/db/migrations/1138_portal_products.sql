@@ -62,12 +62,14 @@ BEGIN
         PERFORM set_config('aeon.portal_moderation','on',true);
         PERFORM set_config('aeon.visible_projects','*',true);
         INSERT INTO portal_products(tenant_id, product_id, slug, published, is_default, participation_policy)
-        SELECT tenant_id, id, lower(key), state='published', rank=1,
-               CASE WHEN state='published' THEN 'legacy' ELSE 'disabled' END
+        SELECT tenant_id, id, lower(key), eligible AND state='published', eligible AND rank=1,
+               CASE WHEN eligible AND state='published' THEN 'legacy' ELSE 'disabled' END
         FROM (
-            SELECT n.*, row_number() OVER (ORDER BY (n.state='published') DESC, n.position, n.key, n.id) AS rank
+            SELECT n.*, n.parent_id IS NULL AND n.deleted_at IS NULL AS eligible,
+                   row_number() OVER (ORDER BY (n.parent_id IS NULL AND n.deleted_at IS NULL) DESC,
+                                              (n.state='published') DESC, n.position, n.key, n.id) AS rank
             FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-            WHERE k.slug='portal_product' AND n.parent_id IS NULL AND n.deleted_at IS NULL
+            WHERE k.slug='portal_product'
         ) products;
         UPDATE portal_pace SET product_id=(SELECT product_id FROM portal_products WHERE is_default);
         INSERT INTO portal_product_pace(tenant_id, product_id, project_node_id, release_history, revision)
@@ -121,16 +123,17 @@ CREATE TRIGGER portal_product_pace_guard BEFORE INSERT OR UPDATE OR DELETE ON po
 
 CREATE FUNCTION aeon_portal_register_product() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF NEW.parent_id IS NULL AND EXISTS (SELECT 1 FROM node_kinds k
+    IF NEW.parent_id IS NULL AND NEW.deleted_at IS NULL AND EXISTS (SELECT 1 FROM node_kinds k
        WHERE k.tenant_id=NEW.tenant_id AND k.id=NEW.kind_id AND k.slug='portal_product') THEN
         INSERT INTO portal_products(tenant_id, product_id, slug, is_default)
         VALUES(NEW.tenant_id, NEW.id, lower(NEW.key),
-               NOT EXISTS(SELECT 1 FROM portal_products WHERE is_default));
+               NOT EXISTS(SELECT 1 FROM portal_products WHERE is_default))
+        ON CONFLICT (tenant_id,product_id) DO NOTHING;
     END IF;
     RETURN NEW;
 END;
 $$;
-CREATE TRIGGER nodes_portal_register AFTER INSERT ON nodes
+CREATE TRIGGER nodes_portal_register AFTER INSERT OR UPDATE OF parent_id,deleted_at,kind_id ON nodes
     FOR EACH ROW EXECUTE FUNCTION aeon_portal_register_product();
 
 CREATE FUNCTION aeon_portal_bind_legacy_pace() RETURNS trigger LANGUAGE plpgsql AS $$

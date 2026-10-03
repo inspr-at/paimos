@@ -8376,29 +8376,33 @@ paths:
     get:
       operationId: readPublicPortalParticipation
       summary: Read the participation policy and separate anonymous history
-      description: Anonymous, no-store. Disabled has no intake or voting controls. Registered never counts browser ballots; anonymous history is separate, never added to active totals. B1 reports registered_available false.
+      description: Anonymous, no-store. Disabled has no intake or voting controls. Registered never counts browser ballots; anonymous history is separate, never added to active totals. B1 reports registered_available false. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
       parameters:
+        - {$ref: '#/components/parameters/PortalBinding'}
         - {name: after, in: query, schema: {type: string, maxLength: 30}, description: Keyset cursor returned as next_cursor; history pages contain at most 100 public wishes}
         - {name: tenantSlug, in: path, required: true, schema: {type: string}}
       responses:
-        '200': {description: Participation policy, content: {application/json: {schema: {$ref: '#/components/schemas/PortalParticipation'}}}}
+        '200': {description: Participation policy, headers: {X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalParticipation'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/participation:
     get:
       operationId: readPublicPortalProductParticipation
       summary: Read the participation policy and separate anonymous history
-      description: Anonymous, no-store. Disabled has no intake or voting controls. Registered never counts browser ballots; anonymous history is separate, never added to active totals. B1 reports registered_available false.
+      description: Anonymous, no-store. Disabled has no intake or voting controls. Registered never counts browser ballots; anonymous history is separate, never added to active totals. B1 reports registered_available false. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
       parameters:
+        - {$ref: '#/components/parameters/PortalBinding'}
         - {name: after, in: query, schema: {type: string, maxLength: 30}, description: Keyset cursor returned as next_cursor; history pages contain at most 100 public wishes}
         - {name: tenantSlug, in: path, required: true, schema: {type: string}}
         - {name: productSlug, in: path, required: true, schema: {type: string}}
       responses:
-        '200': {description: Participation policy, content: {application/json: {schema: {$ref: '#/components/schemas/PortalParticipation'}}}}
+        '200': {description: Participation policy, headers: {X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalParticipation'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}:
@@ -8409,7 +8413,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/catalog:
@@ -8420,7 +8424,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/wishes:
@@ -8431,21 +8435,22 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
     post:
       operationId: submitPublicPortalWishProduct
       summary: Submit an anonymous wish for review
-      description: Product-scoped version of the existing portal contract. Uses this exact product, never the default. Unknown or unpublished products return the same 404 as closed tenants. Shared limiter runs before resolution. Intake and voting require legacy policy; disabled refuses writes, and registered never creates anonymous ballots. All writes recheck policy and publication inside the final fenced transaction. Releases, roadmap and pace use this product's project link. The response fields remain compatible with the existing endpoint.
+      description: Product-scoped version of the existing portal contract. Uses this exact product, never the default. Unknown or unpublished products return the same 404 as closed tenants. Shared limiter runs before resolution. Intake and voting require legacy policy; disabled refuses writes, and registered never creates anonymous ballots. All writes recheck policy and publication inside the final fenced transaction. Releases, roadmap and pace use this product's project link. The response fields remain compatible with the existing endpoint. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
-      parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      parameters: [{$ref: '#/components/parameters/PortalBinding'}, {name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishIntake'}}}}
       responses:
         '201': {description: 'Accepted for review, or discarded by the honeypot', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {description: Participation disabled or unavailable}
         '401': {description: Registered voting requires eligible sign-in}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/comparison:
@@ -8456,7 +8461,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/pace:
@@ -8467,7 +8472,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/catalog.json:
@@ -8478,7 +8483,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/llms.txt:
@@ -8489,7 +8494,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}}, content: {text/plain: {schema: {type: string}}}}
+        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {text/plain: {schema: {type: string}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/releases:
@@ -8500,7 +8505,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
+        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/roadmap:
@@ -8511,7 +8516,7 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
+        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/roadmap.json:
@@ -8522,16 +8527,17 @@ paths:
       security: []
       parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
+        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/wishes/{wishKey}/votes:
     post:
       operationId: votePublicPortalWishProduct
       summary: Cast one anonymous vote on a published wish
-      description: Product-scoped version of the existing portal contract. Uses this exact product, never the default. Unknown or unpublished products return the same 404 as closed tenants. Shared limiter runs before resolution. Intake and voting require legacy policy; disabled refuses writes, and registered never creates anonymous ballots. All writes recheck policy and publication inside the final fenced transaction. Releases, roadmap and pace use this product's project link. The response fields remain compatible with the existing endpoint.
+      description: Product-scoped version of the existing portal contract. Uses this exact product, never the default. Unknown or unpublished products return the same 404 as closed tenants. Shared limiter runs before resolution. Intake and voting require legacy policy; disabled refuses writes, and registered never creates anonymous ballots. All writes recheck policy and publication inside the final fenced transaction. Releases, roadmap and pace use this product's project link. The response fields remain compatible with the existing endpoint. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
       parameters:
+        - {$ref: '#/components/parameters/PortalBinding'}
         - {name: productSlug, in: path, required: true, schema: {type: string}}
         - {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
         - {name: wishKey, in: path, required: true, schema: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$'}}
@@ -8542,21 +8548,23 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {description: Participation disabled or unavailable}
         '401': {description: Registered voting requires eligible sign-in}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/corrections:
     post:
       operationId: submitPublicPortalCorrectionProduct
       summary: Send an anonymous factual correction
-      description: Product-scoped version of the existing portal contract. Uses this exact product, never the default. Unknown or unpublished products return the same 404 as closed tenants. Shared limiter runs before resolution. Intake and voting require legacy policy; disabled refuses writes, and registered never creates anonymous ballots. All writes recheck policy and publication inside the final fenced transaction. Releases, roadmap and pace use this product's project link. The response fields remain compatible with the existing endpoint.
+      description: Product-scoped version of the existing portal contract. Uses this exact product, never the default. Unknown or unpublished products return the same 404 as closed tenants. Shared limiter runs before resolution. Intake and voting require legacy policy; disabled refuses writes, and registered never creates anonymous ballots. All writes recheck policy and publication inside the final fenced transaction. Releases, roadmap and pace use this product's project link. The response fields remain compatible with the existing endpoint. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
-      parameters: [{name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      parameters: [{$ref: '#/components/parameters/PortalBinding'}, {name: productSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
       responses:
         '201': {description: 'Accepted, or discarded without a stored row', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {description: Participation disabled or unavailable}
         '401': {description: Registered voting requires eligible sign-in}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /portal/settings:
@@ -8658,31 +8666,33 @@ paths:
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/wishes:
     post:
       operationId: submitPublicPortalWish
       summary: Submit an anonymous wish for review
-      description: Participation must be legacy on the explicit default product. Disabled and registered reject intake in B1. Title and summary only. No name and no email. The website field is a honeypot; a non-empty value is discarded and still answers 201. Five wishes per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The wish is stored as pending and is not part of the public catalog until someone with settings.manage publishes it.
+      description: Participation must be legacy on the explicit default product. Disabled and registered reject intake in B1. Title and summary only. No name and no email. The website field is a honeypot; a non-empty value is discarded and still answers 201. Five wishes per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The wish is stored as pending and is not part of the public catalog until someone with settings.manage publishes it. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
-      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      parameters: [{$ref: '#/components/parameters/PortalBinding'}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishIntake'}}}}
       responses:
         '201': {description: 'Accepted for review, or discarded by the honeypot', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {description: Participation disabled or unavailable}
         '401': {description: Registered voting requires eligible sign-in}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/wishes/{wishKey}/votes:
     post:
       operationId: votePublicPortalWish
       summary: Cast one anonymous vote on a published wish
-      description: Only legacy participation accepts a browser ballot. Disabled refuses writes; registered requires eligible sign-in and never creates a browser ballot. The old URL targets only the explicit default product. No identity fields. An empty JSON object is the whole body. The same HttpOnly ballot votes once per wish; further calls return the current count. Ten votes per address per minute, reusing the shared public limiter. A disabled portal, unknown tenant or unpublished wish is 404.
+      description: Only legacy participation accepts a browser ballot. Disabled refuses writes; registered requires eligible sign-in and never creates a browser ballot. The old URL targets only the explicit default product. No identity fields. An empty JSON object is the whole body. The same HttpOnly ballot votes once per wish; further calls return the current count. Ten votes per address per minute, reusing the shared public limiter. A disabled portal, unknown tenant or unpublished wish is 404. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
       parameters:
+        - {$ref: '#/components/parameters/PortalBinding'}
         - {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
         - {name: wishKey, in: path, required: true, schema: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$'}}
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
@@ -8692,21 +8702,23 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {description: Participation disabled or unavailable}
         '401': {description: Registered voting requires eligible sign-in}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/corrections:
     post:
       operationId: submitPublicPortalCorrection
       summary: Send an anonymous factual correction
-      description: Competitor, aspect, statement and source only. No name and no email. Any of those fields is refused when it contains an address, including a percent-encoded or HTML-entity form, decoded before the check. The website field is a honeypot; a non-empty value is discarded and still answers 201. A competitor that is not on the public comparison is discarded the same way. Five corrections per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The correction stays off the public page; a person with settings.manage closes it.
+      description: Competitor, aspect, statement and source only. No name and no email. Any of those fields is refused when it contains an address, including a percent-encoded or HTML-entity form, decoded before the check. The website field is a honeypot; a non-empty value is discarded and still answers 201. A competitor that is not on the public comparison is discarded the same way. Five corrections per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The correction stays off the public page; a person with settings.manage closes it. Echo the catalog X-Portal-Binding to bind this request to the displayed product and settings revision; stale bindings return 409.
       security: []
-      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      parameters: [{$ref: '#/components/parameters/PortalBinding'}, {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
       responses:
         '201': {description: 'Accepted, or discarded without a stored row', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {description: Participation disabled or unavailable}
         '401': {description: Registered voting requires eligible sign-in}
+        '409': {description: Product or settings revision changed; reload the displayed catalog}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/catalog.json:
@@ -8717,7 +8729,7 @@ paths:
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/llms.txt:
@@ -8728,7 +8740,7 @@ paths:
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}}, content: {text/plain: {schema: {type: string}}}}
+        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {text/plain: {schema: {type: string}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/releases:
@@ -8739,7 +8751,7 @@ paths:
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
+        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/roadmap:
@@ -8750,7 +8762,7 @@ paths:
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
+        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/roadmap.json:
@@ -8761,7 +8773,7 @@ paths:
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
-        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
+        '200': {description: Public roadmap, headers: {Cache-Control: {schema: {type: string}}, X-Portal-Binding: {$ref: '#/components/headers/PortalBinding'}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicRoadmap'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /portal/market:
@@ -9206,6 +9218,9 @@ components:
   # Additive optional response fields require a minor bump; removals, type changes,
   # and newly required fields require a major bump. Never add a version body field.
   headers:
+    PortalBinding:
+      description: Published product UUID and settings revision; echo as X-Portal-Binding to bind participation and writes to the catalog on screen. JSON fields are unchanged.
+      schema: {type: string, maxLength: 64, pattern: '^[0-9a-f-]{36}:[1-9][0-9]*$'}
     StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.0']}}
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
@@ -16359,6 +16374,12 @@ components:
         next_cursor:
           type: [string, 'null']
   parameters:
+    PortalBinding:
+      name: X-Portal-Binding
+      in: header
+      required: false
+      description: Optional for older clients. The product UUID and settings revision from the catalog must match the current target inside the final fenced write transaction. Malformed values return 400; stale values return 409 without a mutation or success response.
+      schema: {type: string, maxLength: 64, pattern: '^[0-9a-f-]{36}:[1-9][0-9]*$'}
     NodeId:
       name: nodeId
       in: path

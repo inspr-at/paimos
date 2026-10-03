@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -16,6 +18,33 @@ import (
 
 type productContextKey struct{}
 type productSlugContextKey struct{}
+
+const portalBindingHeader = "X-Portal-Binding"
+
+func productBinding(id string, revision int64) string {
+	return id + ":" + strconv.FormatInt(revision, 10)
+}
+
+// Older clients may omit the binding. New clients echo the catalog's identity
+// and settings revision; callers validate after resolving the fenced target.
+func checkProductBinding(r *http.Request, p productSettings) error {
+	values := r.Header.Values(portalBindingHeader)
+	if len(values) == 0 {
+		return nil
+	}
+	if len(values) != 1 || len(values[0]) > 64 {
+		return statusError{http.StatusBadRequest, "invalid product binding"}
+	}
+	id, raw, ok := strings.Cut(values[0], ":")
+	revision, err := strconv.ParseInt(raw, 10, 64)
+	if !ok || !uuidPattern.MatchString(id) || id != strings.ToLower(id) || revision < 1 || err != nil || productBinding(id, revision) != values[0] {
+		return statusError{http.StatusBadRequest, "invalid product binding"}
+	}
+	if id != p.ProductID || revision != p.Revision {
+		return statusError{http.StatusConflict, "product changed; reload the catalog"}
+	}
+	return nil
+}
 
 func productSlugForContext(ctx context.Context) string {
 	slug, _ := ctx.Value(productSlugContextKey{}).(string)
@@ -144,11 +173,16 @@ func (m *Module) readProductSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) writeProductSettings(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
-		var in productSettingsWrite
+	var in productSettingsWrite
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeJSON(r, &in); err != nil || in.Revision < 1 || in.Published == nil || !slugPattern.MatchString(in.Slug) || (in.Policy != "disabled" && in.Policy != "legacy" && in.Policy != "registered") {
-			return nil, statusError{http.StatusBadRequest, "invalid product settings"}
+			return statusError{http.StatusBadRequest, "invalid product settings"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		id := r.PathValue("productId")
 		if !uuidPattern.MatchString(id) {
 			return nil, errClosed
@@ -235,12 +269,17 @@ func (m *Module) readParticipation(w http.ResponseWriter, r *http.Request) {
 	}
 	tid, err := m.resolveTenant(r.Context(), r.PathValue("tenantSlug"))
 	var out participation
+	var binding string
 	if err == nil {
 		err = db.InTenant(db.AllProjects(r.Context(), "public portal participation"), m.pool, tid, func(tx pgx.Tx) error {
 			p, err := publicProduct(r.Context(), tx, r.PathValue("productSlug"), false)
 			if err != nil {
 				return err
 			}
+			if err := checkProductBinding(r, p); err != nil {
+				return err
+			}
+			binding = productBinding(p.ProductID, p.Revision)
 			out, err = loadParticipation(r.Context(), tx, p, after)
 			return err
 		})
@@ -249,10 +288,16 @@ func (m *Module) readParticipation(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "not found")
 		return
 	}
+	var se statusError
+	if errors.As(err, &se) {
+		fail(w, se.status, se.msg)
+		return
+	}
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
+	w.Header().Set(portalBindingHeader, binding)
 	write(w, http.StatusOK, out)
 }
 
