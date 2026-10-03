@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -141,13 +142,10 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 	}
 	var out any
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := lockPortalTenant(r.Context(), tx); err != nil {
+		if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
 			return err
 		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
-			return err
-		}
-		if err := lockPortalTree(r.Context(), tx); err != nil {
 			return err
 		}
 		// The market row guard allows publication only after this person check.

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -284,7 +285,7 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	var settings portalSettings
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := lockPortalTenant(r.Context(), tx); err != nil {
+		if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
 			return err
 		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {

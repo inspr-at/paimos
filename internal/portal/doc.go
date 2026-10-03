@@ -7,8 +7,10 @@
 // comparison and project links. portal_products settings default unpublished
 // with participation disabled. Migration preserves existing published products
 // in legacy mode and binds browser ballots to their original product. Policy,
-// publication and default changes share tenant/tree fences with intake, voting
-// and node moves. Registered activation is gated off until B3+B8+B7 are ready;
+// publication and default changes share the canonical pairing -> tree -> tenant
+// fence with intake and voting; node moves acquire tree before tenant, with
+// pairing first when needed. Resource rows precede the event counter, held last.
+// Registered activation is gated off until B3+B8+B7 are ready;
 // its projection never counts browser ballots. A separate no-store participation
 // endpoint exposes unavailable controls and anonymous history, preserving the
 // exact existing catalog, roadmap and release JSON shapes for strict consumers.

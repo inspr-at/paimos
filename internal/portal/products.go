@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -88,18 +89,6 @@ type participation struct {
 	NextCursor          string          `json:"next_cursor,omitempty"`
 }
 
-// Every portal write uses the same fences as access changes and node moves.
-// No resource or event-counter lock precedes these locks.
-func lockPortalTenant(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid FOR NO KEY UPDATE`)
-	return err
-}
-
-func lockPortalTree(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`)
-	return err
-}
-
 func loadProductSettings(ctx context.Context, tx pgx.Tx, id string, lock bool) (productSettings, error) {
 	var out productSettings
 	query := `SELECT p.product_id::text,p.slug,p.published,p.is_default,p.participation_policy,p.revision,p.theme_revision,p.registered_since,p.anonymous_history_until
@@ -139,10 +128,8 @@ func publicProduct(ctx context.Context, tx pgx.Tx, slug string, lock bool) (prod
 }
 
 func publicWriteProduct(ctx context.Context, tx pgx.Tx, slug string) (productSettings, error) {
-	if err := lockPortalTenant(ctx, tx); err != nil {
-		return productSettings{}, err
-	}
-	if err := lockPortalTree(ctx, tx); err != nil {
+	// Pairing -> tree -> tenant precedes product/resource rows and events.
+	if err := agentpairing.LockMutation(ctx, tx); err != nil {
 		return productSettings{}, err
 	}
 	return publicProduct(ctx, tx, slug, true)

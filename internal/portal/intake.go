@@ -179,10 +179,8 @@ func wishChildAllowed(slugs []string) bool {
 	return false
 }
 
+// The caller holds publicWriteProduct's canonical fence before product lookup.
 func insertPendingWish(ctx context.Context, tx pgx.Tx, tenantID, productID, title, summary string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id', true), 0))`); err != nil {
-		return err
-	}
 	var kindID, prefix string
 	err := tx.QueryRow(ctx, `SELECT id::text, short_prefix FROM node_kinds WHERE slug = 'portal_wish'`).Scan(&kindID, &prefix)
 	if errors.Is(err, pgx.ErrNoRows) || !uuidPattern.MatchString(kindID) {

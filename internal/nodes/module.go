@@ -85,11 +85,12 @@ func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Contex
 }
 
 // lockTree serializes tree edits for this tenant on the same advisory key the
-// node trigger uses, so position assignment and cycle checks cannot race.
+// node trigger uses and fences authorization in the shipped tree -> tenant
+// order. Callers that need pairing acquire it first, before entering here.
 func lockTree(ctx context.Context, tx pgx.Tx) error {
-	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid FOR NO KEY UPDATE`); err != nil {
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id', true), 0))`)
-	return err
+	return authz.LockProjectMutation(ctx, tx, tenantID)
 }

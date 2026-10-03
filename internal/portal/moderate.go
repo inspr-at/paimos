@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -141,10 +142,7 @@ func (m *Module) moderate(w http.ResponseWriter, r *http.Request, fn func(contex
 	}
 	var item portalEdit
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := lockPortalTenant(r.Context(), tx); err != nil {
-			return err
-		}
-		if err := lockPortalTree(r.Context(), tx); err != nil {
+		if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
 			return err
 		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
