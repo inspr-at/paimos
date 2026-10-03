@@ -31,7 +31,9 @@ name inventories or sequences above 10,000 refuse without omitting later hits.
 one-hop visible `relates` context of effective Backlog work in either direction,
 including ranked and tail members. Its own type/status/search filters intersect
 before counts and keyset pages (limit ≤200, cursor ≤2048 bytes); capped counts
-are explicit lower bounds. Unscoped callers retain their previous shape and
+are explicit lower bounds. Default/updated and created sorts encode timestamp
+cursors as RFC3339Nano, preserving microseconds and stable tie ordering.
+Unscoped callers retain their previous shape and
 behavior. **K1 remains open:** release-UUID Knowledge scopes validate current
 project/release visibility, then return `409 release_context_undecided` until the
 coordinator records the release-context definition; no all-work fallback.
@@ -40,6 +42,10 @@ List reads discard stale project, person and query responses. The implementation
 uses shared work predicates and a single read snapshot per overview, without
 per-member HTTP requests. P3/P4a/P5 integration keeps pairing → tree → tenant as
 the canonical mutation fence prefix and mounts persisted adoption reporting.
+The read-only adoption verification route uses the same service as adoption
+reporting. Authorized generic title/body edits to adopted release nodes advance
+the release revision atomically; stale release API edits return
+`409 revision_changed`. Rejected node patches leave the revision unchanged.
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 

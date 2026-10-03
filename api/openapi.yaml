@@ -16856,6 +16856,7 @@ components:
           description: Existing sibling; null appends
     NodePatch:
       type: object
+      description: Adopted release nodes allow title/body edits by an authorized person only. These edits atomically advance the release revision, so release API edits based on an older revision return 409 revision_changed.
       minProperties: 1
       properties:
         human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only a person can clear a pending check. Server authors completion provenance; only a person can set a new pending check when it clears stored completion provenance. Writers, including agents, may set or edit a pending check without stored completion provenance. Existing revision preconditions apply.'}

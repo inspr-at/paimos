@@ -60,7 +60,10 @@ func guardReleasePatch(ctx context.Context, tx pgx.Tx, p tenant.Principal, id st
 	if err = authz.RequireTx(ctx, tx, p, "releases.write", authz.Scope{ProjectID: project}); err != nil {
 		return &httpError{status: 403, msg: "release access required"}
 	}
-	return nil
+	// The caller holds the tree/access fence. Advance before locking the node,
+	// matching release writers; any rejected patch rolls both writes back.
+	_, err = tx.Exec(ctx, `UPDATE project_releases SET revision=revision+1 WHERE tenant_id=$1 AND release_node_id=$2`, p.TenantID, id)
+	return err
 }
 
 type shipsMoveSnapshot struct {

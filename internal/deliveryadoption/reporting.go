@@ -14,6 +14,7 @@ import (
 )
 
 var _ delivery.AdoptionReporting = (*Service)(nil)
+var _ delivery.AdoptionVerification = (*Service)(nil)
 
 type reportCursor struct {
 	Tenant, Project, Digest string

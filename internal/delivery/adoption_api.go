@@ -326,7 +326,7 @@ func (s *Store) RequestAdoption(ctx context.Context, p tenant.Principal, project
 
 // AdoptionVerification is P3's read-only verifier, kept separate from job writes.
 type AdoptionVerification interface {
-	Verify(context.Context, tenant.Principal, string) (json.RawMessage, error)
+	VerifyReport(context.Context, tenant.Principal, string) (json.RawMessage, error)
 }
 
 func (s *Store) VerifyAdoption(ctx context.Context, p tenant.Principal, project string, reporter AdoptionReporting) (json.RawMessage, error) {
@@ -339,7 +339,7 @@ func (s *Store) VerifyAdoption(ctx context.Context, p tenant.Principal, project 
 	}
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(ctx, p), 60*time.Second)
 	defer cancel()
-	raw, err := verifier.Verify(ctx, p, project)
+	raw, err := verifier.VerifyReport(ctx, p, project)
 	if err != nil {
 		return nil, err
 	}

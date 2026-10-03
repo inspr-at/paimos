@@ -174,7 +174,12 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
 		}
 	}
 	args = append(args, q.Cursor == "", value, c.Updated, nullableScopeID(c.ID), q.Limit+1, longest(words))
-	pageSQL := prefix + `, selected AS MATERIALIZED (SELECT ce.*,` + expr + `::text order_value FROM context_entries ce WHERE ($9::bool OR ` + expr + op + `$10::` + cast + ` OR (` + expr + `=$10::` + cast + ` AND (ce.updated_at,ce.id)<($11,$12::uuid))) ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC LIMIT $13)
+	orderExpr := expr + "::text"
+	if cast == "timestamptz" {
+		// Scan timestamps as times; PostgreSQL text depends on session formatting.
+		orderExpr = expr
+	}
+	pageSQL := prefix + `, selected AS MATERIALIZED (SELECT ce.*,` + orderExpr + ` order_value FROM context_entries ce WHERE ($9::bool OR ` + expr + op + `$10::` + cast + ` OR (` + expr + `=$10::` + cast + ` AND (ce.updated_at,ce.id)<($11,$12::uuid))) ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC LIMIT $13)
  SELECT ` + itemColumns + `,CASE WHEN $14::text<>'' AND strpos(lower(n.body),lower($14))>0 THEN substr(n.body,greatest(1,strpos(lower(n.body),lower($14))-300),900) ELSE left(n.body,900) END,$14::text<>'' AND strpos(lower(n.body),lower($14))>300,ce.order_value FROM selected ce JOIN nodes n ON n.tenant_id=$1 AND n.id=ce.id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id ` + nearestProject + "\n" + lastWrite + ` ORDER BY ` + expr + ` ` + dir + `,ce.updated_at DESC,ce.id DESC`
 	rows, err = tx.Query(ctx, pageSQL, args...)
 	if err != nil {
@@ -186,8 +191,16 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
 		var it Item
 		var head, orderValue string
 		var cut bool
-		if err = scanItem(rows, &it, &head, &cut, &orderValue); err != nil {
+		var orderTime time.Time
+		var orderTarget any = &orderValue
+		if cast == "timestamptz" {
+			orderTarget = &orderTime
+		}
+		if err = scanItem(rows, &it, &head, &cut, orderTarget); err != nil {
 			return out, err
+		}
+		if cast == "timestamptz" {
+			orderValue = orderTime.UTC().Format(time.RFC3339Nano)
 		}
 		it.Excerpt = excerpt(head, it.Title, words, cut)
 		out.Items = append(out.Items, it)
