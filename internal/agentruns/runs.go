@@ -455,16 +455,29 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
+	// A managed run's own provisional estimate can outlive its short ledger
+	// window while a vendor stop is backing off. Its current permission comes
+	// from ValidateReservedCapacity below, including the single recovery permit.
+	// Obsolete measured holds defer to that same current admission. Measurement
+	// age is not a vendor stop: only an outstanding recoverable stop needs a
+	// recovery permit. Requiring one after the stop clears strands queued holds.
+	// Manual and pairing windows retain their expiry/freshness gates.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,
  (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
   SELECT 1 FROM agent_accounts door JOIN agent_accounts ledger
    ON ledger.tenant_id=door.tenant_id AND ledger.harness=door.harness
    AND door.quota_pool_fingerprint<>'' AND ledger.quota_pool_fingerprint=door.quota_pool_fingerprint
   WHERE door.id=$2::uuid AND ledger.id=w.account_id
-   AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
-  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
+   AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp()
+  AND (w.ends_at>clock_timestamp() OR ($3::text='managed' AND NOT w.pairing_verification
+   AND w.capacity_kind IN ('blind','refresh') AND w.capacity_source='estimate' AND w.capacity_refresh_run=r.run_id))
+  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance)),
+ coalesce(($3::text='managed' AND NOT w.pairing_verification AND w.starts_at<=clock_timestamp()
+  AND w.capacity_read_at<=clock_timestamp() AND coalesce(w.capacity_source,'')<>'estimate'
+  AND coalesce(w.capacity_kind,'') NOT IN ('blind','refresh')
+  AND (w.capacity_read_at<clock_timestamp()-interval '10 minutes' OR w.ends_at<=clock_timestamp() OR w.capacity_retired)),false)
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
-	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
+	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID, v.Purpose)
 	if err != nil {
 		return nil, err
 	}
@@ -474,15 +487,15 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	active := true
 	for rows.Next() {
 		var id, state string
-		var current, quotaMatches bool
-		if err = rows.Scan(&id, &state, &quotaMatches, &current); err != nil {
+		var current, quotaMatches, obsoleteMeasured bool
+		if err = rows.Scan(&id, &state, &quotaMatches, &current, &obsoleteMeasured); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		count++
 		valid = valid && seen[id]
 		quotaValid = quotaValid && quotaMatches
-		active = active && state == "active" && current
+		active = active && state == "active" && (current || obsoleteMeasured)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
