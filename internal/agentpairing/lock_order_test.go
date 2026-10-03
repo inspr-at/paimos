@@ -13,7 +13,8 @@ import (
 )
 
 // TestTenantTreePairingLockOrder inventories every direct advisory/tenant lock
-// and lock-helper call in these five packages. The shipped order is pairing ->
+// and lock-helper call in these six packages, including auth's transaction
+// guards and workstation designation. The shipped order is pairing ->
 // tenant -> tree -> resource rows; access-only writers omit pairing/tree. Keep
 // the exact primitive sequences here: checking only callers missed the previous
 // inversions inside shared helpers. New call sites must join this inventory.
@@ -27,6 +28,16 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"agentpairing/module.go:in":                         "pairing.Mutation",
 		"agentpairing/lifecycle.go:Lock":                    "pairing",
 		"agentpairing/lifecycle.go:LockMutation":            "pairing.Lock tenant:NO KEY UPDATE tree",
+		"auth/key_scopes.go:agentKeyScopes":                 "tenant:NO KEY UPDATE",
+		"auth/owner_workstation.go:workstationGuard":        "pairing.Mutation",
+		"auth/owner_workstation.go:auditWorkstation":        "tenant:NO KEY UPDATE",
+		"auth/owner_workstation.go:handleOwnerWorkstation":  "pairing.Mutation",
+		"auth/store.go:resolveOIDCPerson":                   "tenant:NO KEY UPDATE",
+		"auth/store.go:issueAgentKeyTx":                     "operator.Ensure tenant:NO KEY UPDATE",
+		"auth/store.go:grantJourneyScopes":                  "operator.Ensure",
+		"auth/store.go:revokeAgentKey":                      "tenant:NO KEY UPDATE",
+		"auth/store.go:revokeAgentKeyTx":                    "operator.Ensure",
+		"auth/store.go:rotateAgentKeyWithScopes":            "tenant:NO KEY UPDATE",
 		"authz/accept.go:AcceptInvite":                      "tenant:NO KEY UPDATE advisory:alias",
 		"authz/agent_creation.go:createAgent":               "project.Mutation",
 		"authz/aliases.go:linkAlias":                        "access.Mutation",
@@ -62,7 +73,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"operatoractor/actor.go:EnsureWithProduction":       "tenant:NO KEY UPDATE tree",
 	}
 	got := map[string]string{}
-	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor"} {
+	for _, pkg := range []string{"agentaccounts", "agentpairing", "auth", "authz", "recurrences", "operatoractor"} {
 		files, err := filepath.Glob(filepath.Join("..", pkg, "*.go"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("inventory %s: files=%d err=%v", pkg, len(files), err)
@@ -98,7 +109,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		}
 	}
 	if reflect.DeepEqual(got, want) {
-		t.Logf("verified %d lock sites across five packages", len(got))
+		t.Logf("verified %d lock sites across six packages", len(got))
 	}
 }
 
@@ -153,6 +164,39 @@ func TestOperatorLockOrderNegativeControls(t *testing.T) {
 						t.Fatalf("inventory accepted inverted helper sequence %q", got)
 					}
 				})
+			}
+		})
+	}
+}
+
+// Guards are closures, and helpers can conceal primitives. Keep controls for
+// both representations of the workstation inversion that escaped this guard.
+func TestWorkstationLockOrderNegativeControls(t *testing.T) {
+	tenantSQL := "tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`)"
+	pairingSQL := "tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`)"
+	treeSQL := "tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`)"
+	for _, tc := range []struct{ name, ordered, inverted, want, wantInverted string }{
+		{"primitives", pairingSQL + "; " + tenantSQL + "; " + treeSQL,
+			tenantSQL + "; " + pairingSQL + "; " + treeSQL,
+			"pairing tenant:NO KEY UPDATE tree", "tenant:NO KEY UPDATE pairing tree"},
+		{"helper", "agentpairing.LockMutation(ctx, tx)",
+			tenantSQL + "; agentpairing.LockMutation(ctx, tx)",
+			"pairing.Mutation", "tenant:NO KEY UPDATE pairing.Mutation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sequence := func(body string) string {
+				file, err := parser.ParseFile(token.NewFileSet(), "guard.go",
+					"package auth; func workstationGuard() { return func() { "+body+" } }", 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.Join(lockOrderSequence(t, "auth", file.Decls[0].(*ast.FuncDecl).Body), " ")
+			}
+			if got := sequence(tc.ordered); got != tc.want {
+				t.Fatalf("ordered closure lock sequence %q, want %q", got, tc.want)
+			}
+			if got := sequence(tc.inverted); got != tc.wantInverted || got == tc.want {
+				t.Fatalf("inverted closure lock sequence %q, want rejected sequence %q", got, tc.wantInverted)
 			}
 		})
 	}
