@@ -50,9 +50,16 @@ matrix preserves existing role ladders. Model locks bound Default → You →
 Project selection; residency locks allow any narrower choice and flag loosening.
 Ticket requirements and existing run stamps remain floors. Account routing
 recomputes the canonical starter's live requirement before every reservation,
-recheck and vendor retry; no account evidence means class `any` until AEON-473.
+recheck and vendor retry; no account evidence means class `any`.
 Pairing verification remains exempt. Preference endpoints, planning callers
 and UI editing follow in 502b–e.
+
+AEON-604 (1129) stores host-owned residency evidence per account in a tenant-RLS
+table. The record includes bounded country sets, profile coverage, local
+execution, verification/expiry, proof reference and optional retention/training
+declarations. Writes snapshot the account binding and emit an event; the fence
+rejects missing, expired, future-dated or superseded evidence. The additive table
+does not change existing account rows or grant any account residency by default.
 
 Migration 1104's tenant-loop seed and replacement area-schema helper require an
 exact-byte exception in `scripts/migration-policy-exceptions.json`. The new

@@ -7,6 +7,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 func Load(ctx context.Context, tx pgx.Tx, orderID string) (*Binding, error) {
@@ -21,19 +23,22 @@ var ErrEvidence = errors.New("review evidence requires the assigned, fenced revi
 // Only the exact assigned run, on its current daemon lease, may set a verdict.
 // Replays retain the first result; a new review needs a new work order.
 func RecordEvidence(ctx context.Context, tx pgx.Tx, orderID, evidenceID, principalID, runID, kind, text, daemon, generation string) error {
-	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM work_order_reviews v JOIN agent_runs r
+	var harness, model, family string
+	err := tx.QueryRow(ctx, `SELECT p.harness,p.model,p.family FROM work_order_reviews v JOIN agent_runs r
         ON r.tenant_id=v.tenant_id AND r.id=v.run_id
         JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.model_profile_id
  JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
         WHERE v.work_order_id=$1 AND r.id=$2 AND r.agent_principal_id=$3
         AND r.status IN ('starting','running','waiting') AND r.daemon_id=$4 AND r.daemon_generation=$5
         AND a.registered_by_principal_id=r.agent_principal_id AND a.daemon_id=r.daemon_id AND a.last_daemon_generation=r.daemon_generation
- AND p.id=v.reviewer_profile_id AND p.family=v.reviewer_family AND p.family<>v.author_family)`, orderID, runID, principalID, daemon, generation).Scan(&allowed)
+ AND p.id=v.reviewer_profile_id AND p.family=v.reviewer_family AND p.family<>v.author_family`, orderID, runID, principalID, daemon, generation).Scan(&harness, &model, &family)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrEvidence
+	}
 	if err != nil {
 		return err
 	}
-	if !allowed || kind != "text" || daemon == "" || generation == "" {
+	if !harnesslaunch.FamilyMatches(harness, model, family) || kind != "text" || daemon == "" || generation == "" {
 		return ErrEvidence
 	}
 	result := Parse(text)
