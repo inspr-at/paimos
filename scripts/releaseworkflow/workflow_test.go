@@ -112,6 +112,19 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	}
 }
 
+func TestRehearsalEmbedsItsCandidateVersion(t *testing.T) {
+	j := readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"]
+	historyIndex, history := named(t, j, "Release history fixture")
+	buildIndex, _ := named(t, j, "Build cached smoke image")
+	if historyIndex >= buildIndex || history.Env["VERSION"] != "${{ steps.version.outputs.version }}" || !strings.Contains(history.Run, `-candidate "$VERSION"`) {
+		t.Fatal("rehearsal image must embed its own reserved version before building")
+	}
+	_, published := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Release history")
+	if strings.Contains(published.Run, "-candidate") {
+		t.Fatal("tagged release builds must keep their normal history generation")
+	}
+}
+
 func TestSmokeBeforePushAndAttest(t *testing.T) {
 	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
 	buildIndex, build := named(t, j, "Build cached smoke image")

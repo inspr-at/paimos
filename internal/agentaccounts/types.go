@@ -58,6 +58,7 @@ type Account struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	Windows           []Window   `json:"windows"`
 	daemonGeneration  *string
+	residencyEvidence *ResidencyEvidence
 }
 
 // Window is one allowance bound for a single unit.

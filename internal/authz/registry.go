@@ -66,6 +66,7 @@ func makeRegistry() []Permission {
 		}
 	}
 	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
+	out = append(out, Permission{Key: "agents.plan.read", Group: "Agents", Description: "Read the person's agent start plan and running counts", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }
@@ -146,6 +147,9 @@ func builtinPermissions(key string) []string {
 			allow = p.Key == "comments.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && guestReadGroup(resource))
 		case "customer":
 			allow = p.Key == "profile.portal_read" || p.Key == "profile.portal_write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
+		}
+		if p.Key == "agents.plan.read" && key != "customer" {
+			allow = true
 		}
 		if allow {
 			out = append(out, p.Key)

@@ -268,7 +268,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Access dialog regressions (hosted only)
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
+        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/key-full-access.spec.ts tests/scope-codes.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
       - name: Preserve failed access dialog traces
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -476,6 +476,10 @@ jobs:
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
       - run: node --test scripts/release-pin-pr.test.mjs
+      - name: Offline code-health audit toolkit and slice ownership
+        run: |
+          python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
+          python3 -B scripts/audit/covcheck.py --summary
       - name: Full UI QA workflow regressions
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

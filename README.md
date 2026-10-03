@@ -10,6 +10,119 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Code health audits
+
+AEON-571 defines the ongoing code-health workflow. Each run belongs to a child
+ticket of that epic and produces ticket attachments, rather than committed
+findings. Recurring work and queue dispatch belong to PAIMOS (AEON-573); until
+that integration ships, the coordinator starts these runs manually.
+
+| Run | Trigger | Scope |
+| --- | --- | --- |
+| Delta audit | Each published release | Files changed since the last audited release, by slice |
+| Tool sweep | Weekly | Static analysis compared with the accepted tool baseline |
+| Rolling deep read | Weekly | Two of nine slices in rotation; a complete rotation takes about five weeks |
+| Full audit | Quarterly or on demand | All nine slices plus the tool sweep |
+
+Readers use [the shared rubric](scripts/audit/rubric.md), record each assigned
+file and findings in [the slice schema](scripts/audit/finding.schema.json),
+and obtain independent verification from another model family. Check current
+tickets before reporting known problems. Deduplicate against open findings by
+the emitted `fingerprint` (files + theme + title, ignoring line-number churn,
+title case and whitespace); link existing tickets in `related_tickets`.
+Critical findings get an immediate ticket and operator notice; high findings
+go to their theme's queued ticket; medium/low findings are batched by theme
+with a weekly summary of new themes. This toolkit does not send notices,
+create tickets, run models, schedule work or publish pages.
+
+The tools in `scripts/audit/` use Python 3.10+ and the standard library, Git,
+and Node for the optional renderer smoke check. They run offline, without
+installing packages or invoking analysis tools. Supply locally collected,
+sanitized diagnostics in the shared `T` manifest; never include credentials
+or raw secret scanner output. Tool installation, advisory downloads and
+analysis run separately on the approved build/test runner.
+
+Start with an immutable snapshot and inspect `assigned` in the coverage
+report to dispatch readers. The slice map uses repo-relative, case-sensitive
+globs: `*` stays within one path component and `**` crosses directories.
+`exclude` removes deliberate overlap (S9 excludes S8's views/components).
+Unknown code extensions can be added to `code_extensions`/`code_names`;
+new packages need explicit ownership. Ambiguous ownership and unassigned
+code fail with exit 1, malformed inputs with exit 2. The map covers deploy
+Compose, root/web embeds, web configuration and end-to-end tests as well as
+the original nine areas. Assigned context files also require manifest entries;
+use `read`, `generated`, `vendored` or `not-code` with a nonnegative line count.
+
+```bash
+AUDIT_DIR=tmp/code-health
+AUDIT_SHA=$(git rev-parse HEAD)
+mkdir -p "$AUDIT_DIR"
+python3 -B scripts/audit/covcheck.py --sha "$AUDIT_SHA" --out "$AUDIT_DIR/assignment.json"
+```
+
+An assignment-only check proves ownership, not reading. Each reader writes
+`S1.json` through `S9.json` with `slice`, `sha`, `coverage`, `findings` and
+`good`. The coordinator then validates the actual manifests. For a rolling
+read, pass `--slice S1 --slice S2` and just those two `--manifest` arguments.
+For a delta audit, pass `--since <last-audited-commit>`; only changed files
+still present at the new snapshot require coverage. Whole-tree ownership is
+still enforced. Deleted paths do not need reading at the new snapshot.
+
+```bash
+# Full audit; all nine manifests must already exist.
+coverage_args=()
+merge_args=()
+for manifest_file in "$AUDIT_DIR"/S[1-9].json; do
+  coverage_args+=(--manifest "$manifest_file")
+  merge_args+=(--manifest "$manifest_file")
+done
+python3 -B scripts/audit/covcheck.py --sha "$AUDIT_SHA" "${coverage_args[@]}" --out "$AUDIT_DIR/coverage.json"
+
+# Weekly sweep: compare first. The checked-in baseline is an empty seed.
+python3 -B scripts/audit/baseline.py compare --input "$AUDIT_DIR/T.json" \
+  --baseline scripts/audit/tool-baseline.json --out "$AUDIT_DIR/T-new.json"
+
+python3 -B scripts/audit/merge.py "${merge_args[@]}" --manifest "$AUDIT_DIR/T-new.json" \
+  --reviews "$AUDIT_DIR/reviews.json" --release 'audited release label' --out "$AUDIT_DIR/merged.json"
+python3 -B scripts/audit/groups.py --audit "$AUDIT_DIR/merged.json" --out "$AUDIT_DIR/grouped.json"
+python3 -B scripts/audit/build.py --audit "$AUDIT_DIR/grouped.json" --out "$AUDIT_DIR/audit.html"
+node scripts/audit/run.cjs "$AUDIT_DIR/audit.html"
+just audit-check
+```
+
+Reviews are a JSON array of objects with `id`, `verdict`, nonempty `evidence`,
+and optional `severity`, `note` and `pass`. Verdicts are `confirmed`, `partly`,
+`refuted` or `duplicate:<finding-id>`; the prototype's `BEGIN-VERIFY`/`END-VERIFY`
+JSONL envelope is also accepted. Review IDs must match candidates from the
+same run, or use `T:<theme>` to verify a tool theme by sampling as in the
+prototype. Individual tool verdicts take precedence over a theme verdict;
+the tool table reports candidate counts and mixed verdicts per theme.
+Missing reviews remain `unverified` in `dropped`; only confirmed or
+partly confirmed findings appear on the page. Original severity and verification
+evidence stay with each finding. Fingerprint duplicates retain merged locations,
+related tickets and aliases, with each original candidate in `dropped`.
+Mixed snapshots, conflicting reviews, duplicate IDs and invalid duplicate
+targets fail rather than silently overwriting evidence.
+
+`groups.py` derives themes from the retained findings. Optional
+`--descriptions PATH` supplies a JSON object keyed by theme, with `title`,
+`summary` and `tickets` for editorial copy; no fixed finding IDs are bundled.
+The page keeps the prototype's search, severity filters, expandable themes,
+coverage, tools, strengths and method. It calculates totals from input, escapes
+audit text and uses local fonts. Identical inputs produce identical JSON/HTML;
+there are no wall-clock timestamps or embedded claims about a previous audit.
+
+Accept a baseline explicitly **after reviewing** the tool candidates:
+`python3 -B scripts/audit/baseline.py accept --input tmp/code-health/T.json
+--baseline scripts/audit/tool-baseline.json --out tmp/code-health/tool-baseline.json`.
+It stores sorted SHA-256 fingerprints only, including the optional `tool`
+producer identity (defaults to the theme), and retains known hashes across
+clean sweeps. Later runs use the latest accepted attachment as `--baseline`;
+acceptance is never implicit during comparison. Findings, reviews, reports
+and accepted baseline attachments stay under ignored `tmp/` or outside the
+checkout, and are attached to the run ticket. The stable living-page link,
+trends and slice-coverage age are coordinator publication concerns.
+
 ## Recurring work
 
 In the web app, **Repeat…** in a ticket or epic's More menu (Shift+R while
@@ -243,6 +356,41 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+## Agent start plan
+
+`aeon agents plan` shows the person's planned total, per-harness limits and
+running counts; `--json` returns the same snapshot as `GET /api/agents/plan`.
+The person reads their own plan. An agent key reads only its live person
+creator's plan and needs the explicit `agents.plan.read` scope and live role
+permission. There is no person or tenant selector. Existing coordinator keys
+must receive this scope through the person's normal key-scope controls.
+Plan reads, writes and running counts use the canonical person, including when
+the caller or key creator is a linked alias. The snapshot returns that canonical
+`principal_id`. With no canonical preference, a saved alias preference remains
+readable; conflicting effective plans across linked rows fail closed. An
+explicit person save updates the canonical row and reconciles existing alias
+copies. Other preferences remain private to the calling principal.
+
+The person saves the plan through `PUT /api/preferences/agents.working`:
+`{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}}}`.
+Total and numeric limits range from 0 to 30. Missing limits mean No limit;
+numeric zero means at most zero, while `"off"` explicitly disables a harness.
+Limits may add up to more than the total. Legacy `cap` (1–12) maps to total;
+legacy area/model reservations are ignored, because reservations cannot become
+maximum limits. Legacy values keep their original shape for existing UI
+clients. No stored total defaults to 15, the existing launcher ceiling.
+
+Running counts include unended, unarchived sessions owned by the person across
+projects, including starting, waiting, idle, throttled and stopping sessions.
+Silence alone does not release a slot. Ownerless legacy sessions count only
+when their agent's key creators identify one person unambiguously. The API
+returns counts without session or project details. Malformed saved plans fail
+closed. `agentplan.CanStart` checks total and harness limits without changing
+running work; launchers must serialize starts and check account room separately.
+This backend change supplies the read path and helper; launcher integration
+and the revised control are separate AEON-540 parts. Lowering the plan never
+pauses or stops existing work.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open
@@ -311,7 +459,47 @@ links appear only after successful reads. Merge facts use changes to a ticket’
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
 do not count as merges. The visit-bounded autopilot log must also load completely
 before the cutoff advances. Journey next actions use one batch snapshot query.
-This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
+The additive `GET /api/decision-desk/projection` supplies the future Decision
+Desk's canonical order and exact counts. Held approvals sort by expiry, then
+other held work by age, then ordinary open items by age, with source ID ties.
+Questions with several askers count once; a question replaces its linked action
+request. Sign-ins remain separate chores. Counts cover currently readable sources
+independently of page size; coverage above 1000 projects returns an explicit 422.
+The current Agents badge continues to count the approvals and held requests its
+panel can display. Agents does not poll the unused desk projection before the
+P6/P8 cutover, so failures in that future source do not affect its refresh state.
+Morning briefing retains actionable approvals with their scope labels/rationale
+and held requests with their project/body and app Source links.
+P6/P8 must switch desk, badge and briefing together when the complete desk UI and
+question deep links are available; ordinary questions currently remain in the
+server projection, without generating pushes.
+
+AEON-568's notification adapter (`internal/decisiondesk`) exposes bounded
+`NoticesTx`, final `ClaimTx` admission and `CurrentTx` reauthorization for the
+existing AEON-455 phone scheduler. Eligible work has a real unfinished work
+link or a correlated unresolved held request; a parked label alone is insufficient.
+The proposed approval expiry-warning window is 15 minutes, subject to the phone scheduler's quiet hours and escalation.
+Notice scans filter project/workspace decision authority before their limit.
+The scheduler must admit every candidate through ClaimTx before its transport
+check: an approval lacking its native scope authority gets a terminal skipped
+claim and returns false, allowing later scans to advance. Final claims take the tree fence,
+tenant access fence and source row lock, matching project-access mutations, then recheck only that source's current project,
+revision, state and decision authority. Recipient indexes compare native UUIDs.
+Claims persist once per source/revision/recipient across devices and replicas,
+including action requests later represented by their canonical question.
+An ambiguous transport failure retains its claim and records failure rather
+than repeating a push. Payloads contain only source pointers. Answer commits,
+grace edits, corrections and expiry never emit success notifications; doctrine
+keeps its existing per-person toast claim and has no competing desk push.
+Phone scheduler activation remains dependent on AEON-455 landing on main;
+this package adds no scheduler or competing subscription store. Full P7 acceptance
+remains open: AEON-455 owns runtime delivery, quiet-hour/escalation/subscription
+tests, agreement on the warning window and integrated doctrine toast suppression.
+The current adapter treats approval requests against unfinished ticket/task work
+as held; the coordinator must confirm that policy before activation. Durable
+claims retain retry evidence rather than being pruned while a source can recur.
+
+The in-app briefing is available; push, e-mail and spoken delivery remain future work.
 
 ## Link a vendor account to yourself
 
@@ -694,6 +882,12 @@ Focus preserves the graph's reduced-motion preference.
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.
 
+CLI issue and knowledge updates, estimate plans, project-tag attachment and
+declarative plan updates send the revision of the node they read. A concurrent
+edit returns a conflict instead of replacing newer fields; read the current
+node before retrying. If a tag was created but could not be attached, the error
+names that retained tag. A failed plan leaves earlier successful writes applied.
+
 ```sh
 paimos auth login --url https://aeon.example --name default --key-file ./agent.key
 paimos whoami
@@ -806,9 +1000,11 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Classic colleagues without a sign-in identity can join through **Settings → Access → People → Imported from classic → Invite this person**. The invite starts with their email and imported access; the administrator confirms roles they may grant. On acceptance, one active, unlinked imported account with exactly the same verified email (case-insensitive) in this workspace becomes an alias of the new person, with an audited reason. Classic identities and history remain intact. Multiple unlinked matches require manual **Link to person**, including inactive records or records that already have aliases; already linked, deactivated or existing link-target accounts are never automatically linked. A token alone cannot link an account. Invited access stays authoritative even for project-only invites; sign-in and later imports never restore workspace access from the alias's classic roles.
 
-Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet previews **Ticket worker** and **Coordinator** scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. The same previews and search are available when editing scopes; rotation previews keep every original scope. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
+Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
 
-People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
+Manual rotation rechecks live permissions inside the replacement transaction. Shared roles combine workspace and project grants; generated private roles also cap replacement scopes at their configured workspace permissions, even when preserving the old scopes. A project binding cannot restore a scope removed from that private role. The coordinator’s derived project-only `rules.read` remains available. A rejected rotation leaves the old key unchanged and creates no replacement or audit event.
+
+People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. **Full access** selects every agent-grantable scope within the agent’s role, editor and original creator ceilings. Per-group **All / None** changes only visible scopes in that group; presets and **All** never extend the agent’s role. A quiet note names the person-only actions: managing members, roles, keys and settings, reading keys, the access audit log, approval decisions, rule publishing, conversation watching, harness force-stop and recovery, ownership transfer and the customer portal. **Expires after** starts at **Keep current**, or can set 30, 90 or 365 days from saving, or **Never**, without rotation. The API accepts optional `expires_at`: omission preserves expiry, `null` means Never, and a timestamp must be in the future. Scopes and expiry apply atomically, retaining the same ID and secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
@@ -1090,7 +1286,7 @@ Both modes validate every plan entry and project membership before any write. Ap
 
 The ticket panel's **Cross-family review** section requests a review of a repository and two full commit hashes. A completed managed builder run also requests one automatically when its daemon reports a produced commit range and its key already permits `work_orders.write` and `run.create`. The reviewer receives the ticket snapshot, acceptance criteria and exact bounded diff through the existing managed-run queue. This slice never merges.
 
-Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
+Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Profile families must match their fixed harness provider or a supported explicit provider/model binding. Unknown providers cannot establish review independence. Inconsistent legacy pins remain immutable history but are excluded from routing, evidence and approval; replace them with a correctly labelled profile. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
 
 Review context is built in a private, temporary bare Git repository. Only the
 sealed base and head objects are fetched from the workspace through a transport
@@ -1107,7 +1303,9 @@ Scratch repositories are removed on success and error.
 
 Each finding uses `FINDING: <critical|high|medium|low> <relative-file>:<line> <message>`. The final line must be exactly `VERDICT: ok` or `VERDICT: changes`. Only a completed run with vendor-reported model evidence and a valid, independent `ok` opens the gate. Missing output, malformed verdicts, cancellation and unavailable routes leave it closed. Findings, elapsed time and vendor-reported cost appear on the ticket; unreported cost is omitted. Repeated request IDs safely replay the same binding; a changed range requires a new request.
 
-Optional GitHub status reporting is host-owned. Configure all of `AEON_REVIEW_APP_ID`, `AEON_REVIEW_INSTALLATION_ID`, `AEON_REVIEW_APP_KEY_FILE` (absolute physical path to a private RSA file, mode 0600), `AEON_REVIEW_APP_TENANT_ID` and `AEON_REVIEW_APP_REPOSITORY` (`owner/repo`). The installation token is narrowed to that single repository, with `statuses:write` and `pull_requests:read` only. Specify the PR number when requesting a review. Reporting checks its exact base and head before posting `aeon/review`, retries failures and revokes temporary tokens. A moved PR cannot receive an approval for its new head from an old review. The repository owner must separately make `aeon/review` a required branch-protection status and restrict its source to this App; Aeon does not change protection rules. Without configuration, local reviews continue normally. See [GitHub commit statuses](https://docs.github.com/en/rest/commits/statuses) for repository-side enforcement.
+Optional GitHub status reporting is host-owned. Configure all of `AEON_REVIEW_APP_ID`, `AEON_REVIEW_INSTALLATION_ID`, `AEON_REVIEW_APP_KEY_FILE` (absolute physical path to a private RSA file, mode 0600), `AEON_REVIEW_APP_TENANT_ID` and `AEON_REVIEW_APP_REPOSITORY` (`owner/repo`). The installation token is narrowed to that single repository, with `statuses:write` and `pull_requests:read` only. Specify the PR number when requesting a review. Reporting pages through all latest publishable repository/head reviews; reviews without a PR cannot hide the status owner. Independent publication and refresh passes check the exact PR, repository, base and head before posting `aeon/review`. Successful bindings are checked again without duplicate success posts. A changed binding revokes success on the originally reviewed SHA and marks the review stale; restoring the base does not revive it, so request a new review. Failed revocations remain closed locally and retry until GitHub accepts the error status. Temporary tokens are revoked. A moved PR cannot receive an approval for its new head from an old review. The repository owner must separately make `aeon/review` a required branch-protection status and restrict its source to this App; Aeon does not change protection rules. Without configuration, local reviews continue normally. See [GitHub commit statuses](https://docs.github.com/en/rest/commits/statuses) for repository-side enforcement.
+
+For immediate base-change revocation, provision `AEON_REVIEW_WEBHOOK_SECRET_FILE` (absolute physical path, private mode, 32–4096 bytes) and configure the same secret on the GitHub App webhook at `/api/reviews/github`, subscribed to pull requests. Signed `edited`, `synchronize` and `reopened` deliveries are checked against the host-owned installation and repository. A changed base closes the matching review before posting an error, independently of unrelated dirty publications; a failed post returns 502 and remains retryable. Replayed deliveries never approve or reopen a review. The separate refresh scan remains the backup for missed deliveries and base-branch advances. Without the webhook secret, immediate delivery is disabled and the scan still runs.
 
 ## Lead handover and short review/fix jobs
 
@@ -1219,7 +1417,7 @@ The ticket-worker set is `nodes.read`, `nodes.write`, `comments.read`, `comments
 aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a072a8d
 ```
 
-Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. It never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
+Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. Creation, editing and rotation use the same role ceiling: workspace-role permissions plus project-grantable and self-service permissions (`kinds.read`, `profile.read`, `profile.write`, `authz.read`) held through project roles, intersected with the agent-grantable registry. A scope from a project role still requires that project's binding on each request; it grants no workspace access. Rotation never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
 
 For the exact calls a CLI command makes, run `aeon scopes needed issue get/create/update/comment` or `aeon scopes needed "issue get" "issue search"`; `--json` returns the code and group/label/id list. With no commands, it covers get/create/update/comment/search. This works offline, derives permission names from the authorization route map, and tests the command table against actual HTTP calls. `issue get` reads the activity feed, so it needs `events.read` (**See history**) as well as `nodes.read`. The broader ticket-worker set above also includes `comments.read`; the current CLI reads comments through activity rather than a separate comment-read call. Project moves need `nodes.move` in addition to ordinary update scopes. Unsupported command forms are refused rather than guessed.
 
@@ -1270,6 +1468,16 @@ even when another writer keeps the pipe open. Cleanup suppresses further stream
 callbacks and bounds the wait for an in-flight callback; local closure never proves EOF
 for a final Codex receipt. `Stop` keeps its process-only role so an observer can
 call it without waiting on itself.
+Protocol writes, including startup and control frames, have a 20-second maximum
+and honor shorter caller deadlines while queued or blocked in the pipe. A canceled
+partial write closes the transport and cleans up its owned process group. Account
+probes also clean up their own descendants and bound inherited-pipe waits. Vendor
+launches bound stderr draining to two seconds after leader exit, including failed
+ownership checks; cleanup signals the launch group before reaping its leader.
+Codex quota capture applies its three-second budget to every protocol write. The
+native Grok proxy rejects headers beyond 4096 bytes before buffering more input.
+The local `run-agent` runner shares the accepted run deadline across the agent
+and `--test-exec`; Stop cancels both phases and waits for owned process cleanup.
 The reporter retains bounded normalized state in memory, never raw output or
 worker leases on disk. Restart/crash recovery and external worker capture remain
 separate work; an unavailable endpoint can leave the last snapshot provisional.
@@ -1736,10 +1944,31 @@ Login navigates to
 sign-out posts to `/api/auth/logout` before routing to `/signin`. API calls use
 same-origin credentials, a ten-second timeout, and no browser response cache.
 The backend owns authentication cookies and the configured OIDC authentication redirect.
+OIDC discovery has a five-second deadline and shares one in-flight attempt without
+holding the sign-in mutex over network I/O. Canceled callers can leave immediately;
+failed discovery remains retryable. Discovery and signing-key responses are capped
+at 1 MiB before decoding.
 Email comparisons fold only ASCII A-Z; Unicode characters remain distinct in
 bootstrap admin checks, development sign-in, invitation provisioning, imported
 profile matching and link suggestions. Classic principal backfills take the
 same tenant lock as invitation acceptance before repairing emails.
+Email-based OIDC bootstrap enrollment requires `email_verified: true`, just
+like invite enrollment, and can run only once. The first principal binding's
+append-only audit event closes bootstrap enrollment; subsequent claims to the
+same mailbox cannot create another admin, even when verified. Existing and
+operator-pinned issuer/subject memberships continue to sign in.
+Invite acceptance holds the tenant access lock through its binding inserts;
+linking takes that lock before the alias lock (seed 532) and principal rows.
+These access-write fences use `FOR NO KEY UPDATE` so they serialize with each
+other and membership changes while allowing event writers' tenant FK checks.
+The last-owner trigger uses the same fence during binding removal/deactivation.
+Project-role assignment and attachment writes lock the tree (seed 0), then the
+tenant, before reading current grants and resource rows. Attachment request
+bodies are read before these locks; the final transaction checks permission in
+the node's current project and commits metadata and audit events together.
+Attachment writes use a shared tenant lock: access edits are fenced while
+other resource writers can finish their tenant foreign-key checks. Retained
+principal import/backfill paths take tree, tenant, then alias locks in that order.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty
@@ -2330,13 +2559,36 @@ the generic auth refusal. After updating the server, restart agentd
 to retry attach registration; there is no in-process registration retry.
 
 Owner refusal guidance distinguishes incompatible attach versions, a pairing
-that no longer authenticates, unavailable project/ticket access, an expired code
-and the live approval-request limit. Server errors preserve `code` and `error`
+that no longer authenticates, unavailable project/ticket access, draining or
+removed harness enrollment, an expired code, lost daemon registration, transport
+failures and the distinct computer, attempt, registration and approval limits.
+Local startup failures have separate guidance: a computer-wide disconnect needs
+settlement followed by fresh pairing, completed cleanup needs fresh pairing, and
+an origin or workspace mismatch needs the approved configuration or fresh pairing
+for the intended instance and workspace. Other local startup failures direct the
+owner to `aeon-agentd status`, the agentd log and a restart when owned work permits;
+they are not reported as connection failures. Admission and limit hints share the
+same per-computer cap and attempt window.
+Server errors preserve `code` and `error`
 and add `attach_refusal` only after checking the computer proof and principal
-(or the signed-in person owner). Unknown causes remain generic. Revoked HTTP
+(or the signed-in person owner). Fixed English/German hints name the next action;
+unknown causes direct the owner to daemon status and the administrator's server
+logs. Arbitrary server text never becomes terminal output. Revoked HTTP
 bearers stay unauthenticated; pairing repair is offered only by the locally
 authenticated interactive helper. Poll refusals still detach and clear local
 state, and no uncertain conversation submission is retried.
+
+If attach fails after a server restart, the daemon's memory-only poll registration
+was lost: restart agentd when owned work permits, then request fresh approval.
+Re-pairing is not required for lost registration. A local `harness claude draining`
+report alone does not block attach: the attach manager does not use the supervisor's
+launch fence. A server-side draining or removed enrollment does block a fresh
+attach, including `--status-only` for an already running process. That operation
+creates new session/consent authority; draining preserves previously owned work
+for settlement, not new attachment authority. For a harness drain,
+`aeon-agentd add-harness` can create a new enrollment while the old one drains.
+For a computer drain, let owned work settle and pair the computer again.
+Restarting agentd does not undo a server-side disconnect.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.

@@ -24,6 +24,7 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/agents/plan": "agents.plan.read",
 	// Read-only people enter with nodes.read. Recurrence handlers still require
 	// recurrences.manage for agents, including their explicit role and key scope.
 	"GET /api/recurrences":                         "nodes.read|recurrences.manage",
@@ -44,6 +45,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/questions/{questionId}/status":       "questions.read",
 	"POST /api/questions/{questionId}/decision":    "questions.decide",
 	"GET /api/decision-desk":                       "questions.read",
+	"GET /api/decision-desk/projection":            "profile.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",
@@ -184,6 +186,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-accounts/use":                                            "account.read|account.probe",
 	"POST /api/agent-accounts/runs/{runId}/target":                           "run.create",
 	"PUT /api/agent-accounts/{accountId}/metadata":                           "account.manage",
+	"GET /api/agent-accounts/{accountId}/residency-evidence":                 "account.read",
+	"PUT /api/agent-accounts/{accountId}/residency-evidence":                 "account.manage|account.probe", // Handler distinguishes owning person from bound host key.
 	"PUT /api/agent-accounts/{accountId}/label":                              "account.manage",
 	"PUT /api/agent-accounts/{accountId}/limit":                              "account.manage",
 	"GET /api/agent-keys":                                                    "keys.read",
@@ -223,6 +227,7 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/harness-sessions/{sessionId}/delivery-rating":               "nodes.read",
 	"GET /api/usage/dashboard":                                               "harness.read",
 	"GET /api/health":                                                        "public",
+	"POST /api/reviews/github":                                               "public", // Authenticated by host-owned GitHub HMAC, never a tenant session.
 	"GET /api/aithema/jwks":                                                  "public",
 	"GET /api/ready":                                                         "public",
 	"GET /api/imports":                                                       "imports.read",

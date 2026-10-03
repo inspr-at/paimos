@@ -860,6 +860,25 @@ classification stays empty, so live pill and benefit text never reaches
 read again. A shared commit still takes the strongest group. Compare follows
 that group.
 
+For images built before their release tag, run
+`go run ./internal/releasehistory/generate -repo . -repository inspr-at/paimos -offline -candidate VERSION`.
+The version must match committed `HEAD:version.json`, including its scheme,
+channel, sequence and reservation instant. The candidate uses HEAD's commit and
+captured notes: a matching committed `release-notes/VERSION.json`, otherwise the
+reviewed public projection in `product-notes.json`. Missing or mismatched captures
+fail the build; uncommitted edits do not supply candidate identity or notes.
+`GITHUB_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL` and `GITHUB_WORKFLOW`
+identify the building workflow when available. Its status is recorded as in
+progress, with no invented conclusion. Without those inputs CI evidence is pending.
+
+The candidate is visible in the release history, named by its codename, with
+Features/Fixes from its captured notes. Its tag, headline, tag/publication times,
+image digest and release-run link stay empty or null; `evidence.pending` names
+what remains to be established. A later tagged build fills those fields through
+the normal history generator; it neither rewrites the original manifest nor
+creates a second entry for the version. Existing published entries keep their
+normal tag-based generation. Candidate mode does not publish, tag, or deploy.
+
 `internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
 files **from their matching annotated Git tags**, including under `-offline`.
 Later ticket edits cannot change those notes. The generated manifest records the exact
