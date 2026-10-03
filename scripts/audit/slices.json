@@ -130,6 +130,7 @@
       "title": "Product domain A: nodes, business, imports",
       "paths": [
         "internal/nodes/**",
+        "internal/workstate/**",
         "internal/business/**",
         "internal/importer/**",
         "internal/imports/**",
