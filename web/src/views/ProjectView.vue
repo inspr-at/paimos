@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
-import { vClipTip } from '../lib/clipTip'
+import { isClipped, vClipTip } from '../directives/clipTip'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
@@ -90,18 +90,41 @@ const descriptionExpanded = ref(false)
 const descriptionClipped = ref(false)
 const descriptionBlock = ref<HTMLElement>()
 const descriptionMore = ref<HTMLButtonElement>()
+const descriptionText = ref<HTMLElement>()
+const descriptionProbe = ref<HTMLElement>()
+const descriptionNeedsPanel = ref(false)
+const descriptionFull = ref<HTMLElement>()
 const descriptionRoom = ref(0)
-function measureDescription(clipped: boolean) {
-  descriptionClipped.value = clipped
-  if (!clipped) descriptionExpanded.value = false
-}
+// Description disclosure owns its measurement; full text may exceed the
+// viewport, so it belongs in a focusable scroll region rather than a tooltip.
+watch([descriptionText, descriptionProbe, () => project.value?.description], ([element, probe], _, onCleanup) => {
+  if (!element) return
+  const measure = () => {
+    descriptionClipped.value = isClipped(element)
+    const rect = element.getBoundingClientRect()
+    const room = Math.max(rect.top - 16, innerHeight - rect.bottom - 16)
+    descriptionNeedsPanel.value = innerWidth <= 720 || matchMedia('(pointer: coarse)').matches || (probe?.offsetHeight ?? 0) > room
+    if (!descriptionClipped.value) descriptionExpanded.value = false
+  }
+  const observer = new ResizeObserver(measure)
+  observer.observe(element)
+  if (probe) observer.observe(probe)
+  window.addEventListener('resize', measure)
+  measure()
+  onCleanup(() => { observer.disconnect(); window.removeEventListener('resize', measure) })
+}, { flush: 'post' })
 function closeDescription() {
   descriptionExpanded.value = false
   descriptionMore.value?.focus()
 }
-function toggleDescription() {
+async function toggleDescription() {
   descriptionRoom.value = Math.max(44, innerHeight - (descriptionBlock.value?.getBoundingClientRect().bottom ?? 0) - 12)
+  const openedFor = projectId.value
   descriptionExpanded.value = !descriptionExpanded.value
+  if (descriptionExpanded.value) {
+    await nextTick()
+    if (descriptionExpanded.value && projectId.value === openedFor) descriptionFull.value?.focus({ preventScroll: true })
+  }
 }
 function dismissDescription(event: PointerEvent) {
   if (event.target instanceof Node && !descriptionBlock.value?.contains(event.target)) descriptionExpanded.value = false
@@ -1616,9 +1639,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
           <div v-if="project.description" ref="descriptionBlock" class="description-block" @keydown.esc.stop.prevent="closeDescription">
-            <button v-if="descriptionClipped" ref="descriptionMore" type="button" class="description-more" :aria-expanded="descriptionExpanded" aria-controls="project-description-full" @click="toggleDescription">{{ descriptionExpanded ? 'Less' : 'More' }}</button>
-            <p id="project-description" v-clip-tip="{ text: project.description, onClip: measureDescription }" data-tip-touch class="description" tabindex="0">{{ project.description }}</p>
-            <div v-if="descriptionExpanded" id="project-description-full" class="description-full" :style="{ maxHeight: `min(40dvh, ${descriptionRoom}px)` }" role="region" aria-label="Full project description" tabindex="0">{{ project.description }}</div>
+            <button v-if="descriptionClipped && descriptionNeedsPanel" ref="descriptionMore" type="button" class="description-more" :aria-expanded="descriptionExpanded" aria-controls="project-description-full" @click="toggleDescription">{{ descriptionExpanded ? 'Less' : 'More' }}</button>
+            <p id="project-description" ref="descriptionText" v-clip-tip="descriptionNeedsPanel ? '' : project.description" class="description">{{ project.description }}</p>
+            <div class="description-measure" aria-hidden="true"><p ref="descriptionProbe" class="description-probe">{{ project.description }}</p></div>
+            <div v-if="descriptionExpanded" id="project-description-full" ref="descriptionFull" class="description-full" :style="{ maxHeight: `min(40dvh, ${descriptionRoom}px)` }" role="region" aria-label="Full project description" tabindex="0" @keydown.stop @keydown.esc.prevent="closeDescription">{{ project.description }}</div>
           </div>
         </div>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
@@ -1800,8 +1824,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .title-line .key-badge, .state-chip { flex: none; margin-top: 4px; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.description-block { position: relative; }
-.description-more { display: none; }
+.description-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.description-probe { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+.description-block { position: relative; display: flex; flex-direction: column; }
+.description-more { display: block; align-self: flex-start; min-width: 5ch; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .description-full { position: absolute; z-index: 6; top: 100%; inset-inline: 0; max-height: 40dvh; overflow: auto; overscroll-behavior: contain; padding: 12px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13.5px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 @media (pointer: coarse) { .description { min-height: 44px; line-height: 22px; } }
 .head-stats { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
@@ -1894,8 +1920,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .toolbar-wrap { margin: 0 -12px; padding: 0 12px; }
   .title-line { gap: 10px; }
   .title-line h1 { font-size: 24px; }
-  .description-block { display: flex; flex-direction: column; }
-  .description-more { display: block; align-self: flex-start; min-width: 5ch; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
   .description { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .stat-line { flex-wrap: wrap; gap: 4px 14px; }
   .activity { display: none; }

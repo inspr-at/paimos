@@ -233,8 +233,10 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     const clipped = await identity.evaluate(el => el.scrollHeight > el.clientHeight + 1)
     if (clipped) {
       await expect(identity).toHaveAttribute('data-tip', forText)
-      await page.keyboard.press('Tab')
-      await identity.focus()
+      // The identity immediately precedes Change in the real tab order.
+      await page.keyboard.press('Shift+Tab')
+      await expect(identity).toBeFocused()
+      await expect(identity).toHaveAttribute('data-clip-tip', '')
       await fittingTip(preview.locator('.tooltip'), forText)
     } else await fullText(identity, forText)
     await expectStableControls({
@@ -287,6 +289,33 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
   })
 }
 
+// A focused name can become clipped after a responsive layout change. The
+// shared host must observe the disclosure appearing without a second focusin.
+for (const theme of ['light', 'dark'] as const) {
+  test(`Rules Preview refreshes a keyboard-focused identity after clipping (${theme})`, async ({ page }) => {
+    await scene(page, 390, theme)
+    await mockWork(page, fixtures())
+    await mockRules(page)
+    await page.route('**/api/projects*', route => route.fulfill({ json: { items: [{ id: RULE_PROJECT, key: 'AEON', title: longTitle, state: 'active', open: 1, in_progress: 0, done: 0, cancelled: 0, total: 1, last_activity: '2026-09-28T10:00:00Z', people: [] }] } }))
+    await page.goto('/settings/agent-rules')
+    await page.getByRole('button', { name: 'Preview', exact: true }).click()
+    const preview = page.getByRole('dialog', { name: 'What agents receive' })
+    const identity = preview.locator('.for-value'), tip = preview.locator('.tooltip')
+    await expect(preview.locator('.for .btn')).toBeFocused()
+    await expect(preview.locator('.summary')).toBeVisible()
+    await page.mouse.move(0, 0)
+    await identity.evaluate(el => { el.style.height = 'auto'; el.style.webkitLineClamp = 'unset' })
+    await expect(identity).not.toHaveAttribute('data-tip')
+    await page.keyboard.press('Shift+Tab')
+    await expect(identity).toBeFocused()
+    await expect(tip).toHaveCount(0)
+    await identity.evaluate(el => { el.style.removeProperty('height'); el.style.removeProperty('-webkit-line-clamp') })
+    await expect(identity).toHaveAttribute('data-tip', `${longTitle} · Markus Barta · Builder`)
+    await fittingTip(tip, `${longTitle} · Markus Barta · Builder`)
+    await expect(identity).toBeFocused()
+  })
+}
+
 // Real touch input does not synthesize keyboard :focus-visible or mouse hover.
 test.describe('touch full-text reveal', () => {
   test.use({ hasTouch: true })
@@ -300,21 +329,89 @@ test.describe('touch full-text reveal', () => {
       data.projects[0]!.description = text
       await mockWork(page, data)
       await page.goto('/p/PHAROS/tickets')
-      const desc = page.locator('#project-description'), tip = page.locator('.tooltip')
-      await expect(desc).toHaveAttribute('data-tip', text)
+      const desc = page.locator('#project-description'), full = page.locator('#project-description-full')
+      const more = page.locator('.description-more')
+      await expect(more).toBeVisible()
       expect((await desc.boundingBox())!.height).toBeGreaterThanOrEqual(44)
       await expectStableControls({
-        controls: { description: desc, ...projectControls(page, width) },
+        controls: { more, description: desc, ...projectControls(page, width) },
         scrollAreas: { header: page.locator('.head-main') },
         interactions: [
-          { name: 'tap clipped description', run: async () => { await desc.tap(); await fittingTip(tip, text); await screenshot(page, 'project-touch', width, theme) } },
-          { name: 'tap again to dismiss', run: async () => { await desc.tap(); await expect(tip).toHaveCount(0) } },
-          { name: 'tap then outside', run: async () => { await desc.tap(); await fittingTip(tip, text); await page.locator('#project-title').tap(); await expect(tip).toHaveCount(0) } },
+          { name: 'tap More', run: async () => { await more.tap(); await fullText(full, text); await screenshot(page, 'project-touch', width, theme) } },
+          { name: 'tap Less to dismiss', run: async () => { await more.tap(); await expect(full).toHaveCount(0) } },
+          { name: 'tap then outside', run: async () => { await more.tap(); await fullText(full, text); await page.locator('#project-title').tap(); await expect(full).toHaveCount(0) } },
         ],
       })
       await noOverflow(page)
       expect(errors).toEqual([])
     })
+  }
+  // Native touch input proves that pointercancel from scrolling is safe.
+  for (const width of [768, 1024]) for (const theme of ['light', 'dark'] as const) {
+    for (const input of ['touch', 'keyboard'] as const) {
+      test(`viewport-long description keeps ${input} scrolling (${width} ${theme})`, async ({ page, context }) => {
+        await scene(page, width, theme)
+        const data = fixtures(), text = `${description.repeat(30)} Vollständiger Schluss.`
+        data.views.push(mockView({ id: 'heading-view', name: 'Saved heading view' }))
+        data.projects[0]!.description = text
+        await mockWork(page, data)
+        await page.goto('/p/PHAROS/tickets')
+        const more = page.locator('.description-more'), desc = page.locator('#project-description')
+        // Exercise the old tooltip too: baseline failures must come from lost
+        // scrolling, rather than the absence of the new disclosure button.
+        if (await more.isVisible()) {
+          if (input === 'touch') await more.tap()
+          else { await page.keyboard.press('Tab'); await more.focus(); await page.keyboard.press('Enter') }
+        } else if (input === 'touch') await desc.tap()
+        else { await page.keyboard.press('Tab'); await desc.focus() }
+        const full = page.locator('#project-description-full, .tooltip')
+        await expect(full).toHaveText(text)
+        expect(await full.evaluate(el => el.scrollHeight)).toBeGreaterThan(await page.evaluate(() => innerHeight))
+        expect(await full.evaluate(el => el.scrollHeight)).toBeGreaterThan(await full.evaluate(el => el.clientHeight))
+        await expectStableControls({
+          controls: projectControls(page, width),
+          interactions: [{ name: `${input} scroll preserves disclosure`, run: async () => {
+            if (input === 'touch') {
+              await full.evaluate(el => {
+                el.dataset.cancels = '0'
+                el.addEventListener('pointercancel', () => { el.dataset.cancels = String(Number(el.dataset.cancels) + 1) })
+              })
+              const cdp = await context.newCDPSession(page)
+              try {
+                const box = (await full.boundingBox())!, x = box.x + box.width / 2
+                const from = box.y + box.height - 20, to = box.y + 20
+                await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: from }] })
+                for (let step = 1; step <= 8; step++) {
+                  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: from + (to - from) * step / 8 }] })
+                }
+                await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+              } finally { await cdp.detach() }
+              await expect(full).toHaveText(text)
+              await expect.poll(() => full.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+              expect(await full.getAttribute('data-cancels')).not.toBe('0')
+            } else {
+              await full.focus()
+              await page.keyboard.press('ArrowDown')
+              await expect(full).toHaveText(text)
+              await expect.poll(() => full.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+              await page.keyboard.press('End')
+              await expect(full).toHaveText(text)
+              await expect.poll(() => full.evaluate(el => Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight))).toBeLessThanOrEqual(1)
+              const tailVisible = await full.evaluate(el => {
+                const node = el.firstChild!, range = document.createRange()
+                range.setStart(node, (node.textContent?.length ?? 0) - 'Vollständiger Schluss.'.length)
+                range.setEnd(node, node.textContent?.length ?? 0)
+                const tail = range.getBoundingClientRect(), frame = el.getBoundingClientRect()
+                return tail.top >= frame.top && tail.bottom <= frame.bottom && tail.right <= frame.right
+              })
+              expect(tailVisible, 'the last words must be on screen after End').toBe(true)
+            }
+            await screenshot(page, `project-long-${input}`, width, theme)
+          } }],
+        })
+        await noOverflow(page)
+      })
+    }
   }
   for (const theme of ['light', 'dark'] as const) {
     test(`phone long description scrolls without moving controls (${theme})`, async ({ page }) => {
@@ -365,7 +462,7 @@ test.describe('touch full-text reveal', () => {
         scrollAreas: { body: gate.locator('.scroll') },
         interactions: [
           { name: 'tap full title', run: async () => { await name.tap(); await fittingTip(tip, longTitle); await twoLineTouchTarget(name); await screenshot(page, 'done-gate-touch', 390, theme) } },
-          { name: 'tap title again to dismiss', run: async () => { await name.tap(); await expect(tip).toHaveCount(0) } },
+          { name: 'tap heading to dismiss', run: async () => { await gate.locator('h2').tap(); await expect(tip).toHaveCount(0) } },
           { name: 'tap title and then elsewhere', run: async () => { await name.tap(); await fittingTip(tip, longTitle); await gate.locator('h2').tap(); await expect(tip).toHaveCount(0) } },
         ],
       })
@@ -387,7 +484,7 @@ test.describe('touch full-text reveal', () => {
         scrollAreas: { header: page.locator('.profiles-head') },
         interactions: [
           { name: 'tap full profile name', run: async () => { await heading.tap(); await fittingTip(tip, longName); await twoLineTouchTarget(heading); await screenshot(page, 'profile-touch', 390, theme) } },
-          { name: 'dismiss full name', run: async () => { await heading.tap(); await expect(tip).toHaveCount(0) } },
+          { name: 'dismiss full name', run: async () => { await page.locator('.profiles-head .eyebrow').tap(); await expect(tip).toHaveCount(0) } },
           { name: 'short live name', run: async () => { await field.fill('Kurz'); await expect(heading).toHaveText('Kurz'); await expect(heading).not.toHaveAttribute('data-tip') } },
           { name: 'long live name', run: async () => { await field.fill(longName.slice(0, 100)); await expect(heading).toHaveAttribute('data-tip', longName.slice(0, 100)); await heading.tap(); await fittingTip(tip, longName.slice(0, 100)) } },
         ],
@@ -411,7 +508,7 @@ test.describe('touch full-text reveal', () => {
         scrollAreas: { body: preview.locator('.body') },
         interactions: [
           { name: 'tap full identity', run: async () => { await identity.tap(); await fittingTip(tip, text); await twoLineTouchTarget(identity); await screenshot(page, 'rules-touch', 390, theme) } },
-          { name: 'tap identity again to dismiss', run: async () => { await identity.tap(); await expect(tip).toHaveCount(0) } },
+          { name: 'tap For label to dismiss', run: async () => { await preview.locator('.for-label').tap(); await expect(tip).toHaveCount(0) } },
           { name: 'tap identity and then elsewhere', run: async () => { await identity.tap(); await fittingTip(tip, text); await preview.locator('.for-label').tap(); await expect(tip).toHaveCount(0) } },
         ],
       })

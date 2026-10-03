@@ -5,7 +5,7 @@ import { doneGateState, settleDoneGate } from '../lib/doneGateAsk'
 import { gateAction, gateProgress, gateTitle } from '../lib/doneGate'
 import { benefitDraft, benefitIssues, pillWords } from '../lib/ticketBenefits'
 import AppIcon from './AppIcon.vue'
-import { vClipTip } from '../lib/clipTip'
+import { vClipTip } from '../directives/clipTip'
 
 const dialog = ref<HTMLDialogElement>()
 const titleId = useId()
@@ -109,7 +109,7 @@ watch(() => doneGateState.request, async (next) => {
           <h2 :id="titleId">{{ title }}</h2>
           <p class="quiet">
             <span class="id">{{ request.key }}</span>
-            <span v-clip-tip="request.title" class="name" tabindex="0" data-tip-touch>{{ request.title }}</span>
+            <span v-clip-tip="request.title" class="name" tabindex="0">{{ request.title }}</span>
             <span v-if="progress" class="step">{{ progress }}</span>
           </p>
         </div>

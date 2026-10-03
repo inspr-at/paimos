@@ -4,6 +4,8 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
+Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
+
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
