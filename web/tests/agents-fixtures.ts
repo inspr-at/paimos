@@ -97,6 +97,7 @@ export type AgentData = ReturnType<typeof agentData>
 export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
 export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
   accountsForbidden?: boolean
@@ -123,6 +124,12 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
+    if (path === '/api/agents/plan' && method === 'GET') {
+      const stored = options.workingPreference?.()
+      const running: Record<string, number> = {}
+      for (const session of data.sessions) if (!session.stopped_at && session.phase !== 'stopped') running[session.harness] = (running[session.harness] ?? 0) + 1
+      return route.fulfill({ json: { total: stored?.total ?? stored?.cap ?? 15, limits: stored?.limits ?? {}, principal_id: data.me, running, running_total: Object.values(running).reduce((n, x) => n + x, 0), source: stored?.total !== undefined ? 'plan' : stored ? 'legacy' : 'default', updated_at: null } })
+    }
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)

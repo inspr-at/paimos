@@ -193,6 +193,9 @@ export const cancelRun = async (id: string) => {
 const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 export const readControlResponse = (project: string, session: string, control: string) => api(sessionResource(project, session, `controls/${enc(control)}`))
 export const readManagedSettings = (project: string, session: string) => api(sessionResource(project, session, 'managed-settings'))
+// AEON-436 protected subresource; these answers contain tier state, not raw session rows.
+export const readTierResponse = (project: string, session: string) => api(sessionResource(project, session, 'tier'))
+export const decideTierResponse = (project: string, session: string, request: string, body: unknown) => api(sessionResource(project, session, `tier/requests/${enc(request)}/decision`), post(body))
 export const sendManagedControl = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'managed-controls'), post(body))
 export const sendSessionControl = async (project: string, session: string, kind: 'interrupt' | 'stop'): Promise<SessionControl> =>
   (await call<SessionControl>(sessionResource(project, session, `controls/${kind}`), 'POST', {})).body
