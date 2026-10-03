@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import {
   balanceShards, checkCoverage, discoverSpecs, loadManifest, main, parseArgs,
@@ -293,24 +294,56 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
 })
 
-test('manifest drift never blocks a PR: new specs join the gate, removed ones are dropped, --strict reports both', async () => {
+test('manifest drift never blocks a PR: new specs stay ungated, removed ones are dropped, --strict reports both', async () => {
   const manifest = fixture()
   const discovered = [...files(manifest).filter(file => file !== 'tests/a-0.spec.ts'), 'tests/brand-new.spec.ts', 'tests/quotes/also-new.spec.ts']
   const { manifest: reconciled, unlisted, stale } = reconcileManifest(manifest, discovered)
   assert.deepEqual(unlisted, ['tests/brand-new.spec.ts', 'tests/quotes/also-new.spec.ts'])
   assert.deepEqual(stale, ['tests/a-0.spec.ts'])
   const group = reconciled.groups.find(g => g.id === 'unlisted')
-  assert.equal(group.gate, undefined, 'unlisted specs must be gated')
+  assert.equal(group.gate, false, 'unlisted specs have no hosted-runner evidence and must not gate')
   assert.deepEqual(group.specs.map(s => s.file), unlisted)
   const shards = balanceShards(reconciled, 3)
-  assert.deepEqual(checkCoverage(reconciled, shards, discovered), { specs: discovered.length, shards: 3 })
+  assert.deepEqual(checkCoverage(reconciled, shards, discovered), { specs: discovered.length - unlisted.length, shards: 3, ungated: unlisted.length })
+  assert.deepEqual(checkCoverage(reconciled, balanceShards(reconciled, 3, { all: true }), discovered, { all: true }), { specs: discovered.length, shards: 3 })
   assert.ok(!files(reconciled).includes('tests/a-0.spec.ts'))
   // A fully clean tree adds nothing.
   assert.equal(reconcileManifest(manifest, files(manifest)).manifest.groups.length, manifest.groups.length)
   assert.throws(() => reconcileManifest({ ...manifest, groups: [...manifest.groups, { ...group, id: 'unlisted' }] }, [...discovered, 'tests/x.spec.ts']), /reserved/)
   assert.equal(parseArgs(['--check', '--strict']).strict, true)
-  // The real tree with the real manifest still plans a full gate even if main moved on.
+  // The real tree with the real manifest keeps the full gate even if main moved on.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.ok(JSON.parse(out.pop()).specs >= 49)
+  assert.equal(JSON.parse(out.pop()).specs, 49)
+})
+
+test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'ci-web-shard-'))
+  try {
+    mkdirSync(resolve(root, 'tests'))
+    writeFileSync(resolve(root, 'playwright.ui.config.ts'), '')
+    const manifest = { version: 1, groups: [group('a', [9, 8])] }
+    const place = names => { for (const f of readdirSync(resolve(root, 'tests'))) rmSync(resolve(root, 'tests', f)); for (const n of names) writeFileSync(resolve(root, 'tests', n), '') }
+    const strict = () => main(['--check', '--strict', '--shards', '2'], { manifest, root, out: () => {}, env: {} })
+    place(['a-0.spec.ts', 'a-1.spec.ts'])
+    assert.equal(await strict(), 0)
+    place(['a-0.spec.ts', 'a-1.spec.ts', 'new.spec.ts'])
+    await assert.rejects(strict(), /Manifest drift: 1 unlisted, 0 stale.*new\.spec\.ts/)
+    place(['a-0.spec.ts'])
+    await assert.rejects(strict(), /Manifest drift: 0 unlisted, 1 stale.*a-1\.spec\.ts/)
+    place(['a-0.spec.ts', 'new.spec.ts'])
+    await assert.rejects(strict(), /Manifest drift: 1 unlisted, 1 stale/)
+    const lines = []
+    assert.equal(await main(['--check', '--shards', '2'], { manifest, root, out: s => lines.push(s), env: {} }), 0)
+    assert.deepEqual(JSON.parse(lines.pop()).unlisted, ['tests/new.spec.ts'])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a source manifest cannot declare the reserved unlisted group', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'ci-web-shard-reserved-'))
+  try {
+    const file = resolve(root, 'manifest.json')
+    writeFileSync(file, JSON.stringify({ version: 1, groups: [group('unlisted', [1])] }))
+    assert.throws(() => loadManifest(file), /reserved group id: unlisted/)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

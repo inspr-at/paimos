@@ -49,7 +49,10 @@ export function validateManifest(manifest) {
 }
 
 export function loadManifest(path = manifestPath) {
-  return validateManifest(JSON.parse(readFileSync(path, 'utf8')))
+  const manifest = validateManifest(JSON.parse(readFileSync(path, 'utf8')))
+  // `unlisted` is the synthetic group reconcileManifest adds for specs the manifest does not know.
+  if (manifest.groups.some(group => group.id === 'unlisted')) throw new Error('Manifest must not declare the reserved group id: unlisted')
+  return manifest
 }
 
 // Longest-processing-time scheduling. File names break weight ties, and the
@@ -86,9 +89,9 @@ export function discoverSpecs(root = webRoot, directories = ['tests']) {
 }
 
 // Specs added or removed on main after the manifest was written must not break
-// unrelated PRs (and a shard job must never silently skip a new spec). Undeclared
-// specs join the gate in an `unlisted` group with a default weight; declared
-// specs that no longer exist are dropped. --strict turns either into an error.
+// unrelated PRs. Undeclared specs go to an ungated `unlisted` group with a default
+// weight (visible in the run warning and --check); declared specs that no longer
+// exist are dropped. --strict turns either into an error.
 export function reconcileManifest(manifest, discovered, { defaultWeightSeconds = 60 } = {}) {
   const found = new Set(discovered)
   const declared = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
@@ -97,7 +100,10 @@ export function reconcileManifest(manifest, discovered, { defaultWeightSeconds =
   if (unlisted.length && manifest.groups.some(group => group.id === 'unlisted')) throw new Error('Manifest must not declare the reserved group id: unlisted')
   const groups = manifest.groups.map(group => ({ ...group, specs: group.specs.filter(spec => found.has(spec.file)) })).filter(group => group.specs.length)
   if (unlisted.length) {
-    groups.push({ id: 'unlisted', config: 'playwright.ui.config.ts', project: null, flags: ['--workers=2'], env: {}, hostedOnly: true,
+    // Ungated, like remaining-ui: the old CI never ran a spec that no workflow step named, and a new spec
+    // has no hosted-runner evidence yet (clip-tip.spec.ts failed there on its first run). Add it to the
+    // manifest to gate it; --all runs it meanwhile.
+    groups.push({ id: 'unlisted', gate: false, config: 'playwright.ui.config.ts', project: null, flags: ['--workers=2'], env: {}, hostedOnly: true,
       specs: unlisted.map(file => ({ file, weightSeconds: defaultWeightSeconds })) })
   }
   return { manifest: { ...manifest, groups }, unlisted, stale }
@@ -262,7 +268,7 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
     return 0
   }
   if (options.mode === 'list') { out(JSON.stringify(plans, null, 2)); return 0 }
-  if (Object.keys(drift).length) out(`::warning::ci-web-shards.json drift: ${drift.unlisted?.length ?? 0} unlisted spec(s) run in the gate with a default weight, ${drift.stale?.length ?? 0} stale entr${drift.stale?.length === 1 ? 'y' : 'ies'} ignored; update the manifest (ci:web:shard -- --check --strict)`)
+  if (Object.keys(drift).length) out(`::warning::ci-web-shards.json drift: ${drift.unlisted?.length ?? 0} unlisted spec(s) are not gated (add them to the manifest), ${drift.stale?.length ?? 0} stale entr${drift.stale?.length === 1 ? 'y' : 'ies'} ignored; update the manifest (ci:web:shard -- --check --strict)`)
   // A full shard is a CI-only entry point. Local inspection remains browser-free.
   if (!env.CI || ['0', 'false'].includes(env.CI)) throw new Error('Run CI shards on hosted CI; use --list or --check locally')
   if (env.RUNNER_ENVIRONMENT !== 'github-hosted') throw new Error('CI web shards require RUNNER_ENVIRONMENT=github-hosted')
