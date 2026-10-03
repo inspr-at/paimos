@@ -75,6 +75,9 @@ const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElemen
 // another dialog open above the popover's own layer handles its Escape itself.
 function escape(event: KeyboardEvent) {
   if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
+  // Names loaded after this panel mounts register their Escape listener later.
+  // Let the open disclosure consume Escape before dismissing its menu.
+  if (panel.value?.querySelector('.read-name-detail:popover-open')) return
   event.preventDefault(); event.stopImmediatePropagation()
   emit('close', true)
 }

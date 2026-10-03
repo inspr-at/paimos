@@ -7,7 +7,7 @@ import { expectStableControls } from './helpers/stable'
 import type { FloatingList } from './helpers/floating-lists'
 
 const name = 'Projektübergreifende Entwicklungszusammenarbeit und Qualitätsverantwortung'
-const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
+const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
 
 async function openList(page: Page, kind: FloatingList, theme: 'light' | 'dark') {
   const data = fixtures()
@@ -27,6 +27,54 @@ async function openList(page: Page, kind: FloatingList, theme: 'light' | 'dark')
   const panel = page.locator('.floating[role="dialog"]')
   await expect(panel).toBeVisible()
   return panel
+}
+
+for (const width of [390, 1024]) for (const theme of ['light', 'dark'] as const) {
+  test(`long name disclosure can be read and exited by keyboard at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    const errors = watchErrors(page)
+    await openList(page, 'option', theme)
+    await page.evaluate(async text => {
+      const { mountFloatingList } = await import(/* @vite-ignore */ '/tests/helpers/floating-lists.ts')
+      mountFloatingList('option', text)
+    }, name.repeat(100))
+    const panel = page.locator('.floating[role="dialog"]')
+    const read = panel.getByRole('button', { name: /^Read full name:/ }).first()
+    const text = (await read.getAttribute('aria-label'))!.replace(/^Read full name: /, '')
+    const disclosure = page.getByRole('region', { name: 'Full name', exact: true })
+    await page.keyboard.press('ArrowRight')
+    await read.focus()
+    await expect(disclosure).toHaveText(text)
+    expect(await disclosure.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(1)
+    const bounds = (await disclosure.boundingBox())!
+    expect(bounds.x).toBeGreaterThanOrEqual(0)
+    expect(bounds.y).toBeGreaterThanOrEqual(0)
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(844)
+    await expectStableControls({
+      controls: { panel, read, row: panel.getByRole('menuitemradio').first(), search: panel.locator('input'), group: panel.locator('.menu') },
+      scrollAreas: { panel, disclosure },
+      interactions: [{ name: 'read overflowing text with the keyboard', run: async () => {
+        await read.press('Tab')
+        await expect(disclosure).toBeFocused()
+        await disclosure.press('End')
+        await expect.poll(() => disclosure.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+        await expect(disclosure).toHaveText(text)
+        await disclosure.press('Shift+Tab')
+        await expect(read).toBeFocused()
+        await expect(disclosure).toHaveText(text)
+      } }],
+    })
+    mkdirSync(shots, { recursive: true })
+    await page.screenshot({ path: join(shots, `long-name-${width}-${theme}.png`) })
+    await read.press('Tab')
+    await expect(disclosure).toBeFocused()
+    await disclosure.press('Tab')
+    await expect(panel).toHaveCount(0)
+    await expect(disclosure).toHaveCount(0)
+    expect(await events(page)).toEqual([])
+    expect(errors).toEqual([])
+  })
 }
 
 async function events(page: Page) {
@@ -92,7 +140,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
           const row = panel.locator('[role="option"], [role="menuitemradio"]').first()
           const read = panel.getByRole('button', { name: /^Read full name:/ }).first()
           await expect(read).toBeVisible()
-          const text = await read.getAttribute('data-tip')
+          const text = (await read.getAttribute('aria-label'))!.replace(/^Read full name: /, '')
           expect(text).toContain(`${name} 1`)
           const nameElement = row.locator('.name, .title, .label, .opt-label')
           await expect(nameElement).toHaveAttribute('data-clip-tip', '')
@@ -106,21 +154,29 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
             scrollAreas: { panel },
             interactions: [{ name: 'tap the separate name disclosure', run: async () => {
               await read.tap()
-              await expect(page.locator('.tooltip')).toHaveText(text as string)
+              await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText(text as string)
               expect(await events(page)).toEqual([])
               await expect(panel).toBeVisible()
             } }, { name: 'read it again without committing a choice', run: async () => {
               await read.tap()
-              await expect(page.locator('.tooltip')).toHaveText(text as string)
+              await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText(text as string)
               expect(await events(page)).toEqual([])
             } }, { name: 'native disclosure keys do not select the row', run: async () => {
               await expect(read).toBeFocused()
               for (const key of ['Enter', 'Space']) {
                 await read.press(key)
-                await expect(page.locator('.tooltip')).toHaveText(text as string)
+                await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText(text as string)
                 expect(await events(page)).toEqual([])
                 await expect(panel).toBeVisible()
               }
+            } }, { name: 'Escape closes only the name disclosure', run: async () => {
+              await read.press('Escape')
+              await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveCount(0)
+              await expect(read).toBeFocused()
+              await expect(panel).toBeVisible()
+              expect(await events(page)).toEqual([])
+              await read.press('Enter')
+              await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText(text as string)
             } }],
           })
           mkdirSync(shots, { recursive: true })
@@ -134,6 +190,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
           else expect((selected as unknown[])[1]).toMatchObject({ key: 'PHAROS-100', title: `${name} 1` })
           await expect(panel).toHaveCount(0)
           await expect(page.locator('.tooltip')).toHaveCount(0)
+          await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveCount(0)
           expect(errors).toEqual([])
         } finally { await context.close() }
       })

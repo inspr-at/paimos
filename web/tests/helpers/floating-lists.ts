@@ -19,7 +19,7 @@ export type FloatingList = 'choice' | 'group' | 'epic' | 'option' | 'label' | 'r
 let host: HTMLElement | null = null
 let anchor: HTMLElement | null = null
 
-export function mountFloatingList(kind: FloatingList, longNames = false) {
+export function mountFloatingList(kind: FloatingList, longNames: boolean | string = false) {
   if (host) { render(null, host); host.remove() }
   anchor?.remove()
   host = document.createElement('div')
@@ -29,7 +29,7 @@ export function mountFloatingList(kind: FloatingList, longNames = false) {
   Object.assign(anchor.style, { position: 'fixed', left: '20px', top: '80px', height: '24px' })
   document.body.append(anchor)
   const choices = Array.from({ length: 16 }, (_, index) => {
-    const label = longNames ? `Projektübergreifende Entwicklungszusammenarbeit und Qualitätsverantwortung ${index + 1}` : `Choice ${index + 1}`
+    const label = typeof longNames === 'string' ? `${longNames} ${index + 1}` : longNames ? `Projektübergreifende Entwicklungszusammenarbeit und Qualitätsverantwortung ${index + 1}` : `Choice ${index + 1}`
     return { value: `choice-${index}`, label, name: label, color: '', on: 0, count: 1 }
   })
   const components: Record<FloatingList, Component> = { choice: ChoicePicker, group: MoveToGroup, epic: EpicPicker, option: OptionMenu, label: LabelMenu, relation: RelationPicker, facet: ChoiceFacet, business: PickerMenu }

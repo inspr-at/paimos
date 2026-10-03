@@ -119,7 +119,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     await page.keyboard.press('Shift+Tab')
     await expect(admin).toBeFocused()
     await expect(page.locator('.tooltip')).toContainText(LONG_DETAIL)
-    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
+    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `aeon-624-role-picker-${width}-${theme}.png`) })
     await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -246,7 +246,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
         await page.keyboard.press('ArrowRight')
         if (await read.count()) {
           await read.focus()
-          await expect(page.locator('.tooltip')).toContainText('Projektübergreifende Entwicklungszusammenarbeit')
+          await expect(page.getByRole('region', { name: 'Full name', exact: true })).toContainText('Projektübergreifende Entwicklungszusammenarbeit')
         } else if (kind === 'choice') {
           // Settings choices already wrap the whole name without an ellipsis.
           await row.focus()
@@ -259,7 +259,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
         }
       } }],
     })
-    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
+    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `aeon-624-${kind}-${width}-${theme}.png`) })
     const before = await page.evaluate(() => (window as unknown as { __floatingEvents: unknown[] }).__floatingEvents.length)
@@ -300,6 +300,15 @@ for (const key of ['Enter', 'Space']) test(`keyboard Cancel with ${key} makes ze
 test('touch and keyboard expose complete role names, descriptions and refusal reasons', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, reducedMotion: 'reduce' })
   const page = await context.newPage()
+  const touch = await context.newCDPSession(page)
+  async function hold(row: Locator) {
+    const box = (await row.boundingBox())!
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+    await page.clock.runFor(500)
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.clock.resume()
+  }
   try {
     const { world, picker } = await openRoles(page, 1, true)
     await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -311,7 +320,12 @@ test('touch and keyboard expose complete role names, descriptions and refusal re
     await page.reload()
     await page.getByRole('button', { name: `Role of ${LONG_SUBJECT}: Member. Change`, exact: true }).click()
     const row = picker.getByRole('radio', { name: /^Laufzeitverantwortung/ })
+    await page.clock.install()
     await row.tap()
+    await expect(row).toHaveAttribute('aria-checked', 'true')
+    await expect(page.locator('.tooltip')).toHaveCount(0)
+    await hold(row)
+    await expect(row).toHaveAttribute('aria-checked', 'true')
     await expect(page.locator('.tooltip')).toHaveText(`${runtime.name}\n${LONG_DETAIL}`)
     await insideViewport(page.locator('.tooltip'), page)
     const desc = row.locator('.desc')
@@ -319,6 +333,10 @@ test('touch and keyboard expose complete role names, descriptions and refusal re
     expect(await desc.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('normal')
     const refused = picker.getByRole('radio', { name: /^Owner/ })
     await refused.tap()
+    await expect(refused).toHaveAttribute('aria-checked', 'true')
+    await expect(page.locator('.tooltip')).toHaveCount(0)
+    await hold(refused)
+    await expect(refused).toHaveAttribute('aria-checked', 'true')
     await expect(page.locator('.tooltip')).toContainText('you do not hold')
     await expect(picker.locator('.actions .primary')).toBeDisabled()
     await expect(picker.getByRole('region', { name: 'What changes' })).toContainText('you do not hold')
@@ -360,18 +378,77 @@ for (const width of [390, 1024, 1440]) test(`long German heading wraps to two li
   await insideViewport(page.locator('.tooltip'), page)
 })
 
-test('keyboard focus reveals the complete role decision text', async ({ page }) => {
-  const { picker } = await openRoles(page, 0, true)
-  const admin = picker.getByRole('radio', { name: /^Admin/ })
-  await admin.click()
-  await page.keyboard.press('Tab')
-  await page.keyboard.press('Shift+Tab')
-  await expect(admin).toBeFocused()
-  await expect(page.locator('.tooltip')).toHaveText(`Admin\n${LONG_DETAIL}`)
-  await page.mouse.move(1, 1)
-  await expect(admin).toBeFocused()
-  await expect(page.locator('.tooltip')).toHaveText(`Admin\n${LONG_DETAIL}`)
-})
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`keyboard focus reveals the complete role decision text at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const errors = watchErrors(page)
+    const { picker } = await openRoles(page, 0, true)
+    const admin = picker.getByRole('radio', { name: /^Admin/ })
+    await admin.click()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect(admin).toBeFocused()
+    await expect(page.locator('.tooltip')).toHaveText(`Admin\n${LONG_DETAIL}`)
+    await expectStableControls({
+      controls: { ...(width === 390 ? { frame: picker } : {}), row: admin, selectors: picker.getByRole('radiogroup'), actions: picker.locator('.actions'), apply: picker.locator('.actions .primary'), cancel: picker.getByRole('button', { name: 'Cancel', exact: true }) },
+      scrollAreas: { picker, body: picker.locator('.picker-body') },
+      interactions: [{ name: 'pointer leaves the keyboard-focused role', run: async () => {
+        await admin.hover()
+        await page.mouse.move(1, 1)
+        await expect(admin).toBeFocused()
+        await expect(page.locator('.tooltip')).toHaveText(`Admin\n${LONG_DETAIL}`)
+      } }],
+    })
+    await insideViewport(page.locator('.tooltip'), page)
+    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
+    mkdirSync(shots, { recursive: true })
+    await page.screenshot({ path: join(shots, `role-pointer-${width}-${theme}.png`) })
+    expect(errors).toEqual([])
+  })
+
+  test(`keyboard role disclosure follows nested scrolling at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const errors = watchErrors(page)
+    const { world, picker } = await openRoles(page, 30, true)
+    const body = picker.locator('.picker-body')
+    const admin = picker.getByRole('radio', { name: /^Admin/ })
+    await admin.click()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect(admin).toBeFocused()
+    const tooltip = page.locator('.tooltip')
+    await expect(tooltip).toHaveText(`Admin\n${LONG_DETAIL}`)
+    expect(await body.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(32)
+    const before = (await admin.boundingBox())!
+    const tipBefore = (await tooltip.boundingBox())!
+    await expectStableControls({
+      controls: { frame: picker, row: admin, selectors: picker.getByRole('radiogroup'), actions: picker.locator('.actions'), apply: picker.locator('.actions .primary'), cancel: picker.getByRole('button', { name: 'Cancel', exact: true }) },
+      scrollAreas: { picker, body },
+      interactions: [{ name: 'scroll the focused role inside its picker', run: async () => {
+        // Cross the real asynchronous scroll event before checking disclosure.
+        // A passing assertion before dispatch would conceal the old hide().
+        await body.evaluate(el => new Promise<void>(resolve => {
+          el.addEventListener('scroll', () => requestAnimationFrame(() => resolve()), { once: true })
+          el.scrollTop = 32
+        }))
+        expect(await body.evaluate(el => el.scrollTop)).toBe(32)
+        await expect(admin).toBeFocused()
+        await expect(tooltip).toHaveText(`Admin\n${LONG_DETAIL}`)
+        expect((await admin.boundingBox())!.y).toBeCloseTo(before.y - 32, 1)
+        const tipAfter = (await tooltip.boundingBox())!
+        expect(Math.abs(tipAfter.y - tipBefore.y), 'disclosure follows the source rather than retaining stale coordinates').toBeGreaterThan(1)
+        await insideViewport(tooltip, page)
+      } }],
+    })
+    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
+    mkdirSync(shots, { recursive: true })
+    await page.screenshot({ path: join(shots, `role-scroll-${width}-${theme}.png`) })
+    expect(world.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/workspace-role'))).toEqual([])
+    expect(errors).toEqual([])
+  })
+}
 
 test('facet search stays still when Clear appears and disappears', async ({ page }) => {
   await mockWork(page, fixtures())
@@ -417,7 +494,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
   const controls = { input, save: panel.getByRole('button', { name: 'Save', exact: true }), reset, cancel: panel.getByRole('button', { name: 'Cancel', exact: true }) }
   for (const control of Object.values(controls)) await insidePanel(control, panel, page)
   await expectStableControls({ controls, scrollAreas: { panel }, interactions: [{ name: 'type the full hostname', run: () => input.fill(registeredHost) }] })
-  const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
+  const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
   mkdirSync(shots, { recursive: true })
   await page.screenshot({ path: join(shots, `aeon-624-session-host-${width}-${theme}.png`) })
   await reset.click()
