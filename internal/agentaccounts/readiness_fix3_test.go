@@ -78,3 +78,36 @@ func TestFix3MeasurementHeartbeatAndGenerationFence(t *testing.T) {
 		t.Fatal("measurement report erased health or rebound an old generation")
 	}
 }
+
+// A restart report carrying an old check must not bypass measurement-only
+// health isolation through the ordinary restart heartbeat's partial commit.
+func TestR122MeasurementRestartWithPendingCheckPreservesHealth(t *testing.T) {
+	for _, failure := range []string{"auth_failed", "unavailable"} {
+		t.Run(failure, func(t *testing.T) {
+			now := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
+			f := readinessWorld(t, "r122-measurement-restart-"+failure, now)
+			path := "/api/agent-accounts/" + f.account.ID
+			var health Account
+			callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Failure: failure}), 200, &health)
+			var check AccountCheck
+			callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("before-restart", 0), 202, &check)
+			if check.DaemonGeneration == nil || *check.DaemonGeneration != "g1" || health.LastProbeAt == nil {
+				t.Fatal("fixture requires a pending g1 check and known failed health")
+			}
+			later := fixedClockModule{Module: New(appPool), at: now.Add(time.Minute)}
+			probe := probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, MeasurementOnly: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success"}}
+			callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 409, nil)
+			if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_probe_ok=false AND last_probe_failure=$2 AND last_probe_at=$3 AND last_daemon_generation='g1'`, f.account.ID, failure, *health.LastProbeAt) != 1 {
+				t.Fatal("rejected measurement-only restart overwrote health or advanced generation")
+			}
+			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='pending' AND result IS NULL`, check.ID) != 1 {
+				t.Fatal("rejected measurement-only restart changed the pending check")
+			}
+			probe.Readiness = nil
+			callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+			if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_probe_ok=false AND last_probe_failure=$2 AND last_probe_at=$3 AND last_daemon_generation='g2'`, f.account.ID, failure, *health.LastProbeAt) != 1 {
+				t.Fatal("measurement-only generation heartbeat changed known failed health")
+			}
+		})
+	}
+}
