@@ -446,6 +446,9 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 			return registrationConflict(err, vendor)
 		}
 		existing.vendorRefDigest = vendor
+		if err := preserveChatAlias(ctx, tx, *existing); err != nil {
+			return err
+		}
 	} else if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
 		return vendorRefConflict("vendor_session_ref differs from this active generation's existing binding", vendor)
 	}
@@ -637,6 +640,19 @@ type registration struct {
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
+	var in registration
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	// Alias learning and chat binding share the tenant access fence. Take it
+	// before the hierarchy/session locks, then authorize the final write.
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+		return nil, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: projectID}); err != nil {
+		return nil, err
+	}
 	if p.Kind == tenant.Agent {
 		// A registered generation must be able to heartbeat and stop itself.
 		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: projectID}); err != nil {
@@ -644,10 +660,6 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		}
 	}
 	if err := project(ctx, tx, projectID); err != nil {
-		return nil, err
-	}
-	var in registration
-	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
 	if in.SucceedsID != nil {
