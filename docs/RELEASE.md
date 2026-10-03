@@ -237,6 +237,17 @@ router and small Go/Node checks. Go tests use four pool shards when routing
 admits the batch, otherwise the existing seven hosted shards. Timing budgets,
 static checks and the required `go` aggregate always run hosted.
 
+**Web CI (OPS-257):** hosted `web-setup` runs typecheck, lint, unit tests and
+browser-runner safety once, builds the current web, and shares its dependencies
+and build through the run's `web-runtime` artifact. Dependency and Chromium
+caches are keyed by the lockfile hash and resolved Playwright version; each of
+12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+system libraries. The shard command is `npm --prefix web run ci:web:shard --
+i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
+screenshots are retained in `web-shard-i-evidence` for seven days. The required
+check remains exactly `web`: its unconditional aggregate rejects failed,
+cancelled or skipped setup/shards.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
