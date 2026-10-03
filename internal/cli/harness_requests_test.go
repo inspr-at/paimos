@@ -149,6 +149,10 @@ func TestHeartbeatReportsOnlyAppliedRequests(t *testing.T) {
 			o.PrintControls = true
 			o.Model = "original-model"
 			o.Effort = "low"
+			o.Transcript = claudeUsagePath(t, t.TempDir(), "session.jsonl")
+			if err := os.WriteFile(o.Transcript, []byte(`{"type":"assistant","message":{"model":"original-model","reasoning_effort":"low"}}`+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			n := 0
 			err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{alive: func(int) bool { return true }, label: func() (string, bool) { return "Original name", true }, wait: func(context.Context, int, time.Duration) error {
 				n++
