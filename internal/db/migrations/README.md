@@ -273,3 +273,36 @@ prior assertions are preserved. Evidence is retained locally in
 `tmp/aeon619-lock/negative-remote.log`, `positive-remote.log` and
 `static-lock-guard.log`. These are worker checks; consolidated review, push,
 merge and release remain coordinator work. No origin push or deployment ran.
+
+AEON-619 final repair round replaces the two node entry-point mutation fences
+with main's `authz.LockProjectWrite`. Its tenant SHARE lock excludes authority
+writes while permitting tenant FK key-share checks by concurrent comments and
+events. Pairing still precedes tree where required, tree precedes tenant, and
+authorization remains in the final write transaction. The lock inventory changes
+only the two node-helper expectations; shared helpers and their guards stay intact.
+No migration, policy exception, API contract or approved design decision changes.
+
+Regression-only commit `3b502ad4` preserves production code from `7b6a6e94`.
+Its two real HTTP comment/update and comment/delete cases pause after node SHARE
+and tenant-fence acquisition, then use PostgreSQL's wait graph to establish the
+edit's node-row wait before resuming the comment's tenant-referencing append.
+The approved remote run fails both cases on that baseline (update 409, delete
+500 with PostgreSQL `40P01`); the missing durable edit is also asserted.
+Repair `a782c0bd` passes both cases in the permitted single-package local check,
+including exactly one durable comment and edit audit event per case. Evidence:
+`tmp/aeon619-fix3/negative-remote.log` and `positive-targeted-local.log`.
+
+The approved remote runner exits 0 at `a782c0bd` for uncached full nodes, portal,
+authz, agentpairing, activity, events, relations and workqueue suites, followed
+by the web build, lint and all 1,396 web tests (655 Node tests and 741 Vitest
+tests; no Node skips). This includes the earlier pairing/tree barriers and the
+lock inventory's negative controls. The regression source is byte-identical to
+the failing baseline; shared helpers, three other main guards, contract,
+migration 1138 and its policy exception are unchanged. Retained evidence:
+`tmp/aeon619-fix3/positive-remote.log` and `preserved-artifacts.json`.
+
+The approved browser runner refuses the four portal specs with exit 3 because
+OPS-247's bootstrap and launcher remain pending (`remote-browser.log`). Linux
+Chromium verification remains a coordinator gate; no browser gate was bypassed
+and no origin push, deployment, model CLI or ticket status change ran. These
+results record worker validation, not merge or release approval.
