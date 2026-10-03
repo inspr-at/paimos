@@ -47,6 +47,9 @@
 // An unpaired registering key, workspace admin or key creator is not implicitly
 // an owner. Writes recheck live permissions under tenant -> pairing -> account
 // locks and append account.residency_evidence_updated as the final operation.
+// Readiness, residency and pairing lifecycle writers share the tenant -> pairing
+// -> account lock order. The tenant fence uses NO KEY UPDATE so FK share locks
+// remain compatible; authorization is rechecked inside that fenced transaction.
 // Evidence names covered profiles, inference/storage/log country sets, explicit
 // local execution, verification/expiry times and an opaque proof reference;
 // optional retention days and training opt-out are retained as declarations.

@@ -16,10 +16,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Lock is acquired before work-order/run/account locks by every paired
-// dispatch, claim, probe, settlement and lifecycle mutation. This serializes
-// revocation with in-flight credentials that passed the HTTP auth boundary.
+// Lock acquires the tenant authorization fence, then the pairing fence, before
+// tree/work-order/run/account locks. Every paired dispatch, claim, probe,
+// settlement and lifecycle mutation uses this order, including callers that
+// re-enter Lock after already acquiring both fences. NO KEY UPDATE permits
+// tenant FK checks while serializing role changes with transaction-local auth.
 func Lock(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
 	return err
 }

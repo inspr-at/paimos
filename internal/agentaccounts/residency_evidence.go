@@ -12,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -195,15 +196,17 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out residencyEvidenceRecord
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		ctx := r.Context()
-		// m.in acquires pairing first, matching existing lifecycle writers.
-		// Only writes need the tenant fence shared with role mutation.
-		if write {
-			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
-				return err
-			}
+	// Writes share tenant -> pairing ordering with readiness and lifecycle
+	// mutations. Advisory GETs need only a tenant-scoped snapshot: they must
+	// not acquire either write fence or wait for an account mutation.
+	inTenant := m.in
+	if !write {
+		inTenant = func(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
+			return db.InTenant(ctx, m.pool, tenantID, fn)
 		}
+	}
+	err := inTenant(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ctx := r.Context()
 		permission := "account.read"
 		if write {
 			permission = "account.manage"
