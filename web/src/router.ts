@@ -31,6 +31,7 @@ export const router = createRouter({
     {
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
+        { path: 'releases', component: RouteMarker, meta: { title: 'Releases', projectSection: 'releases' } },
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.

@@ -8,12 +8,12 @@ import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
 
 // Phones: every filter in one sheet, and grouping; the same state as the toolbar.
-const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; facetErrors?: Record<string, string>; view?: 'list' | 'outline' | 'graph'; canSave?: boolean }>(), { view: 'list' })
+const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; totalIncomplete?: boolean; facetErrors?: Record<string, string>; view?: 'list' | 'outline' | 'graph' | 'releases'; canSave?: boolean }>(), { view: 'list' })
 const emit = defineEmits<{
   toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
 }>()
-const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
+const dimensions = computed(() => DIMENSIONS.filter(d => props.view === 'releases' ? d.key !== 'release' : props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
@@ -65,7 +65,7 @@ defineExpose({ open, close })
             <button type="button" class="btn" @click="emit('collapseAll'); close()"><AppIcon name="collapse-all" :size="14" />Collapse all</button>
           </div>
         </div>
-        <section v-else-if="view !== 'graph'" class="sheet-section">
+        <section v-else-if="view !== 'graph' && view !== 'releases'" class="sheet-section">
           <p class="eyebrow">Group by</p>
           <div class="chip-grid" role="radiogroup" aria-label="Group by">
             <button v-for="option in GROUPS" :key="option.value" type="button" role="radio" class="choice" :aria-checked="filters.group === option.value" @click="emit('group', option.value)">{{ option.label }}</button>
@@ -91,7 +91,7 @@ defineExpose({ open, close })
       </div>
       <footer>
         <button ref="doneButton" type="button" class="btn primary done" @click="close">
-          <AppIcon name="check" :size="14" />Show {{ total === null ? 'tickets' : plural(total, 'ticket') }}
+          <AppIcon name="check" :size="14" />Show {{ totalIncomplete && total !== null ? '≥ ' : '' }}{{ total === null ? 'tickets' : plural(total, 'ticket') }}
         </button>
       </footer>
     </div>

@@ -39,6 +39,10 @@ export type PlanningRead = (context: PlanningContext, source: PlanningSource, cu
 // a second membership selector. Reuse ticket filters, including their exclusions
 // and date bounds, but keep release lifecycle separate from work_state.
 export function planningQuery(project: string, filters: ListFilters, hideStates: readonly string[] = []): string {
+  if (new TextEncoder().encode(filters.q).length > 200) throw new Error('Search is limited to 200 UTF-8 bytes')
+  for (const values of [filters.status, filters.type, filters.priority, filters.assignee, filters.tag, filters.cost, filters.epic, filters.human_check, hideStates]) {
+    if (values.length > 100 || new TextEncoder().encode(values.join(',')).length > 6400) throw new Error('Too many filter values')
+  }
   const ordinary = apiParams(project, { ...filters, ships_in: [] })
   const params = new URLSearchParams({ view: 'planning', hide_closed: String(!filters.showClosed) })
   for (const key of ['q', 'kind', 'priority', 'assignee', 'tag', 'cost_unit', 'human_check', 'epic', 'date_field', 'date_from', 'date_to'] as const) {

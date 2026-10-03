@@ -25,6 +25,9 @@ describe('release planning query', () => {
     expect(query.has('state')).toBe(false); expect(query.has('ships_in')).toBe(false); expect(query.getAll('hide_state')).toEqual(['done', 'cancelled'])
   })
   it('bounds UTF-8 search before work', () => { expect(() => planningQuery('project', filtersFromQuery({ q: 'ä'.repeat(101) }))).toThrow('200 UTF-8') })
+  it('bounds filter arrays before normalization', () => {
+    expect(() => planningQuery('project', { ...filtersFromQuery({}), assignee: Array.from({ length: 101 }, (_, i) => `person-${i}`) })).toThrow('Too many filter values')
+  })
 })
 describe('bounded release reads', () => {
   it('makes one overview request with no member fan-out, then lazily opens multiple rows', async () => {
@@ -33,6 +36,12 @@ describe('bounded release reads', () => {
     h.state.expand('0'); h.state.expand('1'); expect(h.requests.slice(1).map(r => r.source)).toEqual(['release:0', 'release:1'])
     h.requests[1]!.resolve(page(1)); h.requests[2]!.resolve(page(1)); await settle()
     expect([...h.state.expanded]).toEqual(['0', '1']); expect(h.state.rendered.value).toBe(2); h.state.dispose()
+  })
+  it('restores unloaded expansion IDs without fetching their members before their release page', async () => {
+    const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview()); await settle()
+    h.state.expand('unloaded'); expect(h.requests).toHaveLength(1)
+    h.state.more('released'); h.requests[1]!.resolve({ items: [release('unloaded')] }); await settle()
+    expect(h.requests.map(r => r.source)).toEqual(['overview', 'released', 'release:unloaded']); h.state.dispose()
   })
   it('reserves no more than four requests and 2,000 rendered work rows for Expand all', async () => {
     const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview(50)); await settle(); h.state.expandAll()

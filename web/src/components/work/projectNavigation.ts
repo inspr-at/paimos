@@ -5,6 +5,7 @@ import type { IconName } from '../AppIcon.vue'
 
 export interface ProjectTab { id: string; label: string; icon: IconName }
 export const PROJECT_SECTIONS = [
+  { id: 'releases', label: 'Releases', icon: 'box' },
   { id: 'tickets', label: 'Tickets', icon: 'ticket' },
   { id: 'journey', label: 'Journey', icon: 'journey' },
   { id: 'knowledge', label: 'Knowledge', icon: 'book' },
@@ -33,5 +34,5 @@ export const KNOWLEDGE_VIEWS = [
 
 export function projectSection(route: Pick<RouteLocationNormalizedLoaded, 'meta' | 'query'>): ProjectSection {
   const section = route.meta.projectSection ?? route.query.section
-  return section === 'knowledge' || section === 'journey' ? section : 'tickets'
+  return section === 'releases' || section === 'knowledge' || section === 'journey' ? section : 'tickets'
 }

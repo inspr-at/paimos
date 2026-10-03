@@ -20,10 +20,11 @@ const props = defineProps<{
   // The words for one value in a chip (an epic's title, a person's name).
   label: (dimension: Dimension, value: string) => string
   total: number | null
+  totalIncomplete?: boolean
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
-  view: TicketView | 'journey' | 'knowledge'
+  view: TicketView | 'journey' | 'knowledge' | 'releases'
   knowledgeView?: 'entries' | 'graph'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
@@ -80,9 +81,9 @@ watch(draft, value => {
 onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
 const graph = computed(() => props.view === 'graph')
-const dimensions = computed(() => DIMENSIONS.filter(d => !graph.value || TICKET_GRAPH_FILTERS.includes(d.key)))
+const dimensions = computed(() => DIMENSIONS.filter(d => props.view === 'releases' ? d.key !== 'release' : !graph.value || TICKET_GRAPH_FILTERS.includes(d.key)))
 const primary = computed(() => dimensions.value.filter(d => d.primary))
-const active = computed(() => activeDimensions(props.filters).filter(key => !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
+const active = computed(() => activeDimensions(props.filters).filter(key => props.view === 'releases' ? key !== 'release' : !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
 const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (!graph.value && props.filters.date ? 1 : 0))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (!graph.value && props.filters.date ? 1 : 0))
 const chipCount = computed(() => active.value.length + (!graph.value && props.filters.date ? 1 : 0))
@@ -150,8 +151,8 @@ defineExpose({ focusSearch, openFilterMenu, input })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
-    <ProjectTabs v-if="view !== 'journey'" class="view-switch"
+  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'releases' ? 'Release list controls' : view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
+    <ProjectTabs v-if="view !== 'journey' && view !== 'releases'" class="view-switch"
       :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
       :tips="view !== 'knowledge'"
@@ -159,7 +160,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <template v-if="view !== 'knowledge' && view !== 'journey'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
-      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
+      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" :aria-label="view === 'releases' ? 'Search releases and work in this project' : 'Search tickets in this project'" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
       <kbd v-if="!draft && !narrow" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
@@ -198,7 +199,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     <span class="spacer" />
 
-    <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
+    <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ totalIncomplete ? '≥ ' : '' }}{{ plural(total, 'ticket') }}</template></span>
     <label class="switch closed-switch">
       <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <span>Hide closed</span>
@@ -207,11 +208,11 @@ defineExpose({ focusSearch, openFilterMenu, input })
       type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
       :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
-    <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button v-if="!graph && view !== 'releases'" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
-    <button v-if="!graph" type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button v-if="!graph && view !== 'releases'" type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
@@ -226,7 +227,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading" :error="facetErrors?.[open.dimension]"
       @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
-    <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
+    <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="view === 'releases' ? dimensions.map(d => d.key) : graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
     <DateMenu v-if="dateAnchor" :anchor="dateAnchor" :value="filters.date" @change="value => emit('date', value)" @close="closeDate" />
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
       <DisplayPanel

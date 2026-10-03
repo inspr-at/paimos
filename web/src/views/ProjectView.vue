@@ -70,6 +70,7 @@ import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQu
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
+const ReleasePlanning = defineAsyncComponent(() => import('../components/releases/ReleasePlanning.vue'))
 const JourneyView = defineAsyncComponent(() => import('../components/journey/JourneyView.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
@@ -135,7 +136,9 @@ const section = computed(() => projectSection(route))
 const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
 const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
 const onKnowledge = () => section.value === 'knowledge'
-const filters = computed(() => filtersFromQuery(section.value !== 'tickets' ? {} : route.query))
+const releasesActive = computed(() => section.value === 'releases')
+const planningSummary = ref<{ total: number | null; loading: boolean; incomplete: boolean }>({ total: null, loading: false, incomplete: false })
+const filters = computed(() => filtersFromQuery(section.value === 'tickets' || releasesActive.value ? route.query : {}))
 // A view (or a shared link) may carry its own column set; widths stay the person's.
 const tablePrefs = computed<ListPrefs | null>(() => {
   const cols = filters.value.cols
@@ -179,7 +182,7 @@ async function fetchWorkList(query: ListQuery) {
 const list = useTicketList(projectId, filters, { identity: () => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`, review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
-type ViewMode = TicketView | 'journey' | 'knowledge'
+type ViewMode = TicketView | 'journey' | 'knowledge' | 'releases'
 const activeTicketView = computed(() => ticketView(route.query.view))
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
 const knowledgeActive = computed(onKnowledge)
@@ -401,7 +404,7 @@ function options(dimension: Dimension) {
     return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
   }
   const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, releases: list.releaseNames.value })
-  return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
+  return dimension === 'status' && !releasesActive.value ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
   return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, releases: list.releaseNames.value })
@@ -425,6 +428,7 @@ watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) 
 
 // ---------- URL state ----------
 function modeQuery() {
+  if (releasesActive.value) return ticketKey.value ? ticketSectionQuery() : {}
   return { view: route.query.view === 'full' && fullView.value ? 'full' : activeTicketView.value.id,
     ...(ticketKey.value ? ticketSectionQuery() : {}), ...(route.query.panel === 'full' ? { panel: 'full' } : {}) }
 }
@@ -509,7 +513,7 @@ const customised = computed(() => hasFilters(filters.value) || filters.value.sor
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
 const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !releasesActive.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
@@ -559,7 +563,7 @@ const queryKey = computed(() => {
 })
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value || releasesActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value || mode === 'graph') return
   // Switching views on the same query reuses the rows already loaded.
@@ -569,7 +573,7 @@ watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (mode === 'all') void load.then(() => list.loadAll())
   if (sameQuery) return
   // A new query starts at its first row, with the project header still out of view.
-  if (old && scrollRoot.value && toolbarWrap.value && scrollRoot.value.scrollTop > toolbarWrap.value.offsetTop) {
+  if (!releasesActive.value && old && scrollRoot.value && toolbarWrap.value && scrollRoot.value.scrollTop > toolbarWrap.value.offsetTop) {
     scrollRoot.value.scrollTop = toolbarWrap.value.offsetTop
   }
 }, { immediate: true })
@@ -1084,7 +1088,7 @@ async function remove(view: SavedView) {
 }
 
 // ---------- Selection and bulk changes ----------
-const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && !fullView.value)
+const selectable = computed(() => writable.value && !releasesActive.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
 // Phone selection can be armed before the first card is chosen.
 const phoneQuery = window.matchMedia('(max-width: 720px)')
@@ -1445,7 +1449,10 @@ function extendSelection(step: number) {
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
-  if (knowledgeActive.value && !ticketKey.value) return
+  if ((knowledgeActive.value || releasesActive.value) && !ticketKey.value) {
+    if (releasesActive.value && event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.defaultPrevented && !typing(event.target) && !document.querySelector('dialog[open], .floating')) { event.preventDefault(); toolbar.value?.focusSearch() }
+    return
+  }
   // Command or Control A in the list selects every loaded row.
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && selectable.value && !event.defaultPrevented
     && !typing(event.target) && !document.querySelector('dialog[open], .floating') && !panel.value?.el?.contains(document.activeElement)) {
@@ -1627,7 +1634,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
+          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="releasesActive ? planningSummary.total : total" :total-incomplete="releasesActive && planningSummary.incomplete" :loading="releasesActive ? planningSummary.loading : graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading" :facet-errors="list.facetErrors"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
@@ -1648,8 +1655,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
       </div>
 
+      <ReleasePlanning v-if="releasesActive" :project-id="project.id" :project-key="project.routeKey" :person="`${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`" :filters="filters" :scroll-root="scrollRoot" :now="now" :density="density"
+        @summary="planningSummary = $event" @open="openKey" @copy="copyKey" @new-tab="newTab" @scope="id => update({ ships_in: [id] })" />
       <JourneyView
-        v-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
+        v-else-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
         :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
@@ -1695,7 +1704,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
-      <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
+      <p v-if="!releasesActive && !journeyActive && !knowledgeActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
@@ -1718,7 +1727,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :facet-errors="list.facetErrors" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        ref="filterSheet" :filters="filters" :options="options" :facet-errors="list.facetErrors" :total="releasesActive ? planningSummary.total : total" :total-incomplete="releasesActive && planningSummary.incomplete" :view="releasesActive ? 'releases' : graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!releasesActive && !graphActive && canSaveView"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"

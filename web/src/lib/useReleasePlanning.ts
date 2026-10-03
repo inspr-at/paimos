@@ -46,6 +46,7 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
     pump()
   }
   function openWork(id: string) {
+    if (id !== 'backlog' && !rows().some(row => row.release_id === id)) return
     if (id === 'backlog') { enqueue('backlog:ranked'); enqueue('backlog:tail') }
     else enqueue(`release:${id}`)
   }

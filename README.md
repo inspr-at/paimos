@@ -27,6 +27,21 @@ changed queries refuse old cursors. Recovery/`through` combinations are refused.
 Product marketing names use P3's explicit runtime product binding; over-budget
 name inventories or sequences above 10,000 refuse without omitting later hits.
 
+The project’s **Releases** tab (`/p/<key>/releases`) shows Upcoming, Backlog,
+Abandoned and Released. Several releases can expand together; the chevron only
+opens work, while the name also sets the existing URL scope. Expansion is
+remembered separately from Outline per project/person. One overview supplies
+the first release pages without member requests; work loads lazily in ≤200-row
+pages, with at most four reads and 2,000 rendered child rows. Continuations
+stay above growing content. Search and Hide use P5’s whole-query server counts;
+changing scope/query/person invalidates cursors and late responses. Passive
+insertions above hovered/focused rows wait until those controls are left or
+**Show loaded** is chosen. Capped counts and stale/failed reads stay explicit.
+Item progress/ETA/assignee and epic titles are not supplied by the current
+delivery item response and remain unknown; no per-ticket read is added.
+Breadcrumb/picker, write actions, lifecycle sheets and the journey adoption
+card remain assigned to the other P6 packages.
+
 `GET /api/knowledge?project_id=<project>&ships_in=none` reads deduplicated,
 one-hop visible `relates` context of effective Backlog work in either direction,
 including ranked and tail members. Its own type/status/search filters intersect
