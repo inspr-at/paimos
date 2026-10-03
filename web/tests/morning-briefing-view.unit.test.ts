@@ -8,7 +8,7 @@ import * as Briefing from '../src/lib/morningBriefing'
 import * as Scope from '../src/lib/identityScope'
 import * as AgentState from '../src/lib/agentState'
 import { APIError } from '../src/lib/api'
-import { usageDashboard } from './usage-data'
+import { usageAllowanceWindow, usageDashboard } from './usage-data'
 import type { UsageDashboard } from '../src/lib/usageFormat'
 
 const START = '2026-09-30T08:00:00.000Z', END = '2026-10-01T08:00:00.000Z'
@@ -27,12 +27,13 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean } = {}, setupPrelude = '') {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean; partialAllowance?: boolean; truncatedAllowance?: boolean } = {}, setupPrelude = '') {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
   const can = (permission: string, project?: string) => !(options.noDecide && permission === 'approvals.decide') && (permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed'))
   const pending = { id: 'approval', resource_kind: 'node', resource_id: 'ticket', scope: 'nodes.write', rationale: 'Review me', decision: null, expires_at: '2099-01-01T00:00:00Z' }
   const dashboard = (options as typeof options & { dashboard?: UsageDashboard }).dashboard ?? usageDashboard('reported')
+  if (options.partialAllowance) Object.assign(dashboard.allowance, { state: 'partial', windows: [usageAllowanceWindow()], truncated: !!options.truncatedAllowance })
   dashboard.totals.cost_state = 'known'
   dashboard.totals.cost_unknown_rows = 0; dashboard.totals.unreported_sessions = 0; dashboard.totals.provisional_rows = 0
   const json = async (path: string, _signal?: AbortSignal, init?: RequestInit) => {
@@ -243,4 +244,13 @@ it('preserves held request body, project label and an app Source link', async ()
 it('records calls to the real desk reader export in the briefing harness', async () => {
   const { paths } = await mount({}, "import { readDeskProjection } from '../lib/decisionDesk'\nvoid readDeskProjection(100)\n")
   expect(paths.filter(path => path.startsWith('/decision-desk/projection'))).toEqual(['/decision-desk/projection?limit=100'])
+})
+
+it.each([false, true])('shows returned partial allowance windows and coverage (truncated=%s)', async truncatedAllowance => {
+  const { root } = await mount({ projectCost: true, partialAllowance: true, truncatedAllowance })
+  const text = textOf(root)
+  expect(text).toContain('Accounts now')
+  expect(text).toContain(usageAllowanceWindow().label)
+  expect(text).not.toContain('No account budget windows recorded.')
+  expect(text).toContain(truncatedAllowance ? 'Account budget windows are truncated.' : 'Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
 })

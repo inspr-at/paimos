@@ -82,6 +82,7 @@ func (f *fixture) queueAccount(t *testing.T, allowance int64) string {
 		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',$3)`, f.agent.TenantID, id, allowance)
 		return err
 	})
+	roundTheClockAccount(t, f, id)
 	return id
 }
 func TestTicketQueueOrderResetReadinessAndPayload(t *testing.T) {
