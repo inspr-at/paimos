@@ -605,6 +605,57 @@ func TestKeyTrimGrantFenceDeniesStaleGrantAfterApprovalCommits(t *testing.T) {
 	}
 }
 
+func TestKeyTrimOppositeProposalsFenceCompleteKeyBatch(t *testing.T) {
+	m, owner := keyFixture(t)
+	scopes := []string{"approvals.request", "nodes.read", "nodes.write"}
+	keys := []agentKeyCreatedJSON{
+		decodeKey(t, keyRequest(m, owner, map[string]any{"name": "first-proposer", "scopes": scopes})),
+		decodeKey(t, keyRequest(m, owner, map[string]any{"name": "second-proposer", "scopes": scopes})),
+	}
+	// Start with the higher authenticating key: taking self first instead of
+	// the complete sorted batch would invert the order of these proposals.
+	if keys[0].ID < keys[1].ID {
+		keys[0], keys[1] = keys[1], keys[0]
+	}
+	agents := make([]tenant.Principal, 2)
+	for i, key := range keys {
+		prefix, secret, _ := parseBearer("Bearer " + key.Token)
+		p, ok, err := m.authenticateAgent(t.Context(), prefix, secret)
+		if err != nil || !ok {
+			t.Fatal("authentication failed")
+		}
+		agents[i] = p
+	}
+	now := time.Now().UTC()
+	m.trimNow = func() time.Time { return now }
+	in := trimInput{RequestID: "10000000-0000-4000-8000-000000000001", Expected: scopes, Candidate: []string{"approvals.request", "nodes.read"}, ExpiresAt: now.Add(time.Hour), Evidence: trimEvidence{Summary: "Retain proposal and read permissions.", ObservedAt: now, Risks: []trimRisk{{Scope: "nodes.write", Evidence: "No recorded use; earlier use unknown.", Risk: "Writes fail."}}}}
+	pool, barrier, ctx := dbtest.BarrierPool(t, m.pool, func(sql string) bool {
+		return strings.Contains(sql, "pg_advisory_xact_lock(hashtextextended($1,615))")
+	})
+	first := *m
+	first.pool = pool
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() { _, err := first.proposeKeyTrim(ctx, agents[0], keys[1].ID, in); firstDone <- err }()
+	holder := barrier.Wait(t, ctx)
+	finished := make(chan struct{})
+	go func() { _, err := m.proposeKeyTrim(ctx, agents[1], keys[0].ID, in); secondDone <- err; close(finished) }()
+	if lock := dbtest.BlockedOrDone(t, ctx, m.pool, holder, finished); lock != "advisory" {
+		t.Fatalf("opposite proposal did not wait on the first key in the batch: %q", lock)
+	}
+	barrier.Release()
+	if err := dbtest.Await(t, ctx, firstDone); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbtest.Await(t, ctx, secondDone); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		if !slices.Equal(trimScopesStored(t, m, owner, key.ID), scopes) {
+			t.Fatal("agent proposal changed key scopes")
+		}
+	}
+}
+
 func TestKeyTrimProposalKeysetPagination(t *testing.T) {
 	m, owner, key, in := trimFixture(t)
 	for _, request := range []string{"10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002", "10000000-0000-4000-8000-000000000003"} {
