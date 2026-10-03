@@ -12,7 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
 // ModelsForRun projects the same catalog as /agent-accounts/catalog, scoped to
@@ -113,7 +115,7 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		role = "build"
 	}
 	if !slices.Contains([]string{"scout", "mechanical", "build", "build-hard", "review-gate"}, role) ||
-		(family != "" && !slices.Contains([]string{"openai", "anthropic", "xai", "cursor"}, family)) ||
+		(family != "" && !reviewgate.ValidFamily(family)) ||
 		(role == "review-gate" && family == "") {
 		writeErr(w, fail(http.StatusBadRequest, "invalid role or author family"))
 		return
@@ -187,9 +189,9 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		FROM model_profiles p LEFT JOIN model_role_routes r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$1
 		WHERE p.enabled
-		  AND ($1 <> 'review-gate' OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
-		  AND (r.state IS NULL OR r.state='available' OR r.valid_until <= $3)
-		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, authorFamily, now)
+		  AND ($1 <> 'review-gate' OR r.profile_id IS NOT NULL)
+		  AND (r.state IS NULL OR r.state='available' OR r.valid_until <= $2)
+		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, now)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +201,10 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		var p catalogProfile
 		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.Priority); err != nil {
 			return nil, err
+		}
+		family := harnesslaunch.ModelFamily(p.Harness, p.Model)
+		if family != p.Family || role == "review-gate" && (!harnesslaunch.FamilyMatches(p.Harness, p.Model, p.Family) || family == authorFamily) {
+			continue
 		}
 		profiles = append(profiles, p)
 	}
