@@ -29,6 +29,7 @@ const contextKey = computed(() => JSON.stringify({ project: props.project.id, ..
 const adapted = computed(() => ticketGraphData(visible.value, props.project.routeKey))
 const panelOpen = computed(() => !!route.params.ticketKey)
 const selected = computed(() => visible.value.nodes.find(node => panelOpen.value ? node.key.toLowerCase() === String(route.params.ticketKey).toLowerCase() : node.id === selection.value))
+const disclosed = computed(() => hovered.value ?? selected.value ?? null)
 const summary = computed(() => `${plural(visible.value.nodes.length, 'ticket')} · ${plural(visible.value.nodes.filter(n => n.type === 'epic').length, 'epic')} · ${plural(visible.value.links.length, 'link')}`)
 let request: AbortController | undefined
 async function load() {
@@ -58,6 +59,8 @@ async function open(node: GraphNode) {
   }
   emit('open', ticket.key)
 }
+function select(node: GraphNode) { selection.value = node.id; hovered.value = null }
+function clear() { selection.value = ''; hovered.value = null }
 watch([contextKey, viewer], load, { immediate: true })
 watch([data, visible, loading], () => emit('state', { data: data.value, visible: visible.value, loading: loading.value }), { immediate: true })
 watch(panelOpen, async (open, wasOpen) => { if (!open && wasOpen) { await nextTick(); canvas.value?.focus() } })
@@ -69,7 +72,7 @@ defineExpose({ focus: () => canvas.value?.focus() })
   <GraphCanvas ref="canvas" :data="adapted" :viewer-key="viewer" title="Tickets, connected"
     :summary="loading ? 'Finding the connections…' : summary" :selected-id="selected?.id"
     open-on-click :keyboard-active="!panelOpen || route.query.focus === '1'" :min-stage-height="320" canvas-class="ticket-graph-canvas"
-    @select="node => selection = node.id" @open="open" @clear="selection = ''"
+    @select="select" @open="open" @clear="clear"
     @hover="node => hovered = visible.nodes.find(n => n.id === node?.id) ?? null">
     <template #default="{ focused }">
       <div v-if="loading || error || !visible.nodes.length" class="tg-state" role="status">
@@ -78,8 +81,8 @@ defineExpose({ focus: () => canvas.value?.focus() })
         <p v-else-if="loading">Loading ticket connections…</p>
         <template v-else><h3>{{ data.nodes.length ? 'No tickets match these filters' : 'No tickets to show yet' }}</h3><p>{{ data.nodes.length ? 'Adjust the search or filters to see more connections.' : 'Try showing closed tickets, or add tickets in List view.' }}</p></template>
       </div>
-      <div v-if="hovered && !loading && !error" class="tg-tooltip" :class="{ focused }" role="tooltip">
-        <span>{{ hovered.key }} · {{ statusMeta(hovered.status).label }} · {{ plural(hovered.link_count, 'link') }}</span><strong>{{ hovered.title }}</strong>
+      <div v-if="disclosed && !loading && !error" class="tg-tooltip" :class="{ focused }" role="tooltip">
+        <span>{{ disclosed.key }} · {{ statusMeta(disclosed.status).label }} · {{ plural(disclosed.link_count, 'link') }}</span><strong>{{ disclosed.title }}</strong>
       </div>
     </template>
     <template #footer>

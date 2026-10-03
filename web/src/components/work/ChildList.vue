@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { nextTick, ref } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { statusMeta } from '../../lib/work'
@@ -43,7 +44,7 @@ defineExpose({ startAdd })
         <button type="button" class="child-row" :class="{ closed: statusMeta(child.state).closed }" @click="emit('open', child.key)">
           <StatusIcon :state="child.state" :size="13" :data-tip="statusMeta(child.state).label" />
           <span class="key">{{ child.key }}</span>
-          <span class="child-title">{{ child.title }}</span>
+          <span v-clip-tip class="child-title">{{ child.title }}</span>
           <PriorityIcon v-if="child.priority" :priority="child.priority" :size="13" />
         </button>
       </li>
@@ -88,5 +89,10 @@ defineExpose({ startAdd })
 .add-input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; color: var(--ink); font-size: 13.5px; }
 .add-input:focus { box-shadow: none; }
 .key, .child-title { line-height: 18px; }
-@media (max-width: 720px) { .child-row { height: 40px; } .key { width: 76px; } }
+@media (max-width: 720px) {
+  .child-row { height: auto; min-height: 44px; padding-block: 6px; align-items: flex-start; }
+  .key { width: 76px; }
+  .child-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
+  .child-row > svg { flex-shrink: 0; margin-top: 2px; }
+}
 </style>
