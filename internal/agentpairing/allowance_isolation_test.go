@@ -11,7 +11,20 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/capacity"
 )
+
+// Budget isolation fixtures use explicit hours: manual caps are not vendor
+// measurements and cannot exempt a managed run from the person's schedule.
+func fixtureWorkHours(t *testing.T, f *fixture, accountID string) {
+	t.Helper()
+	s := capacity.DefaultSchedule("UTC")
+	s.Reserve = capacity.ReserveOff
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": accountID, "schedule": s}, true, "", 204)
+}
 
 func routeWithUnits(t *testing.T, f *fixture, v agentpairing.View, e agentpairing.Enrollment, key, run string, units map[string]int, status int) agentaccounts.RouteResult {
 	t.Helper()
@@ -47,6 +60,11 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	v := f.redeem(p)
 	e := v.Enrollments[0]
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	// Quota details require the separate person link, even for the approver.
+	offer := offerLink(t, f, p, key, e.AccountID)
+	review := reviewLink(t, f, offer)
+	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 200)
+	fixtureWorkHours(t, f, e.AccountID)
 	var verificationWindow string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT id::text FROM account_allowance_windows WHERE account_id=$1 AND pairing_verification`, e.AccountID).Scan(&verificationWindow); err != nil {
 		t.Fatal(err)
@@ -102,13 +120,8 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	}
 	// The launcher catalog and normal account health must use the same ordinary
 	// budgets as managed routing, not the exhausted internal verification cap.
-	// AEON-478's accountprivacy.Load/mask withholds quota windows from an
-	// unlinked person, including the pairing approver. Confirm ownership through
-	// the real account-link flow before asserting the owner's budget details;
+	// Ownership was confirmed through the real account-link flow above;
 	// pairing approval alone grants ongoing use, not quota visibility.
-	offer := offerLink(t, f, p, key, e.AccountID)
-	review := reviewLink(t, f, offer)
-	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 200)
 	var catalog agentaccounts.Catalog
 	decodeResult(t, f.call("GET", "/api/agent-accounts/catalog", nil, true, "", 200), &catalog)
 	found := false
