@@ -54,6 +54,8 @@ the original nine areas. Shared harness/model observations in
 `internal/modelreport/` belong to S2 (agent runtime), alongside their harness,
 daemon and model-registry callers. Assigned context files also require manifest entries;
 use `read`, `generated`, `vendored` or `not-code` with a nonnegative line count.
+Account quota privacy policy and its tests (`internal/accountprivacy/**`)
+belong to S1, alongside agent accounts and authorization.
 
 ```bash
 AUDIT_DIR=tmp/code-health
@@ -1026,6 +1028,31 @@ spaced at least five minutes apart. No production Codex idle capability is yet
 qualified; its native readings currently come from a run. Revoked local accounts with a dispatch fence
 are excluded from `aeon-agentd capacity`; an enrolled but unbound account stays
 visible as blocked and cannot prevent a healthy sibling account from working.
+
+Workspace **Low-quota warnings** settings default to an early notice at 10%
+remaining and an urgent notice at 3%. Both are whole percentages from 1–50,
+with urgent below early (`GET/PUT /api/settings/quota-warnings`,
+`settings.manage`; writes require a person). Only measured readings no more
+than ten minutes old, before their reset, qualify; a balance without a
+percentage denominator cannot produce a percentage warning. Receipts persist
+per resource or confirmed login pool, window, reset and threshold across
+computers and recovery. A simultaneous crossing produces only the urgent
+notice. A newer measured recovery clears the notice; clock passage alone
+withholds expired details without claiming recovery. A durable quota/window
+observation watermark includes healthy readings and reset transitions, so a
+delayed reading from another computer cannot undo newer recovery evidence.
+Current availability is separate from notice deduplication: urgent → recovery
+→ early still shows limited availability without sending another notice in
+the same reset. `/agents` names affected
+active sessions with a recorded run/account binding. Their parent lead receives
+a durable project-specific inbox summary without quota figures, accepted with
+a queued delivery receipt and deadline. Unread summaries expire through the
+inbox sweeper or fail when their recipient session ends. Exact figures
+on `/agents` follow current owner sharing, including every pooled sibling.
+The internal notice step works for reporting daemons without project access;
+it sends only to leads with current access and restores the reporter's scope.
+A restarted daemon's committed heartbeat still evaluates accepted fresh
+measurements for notices while rejecting the previous generation's check facts.
 
 Matching login fingerprints are hints. In Settings → Accounts, open an account
 and choose **Pool with…**, then confirm the named accounts use the same vendor

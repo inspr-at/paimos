@@ -6,6 +6,60 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/quota-warnings:
+    get:
+      summary: Workspace low-quota warning thresholds
+      operationId: getQuotaWarningSettings
+      security: [{session: []}, {agentKey: []}]
+      tags: [Agents]
+      responses:
+        '200':
+          description: Thresholds in percent remaining; defaults are 10 and 3.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+        '403': {description: Settings management permission required}
+    put:
+      summary: Configure workspace low-quota warning thresholds
+      operationId: putQuotaWarningSettings
+      security: [{session: []}]
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+      responses:
+        '200':
+          description: Saved thresholds. urgent_percent must be lower than early_percent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+        '400': {description: Both integer thresholds must be 1–50 and urgent must be lower than early}
+        '403': {description: Person with settings management permission required}
+  /agent-accounts/quota-warnings:
+    get:
+      summary: Affected active sessions with fresh measured low-quota warnings
+      operationId: listQuotaWarningSessions
+      security: [{session: []}, {agentKey: []}]
+      tags: [Agents]
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Project-filtered session warnings. Unshared peers see limited availability only, without severity, thresholds, windows, or numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuotaWarningSession'}}
+                  next_after: {type: [string, 'null'], format: uuid}
+        '400': {description: Invalid cursor or limit}
+        '403': {description: Account read permission required}
+
   /agentd/step-ups/{challenge_id}:
     get:
       operationId: getAgentdStepUp
@@ -15569,6 +15623,27 @@ components:
       properties:
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountReadiness'}}
         next_after: {type: [string, 'null'], format: uuid}
+    QuotaWarningSettings:
+      type: object
+      additionalProperties: false
+      required: [early_percent, urgent_percent]
+      properties:
+        early_percent: {type: integer, minimum: 1, maximum: 50, default: 10}
+        urgent_percent: {type: integer, minimum: 1, maximum: 50, default: 3}
+    QuotaWarningSession:
+      type: object
+      required: [session_id, project_id, account_id, availability, details_redacted]
+      properties:
+        session_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        availability: {type: string, const: limited}
+        details_redacted: {type: boolean}
+        severity: {type: string, enum: [early, urgent]}
+        remaining_percent: {type: number, minimum: 0, maximum: 50}
+        threshold_percent: {type: integer, minimum: 1, maximum: 50}
+        window_key: {type: string, maxLength: 128}
+        resets_at: {type: [string, 'null'], format: date-time}
     AccountReadiness:
       type: object
       required: [account_id, state, can_try, reason_codes, display_reason, checked_at, next_attempt_at, measured_usage, details_redacted]
