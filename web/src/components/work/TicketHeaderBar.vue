@@ -12,6 +12,7 @@ const props = defineProps<{
   mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
   canRepeat?: boolean
   recurrenceLabel?: string
+  canEditRecurrence?: boolean
   // Keys of the tickets followed to get here (oldest first), and the edit state.
   trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean
   // The peek dock: a labeled way into the project, and a way back to the view it covered.
@@ -110,7 +111,7 @@ void props
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
         <button v-if="kind && ['epic', 'ticket', 'task'].includes(kind)" type="button" role="menuitem" class="menu-item" :disabled="!canRepeat" aria-keyshortcuts="Shift+R" :data-tip="canRepeat ? 'Repeat · Shift R' : 'Needs the Manage recurring work permission'" @click="closeMore(false); emit('repeat')"><AppIcon name="repeat" :size="14" /><span>Repeat…<small v-if="!canRepeat" style="display: block; font-size: 11.5px; color: var(--ink-3)">Needs the Manage recurring work permission</small></span></button>
-        <button v-if="recurrenceLabel" type="button" role="menuitem" class="menu-item" :disabled="!canRepeat" :data-tip="!canRepeat ? 'Needs the Manage recurring work permission' : undefined" @click="closeMore(false); emit('editRecurrence')"><AppIcon name="edit" :size="14" /><span>Edit {{ recurrenceLabel }}…</span></button>
+        <button v-if="recurrenceLabel" type="button" role="menuitem" class="menu-item" :disabled="!canEditRecurrence" :data-tip="!canEditRecurrence ? 'Needs the Manage recurring work permission' : undefined" @click="closeMore(false); emit('editRecurrence')"><AppIcon name="edit" :size="14" /><span>Edit {{ recurrenceLabel }}…</span></button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />

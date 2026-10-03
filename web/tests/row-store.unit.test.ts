@@ -131,6 +131,45 @@ describe('RowStore: revisions only move forward', () => {
     expect(row.title).toBe('Saved title')
   })
 
+  it('an authoritative GET refreshes retirement at the same node revision after a list', () => {
+    const rows = new RowStore()
+    const recurrence = { id: 'r-1', project_id: PROJECT.id, project_key: PROJECT.key, number: 4, retired: false, trigger: { kind: 'time' as const } }
+    const row = rows.adopt(item('n1', 1, { recurrence }), rows.mark(), { show: true })!
+    rows.adoptNode(node('n1', 1, { recurrence: { ...recurrence, retired: true } }), rows.mark())
+    expect(row.recurrence?.retired).toBe(true)
+    expect(rows.latest('n1')?.recurrence?.retired).toBe(true)
+    expect(row.updated_at).toBe(at(1))
+    expect(row.project).toEqual(PROJECT)
+  })
+
+  it('an authoritative GET clears withheld provenance even at the same revision and while editing', () => {
+    const rows = new RowStore()
+    const recurrence = { id: 'r-1', project_id: PROJECT.id, project_key: PROJECT.key, number: 4, retired: false, trigger: { kind: 'time' as const } }
+    const row = rows.adopt(item('n1', 1, { recurrence }), rows.mark(), { show: true })!
+    const editor = rows.edit('n1')!
+    const late = rows.mark()
+    rows.adoptNode(node('n1', 1), rows.mark())
+    expect(row.recurrence).toBeUndefined()
+    expect(rows.latest('n1')?.recurrence).toBeUndefined()
+    rows.adoptNode(node('n1', 1, { recurrence }), late)
+    expect(row.recurrence).toBeUndefined()
+    const saved = node('n1', 2, { title: 'Saved draft' })
+    rows.wrote(saved, rows.mark()); editor.saved(saved); editor.end()
+    expect(row.recurrence).toBeUndefined()
+    expect(row.title).toBe('Saved draft')
+  })
+
+  it('provenance refreshes independently of node revisions without rolling back node values', () => {
+    const rows = new RowStore()
+    const recurrence = { id: 'r-1', project_id: PROJECT.id, project_key: PROJECT.key, number: 4, retired: false, trigger: { kind: 'time' as const } }
+    const row = rows.adopt(item('n1', 1, { recurrence }), rows.mark(), { show: true })!
+    rows.wrote(node('n1', 2, { title: 'Saved title' }), rows.mark())
+    rows.adoptNode(node('n1', 1), rows.mark())
+    expect(row.recurrence).toBeUndefined()
+    expect(row.title).toBe('Saved title')
+    expect(row.updated_at).toBe(at(2))
+  })
+
   it('a replayed event older than what the store knows is older', () => {
     const rows = new RowStore()
     rows.adopt(item('n1', 5), rows.mark())

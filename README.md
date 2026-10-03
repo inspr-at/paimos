@@ -245,7 +245,12 @@ describes the schedule and occurrence number in English or German. The ticket
 header shows a Recurring pill linking to the source recurrence only with
 management permission. Node GET and list responses carry read-only `recurrence`
 provenance from visible occurrence receipts, enriched once per bounded page;
-editable fields do not create a marker. Retired sources keep their markers.
+editable fields do not create a marker or provenance line. Authoritative GETs
+refresh source retirement and visibility even when the ticket revision is unchanged;
+partial save responses preserve the current provenance. Source links and editing use
+the receipt's project, including after a ticket moves. A linked recurrence is resolved
+directly rather than substituted with the first page's first schedule. Retired
+sources keep their markers; withheld provenance clears the marker and source editor.
 Status help and `aeon status help --json` share the same marker definition.
 Management requires `recurrences.manage`; agents need an explicit custom-role grant plus
 a key scope, even when bound to Owner/Admin. Saving a definition also requires

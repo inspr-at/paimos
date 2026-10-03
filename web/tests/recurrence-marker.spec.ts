@@ -87,6 +87,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings\\?recurrence=${id}$`))
     await expect(page.getByRole('heading', { name: 'Recurring work', exact: true })).toBeVisible()
     await expect(page.locator(`#recurrence-${id}`)).toContainText('Website audit')
+    await page.screenshot({ path: join(shots, `settings-${width}-${theme}.png`) })
     expect(errors).toEqual([])
   })
 }
@@ -116,5 +117,134 @@ test('a manager cannot follow a retired source and header controls stay still ac
     { name: 'ordinary ticket in series', run: async () => { await page.goto('/p/PHAROS/PHAROS-14'); await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0) } },
     { name: 'recurring ticket in series', run: async () => { await page.goto('/p/PHAROS/PHAROS-11'); await expect(workspace(page).locator('.recurring-pill')).toBeVisible() } },
   ] })
+  expect(errors).toEqual([])
+})
+
+for (const projection of ['retired', 'withheld'] as const) {
+  test(`authoritative GET ${projection} provenance refreshes a cached list row at the same revision`, async ({ page }) => {
+    const { data, errors, calls } = await setup(page)
+    await page.goto('/p/PHAROS?sort=key&group=none')
+    await expect(row(page).locator('.recurrence-dot')).toBeVisible()
+    const ticket = data.nodes.find(node => node.id === 'n-1')!
+    await page.route('**/api/nodes/n-1', route => {
+      if (route.request().method() !== 'GET') return route.fallback()
+      const { recurrence: _source, project: _project, kind_slug: kind, ...node } = ticket
+      return route.fulfill({ json: { ...node, kind_id: `k-${kind}`, position: '0', deleted_at: null, ...(projection === 'retired' ? { recurrence: { ...provenance, retired: true } } : {}) } })
+    })
+    await row(page).locator('.title-link').click()
+    await expect(workspace(page)).toBeVisible()
+    if (projection === 'retired') {
+      await expect(workspace(page).locator('.recurring-pill')).toBeVisible()
+      await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
+      await expect(workspace(page).locator('.recurrence-provenance')).toContainText('a deleted recurrence')
+    } else {
+      await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0)
+      await expect(workspace(page).locator('.recurrence-provenance')).toHaveCount(0)
+      await expect(row(page).locator('.recurrence-dot')).toHaveCount(0)
+    }
+    expect(calls.filter(call => call.path === '/api/nodes' && call.method === 'GET').length).toBeGreaterThan(0)
+    expect(errors).toEqual([])
+  })
+}
+
+test('editable metadata cannot invent ticket provenance or a source-edit action', async ({ page }) => {
+  const { errors, recurrenceReads } = await setup(page)
+  await page.goto('/p/PHAROS/PHAROS-14')
+  await expect(workspace(page)).toBeVisible()
+  await expect(workspace(page).locator('.recurrence-provenance')).toHaveCount(0)
+  await workspace(page).getByRole('button', { name: 'More actions', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: /Repeat/ })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true })).toHaveCount(0)
+  expect(recurrenceReads).toEqual([])
+  expect(errors).toEqual([])
+})
+
+test('a linked source outside page one is selected directly and stays selected when more rows arrive', async ({ page }) => {
+  const { errors } = await setup(page)
+  const definition = (sourceId: string, name: string, projectId = 'p-pharos'): Recurrence => ({ id: sourceId, project_id: projectId, parent_id: projectId, template: { name, title: name, description: '', acceptance_criteria: [], estimate_hours: 0, priority: 'medium', tags: [], type: 'ticket' }, trigger: provenance.trigger, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one', paused: false, revision: 1, occurrence_count: 4, next_at: null, created_at: '2026-10-01T12:00:00Z', updated_at: '2026-10-01T12:00:00Z' })
+  const target = definition(id, 'Linked source beyond page one')
+  let gets = 0
+  await page.route('**/api/recurrences**', route => {
+    const url = new URL(route.request().url()), path = url.pathname
+    if (path === '/api/recurrences') return route.fulfill({ json: url.searchParams.has('after') ? { items: [target], next_cursor: null } : { items: Array.from({ length: 100 }, (_, index) => definition(`first-${index}`, `First page ${index}`)), next_cursor: 'page-two' } })
+    if (path === `/api/recurrences/${id}`) { gets++; return route.fulfill({ json: target }) }
+    if (path.endsWith('/history')) return route.fulfill({ json: { items: [], next_cursor: null } })
+    if (path.endsWith('/preview')) return route.fulfill({ json: { times: [], trigger_kind: 'time' } })
+    return route.fulfill({ status: 404, json: { error: 'not found' } })
+  })
+  await page.goto(`/p/PHAROS/settings?recurrence=${id}`)
+  const history = page.getByRole('region', { name: 'Recurrence history' })
+  await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
+  expect(gets).toBe(1)
+  await expect(page.locator('#recurrence-first-0')).not.toHaveClass(/selected/)
+  await expectStableControls({ controls: { 'New recurring work': page.getByRole('button', { name: 'New…', exact: true }), 'first page row': page.locator('#recurrence-first-0'), 'first page actions': page.locator('#recurrence-first-0 .row-actions') }, interactions: [{ name: 'load the second page', run: async () => {
+    await page.getByRole('button', { name: 'More recurring work', exact: true }).click()
+    await expect(page.locator(`#recurrence-${id}`)).toHaveClass(/selected/)
+    await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
+  } }] })
+  expect(errors).toEqual([])
+})
+
+test('moved ticket provenance and source editing use the receipt source project despite spoofed metadata', async ({ page }) => {
+  const { data, errors } = await setup(page)
+  const ticket = data.nodes.find(node => node.id === 'n-1')!
+  ticket.project = 'p-aeon'; ticket.parent_id = 'p-aeon'; ticket.key = 'AEON-99'
+  ticket.fields.recurrence_id = 'editable-fake'; ticket.fields.occurrence_number = 99
+  await page.goto('/p/AEON/AEON-99')
+  const line = workspace(page).locator('.recurrence-provenance')
+  await expect(line).toContainText('#4')
+  await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
+  await workspace(page).getByRole('button', { name: 'More actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
+  const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+  await expect(editor).toBeVisible()
+  await expect(editor.getByRole('button', { name: 'Parent', exact: true })).toContainText('No parent (top level of the project)')
+  await expect(editor.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Website audit')
+  expect(errors).toEqual([])
+})
+
+test('withheld provenance closes an open source editor and clears its source-edit action', async ({ page }) => {
+  await page.addInitScript(() => {
+    const streams: Stream[] = []
+    class Stream extends EventTarget {
+      readyState = 1
+      onerror: (() => void) | null = null
+      close() { this.readyState = 2 }
+      constructor() {
+        super(); streams.push(this)
+        queueMicrotask(() => this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 40, resumed: false }), lastEventId: '40' })))
+      }
+    }
+    Object.assign(window, { EventSource: Stream, aeon637Streams: streams })
+  })
+  const { data, errors } = await setup(page)
+  const ticket = data.nodes.find(node => node.id === 'n-1')!
+  ticket.fields.recurrence_id = id; ticket.fields.occurrence_number = 4
+  await page.goto('/p/PHAROS/PHAROS-11')
+  await expect(workspace(page).locator('.recurrence-provenance')).toContainText('Website audit')
+  const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
+  await more.click()
+  await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
+  const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+  await expect(editor).toBeVisible()
+  ticket.recurrence = undefined
+  await page.evaluate(() => {
+    const streams = (window as unknown as { aeon637Streams: EventTarget[] }).aeon637Streams
+    if (!streams.length) throw new Error('No live stream to exercise the refresh')
+    for (const stream of streams) stream.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 41, resumed: false }), lastEventId: '41' }))
+  })
+  await expect(editor).toHaveCount(0)
+  await expect(workspace(page).locator('.recurrence-provenance')).toHaveCount(0)
+  await more.click()
+  await expect(page.getByRole('menuitem', { name: /Repeat/ })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a source link for another project exposes the error without selecting a substitute', async ({ page }) => {
+  const { errors } = await setup(page)
+  await page.goto(`/p/AEON/settings?recurrence=${id}`)
+  await expect(page.getByRole('alert')).toContainText('This recurrence belongs to another project.')
+  await expect(page.getByRole('region', { name: 'Recurrence history' })).toHaveCount(0)
   expect(errors).toEqual([])
 })

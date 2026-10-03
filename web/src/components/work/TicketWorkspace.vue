@@ -112,24 +112,27 @@ const session = useSession()
 const repeatSource = ref<ListItem | null>(null)
 const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
 const mayRepeat = computed(() => !!item.value && ['epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
+const sourceProject = computed(() => item.value?.recurrence ? { id: item.value.recurrence.project_id, routeKey: item.value.recurrence.project_key } : null)
+const mayEditRecurrence = computed(() => !!item.value?.recurrence && !item.value.recurrence.retired && can('recurrences.manage', item.value.recurrence.project_id))
 const recurrenceScope = useIdentityScope()
-watch([() => props.item?.id, () => props.project.id, () => recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
-watch(mayRepeat, value => { if (!value) { repeatSource.value = null; recurrenceEdit.value = null } })
+watch([() => props.item?.id, () => props.project.id, () => item.value?.recurrence?.id, () => item.value?.recurrence?.project_id, () => item.value?.recurrence?.retired, () => mayEditRecurrence.value, () => recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
+watch(mayRepeat, value => { if (!value) repeatSource.value = null })
 function repeat() { if (mayRepeat.value && item.value) repeatSource.value = { ...item.value, fields: { ...item.value.fields } } }
 function editRecurrence() {
   const recordId = item.value?.id, id = originRecurrence.value?.id
-  if (!mayRepeat.value || !id) return
+  const projectId = item.value?.recurrence?.project_id
+  if (!mayEditRecurrence.value || !id || !projectId) return
   void recurrenceScope.run(({ after, signal }) => after(getRecurrence(id, signal), latest => {
-    if (item.value && item.value.id === recordId && item.value.fields.recurrence_id === id && mayRepeat.value) recurrenceEdit.value = latest
+    if (item.value && item.value.id === recordId && item.value.recurrence?.id === id && item.value.recurrence.project_id === projectId && latest.id === id && latest.project_id === projectId && mayEditRecurrence.value) recurrenceEdit.value = latest
   }), { failed: error => toast(error instanceof Error ? error.message : 'Recurring work unavailable.', { tone: 'error' }) })
 }
-function originLoaded(value: Recurrence) { if (item.value?.fields.recurrence_id === value.id) originRecurrence.value = value }
+function originLoaded(value: Recurrence) { if (item.value?.recurrence?.id === value.id && item.value.recurrence.project_id === value.project_id && !item.value.recurrence.retired) originRecurrence.value = value }
 function recurrenceSaved(result: Recurrence) {
   const edited = !!recurrenceEdit.value
   repeatSource.value = null; recurrenceEdit.value = null
-  const owner = recurrenceScope.owner.value, projectId = props.project.id, routeKey = props.project.routeKey
+  const owner = recurrenceScope.owner.value, projectId = props.project.id, routeKey = edited ? sourceProject.value?.routeKey : props.project.routeKey
   if (edited) originRecurrence.value = result
-  toast(`${edited ? 'Saved' : 'Created'} ${recurrenceName(result)}.`, { action: { label: 'Show', run: () => { if (owner && owner === recurrenceScope.owner.value && props.project.id === projectId) void queueRouter.push({ path: `/p/${encodeURIComponent(routeKey)}/settings`, query: { recurrence: result.id } }) } } })
+  toast(`${edited ? 'Saved' : 'Created'} ${recurrenceName(result)}.`, { action: { label: 'Show', run: () => { if (routeKey && owner && owner === recurrenceScope.owner.value && props.project.id === projectId) void queueRouter.push({ path: `/p/${encodeURIComponent(routeKey)}/settings`, query: { recurrence: result.id } }) } } })
 }
 const humanCheckPerson = computed(() => session.identity?.principal.kind === 'person')
 const humanCheckEditable = computed(() => humanCheckPerson.value || !item.value?.fields.human_check_completed)
@@ -556,7 +559,7 @@ defineExpose({
     <TicketHeaderBar
       ref="header"
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :can-repeat="mayRepeat" :recurrence-label="originRecurrence ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :can-repeat="mayRepeat" :can-edit-recurrence="mayEditRecurrence" :recurrence-label="originRecurrence && item?.recurrence && !item.recurrence.retired ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
        :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
@@ -570,7 +573,7 @@ defineExpose({
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
     <RecurrenceEditor v-if="repeatSource" :project="project" :source="repeatSource" @close="repeatSource = null" @saved="recurrenceSaved" />
-    <RecurrenceEditor v-if="recurrenceEdit" :project="project" :recurrence="recurrenceEdit" @close="recurrenceEdit = null" @saved="recurrenceSaved" />
+    <RecurrenceEditor v-if="recurrenceEdit && sourceProject && mayEditRecurrence" :project="sourceProject" :recurrence="recurrenceEdit" @close="recurrenceEdit = null" @saved="recurrenceSaved" />
     <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
@@ -658,7 +661,7 @@ defineExpose({
             <button type="button" class="btn sm" @click="queueAction?.toggle()"><AppIcon name="sparkle" :size="13" />Fix what is missing</button>
           </section>
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
-          <RecurrenceProvenance v-if="typeof item.fields.recurrence_id === 'string' && typeof item.fields.occurrence_number === 'number'" :key="item.id" :node-id="item.id" :recurrence-id="item.fields.recurrence_id" :number="item.fields.occurrence_number" :project-key="project.routeKey" @loaded="originLoaded" />
+          <RecurrenceProvenance v-if="item.recurrence" :key="item.id" :node-id="item.id" :recurrence="item.recurrence" @loaded="originLoaded" />
           <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>

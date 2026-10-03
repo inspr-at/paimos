@@ -14,6 +14,7 @@ const definition = (event = false): Recurrence => ({ id: event ? eventId : id, p
 async function setup(page: Page, readOnly = false) {
   const errors = watchErrors(page), world = fixtures(), calls: { method: string; path: string; body: Record<string, unknown> }[] = []
   world.nodes[1].fields.recurrence_id = id; world.nodes[1].fields.occurrence_number = 1
+  world.nodes[1].recurrence = { id, project_id: 'p-pharos', project_key: 'PRJ-17', number: 1, retired: false, trigger: definition().trigger }
   await mockWork(page, world, { readOnly })
   await page.route('**/api/me/permissions?*', route => {
     const grants = mockEffectivePermissions(readOnly ? 'viewer' : 'member', new URL(route.request().url()).searchParams.get('project_id') || undefined)

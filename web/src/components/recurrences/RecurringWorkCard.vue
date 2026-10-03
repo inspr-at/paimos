@@ -16,13 +16,19 @@ import RecurrenceHistory from './RecurrenceHistory.vue'
 import RecurrenceRun from './RecurrenceRun.vue'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title?: string }; selectedId?: string }>()
-const items = ref<Recurrence[]>([]), cursor = ref<string | null>(null), selected = ref(''), failure = ref(''), loading = ref(false), busy = ref<string[]>([])
+const items = ref<Recurrence[]>([]), cursor = ref<string | null>(null), selected = ref(''), failure = ref(''), loading = ref(false), linked = ref<Recurrence | null>(null), linkFailure = ref(''), busy = ref<string[]>([])
 const editor = ref<{ item?: Recurrence } | null>(null), runPrompt = ref<Recurrence | null>(null), menu = ref<{ item: Recurrence; anchor: HTMLElement } | null>(null)
-const mayManage = computed(() => can('recurrences.manage', props.project.id)), scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane()
-const chosen = computed(() => items.value.find(item => item.id === selected.value))
+const mayManage = computed(() => can('recurrences.manage', props.project.id)), scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane(), links = scope.lane()
+const chosen = computed(() => {
+  const row = items.value.find(item => item.id === selected.value)
+  if (selected.value !== props.selectedId) return row
+  const source = linked.value?.id === selected.value ? linked.value : undefined
+  if (!source) return undefined
+  return row && row.project_id === source.project_id && (row.revision > source.revision || row.revision === source.revision && row.occurrence_count > source.occurrence_count) ? row : source
+})
 const readOnlyReason = 'Needs the Manage recurring work permission'
 let epoch = 0, alive = true
-function clear() { scope.reset(); epoch++; items.value = []; cursor.value = null; selected.value = ''; menu.value = null; editor.value = null; runPrompt.value = null; failure.value = ''; busy.value = []; loading.value = false }
+function clear() { scope.reset(); epoch++; items.value = []; cursor.value = null; selected.value = ''; menu.value = null; editor.value = null; runPrompt.value = null; failure.value = ''; busy.value = []; loading.value = false; linked.value = null; linkFailure.value = '' }
 const stopAccess = onAccessChange(change => { if (change === 'reset') clear() })
 function load(older = false) {
   if (!scope.owner.value || busy.value.length || editor.value || runPrompt.value || menu.value) return
@@ -31,19 +37,29 @@ function load(older = false) {
   void reads.run(({ after, signal }) => after(listRecurrences(projectId, afterCursor, signal), page => {
     items.value = older ? [...items.value, ...page.items.filter(row => !items.value.some(known => known.id === row.id))] : page.items
     cursor.value = page.next_cursor
-    if (!items.value.some(item => item.id === selected.value)) selected.value = items.value.find(item => item.id === props.selectedId)?.id || items.value[0]?.id || ''
+    if (!props.selectedId && linked.value?.id !== selected.value && !items.value.some(item => item.id === selected.value)) selected.value = items.value[0]?.id || ''
   }), { failed: error => { failure.value = error instanceof Error ? error.message : 'Recurring work could not be loaded.' }, settled: () => { loading.value = false } })
 }
-watch([() => props.project.id, () => scope.owner.value], () => { clear(); load() }, { immediate: true, flush: 'sync' })
-watch(() => props.selectedId, id => { if (id && items.value.some(item => item.id === id)) selected.value = id })
+function selectSource() {
+  links.cancel(); linked.value = null; linkFailure.value = ''
+  const id = props.selectedId, projectId = props.project.id
+  if (!id) { if (!items.value.some(item => item.id === selected.value)) selected.value = items.value[0]?.id || ''; return }
+  selected.value = id
+  void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => {
+    if (item.id !== id || item.project_id !== projectId) throw new Error('This recurrence belongs to another project.')
+    linked.value = item
+  }), { failed: error => { linkFailure.value = error instanceof Error ? error.message : 'The linked recurrence could not be loaded.' } })
+}
+watch([() => props.project.id, () => scope.owner.value], () => { clear(); selectSource(); load() }, { immediate: true, flush: 'sync' })
+watch(() => props.selectedId, () => { menu.value = null; editor.value = null; runPrompt.value = null; selectSource() }, { flush: 'sync' })
 watch(mayManage, value => { if (!value) { editor.value = null; runPrompt.value = null; menu.value = null } })
 const poller = usePoller(() => { if (!cursor.value) load() }, 20_000)
 onMounted(() => poller.start())
 onBeforeUnmount(() => { alive = false; epoch++; stopAccess(); poller.stop() })
-function current(item: Recurrence) { return alive && mayManage.value && item.project_id === props.project.id && items.value.some(row => row.id === item.id && row.revision === item.revision) }
-function replace(item: Recurrence) { const index = items.value.findIndex(row => row.id === item.id), known = items.value[index]; if (known && item.revision >= known.revision && item.occurrence_count >= known.occurrence_count) items.value[index] = { ...known, ...item } }
+function current(item: Recurrence) { return alive && mayManage.value && item.project_id === props.project.id && (chosen.value?.id === item.id && chosen.value.revision === item.revision || items.value.some(row => row.id === item.id && row.revision === item.revision)) }
+function replace(item: Recurrence) { if (linked.value?.id === item.id && item.revision >= linked.value.revision && item.occurrence_count >= linked.value.occurrence_count) linked.value = { ...linked.value, ...item }; const index = items.value.findIndex(row => row.id === item.id), known = items.value[index]; if (known && item.revision >= known.revision && item.occurrence_count >= known.occurrence_count) items.value[index] = { ...known, ...item } }
 function closeMenu(restore = true) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
-function saved(item: Recurrence) { editor.value = null; if (items.value.some(row => row.id === item.id)) replace(item); else items.value.push(item); selected.value = item.id; toast(`Saved ${recurrenceName(item)}`) }
+function saved(item: Recurrence) { editor.value = null; if (items.value.some(row => row.id === item.id) || linked.value?.id === item.id) replace(item); else items.value.push(item); selected.value = item.id; toast(`Saved ${recurrenceName(item)}`) }
 function refreshItem(id: string) { void scope.run(({ after, signal }) => after(getRecurrence(id, signal), item => { replace(item) }), { failed: error => { toast(error instanceof Error ? error.message : 'The recurrence could not be refreshed.', { tone: 'error' }) } }) }
 function toggle(item: Recurrence, undo = false) {
   if (!current(item) || busy.value.includes(item.id)) return
@@ -61,7 +77,7 @@ function run(item: Recurrence) {
   if (!current(item) || busy.value.includes(item.id)) return
   reads.cancel(); busy.value = [...busy.value, item.id]
   void scope.run(({ after, signal }) => after(getRecurrence(item.id, signal), latest => {
-    if (!items.value.some(row => row.id === latest.id)) return
+    if (!current(item) || latest.id !== item.id || latest.project_id !== props.project.id) return
     replace(latest)
     if (latest.trigger.kind === 'event' || (latest.open_previous && latest.overlap_policy === 'skip')) { runPrompt.value = latest; return }
     return after(runRecurrence(latest.id, { idempotency_key: crypto.randomUUID(), expected_revision: latest.revision }, signal), ran)
@@ -78,7 +94,7 @@ function remove(item: Recurrence) {
   void scope.run(({ after, signal }) => after(confirmAction({ title: `Delete ${recurrenceName(item)}?`, body: `No more tickets are created. Its existing tickets, receipts and provenance stay.`, confirmLabel: 'Delete', danger: true }), confirmed => {
     if (!confirmed || !current(item)) return
     reads.cancel(); busy.value = [...busy.value, item.id]
-    return after(deleteRecurrence(item.id, item.revision, signal), () => { items.value = items.value.filter(row => row.id !== item.id); if (selected.value === item.id) selected.value = items.value[0]?.id || ''; toast(`Deleted ${recurrenceName(item)}.`) })
+    return after(deleteRecurrence(item.id, item.revision, signal), () => { items.value = items.value.filter(row => row.id !== item.id); if (linked.value?.id === item.id) linked.value = null; if (selected.value === item.id) selected.value = items.value[0]?.id || ''; toast(`Deleted ${recurrenceName(item)}.`) })
   }), { failed: error => { toast(error instanceof Error ? error.message : 'The recurrence was not deleted.', { tone: 'error' }) }, settled: () => { busy.value = busy.value.filter(id => id !== item.id) } })
 }
 function copyCLI(item: Recurrence) {
@@ -103,7 +119,7 @@ function menuKeys(event: KeyboardEvent) { if (!['ArrowUp', 'ArrowDown'].includes
     <section id="recurring-work" class="settings-card glass-card" aria-labelledby="recurring-work-title">
       <header class="card-head"><span class="card-icon"><AppIcon name="repeat" :size="16" /></span><div class="card-titles"><h2 id="recurring-work-title">Recurring work</h2><p>Tickets that create themselves, on a schedule or after a release is published.</p></div><div class="card-aside"><button type="button" class="btn sm" :disabled="!mayManage" :data-tip="mayManage ? 'New recurring work' : readOnlyReason" @click="editor = {}"><AppIcon name="plus" :size="13" />New…</button></div></header>
       <p v-if="!mayManage" class="permission-note" role="note">You can read recurring work. {{ readOnlyReason }}.</p>
-      <div class="card-body"><p v-if="failure" class="error" role="alert">{{ failure }} <button type="button" class="btn sm" @click="load()">Retry</button></p><p v-if="loading && !items.length" class="empty" role="status">Loading recurring work…</p><p v-else-if="!items.length && !failure" class="empty">No recurring work yet. Use New…, or Repeat… on a ticket.</p>
+      <div class="card-body"><p v-if="failure" class="error" role="alert">{{ failure }} <button type="button" class="btn sm" @click="load()">Retry</button></p><p v-if="loading && !items.length" class="empty" role="status">Loading recurring work…</p><p v-else-if="!items.length && !failure && !linkFailure" class="empty">No recurring work yet. Use New…, or Repeat… on a ticket.</p>
         <div v-if="items.length" class="recurrence-list" role="table" aria-label="Recurring work">
           <div class="list-head" role="row"><span role="columnheader">Name</span><span role="columnheader">Trigger</span><span role="columnheader">Next run</span><span role="columnheader">Last result</span><span role="columnheader">Actions</span></div>
           <div v-for="item in items" :id="`recurrence-${item.id}`" :key="item.id" class="recurrence-row" :class="{ selected: selected === item.id, paused: item.paused }" role="row" :tabindex="selected === item.id ? 0 : -1" :aria-label="recurrenceName(item)" @click="selected = item.id" @keydown.stop="rowKeys($event, item)">
@@ -116,6 +132,7 @@ function menuKeys(event: KeyboardEvent) { if (!['ArrowUp', 'ArrowDown'].includes
         </div>
         <button v-if="cursor" type="button" class="btn sm ghost more" :disabled="loading" @click="load(true)">More recurring work</button>
         <p class="list-hint"><KeyCap k="j" /><KeyCap k="k" /> move · <KeyCap k="p" /> pause / resume · <KeyCap k="n" /> run now · <KeyCap k="e" /> edit</p>
+        <p v-if="linkFailure" class="error" role="alert">{{ linkFailure }} <button type="button" class="btn sm" @click="selectSource()">Retry</button></p>
       </div>
     </section>
     <RecurrenceHistory v-if="chosen" :key="chosen.id" :item="chosen" :project-key="project.routeKey" :may-manage="mayManage" :busy="busy.includes(chosen.id)" @toggle="toggle(chosen!)" @run="run(chosen!)" @edit="editor = { item: chosen }" />
