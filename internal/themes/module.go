@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -89,12 +91,21 @@ func completeValues(raw json.RawMessage) bool {
 	return ok && string(a["hover"]) != "null"
 }
 func input(w http.ResponseWriter, r *http.Request, out any, required ...string) bool {
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(time.Now().Add(10 * time.Second)); err == nil {
+		defer controller.SetReadDeadline(time.Time{})
+	} else if !errors.Is(err, http.ErrNotSupported) {
+		httpapi.WriteError(w, 500, "theme request deadline could not be set")
+		return false
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		var size *http.MaxBytesError
 		if errors.As(err, &size) {
 			httpapi.WriteError(w, 413, "theme request exceeds 8 KiB")
+		} else if errors.Is(err, os.ErrDeadlineExceeded) {
+			httpapi.WriteError(w, 408, "theme request body timed out")
 		} else {
 			httpapi.WriteError(w, 400, "invalid theme JSON")
 		}

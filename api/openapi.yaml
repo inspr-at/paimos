@@ -35,6 +35,7 @@ paths:
         '201': {description: Created theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body was not read within 10 seconds}
         '413': {description: Request exceeds 8 KiB}
   /themes/{themeId}:
     parameters:
@@ -62,6 +63,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {description: Revision changed}
+        '408': {description: Request body was not read within 10 seconds}
         '413': {description: Request exceeds 8 KiB}
     delete:
       operationId: deleteTheme
@@ -97,6 +99,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {description: Source revision changed}
+        '408': {description: Request body was not read within 10 seconds}
         '413': {description: Request exceeds 8 KiB}
   /me/theme:
     get:
@@ -126,6 +129,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {description: Selection revision changed}
+        '408': {description: Request body was not read within 10 seconds}
         '413': {description: Request exceeds 8 KiB}
   /agentd/step-ups/{challenge_id}:
     get:
@@ -9556,7 +9560,7 @@ components:
         theme: {$ref: '#/components/schemas/Theme'}
         default_theme_id: {type: string, format: uuid}
         selected_theme_id: {type: [string, 'null'], format: uuid}
-        revision: {type: integer, minimum: 0, description: Selection revision, independent of theme revision}
+        revision: {type: integer, minimum: 0, description: 'Selection revision, independent of theme revision'}
         fallback_notice:
           type: [object, 'null']
           required: [deleted_theme_id, deleted_theme_name]

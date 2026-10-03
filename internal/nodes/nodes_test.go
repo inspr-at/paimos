@@ -245,6 +245,7 @@ func TestUnauthorized(t *testing.T) {
 
 func TestKindCRUD(t *testing.T) {
 	p := newPrincipal(t, "kinds")
+	baseline := len(tenantEvents(t, p.TenantID))
 	status, body := call(t, &p, http.MethodGet, "/api/kinds", "")
 	page := decode[struct {
 		Items []kindJSON `json:"items"`
@@ -290,7 +291,7 @@ func TestKindCRUD(t *testing.T) {
 	if status != http.StatusNotFound {
 		t.Fatalf("get deleted %d", status)
 	}
-	ev := tenantEvents(t, p.TenantID)
+	ev := tenantEvents(t, p.TenantID)[baseline:]
 	want := []string{evKindCreated, evKindUpdated, evKindDeleted}
 	if len(ev) != len(want) {
 		t.Fatalf("events %#v", ev)
@@ -307,6 +308,7 @@ func TestKindCRUD(t *testing.T) {
 
 func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	p := newPrincipal(t, "nodes")
+	baseline := len(tenantEvents(t, p.TenantID))
 	project := kindBySlug(t, p, "project")
 	status, body := call(t, &p, http.MethodPost, "/api/nodes", `{
 		"kind_id":"`+project.ID+`","title":"Alpha","key":"PAI-123"
@@ -369,7 +371,7 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 		t.Fatalf("updated %#v", updated)
 	}
 
-	ev := tenantEvents(t, p.TenantID)
+	ev := tenantEvents(t, p.TenantID)[baseline:]
 	var created int
 	for _, event := range ev {
 		if event.Actor != p.ID {
@@ -555,6 +557,7 @@ func TestTenantIsolation(t *testing.T) {
 
 func TestWriterSeam(t *testing.T) {
 	p := newPrincipal(t, "writer")
+	baseline := len(tenantEvents(t, p.TenantID))
 	stub := &countingWriter{}
 	status, body := callAs(t, New(appPool, stub), &p, http.MethodPost, "/api/kinds", `{
 		"slug":"note","label":"Note","short_prefix":"NTE","icon":"note","field_schema":{}
@@ -565,7 +568,7 @@ func TestWriterSeam(t *testing.T) {
 	if stub.n != 1 {
 		t.Fatalf("writer calls %d", stub.n)
 	}
-	if ev := tenantEvents(t, p.TenantID); len(ev) != 0 {
+	if ev := tenantEvents(t, p.TenantID); len(ev) != baseline {
 		t.Fatalf("stub wrote rows %#v", ev)
 	}
 }

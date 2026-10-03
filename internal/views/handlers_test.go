@@ -42,6 +42,10 @@ func TestViewsShareReadOwnerWriteAndAppendEvents(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
+	var baseline int
+	if err := db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
 	New(db.App).Mount(mux)
 	request := func(principalID, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -80,8 +84,8 @@ func TestViewsShareReadOwnerWriteAndAppendEvents(t *testing.T) {
 	if err := db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&eventCount); err != nil {
 		t.Fatal(err)
 	}
-	if eventCount != 1 {
-		t.Fatalf("events after create and rejected patch = %d, want 1", eventCount)
+	if eventCount != baseline+1 {
+		t.Fatalf("events after create and rejected patch = %d, want %d", eventCount, baseline+1)
 	}
 
 	updated := request(ownerID, http.MethodPatch, "/api/views/"+view.ID, `{"name":"Renamed"}`)

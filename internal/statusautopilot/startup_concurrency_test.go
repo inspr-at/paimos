@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Match TestProjectAccessOverHTTP's startup seed: the first principal insert
-// owns the principal-link lock before its first node takes the tree lock.
+// Exercise a missing System actor: the first principal insert owns the
+// principal-link lock before its first node takes the tree lock.
 // The autopilot must not own tree while waiting to create its System actor.
 func TestStartupPrincipalWriterDoesNotDeadlock(t *testing.T) {
 	d := dbtest.Open(t)
@@ -21,6 +21,21 @@ func TestStartupPrincipalWriterDoesNotDeadlock(t *testing.T) {
 	const tid = "53500000-0000-4000-8000-000000000001"
 	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1,'startup-locks','Startup locks')`, tid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// New tenants already have an audited theme seed and its System actor. This
+	// regression specifically needs actor creation to compete with the writer,
+	// so remove only those known bootstrap fixtures through the test admin.
+	if err := db.InTenant(ctx, d.Admin, tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM events WHERE tenant_id=$1 AND type IN ('principal.created','theme.created')`, tid); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='System' AND roles=ARRAY['system']::text[]`, tid)
+		if err == nil && tag.RowsAffected() != 1 {
+			t.Fatal("missing bootstrap System fixture")
+		}
 		return err
 	}); err != nil {
 		t.Fatal(err)

@@ -80,6 +80,11 @@ func scan(row pgx.Row) (Theme, error) {
 	if err != nil {
 		return t, err
 	}
+	t.CreatedAt, t.UpdatedAt = t.CreatedAt.UTC(), t.UpdatedAt.UTC()
+	if t.DeletedAt != nil {
+		deleted := t.DeletedAt.UTC()
+		t.DeletedAt = &deleted
+	}
 	err = json.Unmarshal(raw, &t.Values)
 	return t, err
 }
