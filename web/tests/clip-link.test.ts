@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { vClipLink } from '../src/directives/clipLink.ts'
 
 class Box extends EventTarget {
@@ -109,7 +110,18 @@ test('unmount removes navigation guards', () => {
   const f = fixture()
   assert.equal(f.click().defaultPrevented, true)
   f.dispose()
+  for (const type of ['pointerdown', 'click']) assert.equal(getEventListeners(f.link, type).length, 0, `${type} guard removed`)
+  for (const type of ['pointerdown', 'keydown', 'scroll', 'focusout']) assert.equal(getEventListeners(f.doc, type).length, 0, `${type} dismissal removed`)
   assert.equal(f.click().defaultPrevented, false)
+})
+
+test('second touch releases temporary document dismissal listeners', () => {
+  const f = fixture()
+  try {
+    assert.equal(f.click().defaultPrevented, true)
+    assert.equal(f.click().defaultPrevented, false)
+    for (const type of ['pointerdown', 'keydown', 'scroll', 'focusout']) assert.equal(getEventListeners(f.doc, type).length, 0, `${type} dismissal removed`)
+  } finally { f.dispose() }
 })
 
 test('record or name changes between pointerdown and click discard stale navigation', () => {

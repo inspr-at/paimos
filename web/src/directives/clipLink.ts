@@ -27,10 +27,10 @@ export const vClipLink: ObjectDirective<HTMLElement, string> = {
     const clear = () => {
       if (pending) stale = true
       revealed = null; pending = null; ready = false
-      doc.removeEventListener('pointerdown', outside, true)
-      doc.removeEventListener('keydown', clear, true)
-      doc.removeEventListener('scroll', clear, true)
-      doc.removeEventListener('focusout', clear, true)
+      doc.removeEventListener('pointerdown', outside, { capture: true })
+      doc.removeEventListener('keydown', clear, { capture: true })
+      doc.removeEventListener('scroll', clear, { capture: true })
+      doc.removeEventListener('focusout', clear, { capture: true })
     }
     const outside = (event: PointerEvent) => {
       if (!(event.target instanceof Node) || !link.contains(event.target) || event.pointerType !== 'touch') clear()
@@ -61,8 +61,8 @@ export const vClipLink: ObjectDirective<HTMLElement, string> = {
     link.addEventListener('click', click, true)
     states.set(link, { identity: binding.value, clear, dispose() {
       clear()
-      link.removeEventListener('pointerdown', pointerdown, true)
-      link.removeEventListener('click', click, true)
+      link.removeEventListener('pointerdown', pointerdown, { capture: true })
+      link.removeEventListener('click', click, { capture: true })
     } })
   },
   updated(link, binding) {
