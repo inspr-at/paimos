@@ -524,7 +524,7 @@ func TestProductMigrationPreservesLegacySelectionAndVotes(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	type legacy struct{ tenant, selected, other, wish, project string }
+	type legacy struct{ tenant, selected, other, wish, project, nested, deleted string }
 	fixtures := make([]legacy, 2)
 	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
 		if name != "1138_portal_products.sql" {
@@ -555,6 +555,15 @@ func TestProductMigrationPreservesLegacySelectionAndVotes(t *testing.T) {
 				if err := insert("PRJ-1", "project", "open", nil, 1, &f.project); err != nil {
 					return err
 				}
+				if err := insert("PPR-3", "portal_product", "published", f.project, -100, &f.nested); err != nil {
+					return err
+				}
+				if err := insert("PPR-4", "portal_product", "published", nil, -200, &f.deleted); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1::uuid`, f.deleted); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(t.Context(), `INSERT INTO portal_settings(tenant_id,enabled)VALUES($1::uuid,true)`, f.tenant); err != nil {
 					return err
 				}
@@ -576,6 +585,16 @@ func TestProductMigrationPreservesLegacySelectionAndVotes(t *testing.T) {
 		if err := db.InTenant(dbtest.Seed(t.Context()), d.App, f.tenant, func(tx pgx.Tx) error {
 			var id, policy, project string
 			var n, sum int
+			for _, dormant := range []string{f.nested, f.deleted} {
+				var published, isDefault bool
+				var policy string
+				if err := tx.QueryRow(t.Context(), `SELECT published,is_default,participation_policy FROM portal_products WHERE product_id=$1::uuid`, dormant).Scan(&published, &isDefault, &policy); err != nil {
+					return fmt.Errorf("dormant product missing from backfill: %w", err)
+				}
+				if published || isDefault || policy != "disabled" {
+					return errors.New("dormant product backfill enabled publication or participation")
+				}
+			}
 			if err := tx.QueryRow(t.Context(), `SELECT product_id::text,participation_policy FROM portal_products WHERE is_default`).Scan(&id, &policy); err != nil {
 				return fmt.Errorf("migration default: %w", err)
 			}
@@ -585,7 +604,7 @@ func TestProductMigrationPreservesLegacySelectionAndVotes(t *testing.T) {
 			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM portal_products`).Scan(&n); err != nil {
 				return err
 			}
-			if n != 2 {
+			if n != 4 {
 				t.Fatalf("tenant product count %d", n)
 			}
 			if err := tx.QueryRow(t.Context(), `SELECT project_node_id::text FROM portal_product_pace WHERE product_id=$1::uuid AND NOT release_history`, f.selected).Scan(&project); err != nil {
