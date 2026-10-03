@@ -31,6 +31,29 @@ theme and drops stale appearance responses after identity changes.
 
 ## Theme API
 
+Settings → Theme (AEON-642) lists the workspace default, shared workspace
+themes and personal themes. Choose, duplicate, rename in place or confirm a
+deletion on the page. New theme copies the current workspace default. Members
+duplicate workspace themes to edit their own; managers with `settings.manage`
+can edit shared themes, including the workspace default (`scope: default`).
+Fresh selection or reload resolves a prior conflict; a conflict on another
+theme does not disable the selected theme's editor. Loading more themes keeps
+unresolved conflict feedback and recovery available until fresh active state loads.
+Recovery belongs to each theme: another theme's conflict or successful deletion
+cannot unlock an unresolved selected theme, even after pagination or a failed reload.
+Pagination sits above the scrolling list and retains its space when the last
+page arrives, keeping New theme, recovery and Colours controls in place.
+Colours has separate light and dark accents, optional derived dark values,
+presets, a native picker and hex input, plus recurring marker choices. The light
+and dark previews update while editing; the rest of the page keeps its saved
+appearance. Contrast below 4.5:1 warns without blocking Save. Suggest adjusts
+only the failing mode to a readable shade of the same hue. Discard and Save
+appear in an overlay bar, preserving the page layout. Saves retain the Agents
+configuration and use the existing revision checks; conflicted drafts must be
+discarded and refreshed before saving again.
+The Agents link still opens Personal → Agents until the separate Agents card
+package lands. Applying saved theme values throughout the app is a later package.
+
 AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
 returns visible workspace themes and the person's own themes with UUID keyset
 pagination (`after`, `limit`, maximum 100). `GET /api/me/theme` returns the active

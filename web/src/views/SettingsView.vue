@@ -113,6 +113,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
 .section-nav { position: sticky; top: 16px; display: grid; gap: 4px; }
 .theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
+@media (pointer: coarse) { .theme-links a { min-height: 44px; } }
 .section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }

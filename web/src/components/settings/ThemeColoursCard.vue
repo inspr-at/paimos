@@ -6,7 +6,10 @@ import { CARD_COLOURS, colourContrast, derivedDark, suggestColour, type ColourMo
 import SettingsCard from './SettingsCard.vue'
 import ThemeColourPicker from './ThemeColourPicker.vue'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ draft: ThemeRecord; editable: boolean }>()
+// `editable` enables the controls; `permitted` says whether the person may
+// change this theme at all, so a temporary lock (saving, a conflict) never
+// reads as a missing permission.
+const props = defineProps<{ draft: ThemeRecord; editable: boolean; permitted: boolean }>()
 const emit = defineEmits<{ change: [draft: ThemeRecord] }>()
 type AccentKey = 'primary' | 'secondary'
 type Pick = { accent: AccentKey; mode: ColourMode } | { marker: true }
@@ -37,12 +40,12 @@ function markerColour(mode: ColourMode) {
   if (choice.source === 'neutral') return mode === 'light' ? '#7c8c8d' : '#8aa3a2'
   return mode === 'light' ? choice.custom ?? '#8547b0' : derivedDark(choice.custom ?? '#8547b0')
 }
-watch(() => [props.draft.id, props.editable], () => { picker.value = null })
+watch([() => props.draft.id, () => props.editable], () => { picker.value = null })
 </script>
 <template>
-  <SettingsCard :title="`Colours · ${draft.name || 'Untitled theme'}`" icon="sun" anchor="colours">
+  <SettingsCard title="Colours" icon="sun" anchor="colours">
     <template #lead>Primary and secondary accents, and the mark on recurring tickets. Only the preview changes until Save.</template>
-    <p class="permission-note">{{ editable ? (draft.scope === 'workspace' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : 'Read-only workspace theme. Duplicate it to make your own.' }}</p>
+    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ permitted ? (draft.scope !== 'personal' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope !== 'personal' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
     <div class="editor-grid">
       <div class="colour-controls">
         <div v-for="accent in accents" :key="accent.key" class="colour-field">
@@ -75,7 +78,7 @@ watch(() => [props.draft.id, props.editable], () => { picker.value = null })
   </SettingsCard>
 </template>
 <style scoped>
-.permission-note { color: var(--ink-2); font-size: 12px; margin-bottom: 16px; }
+.permission-note { color: var(--ink-2); font-size: 12px; height: 54px; margin-bottom: 16px; overflow-y: auto; }.permission-note strong { color: var(--ink); }
 .editor-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 24px; }
 .colour-controls { min-width: 0; }
 .colour-field { padding: 16px 0; border-top: 1px solid var(--line); }
@@ -86,7 +89,7 @@ h3 { font-size: 13px; font-weight: 600; }
 .swatch { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 2px 8px; text-align: left; padding: 8px 10px; min-height: 52px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); }
 .swatch i { width: 20px; height: 20px; border-radius: 50%; grid-row: span 2; box-shadow: inset 0 0 0 1px var(--line-2); }
 .swatch span { font-size: 12px; }.swatch code { font-size: 11px; }
-.derived { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 44px; font-size: 12px; color: var(--ink-2); }
+.derived { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; min-height: 44px; font-size: 12px; color: var(--ink-2); }
 .text-link { padding: 0; min-height: 28px; border: 0; background: none; color: var(--teal-ink); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
 .contrast-lines p { display: flex; align-items: center; gap: 6px; min-height: 32px; font-size: 12px; color: var(--ink-2); }
 .contrast-lines p > span { flex: 1; }.contrast-lines svg { flex-shrink: 0; }.contrast-lines .warning { color: var(--warn-ink); }
@@ -104,4 +107,5 @@ h3 { font-size: 13px; font-weight: 600; }
 .preview-progress { padding: 12px; color: var(--preview-primary); }.preview-progress > div { margin-top: 6px; height: 4px; background: rgba(128,128,128,.2); border-radius: 4px; }.preview-progress i { display: block; width: 65%; height: 100%; background: var(--preview-primary); border-radius: 4px; }.preview-link { color: var(--preview-primary); }
 @container (max-width: 640px) { .editor-grid { grid-template-columns: minmax(0, 1fr); } .previews { grid-template-columns: repeat(2, minmax(0, 1fr)); } .previews > p { grid-column: 1 / -1; } }
 @media (max-width: 600px) { .editor-grid, .previews { grid-template-columns: minmax(0, 1fr); }.text-link { min-height: 44px; }.contrast-lines p { min-height: 44px; } }
+@media (pointer: coarse) { .text-link { min-height: 44px; }.contrast-lines p { min-height: 44px; } }
 </style>

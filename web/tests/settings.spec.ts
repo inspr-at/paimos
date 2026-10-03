@@ -26,7 +26,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -60,7 +60,7 @@ test('members see Personal and Developer; an admin section explains itself', asy
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
   // Members get both per-person settings sections.
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()

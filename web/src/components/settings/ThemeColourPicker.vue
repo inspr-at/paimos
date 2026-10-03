@@ -3,15 +3,18 @@
 import { computed, onMounted, ref } from 'vue'
 import { COLOUR_PRESETS, validColour } from '../../lib/themeColours'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 const props = defineProps<{ title: string; value: string }>()
 const emit = defineEmits<{ change: [value: string]; close: [] }>()
 const hex = ref(props.value), dialog = ref<HTMLElement>()
 const invalid = computed(() => !validColour(hex.value))
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 function change(value: string) { hex.value = value; if (validColour(value)) emit('change', value.toLowerCase()) }
 function keys(event: KeyboardEvent) {
+  if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); emit('close') }
   if (event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation()
-    if (event.target instanceof HTMLInputElement) event.target.blur()
+    if (event.target instanceof HTMLInputElement) { event.target.blur(); dialog.value?.focus() }
     else emit('close')
   }
   if (event.key === 'Tab') {
@@ -34,7 +37,7 @@ onMounted(() => dialog.value?.focus())
           <div class="custom"><label>Native colour picker<input type="color" :value="value" @input="change(($event.target as HTMLInputElement).value)" /></label><label>Hex colour<input :value="hex" maxlength="7" spellcheck="false" :aria-invalid="invalid" aria-describedby="hex-help" @input="change(($event.target as HTMLInputElement).value)" /></label></div>
           <p id="hex-help" class="hex-help" :class="{ error: invalid }">{{ invalid ? 'Use # followed by six hexadecimal digits.' : 'Changes appear in the preview. Save to keep them.' }}</p>
         </div>
-        <footer><button type="button" class="btn" @click="emit('close')">Done</button></footer>
+        <footer><button type="button" class="btn" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" @click="emit('close')">Done<KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
       </section>
     </div>
   </Teleport>
