@@ -65,7 +65,10 @@ The check reads evidence through the configured executor bound to the adoption
 job after authorizing the original project reader, and returns only aggregate
 verification counts. Destination projects and events remain hidden from that
 reader. Undo records the placements it actually removes, including backlog
-rankings created after the original move.
+rankings created after the original move and removals by bulk Undo. An ancestor
+Undo without a recorded removal cannot excuse a later missing placement for a
+descendant that left the subtree. Missing, unbound or revoked executor authority
+fails verification without broadening the reader's access.
 Unrecorded placement deletions and missing archive references still fail.
 
 Tests use durable fake providers and private PostgreSQL restore copies. Native
