@@ -822,9 +822,14 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		}
 	}
 	if money == nil {
-		money, err = loadPlanMicros(ctx, tx, ids, seen)
-		if err != nil {
-			return nil, err
+		money = map[string]planMicros{}
+		// Without usage or estimated hours there are no monetary values to
+		// compute. Still read routes, models and snapshots for the page.
+		if len(usage) > 0 || slices.ContainsFunc(rows, func(r planRow) bool { return r.hours != nil }) {
+			money, err = loadPlanMicros(ctx, tx, ids, seen)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	snapshots, err := loadPlanningSnapshots(ctx, tx, ids)

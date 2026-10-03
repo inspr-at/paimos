@@ -1067,7 +1067,11 @@ func sortsBy(q listQuery, name string) bool {
 	return false
 }
 func listSQL(q listQuery, anchor any) (string, []any) {
-	prefix, args := listFilterSQL(q, true)
+	filteredQuery := q
+	filteredQuery.FacetNames = slices.DeleteFunc(slices.Clone(q.FacetNames), func(name string) bool { return name == "assignee" })
+	// Facets resolve assignees in their own query. The page needs them before
+	// selection only when they constrain filtering or ordering.
+	prefix, args := listFilterSQL(filteredQuery, true)
 	args = append(args, anchor, q.Limit+1)
 	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
 	projects := q.seen.projects

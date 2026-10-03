@@ -264,6 +264,16 @@ func SQL(q Query, sortFields bool) (string, []any) {
 		}
 	}
 	projection += deliveryProjection
+	assigneeSQL, assigneeID := assigneeJoin, "assignee.id::text"
+	assigneePredicate := `AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
+            OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))`
+	needsAssignee := len(q.Assignees)+len(q.AssigneesNot) > 0 || slices.Contains(q.FacetNames, "assignee") || slices.ContainsFunc(q.Sort, func(key SortKey) bool { return key.Name == "assignee" })
+	if !needsAssignee {
+		// Page readers resolve selected people's names after selection. Avoid
+		// reading large imported fields and identity mappings for unused rows.
+		assigneeSQL, assigneeID = "", "NULL::text"
+		assigneePredicate = `AND cardinality($5::text[])=0`
+	}
 	// Hide closed uses the same buckets as the project counts. Until the filter
 	// is on, the predicate stays the previous literal so an unfiltered list
 	// keeps its plan.
@@ -283,15 +293,14 @@ func SQL(q Query, sortFields bool) (string, []any) {
         ) c
     )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
-            assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
-            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + deliveryJoin + `
+            ` + assigneeID + ` AS assignee_id,n.state,k.slug AS kind_slug,
+            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeSQL + deliveryJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
         AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
-        AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
-            OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))
+        ` + assigneePredicate + `
         AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%' OR n.body ILIKE '%'||$6::text||'%'
             OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
                 AND a.key ILIKE '%'||$6::text||'%')
