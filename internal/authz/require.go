@@ -110,6 +110,8 @@ func RequireInProjects(ctx context.Context, tx pgx.Tx, p tenant.Principal, permi
 
 // RequireTx makes a decision inside an existing db.InTenant transaction. It
 // is used by handlers whose resource lock and access check must be atomic.
+// A keyed agent must also be the principal in InTenant's context, so the key
+// usage fence is acquired at entry, before any handler resource locks.
 func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
 	return requireTx(ctx, tx, p, permission, scope)
 }

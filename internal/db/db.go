@@ -51,6 +51,9 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // sets the transaction's project visibility (ADR-003 P2): an explicit service
 // visibility from AllProjects or OnlyProjects, else the visibility of the
 // principal in ctx, else none (fail closed).
+// Carry the authenticating principal in ctx: keyed agents acquire their usage
+// admission fence before fn can lock resources. WithKeyScopeUse adds target
+// keys to the sorted admission batch for operations that touch several keys.
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
 	var tx pgx.Tx
 	var err error
