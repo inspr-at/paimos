@@ -1,232 +1,349 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, reactive, type EffectScope } from 'vue'
-import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
+import type { ActiveTheme, ThemeRecord, ThemesPage } from '../src/lib/themes'
 const mocks = vi.hoisted(() => ({ session: { identity: null as unknown }, permissions: new Set<string>() }))
 vi.mock('../src/stores/session', () => ({ useSession: () => mocks.session }))
 vi.mock('../src/lib/authz', () => ({ can: (permission: string) => mocks.permissions.has(permission) }))
 vi.mock('../src/lib/themes', () => ({ listThemes: vi.fn(), getActiveTheme: vi.fn(), getTheme: vi.fn(), selectTheme: vi.fn(), updateTheme: vi.fn(), duplicateTheme: vi.fn(), deleteTheme: vi.fn() }))
 import * as api from '../src/lib/themes'
-import { useThemeEditor } from '../src/stores/themeEditor'
-const theme = (): ThemeRecord => ({ id: 'personal', tenant_id: 'tenant', name: 'Copper', scope: 'personal', owner_principal_id: 'person', revision: 4, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#b5642a', dark: null }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
-const chosen = (): ActiveTheme => ({ theme: theme(), default_theme_id: 'default', selected_theme_id: 'personal', revision: 12, fallback_notice: null })
-let scope: EffectScope
-let editor: ReturnType<typeof useThemeEditor>
-async function settle() { await nextTick(); await Promise.resolve(); await nextTick() }
-beforeEach(async () => {
-  vi.resetAllMocks(); mocks.permissions = new Set(['profile.write'])
+import {
+  SELECTION, canDelete, canEdit, canReload, canSave, createThemeEditor, feedback, initialState, isConflicted, isDirty, transition,
+  type Operation, type Recovery, type Rights, type ThemeEditorState, type ThemeEvent,
+} from '../src/stores/themeEditor'
+
+// ---- Fixtures ----------------------------------------------------------------
+
+const record = (id: string, name: string, scope: ThemeRecord['scope'], revision: number): ThemeRecord => ({
+  id, name, scope, revision, tenant_id: 'tenant', owner_principal_id: scope === 'personal' ? 'person' : null, created_at: '', updated_at: '',
+  values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#b5642a', dark: null }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } },
+})
+const DEFAULT = record('default', 'Porcelain', 'default', 2)
+const CONTRAST = record('contrast', 'High contrast', 'workspace', 3)
+const COPPER = record('copper', 'Copper', 'personal', 4)
+const OTHER = record('other', 'Other', 'personal', 9)
+const COPY = record('copy', 'High contrast copy', 'personal', 1)
+const LATER = record('later', 'Later', 'workspace', 1)
+const chosen = (theme: ThemeRecord, revision = 12): ActiveTheme => ({ theme, default_theme_id: 'default', selected_theme_id: theme.id === 'default' ? null : theme.id, revision, fallback_notice: null })
+const MEMBER: Rights = { selfWrite: true, manage: false }, MANAGER: Rights = { selfWrite: true, manage: true }, READER: Rights = { selfWrite: false, manage: false }
+const ME = 'tenant/person'
+const conflictOn = (key: string, operation: Recovery['operation'] = 'delete'): Recovery => ({ key, operation, feedback: `${key} changed elsewhere` })
+const named = (theme: ThemeRecord, name: string) => ({ ...theme, name })
+const recoloured = (theme: ThemeRecord, light = '#3a5fc4') => ({ ...theme, values: { ...theme.values, primary: { light, dark: null } } })
+
+const loaded = (patch: Partial<ThemeEditorState> = {}): ThemeEditorState => ({
+  ...initialState(), identity: ME, rights: MEMBER, items: [DEFAULT, CONTRAST, COPPER, OTHER], cursor: 'next', active: chosen(COPPER), draft: COPPER, token: 100, ...patch,
+})
+const waiting = (token: number, op: Operation, patch: Partial<ThemeEditorState> = {}) => loaded({ token, pending: { token, op }, ...patch })
+const target = (theme: ThemeRecord) => ({ id: theme.id, revision: theme.revision, name: theme.name })
+
+// Every state the editor can be in. Pending states own a unique token, so a
+// result event matches exactly one of them.
+const STATES: Record<string, ThemeEditorState> = {
+  signedOut: initialState(),
+  loading: { ...initialState(), identity: ME, rights: MEMBER, token: 1, pending: { token: 1, op: { kind: 'load' } } },
+  clean: loaded(),
+  dirty: loaded({ draft: named(COPPER, 'Copper edited') }),
+  invalid: loaded({ draft: named(COPPER, '   ') }),
+  reader: loaded({ rights: READER }),
+  defaultMember: loaded({ active: chosen(DEFAULT), draft: DEFAULT }),
+  defaultManager: loaded({ rights: MANAGER, active: chosen(DEFAULT), draft: DEFAULT }),
+  renaming: loaded({ renaming: 'copper' }),
+  confirming: loaded({ confirming: target(OTHER) }),
+  activeConflict: loaded({ recoveries: [conflictOn('copper')] }),
+  dirtyConflict: loaded({ draft: named(COPPER, 'Copper edited'), recoveries: [conflictOn('copper', 'save')] }),
+  selectionConflict: loaded({ recoveries: [conflictOn(SELECTION, 'selection')] }),
+  otherConflict: loaded({ recoveries: [conflictOn('other')] }),
+  confirmingConflict: loaded({ confirming: target(OTHER), recoveries: [conflictOn('other')] }),
+  lastPage: loaded({ cursor: null }),
+  fallbackFailed: loaded({ active: null, draft: null, items: [DEFAULT, CONTRAST, OTHER], failure: 'Deleted, but your current theme could not be loaded. Reload themes.' }),
+  paging: waiting(201, { kind: 'more', after: 'next' }, { confirming: target(OTHER), recoveries: [conflictOn('copper')] }),
+  choosing: waiting(202, { kind: 'choose', themeID: 'other', selectionRevision: 12 }, { recoveries: [conflictOn('copper'), conflictOn('other')] }),
+  saving: waiting(203, { kind: 'save', theme: named(COPPER, 'Copper edited') }, { draft: named(COPPER, 'Copper edited'), recoveries: [conflictOn('other')] }),
+  readingDefault: waiting(204, { kind: 'readDefault', themeID: 'default', selectionRevision: 12 }, { recoveries: [conflictOn('copper')] }),
+  duplicating: waiting(205, { kind: 'duplicate', source: CONTRAST, name: 'High contrast copy', selectionRevision: 12 }),
+  selectingCopy: waiting(206, { kind: 'selectCopy', copy: COPY, selectionRevision: 12 }, { items: [DEFAULT, CONTRAST, COPPER, OTHER, COPY] }),
+  deletingOther: waiting(207, { kind: 'delete', target: target(OTHER), wasActive: false }, { confirming: target(OTHER), recoveries: [conflictOn('copper')] }),
+  deletingActive: waiting(208, { kind: 'delete', target: target(COPPER), wasActive: true }, { confirming: target(COPPER) }),
+  fallback: waiting(209, { kind: 'fallback' }, { active: null, draft: null, items: [DEFAULT, CONTRAST, OTHER], message: 'Deleted.' }),
+  reloading: waiting(210, { kind: 'load' }, { recoveries: [conflictOn('copper'), conflictOn('other'), conflictOn(SELECTION, 'selection')] }),
+}
+type StateName = keyof typeof STATES
+
+// ---- Expectations -------------------------------------------------------------
+
+type Check = (after: ThemeEditorState, before: ThemeEditorState) => void
+const keys = (state: ThemeEditorState) => state.recoveries.map(item => item.key).sort()
+const starts = (kind: Operation['kind'], extra: (op: Operation, after: ThemeEditorState, before: ThemeEditorState) => void = () => {}): Check => (after, before) => {
+  expect(after.pending?.op.kind).toBe(kind)
+  expect(after.pending!.token).toBe(before.token + 1)
+  expect(after.failure).toBe('')
+  // Starting work never resolves a recovery by itself.
+  expect(keys(after)).toEqual(keys(before))
+  extra(after.pending!.op, after, before)
+}
+const resets = (identity: string): Check => (after, before) => {
+  expect(after.identity).toBe(identity)
+  expect([after.items, after.active, after.draft, after.recoveries, after.confirming, after.renaming, after.failure, after.message]).toEqual([[], null, null, [], null, null, '', ''])
+  expect(after.token).toBeGreaterThanOrEqual(before.token)
+  if (identity) expect(after.pending).toEqual({ token: before.token + 1, op: { kind: 'load' } })
+  else expect(after.pending).toBeNull()
+}
+const each = (names: StateName[], check: Check) => Object.fromEntries(names.map(name => [name, check])) as Partial<Record<StateName, Check>>
+const ALL = Object.keys(STATES) as StateName[]
+const except = (...names: StateName[]) => ALL.filter(name => !names.includes(name))
+// States that may choose, duplicate or create: loaded, nothing pending or unsaved, no selection conflict.
+const SELECTABLE: StateName[] = ['clean', 'renaming', 'confirming', 'activeConflict', 'otherConflict', 'confirmingConflict', 'lastPage', 'defaultMember', 'defaultManager']
+const EDITABLE_COPPER: StateName[] = ['clean', 'dirty', 'invalid', 'renaming', 'confirming', 'otherConflict', 'confirmingConflict', 'lastPage']
+const IDLE_CLEAN: StateName[] = ['clean', 'reader', 'defaultMember', 'defaultManager', 'renaming', 'confirming', 'activeConflict', 'selectionConflict', 'otherConflict', 'confirmingConflict', 'lastPage', 'fallbackFailed']
+const result = (token: number, value: unknown): ThemeEvent => ({ type: 'resolved', token, result: value })
+const failed = (token: number, status: number | null, message = 'Request failed'): ThemeEvent => ({ type: 'failed', token, status, message })
+
+// Each event lists the states that accept it and what must hold afterwards.
+// Every other state must return the very same object: the event is ignored.
+const EVENTS: Record<string, { event: ThemeEvent; accept: Partial<Record<StateName, Check>> }> = {
+  // Identity and permissions
+  'identity changes': { event: { type: 'identity', identity: 'tenant/someone' }, accept: each(ALL, resets('tenant/someone')) },
+  'sign out': { event: { type: 'identity', identity: '' }, accept: each(except('signedOut'), resets('')) },
+  'same identity': { event: { type: 'identity', identity: ME }, accept: { signedOut: resets(ME) } },
+  'permission lost': { event: { type: 'rights', rights: READER }, accept: each(ALL, (after, before) => {
+    expect(after.rights).toEqual(READER)
+    expect(after.renaming).toBeNull(); expect(after.confirming).toBeNull()
+    expect(after.draft).toEqual(before.draft); expect(after.pending).toEqual(before.pending)
+    expect(canSave(after)).toBe(false); expect(canEdit(after)).toBe(false)
+  }) },
+  // Lifecycle: navigation away and back, reload, pagination
+  'enter section': { event: { type: 'enter' }, accept: each(IDLE_CLEAN, starts('load', (_, after) => expect(after.confirming).toBeNull())) },
+  'reload': { event: { type: 'reload' }, accept: each(IDLE_CLEAN, starts('load', (_, after) => expect(after.confirming).toBeNull())) },
+  'leave section': { event: { type: 'leave' }, accept: each(['renaming', 'confirming', 'confirmingConflict', 'paging', 'deletingOther', 'deletingActive'], (after, before) => {
+    expect(after.confirming).toBeNull(); expect(after.renaming).toBeNull()
+    expect([after.draft, after.recoveries, after.pending]).toEqual([before.draft, before.recoveries, before.pending])
+  }) },
+  'load more': { event: { type: 'more' }, accept: each(['clean', 'dirty', 'invalid', 'reader', 'defaultMember', 'defaultManager', 'renaming', 'confirming', 'activeConflict', 'dirtyConflict', 'selectionConflict', 'otherConflict', 'confirmingConflict', 'fallbackFailed'], starts('more', (op, after, before) => {
+    expect(op).toEqual({ kind: 'more', after: 'next' }); expect(after.draft).toEqual(before.draft); expect(after.confirming).toEqual(before.confirming)
+  })) },
+  // Selection
+  'choose another theme': { event: { type: 'choose', id: 'other' }, accept: each(SELECTABLE, starts('choose', op => expect(op).toEqual({ kind: 'choose', themeID: 'other', selectionRevision: 12 }))) },
+  'choose the active theme again': { event: { type: 'choose', id: 'copper' }, accept: each(['defaultMember', 'defaultManager'], starts('choose', op => expect(op).toMatchObject({ themeID: 'copper' }))) },
+  'choose an unlisted theme': { event: { type: 'choose', id: 'missing' }, accept: {} },
+  // Editing and rename
+  'edit the draft': { event: { type: 'edit', draft: recoloured(COPPER) }, accept: each(EDITABLE_COPPER, (after, before) => {
+    // The edit carries the whole edited copy of the record on screen.
+    expect(after.draft).toEqual(recoloured(COPPER))
+    expect(isDirty(after)).toBe(true); expect(after.confirming).toBeNull(); expect(after.recoveries).toEqual(before.recoveries)
+  }) },
+  'edit tries to change ownership': { event: { type: 'edit', draft: { ...recoloured(COPPER), scope: 'workspace', owner_principal_id: null } }, accept: each(EDITABLE_COPPER, after => {
+    expect(after.draft).toMatchObject({ scope: 'personal', owner_principal_id: 'person' })
+  }) },
+  'edit with a stale revision': { event: { type: 'edit', draft: recoloured({ ...COPPER, revision: 3 }) }, accept: {} },
+  'edit another record': { event: { type: 'edit', draft: recoloured(OTHER) }, accept: {} },
+  'rename the active theme': { event: { type: 'rename', id: 'copper' }, accept: each(EDITABLE_COPPER, after => expect(after.renaming).toBe('copper')) },
+  'rename the default as manager': { event: { type: 'rename', id: 'default' }, accept: { defaultManager: after => expect(after.renaming).toBe('default') } },
+  'rename an inactive theme': { event: { type: 'rename', id: 'other' }, accept: {} },
+  'finish renaming': { event: { type: 'renameEnd' }, accept: { renaming: after => expect(after.renaming).toBeNull() } },
+  // Save and discard
+  'save': { event: { type: 'save' }, accept: { dirty: starts('save', op => expect(op).toEqual({ kind: 'save', theme: named(COPPER, 'Copper edited') })) } },
+  'discard': { event: { type: 'discard' }, accept: {
+    ...each(['dirty', 'invalid'], after => { expect(after.draft).toEqual(COPPER); expect(after.message).toBe('Discarded.'); expect(after.pending).toBeNull() }),
+    // Discarding is the way out of an active or selection conflict: it reloads.
+    ...each(['activeConflict', 'dirtyConflict', 'selectionConflict'], (after, before) => {
+      starts('load')(after, before); expect(after.draft).toEqual(COPPER); expect(after.message).toBe('Discarded.')
+    }),
+  } },
+  // Duplicate and New theme
+  'duplicate a workspace theme': { event: { type: 'duplicate', id: 'contrast' }, accept: each(SELECTABLE, starts('duplicate', op => expect(op).toEqual({ kind: 'duplicate', source: CONTRAST, name: 'High contrast copy', selectionRevision: 12 }))) },
+  'duplicate a conflicted theme': { event: { type: 'duplicate', id: 'other' }, accept: each(SELECTABLE.filter(name => name !== 'otherConflict' && name !== 'confirmingConflict'), starts('duplicate', op => expect(op).toMatchObject({ source: OTHER }))) },
+  'new theme': { event: { type: 'newTheme' }, accept: each(SELECTABLE, starts('readDefault', op => expect(op).toEqual({ kind: 'readDefault', themeID: 'default', selectionRevision: 12 }))) },
+  // Delete with its confirmation
+  'ask to delete another theme': { event: { type: 'confirmDelete', id: 'other' }, accept: each(['clean', 'renaming', 'confirming', 'activeConflict', 'selectionConflict', 'lastPage', 'defaultMember', 'defaultManager'], after => expect(after.confirming).toEqual(target(OTHER))) },
+  'ask to delete the active theme': { event: { type: 'confirmDelete', id: 'copper' }, accept: each(['clean', 'renaming', 'confirming', 'selectionConflict', 'otherConflict', 'confirmingConflict', 'lastPage', 'defaultMember', 'defaultManager'], after => expect(after.confirming).toEqual(target(COPPER))) },
+  'ask to delete a workspace theme': { event: { type: 'confirmDelete', id: 'contrast' }, accept: { defaultManager: after => expect(after.confirming).toEqual(target(CONTRAST)) } },
+  'ask to delete the workspace default': { event: { type: 'confirmDelete', id: 'default' }, accept: {} },
+  'keep the theme': { event: { type: 'cancelDelete' }, accept: each(['confirming', 'confirmingConflict'], after => expect(after.confirming).toBeNull()) },
+  'delete': { event: { type: 'delete' }, accept: { confirming: starts('delete', op => expect(op).toEqual({ kind: 'delete', target: target(OTHER), wasActive: false })) } },
+  // Results: each matches exactly one pending state by token.
+  'page arrives': { event: result(201, { items: [LATER, { ...OTHER, revision: 10 }, { ...COPPER, name: 'Copper newer', revision: 5 }], next_cursor: null } satisfies ThemesPage), accept: { paging: after => {
+    expect(after.items.map(item => item.id)).toEqual(['default', 'contrast', 'copper', 'other', 'later']); expect(after.cursor).toBeNull()
+    // A list row may be newer, but the active record and its draft stay as installed,
+    // and pagination never resolves a recovery.
+    expect(after.draft).toEqual(COPPER); expect(after.active!.theme).toEqual(COPPER); expect(keys(after)).toEqual(['copper'])
+    expect(isConflicted(after)).toBe(true); expect(feedback(after)).toBe('copper changed elsewhere')
+    // The open confirmation captured revision 9; the row is now 10, so it closes.
+    expect(after.confirming).toBeNull()
+  } } },
+  'page fails': { event: failed(201, 500, 'List failed'), accept: { paging: after => { expect(after.failure).toBe('List failed'); expect(keys(after)).toEqual(['copper']); expect(after.cursor).toBe('next') } } },
+  'choice saved': { event: result(202, chosen(OTHER, 13)), accept: { choosing: after => {
+    expect(after.active).toEqual(chosen(OTHER, 13)); expect(after.draft).toEqual(OTHER)
+    // Fresh state resolves only the installed record; the old record's recovery stays visible.
+    expect(keys(after)).toEqual(['copper']); expect(isConflicted(after)).toBe(false); expect(canEdit(after)).toBe(true)
+    expect(feedback(after)).toBe('copper changed elsewhere')
+  } } },
+  'choice conflicts': { event: failed(202, 409), accept: { choosing: after => { expect(keys(after)).toEqual(['#selection', 'copper', 'other']); expect(after.active!.theme.id).toBe('copper'); expect(isConflicted(after)).toBe(true) } } },
+  'chosen theme is gone': { event: failed(202, 404), accept: { choosing: after => { expect(after.recoveries.find(item => item.key === 'other')!.feedback).toBe('Other no longer exists. Reload themes.') } } },
+  'choice fails': { event: failed(202, 500, 'Unavailable'), accept: { choosing: after => { expect(after.failure).toBe('Unavailable'); expect(keys(after)).toEqual(['copper', 'other']) } } },
+  'theme saved': { event: result(203, { ...named(COPPER, 'Copper edited'), revision: 5 }), accept: { saving: after => {
+    expect(after.active!.theme.revision).toBe(5); expect(after.draft).toEqual(after.active!.theme); expect(isDirty(after)).toBe(false)
+    expect(after.message).toBe('Saved.'); expect(keys(after)).toEqual(['other'])
+  } } },
+  'save conflicts': { event: failed(203, 409), accept: { saving: after => {
+    expect(isDirty(after)).toBe(true); expect(canSave(after)).toBe(false); expect(keys(after)).toEqual(['copper', 'other'])
+    expect(feedback(after)).toBe('Copper changed elsewhere. Discard your edits to load the current version.')
+  } } },
+  'saved theme is gone': { event: failed(203, 404), accept: { saving: after => expect(feedback(after)).toBe('Copper no longer exists. Discard your edits to continue.') } },
+  'save fails': { event: failed(203, 500, 'Write failed'), accept: { saving: after => { expect(isDirty(after)).toBe(true); expect(canSave(after)).toBe(true); expect(after.failure).toBe('Write failed'); expect(after.message).toBe('') } } },
+  'default read': { event: result(204, { ...DEFAULT, revision: 3 }), accept: { readingDefault: (after, before) => {
+    expect(after.pending).toEqual({ token: before.token + 1, op: { kind: 'duplicate', source: { ...DEFAULT, revision: 3 }, name: 'Porcelain copy', selectionRevision: 12 } })
+    expect(after.items.find(item => item.id === 'default')!.revision).toBe(3); expect(keys(after)).toEqual(['copper'])
+  } } },
+  'default read fails': { event: failed(204, 500, 'Unavailable'), accept: { readingDefault: after => { expect(after.pending).toBeNull(); expect(after.failure).toBe('The workspace default could not be read. Unavailable') } } },
+  'copy created': { event: result(205, COPY), accept: { duplicating: (after, before) => {
+    expect(after.items.map(item => item.id)).toContain('copy')
+    expect(after.pending).toEqual({ token: before.token + 1, op: { kind: 'selectCopy', copy: COPY, selectionRevision: 12 } })
+  } } },
+  // review-642d 1: duplication conflicts go through the recovery model.
+  'duplicate source conflicts': { event: failed(205, 409), accept: { duplicating: after => {
+    expect(keys(after)).toEqual(['contrast']); expect(after.failure).toBe(''); expect(isConflicted(after)).toBe(false)
+    expect(feedback(after)).toBe('High contrast changed elsewhere. Reload themes, then duplicate it again.'); expect(canReload(after)).toBe(true)
+  } } },
+  'duplicate fails': { event: failed(205, 500, 'Unavailable'), accept: { duplicating: after => { expect(after.failure).toBe('Unavailable'); expect(keys(after)).toEqual([]) } } },
+  'copy selected': { event: result(206, chosen(COPY, 13)), accept: { selectingCopy: after => { expect(after.active!.theme.id).toBe('copy'); expect(after.draft).toEqual(COPY); expect(after.message).toBe('Duplicated.') } } },
+  'copy selection conflicts': { event: failed(206, 409), accept: { selectingCopy: after => {
+    expect(keys(after)).toEqual(['#selection']); expect(isConflicted(after)).toBe(true); expect(after.items.map(item => item.id)).toContain('copy')
+    expect(feedback(after)).toMatch(/^The copy was created, but could not be selected: .*Reload themes, then choose High contrast copy\.$/)
+  } } },
+  'copy selection fails': { event: failed(206, 500, 'Unavailable'), accept: { selectingCopy: after => { expect(after.failure).toBe('The copy was created, but could not be selected. Unavailable'); expect(keys(after)).toEqual([]) } } },
+  'other theme deleted': { event: result(207, undefined), accept: { deletingOther: after => {
+    expect(after.items.map(item => item.id)).toEqual(['default', 'contrast', 'copper']); expect(after.confirming).toBeNull()
+    expect(after.message).toBe('Deleted.'); expect(keys(after)).toEqual(['copper']); expect(isConflicted(after)).toBe(true)
+  } } },
+  // review-642d 2: a conflicting delete keeps its confirmation, but Delete stays off until fresh state.
+  'delete conflicts': { event: failed(207, 409), accept: { deletingOther: after => {
+    expect(after.confirming).toEqual(target(OTHER)); expect(canDelete(after)).toBe(false); expect(keys(after)).toEqual(['copper', 'other'])
+    expect(feedback(after)).toBe('copper changed elsewhere')
+  } } },
+  'deleted theme is gone': { event: failed(207, 404), accept: { deletingOther: after => expect(after.recoveries.find(item => item.key === 'other')!.feedback).toBe('Other was already deleted elsewhere. Reload themes.') } },
+  'delete fails': { event: failed(207, 500, 'Unavailable'), accept: { deletingOther: after => { expect(after.failure).toBe('Unavailable'); expect(after.confirming).toEqual(target(OTHER)); expect(canDelete(after)).toBe(true) } } },
+  'active theme deleted': { event: result(208, undefined), accept: { deletingActive: (after, before) => {
+    expect([after.active, after.draft, after.confirming]).toEqual([null, null, null]); expect(after.items.map(item => item.id)).not.toContain('copper')
+    expect(after.pending).toEqual({ token: before.token + 1, op: { kind: 'fallback' } }); expect(after.message).toBe('Deleted.')
+  } } },
+  'fallback read': { event: result(209, chosen(DEFAULT, 13)), accept: { fallback: after => { expect(after.active!.theme.id).toBe('default'); expect(after.message).toBe('Deleted. You are using the workspace default.') } } },
+  'fallback read fails': { event: failed(209, 500), accept: { fallback: after => { expect(after.active).toBeNull(); expect(after.failure).toMatch(/^Deleted, but/); expect(canReload(after)).toBe(true) } } },
+  'reload arrives': { event: result(210, { page: { items: [DEFAULT, CONTRAST, { ...COPPER, revision: 5 }, { ...OTHER, revision: 10 }], next_cursor: 'later' }, active: chosen({ ...COPPER, revision: 5 }, 13) }), accept: { reloading: after => {
+    // A full snapshot resolves every recovery.
+    expect(after.recoveries).toEqual([]); expect(after.draft!.revision).toBe(5); expect(after.cursor).toBe('later'); expect(canEdit(after)).toBe(true)
+  } } },
+  'reload fails': { event: failed(210, null, 'Offline'), accept: { reloading: after => { expect(after.failure).toBe('Offline'); expect(keys(after)).toEqual(['#selection', 'copper', 'other']) } } },
+  'late result for an older operation': { event: result(150, chosen(OTHER, 99)), accept: {} },
+  'late failure for an older operation': { event: failed(150, 409), accept: {} },
+}
+
+function invariants(state: ThemeEditorState) {
+  if (state.active || state.draft) expect(state.draft?.id).toBe(state.active?.theme.id)
+  if (state.confirming) expect(state.items.find(item => item.id === state.confirming!.id)?.revision).toBe(state.confirming.revision)
+  if (state.renaming) expect(state.renaming).toBe(state.draft?.id)
+  expect(new Set(state.recoveries.map(item => item.key)).size).toBe(state.recoveries.length)
+  if (state.failure || state.recoveries.length) expect(feedback(state)).not.toBe('')
+  if (isConflicted(state)) expect(canEdit(state) || canSave(state)).toBe(false)
+  if (!state.identity) expect([state.items, state.active, state.pending]).toEqual([[], null, null])
+}
+
+// ---- The matrix: every event in every state ----------------------------------
+
+describe('theme editor state model', () => {
+  const cells = Object.keys(STATES).flatMap(state => Object.keys(EVENTS).map(event => [state, event] as const))
+  it.each(cells)('%s × %s', (stateName, eventName) => {
+    const before = STATES[stateName]!, { event, accept } = EVENTS[eventName]!
+    const after = transition(before, event)
+    const check = accept[stateName as StateName]
+    if (check) { expect(after).not.toBe(before); check(after, before) }
+    else expect(after).toBe(before)
+    expect(after.token).toBeGreaterThanOrEqual(before.token)
+    invariants(after)
+  })
+})
+
+// ---- The Vue runner: real promises, identity and permission wiring ----------
+
+let scope: EffectScope | undefined
+afterEach(() => { scope?.stop(); scope = undefined })
+async function editor(options: { manage?: boolean } = {}) {
+  vi.resetAllMocks()
+  mocks.permissions = new Set(['profile.write', ...(options.manage ? ['settings.manage'] : [])])
   mocks.session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } })
-  vi.mocked(api.listThemes).mockResolvedValue({ items: [theme()], next_cursor: null })
-  vi.mocked(api.getActiveTheme).mockResolvedValue(chosen())
-  scope = effectScope(); editor = scope.run(() => useThemeEditor())!; await settle()
-})
-afterEach(() => scope.stop())
-it.each(['selection', 'save', 'delete'] as const)('per-record recovery state machine retains an active %s conflict through other-record events', async operation => {
-  const other = { ...theme(), id: 'other', name: 'Other personal', revision: 9 }
-  const unrelated = { ...theme(), id: 'unrelated', name: 'Unrelated personal' }
-  const fail = (message: string) => Object.assign(new Error(message), { status: 409 })
-  const assertState = (phase: string, conflicted: boolean, feedback: string, id = 'personal') => {
-    expect(editor.active.value!.theme.id, phase).toBe(id)
-    expect(editor.conflict.value, phase).toBe(conflicted)
-    expect(editor.error.value, phase).toBe(feedback)
-    expect(editor.busy.value, phase).toBe(false)
-  }
-  assertState('fresh active record', false, '')
-  if (operation === 'selection') {
-    vi.mocked(api.selectTheme).mockRejectedValueOnce(fail('Selection changed'))
-    await editor.choose(other)
-  } else if (operation === 'save') {
-    editor.draft.value!.name = 'Unsaved name'
-    vi.mocked(api.updateTheme).mockRejectedValueOnce(fail('Active theme changed'))
-    await editor.save()
-  } else {
-    vi.mocked(api.deleteTheme).mockRejectedValueOnce(fail('Active theme changed'))
-    await editor.remove(theme())
-  }
-  assertState('active conflict', true, operation === 'selection' ? 'Selection changed' : 'Active theme changed')
-  if (operation === 'save') {
-    vi.mocked(api.getActiveTheme).mockRejectedValueOnce(new Error('Discard reload failed'))
-    editor.discard(); await settle()
-    assertState('discard without a fresh read', true, 'Discard reload failed')
-    expect(editor.dirty.value).toBe(false)
-  }
-  vi.mocked(api.deleteTheme).mockRejectedValueOnce(fail('Other theme changed'))
-  await editor.remove(other)
-  assertState('another record conflicts', true, 'Other theme changed')
-  editor.cursor.value = 'next-page'
-  let release!: (page: Awaited<ReturnType<typeof api.listThemes>>) => void
-  vi.mocked(api.listThemes).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
-  const paging = editor.more()
-  expect(editor.conflict.value).toBe(true); expect(editor.error.value).toBe('Other theme changed')
-  expect(editor.busy.value).toBe(true)
-  // Even a newer list record cannot replace the active record or its draft.
-  release({ items: [{ ...theme(), revision: 5 }, other, unrelated], next_cursor: null })
-  await paging
-  assertState('pagination completed', true, 'Other theme changed')
-  expect(editor.draft.value!.revision).toBe(4)
-  expect(editor.items.value.find(item => item.id === 'personal')!.revision).toBe(5)
-  vi.mocked(api.getActiveTheme).mockRejectedValueOnce(new Error('Reload failed'))
-  await editor.load()
-  assertState('reload failed', true, 'Reload failed')
-  vi.mocked(api.deleteTheme).mockResolvedValueOnce(undefined)
-  await editor.remove(unrelated)
-  expect(editor.items.value.some(item => item.id === 'unrelated')).toBe(false)
-  expect(editor.items.value.some(item => item.id === 'other')).toBe(true)
-  assertState('another record deleted successfully', true, 'Reload failed')
-  editor.draft.value!.name = 'Blind edit'; await editor.save()
-  expect(api.updateTheme).toHaveBeenCalledTimes(operation === 'save' ? 1 : 0)
-  editor.draft.value!.name = theme().name
-  vi.mocked(api.selectTheme).mockResolvedValueOnce({ ...chosen(), theme: other, selected_theme_id: other.id, revision: 13 })
-  await editor.choose(other)
-  assertState('fresh selection of other record', false, '', other.id)
-  vi.mocked(api.selectTheme).mockResolvedValueOnce({ ...chosen(), theme: { ...theme(), revision: 5 }, revision: 14 })
-  await editor.choose(theme())
-  assertState('fresh selection of original record', false, '')
-  editor.draft.value!.name = 'Recovered edit'
-  vi.mocked(api.updateTheme).mockImplementationOnce(async record => ({ ...record, revision: 6 }))
-  await editor.save()
-  expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'personal', revision: 5, name: 'Recovered edit' }))
-  expect(editor.message.value).toBe('Saved.')
-  assertState('recovered save', false, '')
-})
-it('save captures theme revision, preserves Agents and keeps failed edits', async () => {
-  editor.draft.value!.values.primary.light = '#3a5fc4'
-  vi.mocked(api.updateTheme).mockRejectedValue(new Error('Write failed'))
-  await editor.save()
-  expect(editor.dirty.value).toBe(true); expect(editor.error.value).toBe('Write failed'); expect(editor.message.value).toBe('')
-  expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'personal', revision: 4, values: expect.objectContaining({ agents: theme().values.agents }) }))
-  vi.mocked(api.updateTheme).mockImplementation(async record => ({ ...record, revision: 5 }))
-  await editor.save(); expect(editor.dirty.value).toBe(false); expect(editor.message.value).toBe('Saved.')
-})
-it('selection uses its independent CAS and never claims a failed choice', async () => {
-  vi.mocked(api.selectTheme).mockRejectedValue(Object.assign(new Error('Conflict'), { status: 409 }))
-  await editor.choose({ ...theme(), id: 'other' })
-  expect(api.selectTheme).toHaveBeenCalledWith('other', 12); expect(editor.active.value!.theme.id).toBe('personal'); expect(editor.conflict.value).toBe(true)
-})
-it('duplicate failure after creation reports partial success honestly', async () => {
-  vi.mocked(api.duplicateTheme).mockResolvedValue({ ...theme(), id: 'copy' }); vi.mocked(api.selectTheme).mockRejectedValue(new Error('Unavailable'))
-  await editor.duplicate(theme())
-  expect(editor.items.value.some(item => item.id === 'copy')).toBe(true); expect(editor.error.value).toMatch(/copy was created, but could not be selected/)
-})
-it('a permission loss stops personal writes and workspace themes remain read-only', async () => {
-  expect(editor.editable({ ...theme(), scope: 'workspace' })).toBe(false)
-  mocks.permissions.clear(); editor.draft.value!.name = 'Changed'; await editor.save()
-  expect(api.updateTheme).not.toHaveBeenCalled()
-})
-it('API-shaped default themes need settings.manage, including save and delete attempts', async () => {
-  const shared: ThemeRecord = { ...theme(), id: 'default', name: 'Porcelain', scope: 'default', owner_principal_id: null }
-  vi.mocked(api.getActiveTheme).mockResolvedValue({ ...chosen(), theme: shared, selected_theme_id: null })
-  await editor.load()
-  expect(editor.editable(shared)).toBe(false)
-  editor.draft.value!.name = 'Changed default'; await editor.save()
-  editor.discard(); await editor.remove(shared)
-  expect(api.updateTheme).not.toHaveBeenCalled(); expect(api.deleteTheme).not.toHaveBeenCalled()
-  mocks.permissions.add('settings.manage')
-  expect(editor.editable(shared)).toBe(true)
-  editor.draft.value!.name = 'Changed default'
-  vi.mocked(api.updateTheme).mockImplementation(async record => ({ ...record, revision: 5 }))
-  await editor.save()
-  expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'default', scope: 'default', revision: 4 }))
-  expect(editor.message.value).toBe('Saved.')
-})
-it('successful selection clears a deletion conflict and allows the fresh theme to save', async () => {
-  vi.mocked(api.deleteTheme).mockRejectedValue(Object.assign(new Error('Theme changed'), { status: 409 }))
-  await editor.remove(theme())
-  expect(editor.conflict.value).toBe(true); expect(editor.error.value).toBe('Theme changed')
-  const other = { ...theme(), id: 'other', name: 'Other', revision: 9 }
-  vi.mocked(api.selectTheme).mockResolvedValue({ ...chosen(), theme: other, selected_theme_id: 'other', revision: 13 })
-  await editor.choose(other)
-  expect(editor.active.value!.theme.id).toBe('other'); expect(editor.conflict.value).toBe(false)
-  expect(editor.error.value).toBe('')
-  editor.draft.value!.name = 'Edited other'
-  vi.mocked(api.updateTheme).mockImplementation(async record => ({ ...record, revision: 10 }))
-  await editor.save()
-  expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'other', revision: 9, name: 'Edited other' }))
-  expect(editor.message.value).toBe('Saved.')
-})
-it('a deletion conflict on another record does not disable the selected theme', async () => {
-  vi.mocked(api.deleteTheme).mockRejectedValue(Object.assign(new Error('Other theme changed'), { status: 409 }))
-  await editor.remove({ ...theme(), id: 'other' })
-  expect(editor.error.value).toBe('Other theme changed'); expect(editor.conflict.value).toBe(false)
-  editor.draft.value!.name = 'Still editable'
-  vi.mocked(api.updateTheme).mockImplementation(async record => ({ ...record, revision: 5 }))
-  await editor.save()
-  expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'personal', revision: 4 }))
-})
-it('a failed reload keeps an unresolved save conflict from allowing a blind resave', async () => {
-  editor.draft.value!.name = 'Changed'
-  vi.mocked(api.updateTheme).mockRejectedValue(Object.assign(new Error('Theme changed'), { status: 409 }))
-  await editor.save()
-  vi.mocked(api.getActiveTheme).mockRejectedValue(new Error('Reload failed'))
-  await editor.load(); await editor.save()
-  expect(editor.conflict.value).toBe(true); expect(editor.error.value).toBe('Reload failed')
-  expect(api.updateTheme).toHaveBeenCalledTimes(1)
-})
-it.each(['selection', 'save', 'delete'] as const)('pagination preserves an unresolved %s conflict until fresh active state loads', async operation => {
-  editor.cursor.value = 'next-page'
-  const failure = Object.assign(new Error('Theme changed; reload before editing'), { status: 409 })
-  if (operation === 'selection') {
-    vi.mocked(api.selectTheme).mockRejectedValue(failure)
-    await editor.choose({ ...theme(), id: 'other' })
-  } else if (operation === 'save') {
-    editor.draft.value!.name = 'Unsaved name'
-    vi.mocked(api.updateTheme).mockRejectedValue(failure)
-    await editor.save()
-  } else {
-    vi.mocked(api.deleteTheme).mockRejectedValue(failure)
-    await editor.remove(theme())
-  }
-  expect(editor.conflict.value).toBe(true)
-  expect(editor.error.value).toBe(failure.message)
-  const retainedDraft = JSON.parse(JSON.stringify(editor.draft.value))
-  let release!: (page: Awaited<ReturnType<typeof api.listThemes>>) => void
-  vi.mocked(api.listThemes).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
-  const paging = editor.more()
-  const pendingFeedback = editor.error.value
-  release({ items: [{ ...theme(), id: 'later' }], next_cursor: null })
-  await paging
-  expect(pendingFeedback).toBe(failure.message)
-  expect(api.listThemes).toHaveBeenLastCalledWith('next-page')
-  expect(editor.items.value.map(item => item.id)).toEqual(['personal', 'later'])
-  expect(editor.cursor.value).toBeNull()
-  expect(editor.draft.value).toEqual(retainedDraft)
-  expect(editor.conflict.value).toBe(true)
-  expect(editor.error.value).toBe(failure.message)
-  vi.mocked(api.getActiveTheme).mockResolvedValue({ ...chosen(), theme: { ...theme(), name: 'Fresh theme', revision: 5 }, revision: 13 })
-  await editor.load()
-  expect(editor.draft.value!.name).toBe('Fresh theme')
-  expect(editor.conflict.value).toBe(false)
-  expect(editor.error.value).toBe('')
-})
-it('identity change resets drafts and drops a delayed save result', async () => {
-  let release!: (record: ThemeRecord) => void
-  vi.mocked(api.updateTheme).mockImplementation(() => new Promise(resolve => { release = resolve }))
-  editor.draft.value!.name = 'Old person draft'; const saving = editor.save()
-  mocks.session.identity = null; await settle()
-  release({ ...theme(), name: 'Old person draft', revision: 5 }); await saving
-  expect(editor.draft.value).toBeNull(); expect(editor.items.value).toEqual([]); expect(editor.message.value).toBe('')
-})
-it('New theme can resolve a conflict by selecting a copy, but never duplicates after a failed default read', async () => {
-  vi.mocked(api.deleteTheme).mockRejectedValue(Object.assign(new Error('Theme changed'), { status: 409 }))
-  await editor.remove(theme())
-  const source = { ...theme(), id: 'default', name: 'Default', scope: 'default' as const, owner_principal_id: null }
-  const copy = { ...theme(), id: 'copy', name: 'Default copy', revision: 1 }
-  vi.mocked(api.getTheme).mockRejectedValueOnce(new Error('Default read failed'))
-  await editor.newTheme()
-  expect(api.duplicateTheme).not.toHaveBeenCalled()
-  expect(editor.error.value).toBe('Default read failed'); expect(editor.conflict.value).toBe(true)
-  vi.mocked(api.getTheme).mockResolvedValue(source)
-  vi.mocked(api.duplicateTheme).mockResolvedValue(copy)
-  vi.mocked(api.selectTheme).mockResolvedValue({ ...chosen(), theme: copy, selected_theme_id: copy.id, revision: 13 })
-  await editor.newTheme()
-  expect(api.duplicateTheme).toHaveBeenCalledWith(source, 'Default copy')
-  expect(api.selectTheme).toHaveBeenCalledWith('copy', 12)
-  expect(editor.active.value!.theme.id).toBe('copy')
-  expect(editor.conflict.value).toBe(false); expect(editor.error.value).toBe('')
-})
-it('a revision conflict prevents blind resave; discard reloads the current record', async () => {
-  editor.draft.value!.name = 'Changed'; vi.mocked(api.updateTheme).mockRejectedValue(Object.assign(new Error('Conflict'), { status: 409 }))
-  await editor.save(); await editor.save(); expect(api.updateTheme).toHaveBeenCalledTimes(1)
-  vi.mocked(api.getActiveTheme).mockResolvedValue({ ...chosen(), theme: { ...theme(), name: 'Newer', revision: 8 } })
-  editor.discard(); await settle(); expect(editor.draft.value!.name).toBe('Newer'); expect(editor.draft.value!.revision).toBe(8)
+  vi.mocked(api.listThemes).mockResolvedValue({ items: [DEFAULT, CONTRAST, COPPER, OTHER], next_cursor: 'next' })
+  vi.mocked(api.getActiveTheme).mockResolvedValue(chosen(COPPER))
+  scope = effectScope()
+  const created = scope.run(createThemeEditor)!
+  await created.idle()
+  return created
+}
+const conflict = (message = 'Changed') => Object.assign(new Error(message), { status: 409 })
+
+describe('theme editor runner', () => {
+  it('loads for the person and feeds permissions in as events', async () => {
+    const theme = await editor()
+    expect(theme.active.value).toEqual(chosen(COPPER)); expect(theme.canEdit.value).toBe(true)
+    expect(theme.editable(DEFAULT)).toBe(false)
+    // can() is not reactive in this mock; a new identity object re-evaluates it.
+    mocks.permissions.add('settings.manage'); mocks.session.identity = { ...(mocks.session.identity as object) }
+    await nextTick(); expect(theme.editable(DEFAULT)).toBe(true)
+  })
+  it('state is frozen, so a direct draft write cannot bypass the model', async () => {
+    const theme = await editor()
+    expect(() => { (theme.draft.value as ThemeRecord).name = 'Sneaky' }).toThrow(TypeError)
+    theme.update(draft => { draft.name = 'Through the model' })
+    expect(theme.dirty.value).toBe(true); expect(theme.draft.value!.name).toBe('Through the model')
+  })
+  it('an identity change drops a delayed save result', async () => {
+    const theme = await editor()
+    let release!: (record: ThemeRecord) => void
+    vi.mocked(api.updateTheme).mockImplementation(() => new Promise(resolve => { release = resolve }))
+    theme.update(draft => { draft.name = 'Old person draft' })
+    const saving = theme.save()
+    mocks.session.identity = null; await nextTick()
+    release({ ...COPPER, name: 'Old person draft', revision: 5 }); await saving
+    expect(theme.state.value).toMatchObject({ identity: '', draft: null, items: [], message: '', pending: null })
+  })
+  it('review-642d: reload after a delete conflict closes the stale confirmation; the retry needs a fresh one', async () => {
+    const theme = await editor()
+    vi.mocked(api.deleteTheme).mockRejectedValueOnce(conflict())
+    theme.confirmDelete(OTHER); await theme.remove()
+    expect(theme.confirming.value).toEqual(target(OTHER)); expect(theme.canDelete.value).toBe(false)
+    expect(theme.error.value).toMatch(/^Other changed elsewhere/)
+    vi.mocked(api.listThemes).mockResolvedValue({ items: [DEFAULT, CONTRAST, COPPER, { ...OTHER, revision: 10 }], next_cursor: null })
+    await theme.load()
+    expect(theme.confirming.value).toBeNull(); expect(theme.error.value).toBe('')
+    await theme.remove()
+    expect(api.deleteTheme).toHaveBeenCalledTimes(1)
+    vi.mocked(api.deleteTheme).mockResolvedValueOnce(undefined)
+    theme.confirmDelete(theme.items.value.find(item => item.id === 'other')!); await theme.remove()
+    expect(api.deleteTheme).toHaveBeenLastCalledWith({ id: 'other', revision: 10, name: 'Other' })
+    expect(theme.message.value).toBe('Deleted.')
+  })
+  it('review-642d: both duplication stages keep their conflict through pagination until a reload', async () => {
+    const theme = await editor()
+    vi.mocked(api.duplicateTheme).mockRejectedValueOnce(conflict())
+    await theme.duplicate(CONTRAST)
+    vi.mocked(api.listThemes).mockResolvedValueOnce({ items: [LATER], next_cursor: null })
+    await theme.more()
+    expect(theme.error.value).toBe('High contrast changed elsewhere. Reload themes, then duplicate it again.')
+    expect(theme.canReload.value).toBe(true); expect(theme.canDuplicate(CONTRAST)).toBe(false)
+    vi.mocked(api.duplicateTheme).mockResolvedValueOnce(COPY); vi.mocked(api.selectTheme).mockRejectedValueOnce(conflict())
+    await theme.duplicate(OTHER)
+    expect(theme.error.value).toMatch(/^The copy was created, but could not be selected/)
+    expect(theme.conflict.value).toBe(true); expect(theme.canChoose.value).toBe(false); expect(theme.items.value.map(item => item.id)).toContain('copy')
+    await theme.load()
+    expect([theme.error.value, theme.conflict.value, theme.canChoose.value]).toEqual(['', false, true])
+  })
+  it('the shared default needs settings.manage; members duplicate it instead', async () => {
+    const member = await editor()
+    vi.mocked(api.selectTheme).mockResolvedValueOnce(chosen(DEFAULT, 13))
+    await member.choose(DEFAULT)
+    expect(member.canEdit.value).toBe(false); expect(member.ownership(DEFAULT)).toEqual({ label: 'Workspace default', access: 'read-only' })
+    member.update(draft => { draft.name = 'Changed default' }); await member.save()
+    expect(api.updateTheme).not.toHaveBeenCalled(); expect(member.offersDelete(DEFAULT)).toBe(false)
+    const manager = await editor({ manage: true })
+    expect(manager.ownership(CONTRAST)).toEqual({ label: 'Workspace', access: 'you manage it' }); expect(manager.offersDelete(DEFAULT)).toBe(false)
+  })
 })

@@ -234,7 +234,7 @@ function fail(state: ThemeEditorState, op: Operation, status: number | null, mes
       if (status === 404) return recovery(op.themeID, 'selection', `${nameOf(state, op.themeID)} no longer exists. Reload themes.`)
       break
     case 'save':
-      if (stale(status)) return recovery(op.theme.id, 'save', status === 404 ? `${op.theme.name} no longer exists. Discard your edits to continue.` : `${op.theme.name} changed elsewhere. Discard your edits to load the current version.`)
+      if (stale(status)) return recovery(op.theme.id, 'save', status === 404 ? `${nameOf(state, op.theme.id)} no longer exists. Discard your edits to continue.` : `${nameOf(state, op.theme.id)} changed elsewhere. Discard your edits to load the current version.`)
       break
     case 'readDefault': return { ...done, failure: `The workspace default could not be read. ${reason}` }
     case 'duplicate':
