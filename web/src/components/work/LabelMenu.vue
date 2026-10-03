@@ -101,7 +101,7 @@ function keydown(event: KeyboardEvent) {
 .option:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .option.create { color: var(--teal-ink); font-weight: 600; }
 .option.changed .name { font-weight: 600; }
-.box { display: grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px var(--line-2); color: #fff; }
+.box { display: grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px var(--line-2); color: var(--button-ink); }
 .box.all, .box.some { background: var(--teal); box-shadow: none; }
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .on { font-size: 11px; color: var(--ink-3); }

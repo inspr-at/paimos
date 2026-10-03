@@ -61,7 +61,7 @@ function keys(event: KeyboardEvent) {
 .facet-btn.on { color: var(--teal-ink); }
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
-.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
+.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--teal); color: var(--button-ink); font-size: 10.5px; font-weight: 700; }
 .facet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; padding: 2px 6px 4px 10px; }
 .clear { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .clear:hover { background: var(--row-selected); }

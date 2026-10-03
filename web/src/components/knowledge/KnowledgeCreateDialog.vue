@@ -159,8 +159,8 @@ h2 { font-size: 18px; }
 .kind.on .kind-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .kind-label { flex-shrink: 0; width: 132px; font-size: 13.5px; color: var(--ink); }
 .kind-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
-.kind-check { display: grid; place-items: center; flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; color: #fff; }
-.kind.on .kind-check { background: linear-gradient(180deg, #1a8683, #0e6f6c); }
+.kind-check { display: grid; place-items: center; flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; color: var(--button-ink); }
+.kind.on .kind-check { background: var(--teal); }
 .slug-box {
   display: flex; align-items: center; height: 38px; padding: 0 12px; border: 1px solid var(--glass-edge); border-radius: var(--radius-s);
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); cursor: text;

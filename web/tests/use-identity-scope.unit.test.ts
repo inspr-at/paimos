@@ -9,7 +9,7 @@ import type { Identity } from '../src/lib/api'
 import { AUTH_GENERATION_KEY } from '../src/lib/authTabs'
 
 // The session store reaches for browser theme storage; the scope only reads its identity.
-vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {} }))
+vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {}, resetTheme: () => {} }))
 const who = (tenant: string, person: string) => ({ tenant: { id: tenant, name: tenant }, principal: { id: person, name: person, kind: 'person', roles: [] } }) as unknown as Identity
 function later<T = void>() {
   let resolve!: (value: T) => void

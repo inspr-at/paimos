@@ -443,7 +443,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 /* One primary at a time: only the selected request's Approve is filled. */
 .btn.approve-soft { border-color: transparent; background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .btn.approve-soft:hover { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
-.btn.deny { color: #fff; background: var(--danger); border-color: transparent; }
+.btn.deny { color: var(--danger-on); background: var(--danger); border-color: transparent; }
 .btn.deny:hover { filter: brightness(1.06); background: var(--danger); }
 .fine-print { font-size: 11.5px; color: var(--ink-3); }
 .answer { color: var(--teal-ink); }

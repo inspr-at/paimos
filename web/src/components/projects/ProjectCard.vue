@@ -117,7 +117,7 @@ li.card.card-ghost { position: fixed; z-index: 80; margin: 0; list-style: none; 
 li.card.card-ghost.lifted { scale: 1.025; box-shadow: 0 0 0 1px var(--chip-teal-line), 0 30px 60px -22px rgba(8, 24, 27, .46), 0 10px 22px -12px rgba(8, 24, 27, .3); }
 li.card.card-ghost.dropped { opacity: 0; scale: .96; }
 .card-ghost .card-more, .card-ghost .card-grip { display: none; }
-.card-ghost-count { position: absolute; top: -9px; right: -9px; display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: #0e6f6c; color: #fff; font: 700 12px/1 var(--font); box-shadow: 0 0 0 2px var(--surface-raised-2), 0 4px 10px -4px rgba(8, 24, 27, .4); }
+.card-ghost-count { position: absolute; top: -9px; right: -9px; display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: var(--teal); color: var(--button-ink); font: 700 12px/1 var(--font); box-shadow: 0 0 0 2px var(--surface-raised-2), 0 4px 10px -4px rgba(8, 24, 27, .4); }
 @media (prefers-reduced-motion: no-preference) {
   li.card.card-ghost { transition: scale .16s ease, box-shadow .16s ease, opacity .16s ease; }
   li.card.card-ghost.settling { transition: translate .22s cubic-bezier(.2, .75, .3, 1), scale .22s ease, box-shadow .22s ease; }

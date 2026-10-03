@@ -259,7 +259,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 /* Chevron and count badge share one slot so buttons never change width. */
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
-.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
+.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--teal); color: var(--button-ink); font-size: 10.5px; font-weight: 700; }
 /* Applied filters take their own line under the controls, so the controls never move. */
 .chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; order: 20; flex: 1 0 100%; min-width: 0; }
 .filter-chip { display: inline-flex; align-items: center; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12.5px; max-width: 340px; }

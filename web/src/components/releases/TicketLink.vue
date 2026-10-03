@@ -51,7 +51,7 @@ function click(event: MouseEvent) {
 .ticket-plain.chip { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
 @media (hover: hover) { .ticket-link.chip:hover { box-shadow: inset 0 0 0 1px var(--teal), 0 4px 10px -6px rgba(14, 111, 108, .5); } }
 /* The ticket open beside the history: a filled chip, not an edge mark. */
-.ticket-link.chip[aria-current="true"] { background: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); color: var(--surface); }
+.ticket-link.chip[aria-current="true"] { background: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); color: var(--button-ink); }
 
 .inline { display: inline-flex; align-items: center; font: 500 11px/1.4 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .ticket-link.inline { margin: 0 -4px; padding: 1px 4px; border-radius: 5px; color: var(--teal-ink); }

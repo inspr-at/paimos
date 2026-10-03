@@ -359,7 +359,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
 .search-pill, .header-btn { flex-shrink: 0; }
-.needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: #3a2804; font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
+.needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .search-pill {
   display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;

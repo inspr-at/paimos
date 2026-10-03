@@ -248,7 +248,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
 .arrival-hint { color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-buttons { display: flex; align-items: center; gap: 8px; }
 .action-buttons button { height: 42px; border: 0; padding: 0 14px; background: transparent; color: var(--ink-2); border-radius: 8px; font-size: 13px; white-space: nowrap; }
-.action-buttons .desk-primary { width: 184px; background: var(--teal); color: var(--surface); font-weight: 600; }
+.action-buttons .desk-primary { width: 184px; background: var(--teal); color: var(--button-ink); font-weight: 600; }
 .action-buttons .close-desk { width: 42px; padding: 0; display: grid; place-items: center; }
 button { cursor: pointer; } button:disabled { cursor: default; } button:focus-visible, input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; } kbd { font: 11px var(--mono); opacity: .65; margin-left: 7px; }
 .desk-paper { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; padding: 24px 30px 28px; background: var(--surface); border-radius: 0 12px 12px 12px; border: 1px solid var(--line-2); border-top: 0; outline: 0; }

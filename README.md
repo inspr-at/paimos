@@ -30,6 +30,22 @@ revisions return 409. Personal writes require the owner and `profile.write`
 Personal records and their events remain owner-only, including for managers.
 The full schemas are in [the API contract](api/openapi.yaml).
 
+The web app reads the mode preference and active theme before the authenticated
+view first renders. Saved primary/secondary accents, semantic tints and recurring
+marker colours become root CSS tokens; changing Light, Dark or System preserves
+the chosen theme. A missing dark accent uses the accepted HSL lightness lift to
+6:1 on dark cards. Filled controls and marks use the higher-contrast white or dark
+ink for their actual fill; recurring row badges are 12 px. Theme responses are
+size/time bounded and discarded after an identity change. A failed read shows
+an explicit default-colour notice. No theme values are kept in browser storage.
+
+Appearance editors can use `themeTokens(values, dark)` for their isolated preview
+and `applyAppearanceTheme(savedValues)` after a successful save/selection, or
+`restoreAppearanceTheme(identityCheck)` to read the server's active choice. These
+helpers are in `web/src/lib/themeValues.ts` and `appearanceTheme.ts`; drafts must
+never be applied to the page. Agent appearance consumes the active theme palette,
+while behaviour thresholds and inactive dimming remain personal preferences.
+
 Linking people preserves theme owners and choice rows. Linked identities can
 read, edit and undo their shared personal themes; unlink restores each original
 owner's privacy. The canonical person's saved choice wins (including an explicit

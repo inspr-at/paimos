@@ -79,6 +79,6 @@ async function remove() {
 .label { font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 select.field { appearance: auto; }
 .error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
-.danger-solid { color: #fff; border-color: transparent; background: linear-gradient(180deg, #c05650, #a8423c); box-shadow: 0 0 0 1px rgba(168, 66, 60, .5), 0 8px 18px -10px rgba(168, 66, 60, .7); }
-.danger-solid:hover { filter: brightness(1.05); background: linear-gradient(180deg, #c05650, #a8423c); }
+.danger-solid { color: var(--danger-on); border-color: transparent; background: var(--danger); box-shadow: 0 0 0 1px rgba(168, 66, 60, .5), 0 8px 18px -10px rgba(168, 66, 60, .7); }
+.danger-solid:hover { filter: brightness(1.05); background: var(--danger); }
 </style>

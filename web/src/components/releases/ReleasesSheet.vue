@@ -791,8 +791,8 @@ const KINDS = [
 }
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.new-tag { background: var(--gold-2); color: #3a2804; }
-.end-tag { background: var(--teal); color: var(--surface); }
+.new-tag { background: var(--gold-2); color: var(--gold-on); }
+.end-tag { background: var(--teal); color: var(--button-ink); }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .headline { color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .subjects { color: var(--ink-3); font-size: 12.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }

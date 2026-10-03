@@ -714,7 +714,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .steps .current { color: var(--ink); }
 .steps .done { color: var(--ink-2); }
 .num { display: grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-2); font: 600 12px/1 var(--mono); }
-.current .num, .done .num { background: var(--teal); color: var(--surface); }
+.current .num, .done .num { background: var(--teal); color: var(--button-ink); }
 .card { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
 .card h2, .card h3, .card h4 { margin: 20px 0 6px; }
 .card h2 { font: 600 16px/1.3 var(--font); letter-spacing: 0; }

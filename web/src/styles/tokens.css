@@ -231,3 +231,14 @@
 
 /* AEON-522: full amber tint and hairline for capacity/blocker waits. */
 :root { --queue-wait-ink: color-mix(in srgb, var(--warn-ink) 75%, var(--ink) 25%); --queue-wait-bg: color-mix(in srgb, var(--gold) 12%, transparent); --queue-wait-line: color-mix(in srgb, var(--gold) 42%, transparent); }
+
+/* AEON-644: every solid fill gets deterministic white or dark ink.
+   Runtime themes replace these aliases before the authenticated view renders. */
+:root {
+  --fill-white: #ffffff; --fill-dark: #102327;
+  --button-ink: light-dark(var(--fill-white), var(--fill-dark));
+  --st-ok-on: light-dark(var(--fill-white), var(--fill-dark));
+  --gold-on: var(--fill-dark); --danger-on: light-dark(var(--fill-white), var(--fill-dark));
+  --recurring-marker: var(--gold); --recurring-marker-ink: var(--gold-on);
+  --recurring-marker-wash: var(--gold-wash);
+}

@@ -22,6 +22,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+/* Neutral canvas until the saved mode and accents are ready at first mount. */
+html[data-appearance-loading] body { background-image: none; }
 /* Porcelain grain: light theme only (opacity token is 0 in dark). */
 body::before {
   content: '';
@@ -71,9 +73,9 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .btn:hover { background: var(--btn-bg-hover); box-shadow: var(--shadow-btn-hover); }
 .btn:active { background: var(--seg-on); box-shadow: var(--shadow-btn); transform: translateY(.5px); }
 .btn.primary {
-  color: #fff; border-color: transparent;
-  background: linear-gradient(180deg, #1a8683, #0e6f6c 60%, #0b5c59);
-  box-shadow: 0 0 0 1px rgba(14, 111, 108, .5), 0 10px 24px -10px rgba(14, 111, 108, .7), inset 0 1px 0 rgba(255, 255, 255, .35), 0 0 30px -8px rgba(164, 229, 223, .9);
+  color: var(--button-ink); border-color: transparent;
+  background: var(--teal);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--teal) 50%, transparent), 0 10px 24px -10px color-mix(in srgb, var(--teal) 70%, transparent), inset 0 1px 0 var(--glass-edge), 0 0 30px -8px var(--aqua);
 }
 .btn.primary:hover { filter: brightness(1.06); }
 .btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--teal-ink); }
@@ -134,11 +136,11 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff, #eef5f3); box-shadow: 0 1px 3px rgba(32, 60, 61, .3);
 }
-.switch input:checked { background: linear-gradient(90deg, #0e6f6c, #1a8683); box-shadow: 0 0 12px rgba(164, 229, 223, .6); }
+.switch input:checked { background: var(--teal); box-shadow: 0 0 12px rgba(164, 229, 223, .6); }
 .switch input:checked::after { transform: translateX(14px); }
 /* Mixed: half the track and a centred knob. A full tint read as on in dark mode. */
 .switch input:indeterminate {
-  background: linear-gradient(90deg, #1a8683 0 50%, var(--track) 50% 100%);
+  background: linear-gradient(90deg, var(--teal) 0 50%, var(--track) 50% 100%);
   box-shadow: inset 0 0 0 1px rgba(26, 134, 131, .85);
 }
 .switch input:indeterminate::after { transform: translateX(7px); }
@@ -184,8 +186,8 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   appearance: none; display: inline-grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; margin: 0; border-radius: 4px;
   background: var(--field-bg); box-shadow: inset 0 0 0 1px var(--line-2); cursor: pointer;
 }
-.check-box:checked { background: linear-gradient(180deg, #1a8683, #0e6f6c); box-shadow: inset 0 0 0 1px rgba(14, 111, 108, .6); }
-.check-box:checked::after { content: ''; width: 8px; height: 4.5px; border-left: 1.8px solid #fff; border-bottom: 1.8px solid #fff; transform: translateY(-1px) rotate(-45deg); }
+.check-box:checked { background: var(--teal); box-shadow: inset 0 0 0 1px rgba(14, 111, 108, .6); }
+.check-box:checked::after { content: ''; width: 8px; height: 4.5px; color: var(--button-ink); border-left: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: translateY(-1px) rotate(-45deg); }
 .check-box:focus-visible { box-shadow: 0 0 0 3px rgba(164, 229, 223, .6); }
 
 /* Progress */
@@ -219,8 +221,8 @@ mark { padding: 0 1px; border-radius: 3px; background: var(--mark-hl); color: in
 .icon-button:hover { background: var(--btn-bg-hover); color: var(--teal-ink); }
 .button {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 10px 20px;
-  border: 1px solid transparent; border-radius: 999px; font-weight: 600; color: #fff;
-  background: linear-gradient(180deg, #1a8683, #0e6f6c 60%, #0b5c59);
+  border: 1px solid transparent; border-radius: 999px; font-weight: 600; color: var(--button-ink);
+  background: var(--teal);
   box-shadow: 0 0 0 1px rgba(14, 111, 108, .5), 0 10px 24px -10px rgba(14, 111, 108, .6), inset 0 1px 0 rgba(255, 255, 255, .3);
 }
 .button:hover { filter: brightness(1.06); }

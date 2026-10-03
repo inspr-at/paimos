@@ -940,7 +940,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); }
 .ticket-row.drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
 .outline-group.drop-target th { box-shadow: inset 0 0 0 2px var(--teal); }
-.drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px rgba(14, 111, 108, .8); }
+.drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: var(--teal); color: var(--button-ink); font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px rgba(14, 111, 108, .8); }
 .outline-group th { top: calc(var(--toolbar-h, 0px) + 35px); }
 .more-row td { height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .more-btn { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
@@ -1124,13 +1124,13 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
   .phone-check {
     display: grid; place-items: center; width: 44px; height: 44px; margin: 0; padding: 0; border: 0; border-radius: 50%;
-    background: transparent; color: #fffefa;
+    background: transparent; color: var(--button-ink);
   }
   .phone-check .mark {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
     box-shadow: inset 0 0 0 1.5px var(--ink-2); background: var(--surface);
   }
-  .phone-check[aria-checked="true"] .mark { background: linear-gradient(180deg, #1a8683, #0e6f6c); box-shadow: none; }
+  .phone-check[aria-checked="true"] .mark { background: var(--teal); box-shadow: none; }
   .phone-check:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.selected { background: var(--row-selected); }
   .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }

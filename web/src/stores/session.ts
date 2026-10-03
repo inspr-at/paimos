@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { onScopeDispose, ref } from 'vue'
 import { api, getSession, sessionEnded, type Identity } from '../lib/api'
-import { restoreTheme } from '../lib/theme'
+import { resetTheme, restoreTheme } from '../lib/theme'
 import { accessChanged, clearPermissions, refreshPermissions, revokePermissions } from '../lib/authz'
 import { clearSignInReturn } from '../lib/signInReturn'
 import { dropAttachCode } from '../lib/attachLink'
@@ -46,6 +46,7 @@ export const useSession = defineStore('session', () => {
     dropAttachCode()
     revokePermissions()
     resetPositions()
+    resetTheme()
   }
 
   function readSignInConfig(session: Awaited<ReturnType<typeof getSession>>) {
@@ -84,10 +85,17 @@ export const useSession = defineStore('session', () => {
         if (session.identity) void refreshPermissions()
       }
       readSignInConfig(session)
-      if (session.identity) void restoreTheme()
+      if (!same) {
+        resetTheme()
+        if (session.identity) {
+          const owner = session.identity
+          await restoreTheme(() => started === epoch && tabs.current() && identity.value?.principal.id === owner.principal.id && identity.value?.tenant.id === owner.tenant.id)
+        }
+      }
     } catch {
       if (started !== epoch || !tabs.current()) return
       identity.value = null
+      resetTheme()
       clearPermissions()
       devMode.value = false
       error.value = 'We couldn’t reach your workspace. Please try again.'

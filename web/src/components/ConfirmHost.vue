@@ -51,8 +51,8 @@ p { margin-top: 8px; font-size: 13.5px; color: var(--ink-2); }
 .points svg { margin-top: 2.5px; color: var(--ink-3); }
 .actions .btn { width: 140px; flex: none; }
 .actions { flex: none; display: flex; justify-content: flex-end; gap: 8px; margin: 12px 0; }
-.danger-solid { color: #fff; border-color: transparent; background: linear-gradient(180deg, #c05650, #a8423c); box-shadow: 0 0 0 1px rgba(168, 66, 60, .5), 0 8px 18px -10px rgba(168, 66, 60, .7); }
-.danger-solid:hover { filter: brightness(1.05); background: linear-gradient(180deg, #c05650, #a8423c); }
+.danger-solid { color: var(--danger-on); border-color: transparent; background: var(--danger); box-shadow: 0 0 0 1px rgba(168, 66, 60, .5), 0 8px 18px -10px rgba(168, 66, 60, .7); }
+.danger-solid:hover { filter: brightness(1.05); background: var(--danger); }
 @media (max-width: 720px) {
   .confirm { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; }
   .confirm-card { height: 100%; max-height: none; border-radius: 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }

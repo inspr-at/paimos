@@ -358,7 +358,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 }
 .pill-btn:hover { background: rgba(164, 229, 223, .14); }
 .pill-btn:focus-visible { outline: 2px solid #a4e5df; outline-offset: 2px; }
-.pill-btn[aria-pressed="true"], .pill-btn[aria-checked="true"] { background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; box-shadow: 0 4px 12px -6px rgba(14, 111, 108, .9); }
+.pill-btn[aria-pressed="true"], .pill-btn[aria-checked="true"] { background: var(--teal); color: var(--button-ink); box-shadow: 0 4px 12px -6px rgba(14, 111, 108, .9); }
 .pill-btn.icon { padding: 0; width: 30px; }
 .pill-btn.solo { background: rgba(237, 244, 240, .08); box-shadow: inset 0 0 0 1px var(--lb-edge); }
 .pill-btn.round { width: 36px; height: 36px; padding: 0; background: rgba(237, 244, 240, .1); box-shadow: inset 0 0 0 1px var(--lb-edge); }
