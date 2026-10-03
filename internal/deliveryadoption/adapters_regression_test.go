@@ -228,6 +228,12 @@ func TestCommandProviderProcessHelper(t *testing.T) {
 		return
 	}
 	if role == "parent" {
+		// The baseline adapter does not create a process group. Isolate this
+		// helper there too, so failure cleanup never signals the test runner.
+		group, err := syscall.Getpgid(0)
+		if err != nil || group != os.Getpid() && syscall.Setpgid(0, 0) != nil {
+			os.Exit(2)
+		}
 		binary, err := os.Executable()
 		if err != nil {
 			os.Exit(2)
