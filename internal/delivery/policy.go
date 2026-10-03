@@ -175,6 +175,34 @@ func CheckAdmission(kind tenant.PrincipalKind, hasReleasesWrite bool, state stri
 	return nil
 }
 
+// Admission describes the locked destination and the projected post-write
+// counts, including tombstones. The clock must be sampled after the fences.
+type Admission struct {
+	State               string
+	ClosesAt            *time.Time
+	Now                 time.Time
+	Adding              bool
+	ReleaseRows         int
+	NonTerminalReleases int
+	PendingRows         int
+}
+
+// CheckHistoryCorrectionAdmission applies when either the source or destination
+// is released. The principal kind and permission results must come from the
+// final fenced transaction's current principal and RequireTx checks; this pure
+// policy helper grants no authority. Corrections into another container use its
+// actual state, deadline and projected counts. Removals still check authority
+// and counts because they may increase the pending-internal total.
+func CheckHistoryCorrectionAdmission(kind tenant.PrincipalKind, hasRolesManage, hasReleasesWrite bool, a Admission) error {
+	if kind != tenant.Person || !hasRolesManage {
+		return ErrHistoryCorrection
+	}
+	if err := CheckAdmission(kind, hasReleasesWrite, a.State, a.ClosesAt, a.Now, a.Adding); err != nil {
+		return err
+	}
+	return CheckCounts(a.ReleaseRows, a.NonTerminalReleases, a.PendingRows)
+}
+
 // CheckCounts uses projected counts, including tombstones, not live counts.
 // Count queries must stop at cap+1; they must not allocate a whole population.
 func CheckCounts(releaseRows, nonTerminalReleases, pendingRows int) error {

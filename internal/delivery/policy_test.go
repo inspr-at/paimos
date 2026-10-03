@@ -184,3 +184,78 @@ func TestCountCapsAndCompletion(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryCorrectionAdmission(t *testing.T) {
+	deadline := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+	base := Admission{
+		State: "released", ClosesAt: &deadline, Now: deadline.Add(-time.Nanosecond), Adding: true,
+		ReleaseRows: 1000, NonTerminalReleases: 50, PendingRows: 4000,
+	}
+	for _, tc := range []struct {
+		name   string
+		kind   tenant.PrincipalKind
+		manage bool
+		write  bool
+		edit   func(*Admission)
+		want   error
+	}{
+		{name: "authorized at capacity", kind: tenant.Person, manage: true, write: true},
+		{name: "before deadline needs no extra write grant", kind: tenant.Person, manage: true},
+		{name: "exact deadline with write", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.Now = deadline }},
+		{name: "after deadline with write", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.Now = deadline.Add(time.Nanosecond) }},
+		{name: "no deadline", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.ClosesAt = nil; a.Now = deadline.Add(time.Hour) }},
+		{name: "missing roles.manage", kind: tenant.Person, write: true, want: ErrHistoryCorrection},
+		{name: "agent with both grants", kind: tenant.Agent, manage: true, write: true, want: ErrHistoryCorrection},
+		{name: "unknown principal with both grants", kind: tenant.PrincipalKind("unknown"), manage: true, write: true, want: ErrHistoryCorrection},
+		{name: "exact deadline without write", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.Now = deadline }, want: ErrEntryClosed},
+		{name: "after deadline without write", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.Now = deadline.Add(time.Nanosecond) }, want: ErrEntryClosed},
+		{name: "frozen destination", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.State = "frozen" }, want: ErrFrozen},
+		{name: "abandoned destination", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.State = "abandoned" }, want: ErrReleaseClosed},
+		{name: "unknown destination", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.State = "unknown" }, want: ErrReleaseClosed},
+		{name: "released rows including tombstones over cap", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.ReleaseRows++ }, want: ErrReleaseCapacity},
+		{name: "open release cap", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.NonTerminalReleases++ }, want: ErrOpenReleaseCapacity},
+		{name: "pending internal cap", kind: tenant.Person, manage: true, write: true, edit: func(a *Admission) { a.PendingRows++ }, want: ErrPendingCapacity},
+		{name: "removal still needs roles.manage", kind: tenant.Person, write: true, edit: func(a *Admission) { a.Adding = false }, want: ErrHistoryCorrection},
+		{name: "agent removal still refused", kind: tenant.Agent, manage: true, write: true, edit: func(a *Admission) { a.Adding = false }, want: ErrHistoryCorrection},
+		{name: "rerank is not admission", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.Adding = false; a.Now = deadline }},
+		{name: "removal still checks pending total", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.Adding = false; a.PendingRows++ }, want: ErrPendingCapacity},
+		{name: "move out to building before deadline", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.State = "building" }},
+		{name: "move out to planned after deadline", kind: tenant.Person, manage: true, edit: func(a *Admission) { a.State = "planned"; a.Now = deadline }, want: ErrEntryClosed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := base
+			if tc.edit != nil {
+				tc.edit(&a)
+			}
+			if err := CheckHistoryCorrectionAdmission(tc.kind, tc.manage, tc.write, a); !errors.Is(err, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+		})
+	}
+
+	t.Run("missing trusted clock", func(t *testing.T) {
+		a := base
+		a.Now = time.Time{}
+		err := CheckHistoryCorrectionAdmission(tenant.Person, true, true, a)
+		if err == nil || err.Error() != "admission needs the trusted post-fence clock" {
+			t.Fatalf("expected clock validation, got %v", err)
+		}
+	})
+	t.Run("negative projected count", func(t *testing.T) {
+		a := base
+		a.ReleaseRows = -1
+		err := CheckHistoryCorrectionAdmission(tenant.Person, true, true, a)
+		if err == nil || err.Error() != "delivery counts cannot be negative" {
+			t.Fatalf("expected count validation, got %v", err)
+		}
+	})
+}
+
+func TestOrdinaryAdmissionCannotCorrectHistory(t *testing.T) {
+	now := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+	for _, kind := range []tenant.PrincipalKind{tenant.Person, tenant.Agent} {
+		if err := CheckAdmission(kind, true, "released", nil, now, true); !errors.Is(err, ErrReleaseClosed) {
+			t.Fatalf("%s bypassed explicit history correction: %v", kind, err)
+		}
+	}
+}
