@@ -82,7 +82,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
           <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
           <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'} for review`" />
         </RouterLink>
-        <nav v-if="current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/personal#agents">Agents</RouterLink></nav>
+        <nav v-if="current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
       </nav>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
         <component :is="VIEW[current]" v-if="allowed" :key="current" />

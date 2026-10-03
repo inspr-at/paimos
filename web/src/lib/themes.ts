@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { AgentThemeAppearance } from './agentTheme.ts'
 import { api } from './api.ts'
 export interface ThemeAccent { light: string; dark: string | null }
 export interface ThemeValues {
   primary: ThemeAccent; secondary: ThemeAccent
   recurring_marker: { source: 'primary' | 'secondary' | 'neutral' | 'custom'; custom: string | null }
-  agents: { avatar: string; ring: string | null; hover: boolean; size: number | null; palette: string }
+  agents: AgentThemeAppearance
 }
 export interface ThemeRecord {
-  id: string; tenant_id: string; name: string; scope: 'personal' | 'workspace'; owner_principal_id: string | null
+  id: string; tenant_id: string; name: string; scope: 'default' | 'personal' | 'workspace'; owner_principal_id: string | null
   values: ThemeValues; revision: number; created_at: string; updated_at: string
 }
 export interface ActiveTheme {

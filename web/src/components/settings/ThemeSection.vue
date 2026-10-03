@@ -6,6 +6,7 @@ import type { ThemeRecord } from '../../lib/themes'
 import { derivedDark } from '../../lib/themeColours'
 import SettingsCard from './SettingsCard.vue'
 import ThemeColoursCard from './ThemeColoursCard.vue'
+import ThemeAgentsCard from './ThemeAgentsCard.vue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 const editor = useThemeEditor()
@@ -64,6 +65,7 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
       </div>
     </SettingsCard>
     <ThemeColoursCard v-if="draft" :draft="draft" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
+    <ThemeAgentsCard v-if="draft" :draft="draft" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
     <Teleport to="body">
       <div v-if="dirty && draft" class="theme-savebar" role="region" aria-label="Unsaved theme changes" @keydown="keys">
         <p>Unsaved changes to <strong>{{ draft.name || 'Untitled theme' }}</strong><span v-if="!valid"> · Enter a name of up to 80 characters.</span></p>

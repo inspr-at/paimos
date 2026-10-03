@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { installAgentTheme } from '../lib/agentTheme'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { can } from '../lib/authz'
@@ -15,12 +16,13 @@ export function useThemeEditor() {
   const selfWrite = computed(() => session.identity?.principal.kind === 'person' && (can('profile.write') || can('profile.portal_write')))
   // The API's RLS returns only this canonical person's personal themes; linked
   // aliases may have a different owner UUID. Workspace writes need manage.
-  const editable = (theme: ThemeRecord) => theme.scope === 'workspace' ? session.identity?.principal.kind === 'person' && can('settings.manage') : selfWrite.value
+  const editable = (theme: ThemeRecord) => theme.scope !== 'personal' ? session.identity?.principal.kind === 'person' && can('settings.manage') : selfWrite.value
   const dirty = computed(() => !!draft.value && !!active.value && JSON.stringify({ name: draft.value.name, values: draft.value.values }) !== JSON.stringify({ name: active.value.theme.name, values: active.value.theme.values }))
   const valid = computed(() => !!draft.value?.name.trim() && [...draft.value.name.trim()].length <= 80 && !/[\u0000-\u001f\u007f]/.test(draft.value.name))
   const clone = (theme: ThemeRecord) => JSON.parse(JSON.stringify(theme)) as ThemeRecord
   function install(current: ActiveTheme) {
     active.value = current; draft.value = clone(current.theme)
+    installAgentTheme(current.theme.values.agents)
     merge(current.theme)
     if (current.fallback_notice) message.value = `${current.fallback_notice.deleted_theme_name} was deleted. You are using the workspace default.`
   }
@@ -66,6 +68,7 @@ export function useThemeEditor() {
     await perform(async current => {
       const saved = await themes.updateTheme(captured)
       if (!current() || draft.value?.id !== captured.id) return
+      installAgentTheme(saved.values.agents)
       merge(saved); active.value!.theme = saved; draft.value = clone(saved); message.value = 'Saved.'
     })
   }

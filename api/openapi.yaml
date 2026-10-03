@@ -9556,6 +9556,8 @@ components:
             hover: {type: boolean}
             size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
             palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome]}
+            dim_inactive: {type: boolean, description: 'Dim idle and ended agents; omitted means true'}
+            inactive_opacity: {type: integer, minimum: 40, maximum: 80, description: 'Inactive opacity percent; omitted means 55'}
     Theme:
       type: object
       required: [id, tenant_id, name, scope, owner_principal_id, values, revision, created_at, updated_at]

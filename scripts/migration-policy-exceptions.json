@@ -73,6 +73,12 @@
       "sha256": "601ae9ff9206769a92e77704e27f0d361f11d24be373b2e7ce0d3af31cef41c5",
       "ticket": "AEON-641",
       "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
+    },
+    {
+      "file": "1235_agent_appearance_themes.sql",
+      "sha256": "21d4ef2673c38be1befbde329b88cdf7e55ccb64735d749a3b035e55ee004c6e",
+      "ticket": "AEON-643",
+      "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
     }
   ]
 }

@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { expect, test, type Page } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fixtures, mockWork } from './work-fixtures'
+import { mockSettings, settingsData } from './settings-fixtures'
+import { expectStableControls } from './helpers/stable'
+import { indicatorVariants } from '../src/lib/indicatorVariants'
+import type { ThemeRecord } from '../src/lib/themes'
+
+const shots = resolve('test-results/aeon-643')
+const initial = (): ThemeRecord => ({
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '',
+  values: { primary: { light: '#0e6f6c', dark: '#a4e5df' }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-1', ring: null, size: null, hover: false, palette: 'standard' } },
+})
+async function mock(page: Page, admin = true) {
+  const data = fixtures()
+  data.preferences['agent-indicator'] = { style: 'robot-5', hovering: true }
+  data.preferences['agent-state'] = { palette: 'protan', yellowMinutes: 7, redMinutes: 19 }
+  await mockWork(page, data, { admin })
+  await mockSettings(page, settingsData())
+  const state = { theme: initial(), writes: [] as ThemeRecord[], fail: false }
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    const method = route.request().method()
+    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: null, revision: 0, fallback_notice: null })
+    if (path === '/api/me/theme') return route.fulfill({ json: active() })
+    if (path === '/api/themes') return route.fulfill({ json: { items: [state.theme], next_cursor: null } })
+    if (path === `/api/themes/${state.theme.id}`) {
+      if (method === 'PATCH') {
+        state.writes.push(route.request().postDataJSON())
+        if (state.fail) return route.fulfill({ status: 500, json: { error: 'write failed' } })
+        const body = route.request().postDataJSON()
+        state.theme = { ...state.theme, name: body.name, values: body.values, revision: state.theme.revision + 1 }
+      }
+      return route.fulfill({ json: state.theme })
+    }
+    return route.fallback()
+  })
+  return { state, data }
+}
+
+for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+  test(`${width} ${mode}: nine avatars, stable controls, isolated state previews and saved appearance`, async ({ page }) => {
+    const { state, data } = await mock(page)
+    data.preferences.theme = { choice: mode }
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ reducedMotion: 'no-preference', colorScheme: mode })
+    await page.goto('/settings/theme#agents')
+    const card = page.locator('#agents')
+    await expect(card.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
+    await expect(card.locator('.avatar-tile')).toHaveCount(9)
+    await expect(card.locator('.states .live-bot')).toHaveCount(10)
+    // All actual renderers load; none of these tiles uses fragment sketch art.
+    await expect(card.locator('.avatar-tile .agent-indicator-art')).toHaveCount(9)
+    const robot = card.getByRole('radio', { name: 'Robot 5', exact: true })
+    const hover = card.getByRole('switch', { name: 'Hover', exact: true })
+    const size = card.getByRole('slider', { name: 'Size', exact: true })
+    const dim = card.getByRole('switch', { name: 'Dim inactive', exact: true })
+    const reset = card.getByRole('button', { name: 'Use drawn ring and sizes' })
+    const moving = card.getByRole('radio', { name: 'Moving', exact: true })
+    await expectStableControls({
+      controls: { avatarGroup: card.getByRole('radiogroup', { name: 'Agent avatar' }), clickedAvatar: robot, ringGroup: card.getByRole('radiogroup', { name: 'Ring', exact: true }), moving, hover, size, reset, dim, opacity: card.getByRole('slider', { name: 'Opacity' }), paletteGroup: card.getByRole('radiogroup', { name: 'State colours' }) },
+      scrollAreas: { card, page: page.locator('html') },
+      interactions: [
+        ...indicatorVariants.map(variant => ({ name: `avatar ${variant.id}`, run: async () => { await card.getByRole('radio', { name: variant.name, exact: true }).click(); await expect(card.locator('.live-row .live-bot').first()).toHaveAttribute('data-style', variant.id) } })),
+        ...['Off', 'Still', 'Moving'].map(name => ({ name: `ring ${name}`, run: async () => { await card.getByRole('radio', { name, exact: true }).click(); await expect(card.locator('.live-row .agent-indicator-art').first()).toHaveAttribute('data-ring', name.toLowerCase()) } })),
+        { name: 'hover on', run: () => hover.check() },
+        { name: 'size chosen', run: async () => { await size.focus(); await size.press('Home'); await size.press('ArrowRight'); await expect(size).toHaveValue('31') } },
+        { name: 'drawn geometry', run: () => reset.click() },
+        { name: 'dim off', run: () => dim.uncheck() },
+        { name: 'dim on', run: () => dim.check() },
+        ...['Protan', 'Deutan', 'Tritan', 'Monochrome', 'Standard'].map(name => ({ name: `palette ${name}`, run: () => card.getByRole('radio', { name, exact: true }).click() })),
+      ],
+    })
+    expect(state.writes).toHaveLength(0)
+    await expect(page.getByRole('region', { name: 'Unsaved theme changes' })).toBeVisible()
+    await robot.click()
+    await card.getByRole('radio', { name: 'Tritan', exact: true }).click()
+    // Both modes render their own state tokens regardless of the page mode.
+    const colors = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('svg')!).getPropertyValue('--agent-state-color').trim()))
+    expect(colors[0]).not.toEqual(colors[1])
+    for (const mode of ['light', 'dark']) for (const state of ['waiting', 'throttled', 'problem', 'idle']) {
+      expect(await card.locator(`.${mode} [data-preview-state="${state}"] .live-bot`).evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
+    }
+    expect(await card.locator('.light [data-preview-state="working"] .live-bot').evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBeGreaterThan(0)
+    // Draft changes never escape to the signed-in viewer's shared appearance.
+    const runtime = await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value)
+    expect(runtime?.avatar).toBe('robot-1')
+    await page.getByRole('button', { name: /^Save/ }).click()
+    await expect(page.getByRole('region', { name: 'Unsaved theme changes' })).toHaveCount(0)
+    expect(state.writes).toHaveLength(1)
+    expect(state.theme.values.agents).toMatchObject({ avatar: 'robot-5', palette: 'tritan', hover: true, ring: null, size: null })
+    await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-5')
+    mkdirSync(shots, { recursive: true })
+    await card.screenshot({ path: resolve(shots, `agents-${width}-${mode}.png`) })
+    // Long text stays readable and is captured in each target viewport/mode.
+    state.theme.name = 'Agentendarstellung für den gemeinsamen Arbeitsbereich und die persönliche Ansicht'
+    await page.reload()
+    await expect(card.getByRole('heading')).toContainText(state.theme.name)
+    await card.screenshot({ path: resolve(shots, `agents-long-${width}-${mode}.png`) })
+    await page.goto('/settings/personal#agents')
+    await expect(page.locator('#agents').getByRole('slider')).toHaveCount(0)
+    await expect(page.getByRole('spinbutton', { name: 'Yellow after (minutes)' })).toHaveValue('7')
+    await expect(page.getByRole('spinbutton', { name: 'Red after (minutes)' })).toHaveValue('19')
+    await page.locator('#agents').screenshot({ path: resolve(shots, `personal-${width}-${mode}.png`) })
+  })
+}
+
+test('failed saves preserve the draft and saved appearance; discard restores it', async ({ page }) => {
+  const { state } = await mock(page)
+  await page.goto('/settings/theme#agents')
+  const card = page.locator('#agents')
+  await card.getByRole('radio', { name: 'Sprite', exact: true }).click()
+  state.fail = true
+  await page.getByRole('button', { name: /^Save/ }).click()
+  await expect(page.getByRole('alert')).toContainText('theme operation failed')
+  await expect(card.getByRole('radio', { name: 'Sprite', exact: true })).toBeChecked()
+  expect(state.theme.values.agents.avatar).toBe('robot-1')
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(card.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
+  await expect(page.getByRole('region', { name: 'Unsaved theme changes' })).toHaveCount(0)
+})
+
+test('members can preview a workspace theme but cannot change it; reduced motion stills all artwork', async ({ page }) => {
+  await mock(page, false)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/settings/theme#agents')
+  const card = page.locator('#agents')
+  await expect(card.getByRole('radio', { name: 'Robot 1', exact: true })).toBeDisabled()
+  await expect(card.getByRole('switch', { name: 'Hover' })).toBeDisabled()
+  await expect(card.getByRole('slider', { name: 'Size', exact: true })).toBeDisabled()
+  await expect(card).toContainText('read-only')
+  await expect(card.locator('.avatar-tile .agent-indicator-art')).toHaveCount(9)
+  expect(await card.evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
+})
