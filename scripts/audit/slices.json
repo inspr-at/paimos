@@ -43,6 +43,7 @@
         "internal/credentialguard/**",
         "internal/unicodeguard/**",
         "internal/agentpairing/**",
+        "internal/stepup/**",
         "internal/agentaccounts/**",
         "internal/accountprivacy/**",
         "internal/approvals/**",
