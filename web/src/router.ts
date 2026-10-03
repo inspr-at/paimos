@@ -79,6 +79,7 @@ export const router = createRouter({
     { path: '/business/quotes/:quoteId/:rest(.*)+', redirect: '/business/quotes' },
     { path: '/business/:parked(organisations|crm)/:rest(.*)*', redirect: '/business/customers' },
     { path: '/crm', redirect: '/business/customers' },
+    { path: '/decision-desk', component: () => import('./views/DecisionDeskView.vue'), meta: { title: 'Decision Desk', fill: false } },
     { path: '/agents/usage', component: () => import('./views/UsageDashboardView.vue'), meta: { title: 'Usage' } },
     // Before :sessionId, or that param captures the public guide. Anonymous readers stay on this route.
     { path: '/agents/register-agent', component: () => import('./views/RegisterAgentView.vue'), meta: { title: 'Connect your machine', public: true } },
