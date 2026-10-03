@@ -4,8 +4,12 @@ package deliveryadoption
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestProviderPendingPollsItsOriginalKeyWithoutAllocatingTwice(t *testing.T) {
@@ -135,5 +139,71 @@ func TestExternalCatalogRetainsPinsAfterDatabaseCheckpointLoss(t *testing.T) {
 	}
 	if err := f.s.reconcileJob(t.Context(), f.a, f.project); err == nil {
 		t.Fatal("ambiguous restore catalog authorized cleanup")
+	}
+}
+
+func TestFiveStaleBackupsKeepRetryBoundsAndLetHealthyPeerProgress(t *testing.T) {
+	f := newFixture(t)
+	f.provider.onEffect = func(kind string, request ProviderRequest) {
+		if kind == "pin" && request.Operation.Identity.Project == f.project {
+			f.sql(t, `UPDATE nodes SET updated_at=updated_at+interval '1 second' WHERE id=$1`, f.project)
+		}
+	}
+	delays := []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour, time.Hour}
+	for i, delay := range delays {
+		out, err := f.s.Pass(t.Context(), "")
+		if err != nil || out.Project != f.project || out.State != "retry_wait" || out.Reason != "stale_source" {
+			t.Fatalf("stale attempt %d: %+v, %v", i+1, out, err)
+		}
+		var next time.Time
+		f.exec(t, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT next_attempt_at FROM delivery_adoption_jobs WHERE project_node_id=$1`, f.project).Scan(&next)
+		})
+		if !next.Equal(f.clock.Add(delay)) {
+			t.Fatalf("attempt %d retry time=%s, want %s", i+1, next, f.clock.Add(delay))
+		}
+		if i == 0 {
+			healthy := f.node(t, "project", "PR-2", "", "open")
+			peer, err := f.s.Pass(t.Context(), "")
+			if err != nil || peer.Project != healthy || peer.State != "adopted" {
+				t.Fatalf("healthy peer starved: %+v, %v", peer, err)
+			}
+		}
+		if err := f.s.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if f.count(t, `SELECT reserved_backup_bytes FROM delivery_adoption_jobs WHERE project_node_id=$1`, f.project) != 0 || len(f.provider.bundles) != 0 {
+			t.Fatal("failed provisional recovery point accumulated across retries")
+		}
+		root := f.s.reports.(FileReports).Root
+		files, err := os.ReadDir(filepath.Join(root, f.p.TenantID, f.project))
+		if err != nil {
+			t.Fatal(err)
+		}
+		payloads := 0
+		for _, file := range files {
+			if reportName.MatchString(file.Name()) {
+				payloads++
+			}
+		}
+		if payloads > 2 {
+			t.Fatal("retries retained more than current and latest failed report")
+		}
+		// PostgreSQL stores microsecond timestamps; use one microsecond below
+		// the exact persisted wake time rather than a sleep-based threshold.
+		f.clock = next.Add(-time.Microsecond)
+		early, err := f.s.Pass(t.Context(), "")
+		if err != nil || early.Project != "" {
+			t.Fatalf("retry woke early: %+v, %v", early, err)
+		}
+		f.clock = next
+	}
+	f.provider.onEffect = nil
+	repaired, err := f.s.Pass(t.Context(), "")
+	if err != nil || repaired.Project != f.project || repaired.State != "adopted" {
+		t.Fatalf("repaired project did not adopt: %+v, %v", repaired, err)
+	}
+	if f.count(t, `SELECT attempts FROM delivery_adoption_jobs WHERE project_node_id=$1`, f.project) != 6 {
+		t.Fatal("retry generations were lost")
 	}
 }

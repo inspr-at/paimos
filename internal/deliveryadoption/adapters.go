@@ -160,7 +160,7 @@ type reportManifest struct {
 	Failed     string `json:"failed"`
 }
 
-var reportName = regexp.MustCompile(`^[1-9][0-9]*_[0-9a-f-]{36}\.report$`)
+var reportName = regexp.MustCompile(`^[1-9][0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.report$`)
 
 func (f FileReports) directory(identity Identity) (string, error) {
 	if !filepath.IsAbs(f.Root) || !uuidRE.MatchString(identity.Tenant) || !uuidRE.MatchString(identity.Project) {
@@ -352,6 +352,8 @@ func (f FileReports) resolve(ref string) (Identity, string, error) {
 	return Identity{Tenant: parts[0], Project: parts[1]}, parts[2], nil
 }
 func (f FileReports) Get(ctx context.Context, ref string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	id, name, err := f.resolve(ref)
 	if err != nil {
 		return nil, err
@@ -375,6 +377,8 @@ func (f FileReports) Get(ctx context.Context, ref string) ([]byte, error) {
 	return readPrivate(filepath.Join(dir, name), MaxReportBytes)
 }
 func (f FileReports) RetainFailed(ctx context.Context, ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	id, name, err := f.resolve(ref)
 	if err != nil {
 		return "", err
@@ -391,6 +395,9 @@ func (f FileReports) RetainFailed(ctx context.Context, ref string) (string, erro
 	m, err := manifest(dir)
 	if err != nil {
 		return "", err
+	}
+	if name == m.Failed {
+		return ref, nil
 	}
 	if name != m.Current {
 		return "", ErrLease

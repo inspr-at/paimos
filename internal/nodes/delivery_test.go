@@ -78,6 +78,14 @@ func TestShipsMoveBlocksReleasedDescendantAndBacklogUndoReturnsTail(t *testing.T
 		}
 	}
 	seed(`INSERT INTO ships_in(tenant_id,project_node_id,item_node_id,release_node_id,rank,source,placed_by) VALUES($1,$2,$3,$4,'B','seed',$5)`, p.TenantID, source.ID, ticket.ID, release.ID, p.ID)
+	code, raw := call(t, &p, http.MethodPost, "/api/kinds", `{"slug":"story","label":"Story","short_prefix":"STY","icon":"ticket","field_schema":{"type":"object","issue_family":true}}`)
+	decode[kindJSON](t, code, raw, http.StatusCreated)
+	code, raw = call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/convert", `{"to_kind":"story"}`)
+	if code != http.StatusConflict || !strings.Contains(string(raw), "remove the item from its release") {
+		t.Fatalf("placed item converted out of permitted release kinds: %d %s", code, raw)
+	}
+	code, raw = call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/convert", `{"to_kind":"task"}`)
+	decode[nodeJSON](t, code, raw, http.StatusOK)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if err := lockTree(t.Context(), tx); err != nil {
 			return err
@@ -92,7 +100,7 @@ func TestShipsMoveBlocksReleasedDescendantAndBacklogUndoReturnsTail(t *testing.T
 	seed(`DELETE FROM ships_in WHERE item_node_id=$1`, ticket.ID)
 	seed(`UPDATE nodes SET parent_id=$2 WHERE id=$1`, ticket.ID, source.ID)
 	seed(`INSERT INTO ships_in(tenant_id,project_node_id,item_node_id,rank,source,placed_by) VALUES($1,$2,$3,'B','seed',$4)`, p.TenantID, source.ID, ticket.ID, p.ID)
-	code, raw := call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/project-move", `{"project_id":"`+target.ID+`"}`)
+	code, raw = call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/project-move", `{"project_id":"`+target.ID+`"}`)
 	moved := decode[projectMoveResult](t, code, raw, 200)
 	if len(moved.Notes) == 0 {
 		t.Fatal("rank-loss warning missing")

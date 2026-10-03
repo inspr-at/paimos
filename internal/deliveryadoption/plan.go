@@ -250,8 +250,6 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 					m.ReleasedAt = &at
 					m.CompletionBasis = "nodes.updated_at"
 				}
-				m.Scheme = ""
-				m.Version = ""
 			}
 		default:
 			refuse("journey_in_flight", v.ID, "Finish the journey build, candidate, deploy or access gate.")
@@ -267,6 +265,12 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 		}
 		if m.State == "planned" {
 			r.Counts.Active++
+			if m.Version != "" {
+				refuse("version_on_planned", v.ID, "Repair the historical coordinate on this uncompleted planning row; adoption cannot fabricate a cut.")
+			}
+		}
+		if m.State == "released" && m.ReleasedAt == nil {
+			refuse("release_time", v.ID, "Restore the recorded historical release time; adoption cannot invent it.")
 		}
 		if counts[v.ID] > 1000 {
 			refuse("release_capacity", v.ID, "Move members out; a release can hold at most 1,000 rows, including tombstones.")

@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
+
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"strings"
 )
 
 func refuseReleaseNode(ctx context.Context, tx pgx.Tx, id string) error {
@@ -18,6 +19,20 @@ func refuseReleaseNode(ctx context.Context, tx pgx.Tx, id string) error {
 			return conflict("use the release API")
 		}
 		return err
+	}
+	return nil
+}
+
+func guardPlacedKind(ctx context.Context, tx pgx.Tx, id, kind string) error {
+	if delivery.ItemKind(kind) {
+		return nil
+	}
+	var placed bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ships_in WHERE item_node_id=$1 AND release_node_id IS NOT NULL)`, id).Scan(&placed); err != nil {
+		return err
+	}
+	if placed {
+		return conflict("remove the item from its release before changing its kind")
 	}
 	return nil
 }
@@ -56,7 +71,7 @@ type shipsMoveSnapshot struct {
 }
 
 func lockShipsForMoves(ctx context.Context, tx pgx.Tx, ids []string) error {
-	rows, err := tx.Query(ctx, `WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id=ANY($1::uuid[]) UNION SELECT n.id FROM nodes n JOIN subtree t ON n.parent_id=t.id) SELECT s.item_node_id FROM ships_in s JOIN subtree t ON t.id=s.item_node_id ORDER BY s.item_node_id LIMIT 5001 FOR UPDATE OF s`, ids)
+	rows, err := tx.Query(ctx, `WITH RECURSIVE subtree AS (SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE n.id=ANY($1::uuid[]) AND k.slug<>'project' UNION SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id JOIN subtree t ON n.parent_id=t.id WHERE k.slug<>'project') SELECT s.item_node_id FROM ships_in s JOIN subtree t ON t.id=s.item_node_id ORDER BY s.item_node_id LIMIT 5001 FOR UPDATE OF s`, ids)
 	if err != nil {
 		return err
 	}
@@ -91,7 +106,28 @@ func shipsInBeforeMove(ctx context.Context, tx pgx.Tx, id string, parent *string
 			return nil, err
 		}
 	}
-	rows, err := tx.Query(ctx, `WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id=$1 UNION ALL SELECT n.id FROM nodes n JOIN subtree t ON n.parent_id=t.id)
+	var releases []string
+	rows, err := tx.Query(ctx, `WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id=$1 UNION ALL SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id JOIN subtree t ON n.parent_id=t.id WHERE k.slug<>'project') SELECT r.release_node_id::text FROM project_releases r JOIN subtree t ON t.id=r.release_node_id WHERE r.project_node_id IS DISTINCT FROM $2::uuid ORDER BY r.release_node_id LIMIT 201`, id, target)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var release string
+		if err = rows.Scan(&release); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		releases = append(releases, release)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(releases) > 0 {
+		return nil, conflict("use the release API; subtree contains releases: " + strings.Join(releases, ", "))
+	}
+	rows, err = tx.Query(ctx, `WITH RECURSIVE subtree AS (SELECT id FROM nodes WHERE id=$1 UNION ALL SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id JOIN subtree t ON n.parent_id=t.id WHERE k.slug<>'project')
 	 SELECT s.item_node_id::text,s.project_node_id::text,s.release_node_id::text,s.rank,s.revision FROM ships_in s JOIN subtree t ON t.id=s.item_node_id WHERE s.project_node_id IS DISTINCT FROM $2::uuid ORDER BY s.item_node_id LIMIT 5001`, id, target)
 	if err != nil {
 		return nil, err

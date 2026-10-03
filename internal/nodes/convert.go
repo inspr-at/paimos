@@ -137,6 +137,9 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 		if err != nil {
 			return err
 		}
+		if err = guardPlacedKind(ctx, tx, id, target.Slug); err != nil {
+			return err
+		}
 		if target.ID == currentKind.ID {
 			node = current
 			views, err := loadEstimates(ctx, tx, []string{id})
@@ -421,6 +424,9 @@ func undoKindChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 	}
 	oldKind, _, err := loadKind(ctx, tx, before.KindID)
 	if err != nil {
+		return events.Change{}, events.ErrConflict
+	}
+	if err = guardPlacedKind(ctx, tx, before.ID, oldKind.Slug); err != nil {
 		return events.Change{}, events.ErrConflict
 	}
 	if err := requireCreateTarget(ctx, tx, p, oldKind.Slug, current.ParentID); err != nil {

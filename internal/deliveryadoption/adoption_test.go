@@ -21,6 +21,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func privateReportRoot(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir()
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 type fixture struct {
 	d                *dbtest.DB
 	s                *Service
@@ -65,7 +74,7 @@ func newFixture(t *testing.T) *fixture {
 	cfg.RollbackFloor = cfg.Artifact
 	f.provider = &fakeProvider{instance: cfg.Instance, results: map[string]ProviderResult{}, bundles: map[string]string{}, clock: func() time.Time { return f.clock }}
 	var err error
-	f.s, err = New(f.d.App, cfg, f.provider, FileReports{Root: t.TempDir()})
+	f.s, err = New(f.d.App, cfg, f.provider, FileReports{Root: privateReportRoot(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +138,14 @@ func (f *fixture) discover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+func (f *fixture) secondOwner(t *testing.T) {
+	t.Helper()
+	var id string
+	f.exec(t, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Remaining owner') RETURNING id::text`, f.p.TenantID).Scan(&id)
+	})
+	dbtest.BindRole(t, f.d, f.p.TenantID, id, "owner")
 }
 func (f *fixture) claim(t *testing.T, project string) job {
 	t.Helper()
@@ -441,6 +458,9 @@ func TestSourceChangeOrRevocationAfterBackupCannotCommit(t *testing.T) {
 	for _, which := range []string{"source", "authority", "lease", "expired"} {
 		t.Run(which, func(t *testing.T) {
 			f := newFixture(t)
+			if which == "authority" {
+				f.secondOwner(t)
+			}
 			f.legacyRelease(t, f.project, "REL-1", "planning", 1)
 			j := f.prepare(t, f.project)
 			switch which {
@@ -527,7 +547,7 @@ func TestUnknownSuccessfulBackupAndCleanupOutageDoNotConsumeHealthyReserve(t *te
 }
 
 func TestDryRunRefusesTargetGuardsAndPopulationBounds(t *testing.T) {
-	for _, which := range []string{"deleted_release", "converted_member", "moved_member", "in_flight", "backlog_cap", "duplicate_version"} {
+	for _, which := range []string{"deleted_release", "converted_member", "moved_member", "in_flight", "backlog_cap", "duplicate_version", "planned_version"} {
 		t.Run(which, func(t *testing.T) {
 			f := newFixture(t)
 			release := f.legacyRelease(t, f.project, "REL-1", "planning", 1)
@@ -554,6 +574,9 @@ func TestDryRunRefusesTargetGuardsAndPopulationBounds(t *testing.T) {
 				other := f.legacyRelease(t, f.project, "REL-2", "released", 2)
 				f.sql(t, `UPDATE journey_releases SET version_scheme='legacy',version='1.0.0' WHERE release_node_id=ANY($1::uuid[])`, []string{release, other})
 				want = "duplicate_version"
+			case "planned_version":
+				f.sql(t, `UPDATE journey_releases SET version_scheme='legacy',version='1.0.0' WHERE release_node_id=$1`, release)
+				want = "version_on_planned"
 			}
 			r, err := f.s.DryRun(t.Context(), f.p, f.project)
 			if err != nil {
@@ -578,8 +601,22 @@ func TestDryRunRefusesTargetGuardsAndPopulationBounds(t *testing.T) {
 	}
 }
 
+func TestCompletedPlanningReleasePreservesItsHistoricalVersion(t *testing.T) {
+	f := newFixture(t)
+	release := f.legacyRelease(t, f.project, "REL-1", "planning", 1)
+	f.sql(t, `UPDATE journey_releases SET version_scheme='legacy',version='1.0.0-rc.1' WHERE release_node_id=$1`, release)
+	f.sql(t, `UPDATE nodes SET state='done',updated_at=$2 WHERE id=$1`, release, f.clock.Add(-time.Hour))
+	j := f.prepare(t, f.project)
+	if _, err := f.s.apply(t.Context(), f.a, j); err != nil {
+		t.Fatal(err)
+	}
+	if f.count(t, `SELECT count(*) FROM project_releases WHERE release_node_id=$1 AND state='released' AND origin='adopted_released' AND version_scheme='legacy' AND version='1.0.0-rc.1' AND released_at=$2`, release, f.clock.Add(-time.Hour)) != 1 {
+		t.Fatal("completed planning history lost its coordinate or completion basis")
+	}
+}
+
 func TestReportStorageBoundsGenerationsAndLatestFailure(t *testing.T) {
-	store := FileReports{t.TempDir()}
+	store := FileReports{privateReportRoot(t)}
 	id := Identity{Tenant: newUUID(), Project: newUUID(), Attempt: newUUID(), Generation: 1}
 	raw := []byte(`{"test":"first"}`)
 	one, err := store.Put(t.Context(), id, raw)
@@ -597,6 +634,9 @@ func TestReportStorageBoundsGenerationsAndLatestFailure(t *testing.T) {
 	}
 	if got, err := store.Get(t.Context(), one); err != nil || string(got) != string(raw) {
 		t.Fatal("latest failed report was lost")
+	}
+	if _, err = store.RetainFailed(t.Context(), one); err != nil {
+		t.Fatal("crash before report checkpoint prevented next generation", err)
 	}
 	stale := id
 	stale.Generation = 1

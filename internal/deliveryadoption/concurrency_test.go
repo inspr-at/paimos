@@ -43,6 +43,7 @@ func TestApplySerializesImporterAtItsActualAdvisoryLock(t *testing.T) {
 
 func TestFinalAuthorityFenceObservesCommittedRevocation(t *testing.T) {
 	f := newFixture(t)
+	f.secondOwner(t)
 	j := f.prepare(t, f.project)
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.Contains(q, "hashtextextended($1,42)") })
 	worker := *f.s
