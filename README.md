@@ -360,6 +360,26 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+## Model preferences
+
+`aeon model resolve --ticket AEON-123` resolves the ticket's work kind,
+complexity and role through Default → You → Project preferences and prints a
+why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
+commands are read-only; role-only `model resolve build` retains its existing
+advisory response.
+
+The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
+`/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
+Use a level's returned `revision` for edits and the DELETE `revision` query
+parameter (0 for an absent level). People edit their canonical You slice;
+Default and Project changes require `model_prefs.manage`, and agents only read.
+Provider locks permit lower choices and flag a loosening in the view and trace.
+Tightening stamps active runs without stopping turns; `running_outside` identifies
+starting/running turns outside the new setting. Stamps never loosen. EU/local
+routes require valid account evidence; without it, work waits with `residency`.
+Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
+matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
+
 ## Agent start plan
 
 `aeon agents plan` shows the person's planned total, per-harness limits and
@@ -479,7 +499,10 @@ Usage requires `harness.read`. Its API list value is approximate, includes
 lifetime usage of sessions **started** in the window, and is not interval spend
 or an invoice. Recorded ticket totals reuse the planning columns' measured and
 estimated figures and Paid semantics; account budget windows describe current
-reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+reported usage. Permitted windows remain visible when account budget coverage is
+partial. The briefing explains privacy omissions and the independent window/account
+truncation limit; shared windows are counted once across project reads.
+Unknown usage stays unknown. Headline usage sums only projects with
 `harness.read`, using the workspace dashboard only for a workspace grant; source
 links appear only after successful reads. Merge facts use changes to a ticket’s
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
@@ -1150,7 +1173,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.5`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.7`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -1997,6 +2020,10 @@ the node's current project and commits metadata and audit events together.
 Attachment writes use a shared tenant lock: access edits are fenced while
 other resource writers can finish their tenant foreign-key checks. Retained
 principal import/backfill paths take tree, tenant, then alias locks in that order.
+Pairing, readiness and residency mutations acquire pairing, tree, then the tenant
+access fence before account/resource rows, retaining final-transaction permission
+checks. Their tenant fence uses `FOR NO KEY UPDATE`; access-only writers may omit
+pairing/tree but must never acquire them after tenant. Event counters remain last.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty
@@ -2316,6 +2343,74 @@ must be regular and at most 64 KiB; content reads remain bounded if it grows.
 Fixture mode retains its stricter private-directory exclusions. Unmanaged capture
 remains unavailable until the exact owning source is bound; live model and effort
 capture remain unimplemented.
+
+### Session service tiers (AEON-436)
+
+`aeon agents tier show --project KEY --session UUID` shows Default / Fast / Fastest,
+per-model adapter provenance, published price multipliers and pending decisions.
+`set --tier fast` uses a person key with the existing project `harness.control`
+permission. It queues a change bound to the current daemon/process generation;
+the active tier changes only after the daemon acknowledges the native mechanism
+at an idle boundary. Codex resumes its owned thread with `service_tier` for the
+next run; Claude applies its `fastMode` setting for the next turn. A rejected or
+uncertain native acknowledgement leaves the active tier unchanged. A session
+running on its own and an ended session are read-only.
+
+`ask --tier fast --reason "QA waits"` records the session agent's request without
+exposing its daemon lease or switching the tier. Persons can use `approve` or
+`decline --decision-request UUID --tier fast`; the tier API exposes requests for
+the Decision Desk. Undo uses `set` with the previous tier: it cancels an unclaimed
+change or queues a reversing change after confirmation. A claimed change must
+settle before a reversing change can be queued.
+
+The session-bound `/tier/report` endpoint carries the adapter's facts for each
+model: price, speed (unknown where unpublished), mechanism, harness/adapter
+version and checked-at. Offered tiers and all reported multipliers must match the
+pinned vendor catalog; reports cannot supply their own price or usage factors.
+The currently named Codex and Claude models have no cited tier price pins, so
+Fast and Fastest are not offered and their multipliers remain null. A paid tier
+requires a cited vendor price and mechanism before it can be enabled. Price and
+subscription capacity consumption are distinct; the fragment's illustrative factors are not
+pricing defaults. Vendor facts are pinned in `internal/servicetier`; account or
+vendor rejection remains authoritative. Usage snapshots retain tier segments and
+their multipliers, and run telemetry records the active tier. Earlier tokens are
+never repriced when a tier changes; vendor billed costs remain vendor costs.
+On Agents, the Tier column uses one small chevron per offered tier. Clicking the
+glyph, or Enter/Space, opens Change tier; plain Left/Right and the hover minus/plus
+step among offered tiers. The eight-second Undo toast cancels an unclaimed change
+or reverses the confirmed change, and refuses an intervening revision or process
+replacement. The session menu and Service tier block open the same picker;
+phones use a full-height sheet with pinned actions. Agent requests can be approved
+or declined in the session panel; Decision Desk integration remains AEON-536.
+Unavailable tiers show their adapter reason, including “not offered: no published
+price”. Unknown prices and model-time baselines remain explicit rather than
+producing last-run estimates from the design fragment's sample numbers.
+
+The tier API also returns `last_change`, including the completed control's outcome
+and reason. A rejected, expired or superseded change reports an error and clears
+its Undo receipt. Cancelling an unclaimed change is neutral: its successful Undo
+receipt uses `tier_cancelled_pending`; a cancelled control uses `tier_cancelled`.
+Neither shows a rejection alert. Other viewers following the change get a neutral
+cancellation message. A real rejection can be dismissed for the current viewer;
+starting the next change also retires it, and a later rejection still appears.
+Overlapping tier reads share one result. Confirmation reads
+back off from 1.2 seconds to 30 seconds and stop after two minutes; they stop
+while the tab is hidden or Agents is closed. Live tier revisions and control
+completion events still reconcile the result after that limit, and Check result
+allows an explicit read. Heartbeats alone do not reload the tier panel.
+Pending agent requests are carried by the session list row, so its “asks for”
+hint does not depend on opening the panel. Host controls remain visible in the
+compact layout alongside the tier control. The session list uses cards below
+760 px container width, including a 1280 px viewport with the panel open;
+1366 px and 1440 px panel-open viewports retain the table. Frozen run-cost labels,
+tier history
+and last-run comparisons are tracked in AEON-609 and must land before paid tiers
+are offered.
+
+Regression coverage includes native acknowledgement and Undo, pending replay,
+tenant/project isolation, revoked authority, vendor cooldown and stored costs
+across tier changes. Requests that leave the active tier unchanged also retain
+their idempotency receipt; reusing their ID with a different body returns 409.
 
 ### Session recovery
 
@@ -2643,7 +2738,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.5`, declared by the response-only
+The reporter contract is `harness-session/2.7`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a

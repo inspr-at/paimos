@@ -38,6 +38,9 @@ import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 import { quickRemoval } from './sessionActions'
 import { sessionEtaEligible } from './sessionRow'
+import ServiceTierBlock from './ServiceTierBlock.vue'
+import { useServiceTiers } from '../../stores/serviceTiers'
+const serviceTiers = useServiceTiers()
 
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
@@ -149,6 +152,10 @@ onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
 const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
 const quick = computed(() => !!props.view && quickRemoval(props.view))
+function pickTier() {
+  const view = props.view, anchor = root.value?.querySelector<HTMLElement>('[aria-label="More session actions"]')
+  if (view && anchor) serviceTiers.open(view.session, view.name, anchor)
+}
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
@@ -183,6 +190,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more>
+          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
@@ -240,6 +248,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </ol>
         <DeliveryRating v-if="s && s.phase === 'stopped'" :session-id="s.id" />
       </section>
+
+      <ServiceTierBlock :key="view.session.id" :session="view.session" :name="view.name" />
 
       <section class="block first" aria-labelledby="setup-title">
         <h3 id="setup-title" class="eyebrow">Details</h3>

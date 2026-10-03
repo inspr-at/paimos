@@ -16,6 +16,7 @@ import type { SessionChangeRequest, SessionControl } from './agents.ts'
 import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
+import type { ServiceTier, TierChange, TierReport, TierRequest, TierState } from './serviceTier.ts'
 
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode' | 'media' | 'terminal'
 export interface MetadataChange {
@@ -37,6 +38,7 @@ export interface HarnessSessionRow {
   pause_progress?: import('./agentPause').PauseProgress
   pause?: import('./agentPause').AgentPause
   continuation?: { succeeds_session_id: string; handover: import('./agentPause').Handover; brief: string }
+  service_tier?: ServiceTier | null; service_tier_revision?: number; service_tier_reports?: TierReport[]; service_tier_request?: ServiceTier | null
   agent_activity_mode?: 'off' | 'tool_activity' | 'agent_summary'
   current_activity?: CurrentAgentActivity | null
   current_activity_history?: CurrentAgentActivity[]
@@ -103,6 +105,17 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
 const sessionResource = (projectId: string, sessionId: string, rest: string) => `/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}/${rest}`
 // The same for the sub-resources that hang off a session by its id alone (its delivery rating).
 const sessionResourceById = (sessionId: string, rest: string) => `/harness-sessions/${enc(sessionId)}/${rest}`
+
+// Tier answers are sub-resource state, never session rows; reads/writes still use
+// the canonical transport so permissions, revocation and write floors apply.
+export const readServiceTier = async (project: string, session: string, signal?: AbortSignal) =>
+  (await call<TierState>(sessionResource(project, session, 'tier'), 'GET', undefined, signal)).body
+export const changeServiceTier = async (project: string, session: string, body: TierChange) =>
+  (await call<TierState>(sessionResource(project, session, 'tier'), 'POST', body)).body
+export const askServiceTier = async (project: string, session: string, body: { request_id: string; tier: ServiceTier; reason: string }) =>
+  (await call<TierRequest>(sessionResource(project, session, 'tier/ask'), 'POST', body)).body
+export const decideServiceTier = async (project: string, session: string, id: string, body: TierChange & { decision: 'approve' | 'decline' }) =>
+  (await call<TierState>(sessionResource(project, session, `tier/requests/${enc(id)}/decision`), 'POST', body)).body
 
 // What one answer knows: the tick its request started at and, for a read, the position
 // of the snapshot it returned. A write's position is the write floor (api() raises it)

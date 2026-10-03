@@ -148,12 +148,12 @@ export const message = (error: unknown) => error instanceof Error ? error.messag
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
-const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed', 'pause_requested', 'pause_planned', 'paused', 'pause_interrupt_requested', 'pause_level_changed', 'pause_stop_requested', 'resume_requested', 'resumed', 'pause_cancelled']
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed', 'pause_requested', 'pause_planned', 'paused', 'pause_interrupt_requested', 'pause_level_changed', 'pause_stop_requested', 'resume_requested', 'resumed', 'pause_cancelled', 'tier_requested', 'tier_declined', 'tier_reported', 'tier_changed', 'tier_cancelled']
 const OTHER_EVENTS = ['harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
 export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
-export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
+export function subscribeAgents(changed: (event?: string) => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   let stream: EventSource
   let stopped = false
@@ -170,7 +170,7 @@ export function subscribeAgents(changed: () => void, connection: (live: boolean)
     source.onerror = () => { if (!stopped && stream === source) connection(false) }
     source.addEventListener('stream.ping', current(() => {}))
     source.addEventListener('stream.ready', current(() => {}))
-    for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) source.addEventListener(name, current(changed))
+    for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) source.addEventListener(name, current(() => changed(name)))
     // Heartbeats prove liveness without invalidating the 20-second live feed poll.
     source.addEventListener('harness.heartbeat', current(() => { if (telemetry) changed() }))
     for (const name of DELIVERY_EVENTS) source.addEventListener(name, current(delivery))

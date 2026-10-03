@@ -279,6 +279,11 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1135_account_readiness.sql" {
+		if err := backfillReadinessMemberships(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 		return fmt.Errorf("record %s: %w", name, err)
 	}
@@ -286,6 +291,55 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 		return fmt.Errorf("commit %s: %w", name, err)
 	}
 	return nil
+}
+
+// Existing accounts need canonical resource IDs before a new daemon probes.
+// Scope each bounded tenant page with ordinary FORCE RLS in the same schema
+// transaction; failure rolls back both migration and membership backfill.
+func backfillReadinessMemberships(ctx context.Context, tx pgx.Tx) error {
+	after := "00000000-0000-0000-0000-000000000000"
+	for {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants WHERE id>$1::uuid ORDER BY id LIMIT 100`, after)
+		if err != nil {
+			return err
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		for _, id := range ids {
+			if err := enterTenant(ctx, tx, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_resources(tenant_id,kind,identity_kind,identity_key)
+    SELECT tenant_id,CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'account',
+    encode(sha256(convert_to('account:'||id::text||':'||CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'UTF8')),'hex') FROM agent_accounts WHERE tenant_id=$1
+    ON CONFLICT(tenant_id,kind,identity_kind,identity_key) DO NOTHING`, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision)
+    SELECT a.tenant_id,a.id,r.id,a.link_revision FROM agent_accounts a JOIN account_readiness_resources r ON r.tenant_id=a.tenant_id AND r.identity_kind='account'
+    AND r.kind=CASE WHEN a.harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END
+    AND r.identity_key=encode(sha256(convert_to('account:'||a.id::text||':'||r.kind,'UTF8')),'hex') WHERE a.tenant_id=$1
+    ON CONFLICT(tenant_id,account_id,resource_id) DO NOTHING`, id); err != nil {
+				return err
+			}
+		}
+		after = ids[len(ids)-1]
+	}
 }
 
 // Keep 1088 one numbered migration while committing installation's exclusive

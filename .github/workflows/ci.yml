@@ -228,6 +228,10 @@ jobs:
         run: npm run test:unit
       - working-directory: web
         run: npx playwright install --with-deps chromium
+      # AEON-478: measure allowance and briefing regressions once Chromium is installed.
+      - name: Usage dashboard and morning briefing regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1
       - name: Capture the round-6 release list for comparison
         id: release-list-before
         working-directory: web
@@ -258,6 +262,9 @@ jobs:
       - name: Browser runner safety (no browsers)
         working-directory: web
         run: npm run test:browser-safety
+      - name: Service tier controls and layout stability
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1
       - working-directory: web
         run: npm run build
       - name: Access scope and role helper tests
@@ -358,10 +365,6 @@ jobs:
       - name: Scope proposals and key management regressions
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
-
-      - name: Morning briefing regressions
-        working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
 
   # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
   footer-ui:
