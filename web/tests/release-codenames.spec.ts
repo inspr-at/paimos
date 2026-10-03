@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 import { CODENAMES, mockReleases, presentedHistory } from './releases-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
@@ -75,7 +76,7 @@ test('the list version uses the dock crossfade without hiding the codename or sh
   const pretty = version.locator('[data-version-character="pretty"]')
   await sheet(page).locator('.shell').evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
   await row.evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
-  // Playwright may scroll the 44 px target into view before hovering it.
+  // Playwright may scroll the copy target into view before hovering it.
   await version.scrollIntoViewIfNeeded()
   const bounds = await version.boundingBox()
   await version.hover()
@@ -133,7 +134,7 @@ test('release list copy controls have accessible interactive row semantics', asy
 })
 
 for (const width of [320, 390, 600, 1600]) {
-  test(`the list version is right-aligned and wraps only when needed at ${width}px`, async ({ page }) => {
+  test(`the list version sits below the name and stays right-aligned at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await open(page)
     if (width <= 760) {
@@ -142,20 +143,19 @@ for (const width of [320, 390, 600, 1600]) {
       await sheet(page).getByRole('button', { name: 'All releases' }).click()
     }
     const row = options(page).first()
-    const name = row.locator('.rn-name')
+    const name = row.locator('.row-name')
     const version = row.locator('.row-version')
-    const heading = row.locator('.line1')
-    await expect(row.locator('.row-identity .current-tag')).toBeVisible()
+    const heading = row.locator('.row-foot')
+    await expect(row.locator('.time .current-tag')).toBeVisible()
     const [nameBounds, versionBounds, headingBounds] = await Promise.all([name.boundingBox(), version.boundingBox(), heading.boundingBox()])
     expect(Math.abs(versionBounds!.x + versionBounds!.width - headingBounds!.x - headingBounds!.width)).toBeLessThanOrEqual(1)
-    if (width <= 390) expect(versionBounds!.y).toBeGreaterThanOrEqual(nameBounds!.y + nameBounds!.height)
-    else expect(Math.abs(versionBounds!.y + versionBounds!.height / 2 - nameBounds!.y - nameBounds!.height / 2)).toBeLessThanOrEqual(1)
+    expect(versionBounds!.y).toBeGreaterThanOrEqual(nameBounds!.y + nameBounds!.height)
     const button = version.getByRole('button')
     await sheet(page).getByRole('grid').focus()
     await page.keyboard.press('Tab')
     await expect(button).toBeFocused()
     await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
-    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(24)
     expect(await sheet(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
     expect(await row.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
     if (process.env.RELEASE_LIST_SHOTS && width <= 390) {
@@ -164,6 +164,179 @@ for (const width of [320, 390, 600, 1600]) {
     }
   })
 }
+
+// Revision 4: names and counts share the first line, state badges stay in the
+// timestamp column, and an independent Pretty/canonical copy row follows below.
+for (const width of [1440, 1024, 390, 320]) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`release row geometry at ${width}px in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      const data = fixtures()
+      data.preferences['developer-ui'] = { show_reserved_versions: true }
+      data.preferences.theme = { choice: theme }
+      const history = presentedHistory(Date.parse('2026-10-02T12:00:00Z'))
+      await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'))
+      Object.assign(history.releases[0]!, { codename: 'Sunlit Sonde' })
+      Object.assign(history.releases[1]!, { codename: 'Rugged Ratio' })
+      Object.assign(history.releases[2]!, { codename: 'Pure Probe', release_sequence: 54 })
+      const longName = 'Absichtlich langer deutscher Release-Name für vollständig lesbare Versionshinweise'
+      Object.assign(history.releases[3]!, { codename: longName })
+      data.preferences.releases = { last_seen: history.releases[4]!.version }
+      await mockWork(page, data)
+      await mockReleases(page, history)
+      await page.goto('/releases/all?release_lang=en')
+      await expect(options(page)).toHaveCount(history.releases.length)
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+      await expect(options(page).first().locator('.current-tag')).toHaveText('Live')
+      await expect(options(page).nth(1).locator('.rollback-tag')).toHaveText('Rollback')
+      await expect(options(page).nth(2)).toContainText('Reserved, never published')
+      await expect(options(page).first().locator('.new-tag')).toHaveText('New')
+      await page.evaluate(() => document.fonts.ready)
+
+      for (const index of [0, 1, 2, 3]) {
+        const row = options(page).nth(index)
+        await row.scrollIntoViewIfNeeded()
+        const button = row.locator('.row-version').getByRole('button')
+        const geometry = await row.evaluate(el => {
+          const rect = (selector: string) => {
+            const box = el.querySelector(selector)!.getBoundingClientRect()
+            return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height }
+          }
+          const text = el.querySelector<HTMLElement>('.rn-name')!
+          const layers = el.querySelector('.version-layers')!
+          const baseline = (node: Element) => {
+            const marker = document.createElement('span')
+            marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
+            node.append(marker)
+            const top = marker.getBoundingClientRect().top
+            marker.remove()
+            return top
+          }
+          return {
+            name: rect('.row-name'), counts: rect('.counts'), version: rect('.row-version'),
+            foot: rect('.row-foot'), main: rect('.main'), time: rect('.time'),
+            badges: [...el.querySelectorAll('.time-badge')].map(tag => {
+              const box = tag.getBoundingClientRect()
+              return { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
+            }),
+            pretty: rect('.version-pretty'), canonical: rect('.version-canonical'),
+            renderers: [...layers.children].map(node => {
+              const box = node.getBoundingClientRect()
+              return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, height: box.height }
+            }),
+            prettyBaseline: baseline(el.querySelector('.version-pretty')!),
+            canonicalBaseline: baseline(el.querySelector('.version-canonical')!),
+            wrap: getComputedStyle(text).whiteSpace, clip: getComputedStyle(text).webkitLineClamp,
+            overflow: el.scrollWidth - el.clientWidth,
+          }
+        })
+        const label = `${width} ${theme} row ${index}`
+        expect(geometry.version.top, label).toBeGreaterThanOrEqual(geometry.name.bottom)
+        expect(geometry.version.right, label).toBeCloseTo(geometry.foot.right, 0)
+        expect(geometry.name.right, label).toBeLessThanOrEqual(geometry.counts.left)
+        expect(geometry.time.right, label).toBeLessThanOrEqual(geometry.main.left)
+        expect(geometry.wrap, label).toBe('normal')
+        expect(geometry.clip, label).toBe('2')
+        if (index === 3) {
+          await expect(row.locator('.row-name')).toHaveAttribute('data-tip', longName)
+          await expect(row.locator('.row-name')).toHaveAttribute('title', longName)
+        }
+        expect(Math.abs(geometry.prettyBaseline - geometry.canonicalBaseline), label).toBeLessThanOrEqual(0.5)
+        expect(geometry.pretty.height, label).toBeGreaterThan(0)
+        expect(geometry.canonical.height, label).toBeGreaterThan(0)
+        expect(geometry.overflow, label).toBe(0)
+        for (const badge of geometry.badges) {
+          expect(badge.left, label).toBeGreaterThanOrEqual(geometry.time.left)
+          expect(badge.right, label).toBeLessThanOrEqual(geometry.time.right)
+          expect(badge.top, label).toBeGreaterThanOrEqual(geometry.time.top)
+          expect(badge.bottom, label).toBeLessThanOrEqual(geometry.time.bottom)
+        }
+        for (const renderer of geometry.renderers) {
+          expect(renderer.left, label).toBeGreaterThanOrEqual(geometry.version.left)
+          expect(renderer.right, label).toBeLessThanOrEqual(geometry.version.right)
+          expect(renderer.top, label).toBeGreaterThanOrEqual(geometry.version.top - 0.5)
+          expect(renderer.bottom, label).toBeLessThanOrEqual(geometry.version.bottom + 0.5)
+          expect(renderer.height, label).toBeLessThanOrEqual(geometry.version.height)
+        }
+        await expectStableControls({
+          controls: { row, copy: button, name: row.locator('.row-name') },
+          scrollAreas: { list: sheet(page).locator('.list-pane'), row },
+          interactions: [
+            { name: 'row hover', run: () => row.hover() },
+            { name: 'copy hover', run: async () => {
+              await button.hover()
+              await expect(button).toHaveAttribute('data-version-view', 'revealed')
+              await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+            } },
+            { name: 'copy focus', run: () => button.focus() },
+          ],
+        })
+        expect((await button.boundingBox())!.height, label).toBeGreaterThanOrEqual(24)
+        await sheet(page).getByRole('grid').focus()
+        await page.mouse.move(1, 1)
+      }
+      // Selection and translation preserve the row controls in scroll coordinates.
+      await sheet(page).getByRole('grid').focus()
+      await page.keyboard.press('Home')
+      await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
+      const row = options(page).nth(1)
+      await expectStableControls({
+        controls: { copy: row.locator('.version-copy'), row, languages: sheet(page).getByRole('radiogroup', { name: 'Language' }) },
+        scrollAreas: { sheet: sheet(page), list: sheet(page).locator('.list-pane') },
+        interactions: [
+          { name: 'next release', run: async () => {
+            await page.keyboard.press('j')
+            await expect(row).toHaveAttribute('aria-selected', 'true')
+          } },
+          { name: 'German', run: async () => {
+            await sheet(page).getByRole('radio', { name: 'DE', exact: true }).click()
+            await expect(row.locator('.headline')).toHaveText('Breite Listen')
+          } },
+        ],
+      })
+      if (process.env.RELEASE_LIST_SHOTS) {
+        await options(page).first().evaluate(el => el.scrollIntoView({ block: 'center' }))
+        await mkdir(process.env.RELEASE_LIST_SHOTS, { recursive: true })
+        await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `row-${width}-${theme}.png`) })
+        await options(page).nth(3).locator('.row-name').click()
+        await expect(sheet(page).locator('.detail h2')).toContainText(longName)
+        await expect(sheet(page).locator('.detail .changes')).toContainText('PAI-1057')
+        await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `detail-${width}-${theme}.png`) })
+        if (width <= 760) await sheet(page).getByRole('button', { name: 'All releases' }).click()
+      }
+      // Badges remain readable rather than collapsing to dots on phones.
+      if (width === 390) {
+        await page.setViewportSize({ width: 1440, height: 1000 })
+        await expect(options(page).first().locator('.new-tag')).toHaveText('New')
+        await page.setViewportSize({ width, height: 1000 })
+        await expect(options(page).first().locator('.new-tag')).toHaveText('New')
+        await expect(options(page).first().locator('.current-tag')).toHaveText('Live')
+      }
+    })
+  }
+}
+
+test('the version track grows with wider monospace glyphs without covering a badge', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await open(page)
+  const row = options(page).first()
+  await row.locator('.version-copy').evaluate(el => { el.style.fontSize = '16px' })
+  await expect.poll(async () => {
+    const [identity, version, button, heading] = await Promise.all([
+      row.locator('.time').boundingBox(), row.locator('.row-version').boundingBox(),
+      row.locator('.version-copy').boundingBox(), row.locator('.row-foot').boundingBox(),
+    ])
+    return identity!.x + identity!.width <= version!.x && version!.width === button!.width && version!.x + version!.width <= heading!.x + heading!.width
+  }).toBe(true)
+  expect((await row.locator('.row-version').boundingBox())!.width).toBeGreaterThan(146)
+  const version = row.locator('.row-version')
+  const before = await version.boundingBox()
+  await version.getByRole('button').hover()
+  await expect(version.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+  expect(await version.boundingBox()).toEqual(before)
+  expect(await row.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+})
 
 test('the detail heading is the name; the number is a quiet line in the notes; search finds a name', async ({ page }) => {
   const history = await open(page)

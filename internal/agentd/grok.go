@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -61,7 +62,7 @@ func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(Ad
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err
 	}
-	if r.Profile.Harness != Grok || r.Profile.Model != grokModel || r.Profile.Effort != grokEffort || r.AccountKey == "" {
+	if r.Profile.Harness != Grok || r.Profile.Model != grokModel || r.Profile.Effort != grokEffort || !harnesslaunch.FamilyMatches(r.Profile.Harness, r.Profile.Model, r.Profile.Family) || r.AccountKey == "" {
 		return nil, errors.New("native Grok profile or account unavailable")
 	}
 	b, ok := a.Bindings[r.AccountKey]

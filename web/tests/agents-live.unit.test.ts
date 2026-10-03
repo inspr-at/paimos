@@ -121,6 +121,24 @@ it('consumes registered/stopped signals and refreshes when the existing stream r
   expect(stream.close).toHaveBeenCalledOnce()
 })
 
+it('tier and completion events wake consumers while heartbeats remain quiet', () => {
+  class Stream extends EventTarget {
+    static current: Stream
+    onopen = null
+    onerror = null
+    close = vi.fn()
+    constructor() { super(); Stream.current = this }
+  }
+  vi.stubGlobal('EventSource', Stream)
+  const changed = vi.fn(), stop = subscribeAgents(changed)
+  const kinds = ['tier_requested', 'tier_declined', 'tier_reported', 'tier_changed', 'tier_cancelled', 'control_completed']
+  for (const kind of kinds) Stream.current.dispatchEvent(new Event(`harness.${kind}`))
+  expect(changed.mock.calls).toEqual(kinds.map(kind => [`harness.${kind}`]))
+  Stream.current.dispatchEvent(new Event('harness.heartbeat'))
+  expect(changed).toHaveBeenCalledTimes(kinds.length)
+  stop()
+})
+
 const currentSession = (fields: Partial<HarnessSession> = {}) => ({
   id: 's1', project_id: 'p1', agent_principal_id: 'a1', run_id: 'r1', revision: 3, row_version: 3, harness: 'codex', host: 'workstation',
   phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(),
@@ -210,4 +228,23 @@ it('principal requests never borrow a sibling session label or claim its ownersh
   ]))
   await store.refreshSessions()
   expect(store.askerName('a1')).toEqual({ name: 'Shared fixture principal', harness: '', sessionId: '' })
+})
+
+it('passes only session/run wake identities from bounded telemetry and usage payloads', () => {
+  class Stream extends EventTarget {
+    static current: Stream
+    onopen = null
+    onerror = null
+    close = vi.fn()
+    constructor() { super(); Stream.current = this }
+  }
+  vi.stubGlobal('EventSource', Stream)
+  const changed = vi.fn(), stop = subscribeAgents(changed)
+  Stream.current.dispatchEvent(new MessageEvent('run.telemetry', { data: JSON.stringify({ after: { run_id: 'selected-run', report: { kind: 'finished' } } }) }))
+  Stream.current.dispatchEvent(new MessageEvent('harness.usage_reported', { data: JSON.stringify({ after: { session_id: 'selected-session', input_tokens: 100 } }) }))
+  expect(changed.mock.calls).toEqual([['run.telemetry', { run_id: 'selected-run' }], ['harness.usage_reported', { session_id: 'selected-session' }]])
+  Stream.current.dispatchEvent(new MessageEvent('run.telemetry', { data: '{broken' }))
+  Stream.current.dispatchEvent(new MessageEvent('run.telemetry', { data: ' '.repeat(65_537) }))
+  expect(changed.mock.calls.slice(2)).toEqual([['run.telemetry'], ['run.telemetry']])
+  stop()
 })

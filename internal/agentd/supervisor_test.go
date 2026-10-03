@@ -225,7 +225,7 @@ func TestManagedHarnessLifecycleAndControls(t *testing.T) {
 	a.harnessControls = []HarnessControl{{ID: "interrupt-1", Kind: "interrupt"}}
 	a.harnessDeliveries = []HarnessDelivery{{ID: "delivery-1", Cursor: 1, Body: "Please check this"}}
 	a.mu.Unlock()
-	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 5 {
+	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 6 {
 		t.Fatalf("managed registration binding or capabilities invalid: %v", caps)
 	}
 	if registration.Model != "" || registration.ReasoningEffort != "" || registration.AccountLabel != "Work subscription" {

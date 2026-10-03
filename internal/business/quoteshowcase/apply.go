@@ -111,8 +111,17 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir 
 	// Profiles, archives, organisations and quotes commit together. A missing
 	// archive id or link key rolls profile changes back with the rest.
 	err := db.InTransaction(ctx, pool, func(txCtx context.Context) error {
+		if apply && len(bundle.Profiles) > 0 {
+			profiles := make([]quotes.ProfileBundle, 0, len(bundle.Profiles))
+			for _, profile := range bundle.Profiles {
+				profiles = append(profiles, quotes.ProfileBundle{Profile: profile.Raw, Files: profile.Files})
+			}
+			if err := quotes.LockProfileBundles(txCtx, pool, tenantID, profiles...); err != nil {
+				return err
+			}
+		}
 		for _, profile := range bundle.Profiles {
-			result, err := quotes.ApplyProfileBundle(txCtx, pool, tenantID, actorID, filesDir, "", quotes.ProfileBundle{Profile: profile.Raw}, false, apply)
+			result, err := quotes.ApplyProfileBundle(txCtx, pool, tenantID, actorID, filesDir, "", quotes.ProfileBundle{Profile: profile.Raw, Files: profile.Files}, false, apply)
 			if err != nil {
 				return fmt.Errorf("profile %s: %w", profile.Name, err)
 			}
@@ -130,7 +139,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir 
 		return db.InTenant(db.AllProjects(txCtx, "quote showcase bundle"), pool, tenantID, func(tx pgx.Tx) error {
 			if apply {
 				var locked string
-				if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-showcase"); err != nil {
