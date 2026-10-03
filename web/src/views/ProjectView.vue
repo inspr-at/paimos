@@ -12,6 +12,7 @@ import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { planningPresent } from '../lib/planning'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
+import { useProjectHeader } from '../lib/useProjectHeader'
 import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
@@ -131,6 +132,8 @@ const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list
 const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
 const section = computed(() => projectSection(route))
+const { headerDensity } = useProjectHeader()
+const ticketsHeader = computed(() => section.value === 'tickets')
 const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
 const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
 const onKnowledge = () => section.value === 'knowledge'
@@ -1577,20 +1580,22 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
-      <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
-        <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
+      <div id="project-header-fold" v-show="!ticketsHeader || headerDensity !== 'collapsed'" class="project-fold">
+      <header class="project-head" :class="{ 'glimpse-room': !ticketsHeader && glimpseActive && !showViewBar }">
+        <div class="head-flex" :class="{ 'with-glimpse': !ticketsHeader && glimpseActive }">
         <div class="head-main">
           <div class="title-line">
             <span class="key-badge big">{{ project.routeKey }}</span>
-            <h1 id="project-title">{{ project.title }}</h1>
+            <h1 id="project-title" v-clip-tip>{{ project.title }}</h1>
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
-          <p v-if="project.description" class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description }}</p>
+          <p v-if="project.description" class="description" v-clip-tip>{{ project.description }}</p>
         </div>
+        <p v-if="ticketsHeader" class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
@@ -1601,28 +1606,33 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           </div>
           <p v-if="queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
           <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
+            <span v-if="ticketsHeader && headerDensity === 'comfortable'" class="progress-label">Progress</span>
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
             <span class="mono pct">{{ counts.percent }}%</span>
           </div>
-          <p class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
+          <p v-if="!ticketsHeader" class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
         </div>
         <div v-else class="head-stats head-stats-skeleton" aria-hidden="true">
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
         </div>
-        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections @select="setSection" />
       </header>
-
+      <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
+        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
+        <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
-        v-if="showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="(ticketsHeader && !graphActive) || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
+        <div v-if="ticketsHeader" id="project-view-settings" class="project-view-settings" />
+      </div>
+      </div>
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
-          :facet-loading="facetLoading"
+          :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
@@ -1630,7 +1640,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
-        />
+        >
+          <template #freshness><ListFreshness v-if="liveActive" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" inline /></template>
+        </ListToolbar>
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
             <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
@@ -1659,7 +1671,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
-      <ListFreshness v-if="liveActive" class="ticket-freshness" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" />
       <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
       <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
@@ -1713,7 +1724,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
-        :density="density" :columns="toolbarColumns" :header-graph="headerGraph"
+        :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="ticketsHeader"
         @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
@@ -1866,4 +1877,60 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .activity { display: none; }
   .hint { display: none; }
 }
+
+/* AEON-639: header and view settings fold together; the independent toolbar
+   retains the same width and horizontal layout in every density. */
+.project-page[class*="header-"] { padding-top: 12px; }
+.project-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.project-navigation :deep(.sections) { margin-top: 0; }
+.project-navigation .view-bar { flex: 1; min-width: 0; padding: 0; }
+.nav-divider { width: 1px; height: 20px; background: var(--line-2); flex: none; }
+.project-view-settings { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
+.project-page[class*="header-"] .project-head { padding: 0 0 4px; }
+.project-page[class*="header-"] .head-flex { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
+.project-page[class*="header-"] .head-main { display: contents; }
+.project-page[class*="header-"] .title-line { max-width: 34vw; }
+.project-page[class*="header-"] .title-line h1 { font-size: 22px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.project-page[class*="header-"] .description { margin: 0; max-width: none; min-width: 0; }
+.project-page[class*="header-"] .activity { white-space: nowrap; }
+.project-page[class*="header-"] .head-stats { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] .stat-line { gap: 10px; }
+.project-page[class*="header-"] .progress-line { width: 130px; }
+.project-page.header-comfortable .head-flex { grid-template-areas: "title title activity stats" "description description description stats"; row-gap: 6px; }
+.project-page.header-comfortable .title-line { grid-area: title; max-width: none; }
+.project-page.header-comfortable .title-line h1 { font-size: 34px; }
+.project-page.header-comfortable .description { grid-area: description; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
+.project-page.header-comfortable .activity { grid-area: activity; justify-self: end; }
+.project-page.header-comfortable .head-stats { grid-area: stats; display: grid; align-self: stretch; align-content: center; }
+.project-page.header-comfortable .progress-line { width: 100%; }
+.progress-label { font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.project-page.header-comfortable .project-navigation { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
+@media (min-width: 601px) and (max-width: 1100px) {
+  .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+  .project-page[class*="header-"] .progress-line { width: 88px; }
+  .project-page.header-comfortable .progress-line { width: 100%; }
+  .project-page[class*="header-"] .head-flex { column-gap: 8px; }
+  .project-page[class*="header-"] .stat-line { gap: 8px; }
+}
+@media (max-width: 900px) { .project-view-settings { display: none; } }
+@media (max-width: 600px) {
+  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description"; gap: 4px 10px; }
+  .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
+  .project-page[class*="header-"] .title-line h1 { font-size: 24px; }
+  .project-page.header-comfortable .title-line h1 { font-size: 28px; }
+  .project-page[class*="header-"] .description { grid-area: description; white-space: nowrap; display: block; }
+  .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .project-page[class*="header-"] .head-stats { display: contents; }
+  .project-page[class*="header-"] .stat-line { grid-area: stats; }
+  .project-page[class*="header-"] .progress-line { grid-area: progress; width: 96px; }
+  .progress-label { display: none; }
+  .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; }
+  .project-navigation :deep(.sections button:not([aria-selected="true"])) { flex: none; width: 44px; padding: 0; }
+  .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+  .project-navigation :deep(.view-bar) { padding: 0; }
+}
+
+.project-navigation.legacy-navigation { display: block; border: 0; padding: 0; }
+.project-navigation.legacy-navigation :deep(.sections) { margin-top: 18px; }
+.project-navigation.legacy-navigation .view-bar { padding: 2px 0 6px; }
 </style>

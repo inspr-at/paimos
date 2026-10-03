@@ -661,6 +661,21 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+The Tickets project header defaults to Compact: project details, sections with
+saved views and Hide/Display, then the toolbar. Comfortable gives the title and
+description more reading room; Collapsed retains the toolbar. The centered
+app-bar switch selects all three on desktop. Phones fold with the project badge
+and chevron, and choose Comfortable/Compact in the Filters sheet's Display
+section. Command+Shift+Period on macOS or Ctrl+Shift+Period elsewhere toggles
+Collapsed and restores the last roomy choice, including while typing. It uses
+the physical Period key; Escape and scrolling do not unfold or fold the header.
+The choice stays on this device, separately for each person and workspace,
+across projects; row height and saved views remain independent. Active filter
+buttons show their values (counts on narrower desktops), with individual remove
+actions and Clear all; their labels, including names arriving asynchronously,
+update after the filter popover closes. The phone fold badge keeps its full
+44 px touch height and an unclipped keyboard focus ring.
+
 Model estimates learn from completed-ticket outcomes, actual session profiles and
 frozen work placements. Fully reported worker runs with measured active time feed
 the newest 30 samples per model version, effort, kind and complexity bucket.
