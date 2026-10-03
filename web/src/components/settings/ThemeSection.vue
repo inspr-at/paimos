@@ -38,7 +38,7 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
   <div class="theme-section" @keydown="keys">
     <SettingsCard title="Themes" icon="layers" anchor="themes">
       <template #lead>Choose the theme you work in. Duplicate any theme to make your own; only you see your themes.</template>
-      <template #aside><button type="button" class="btn sm" :disabled="busy || dirty || !selfWrite" @click="editor.newTheme"><AppIcon name="plus" :size="13" />New theme</button></template>
+      <template #aside><div class="theme-list-actions"><span class="pagination-slot"><button v-if="cursor" type="button" class="btn sm" :disabled="busy" @click="editor.more">Load more themes</button><span v-else class="btn sm pagination-placeholder" aria-hidden="true">Load more themes</span></span><button type="button" class="btn sm" :disabled="busy || dirty || !selfWrite" @click="editor.newTheme"><AppIcon name="plus" :size="13" />New theme</button></div></template>
       <div class="theme-status" :class="{ error: !!error }"><p :role="error ? 'alert' : 'status'">{{ error || message || (busy ? 'Loading…' : dirty ? 'Save or discard your edits before choosing another theme.' : 'Everyone starts with the workspace default.') }}</p><button type="button" class="text-link" :style="{ visibility: error && !dirty ? 'visible' : 'hidden' }" :disabled="busy || !error || dirty" @click="editor.load">Reload themes</button></div>
       <div class="theme-list" aria-label="Themes list">
         <div v-for="theme in items" :key="theme.id" class="theme-row" :class="{ selected: theme.id === active?.theme.id }" :data-theme-id="theme.id">
@@ -61,7 +61,6 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
           </div>
         </div>
       </div>
-      <button v-if="cursor" type="button" class="btn sm load-more" :disabled="busy" @click="editor.more">Load more themes</button>
     </SettingsCard>
     <ThemeColoursCard v-if="draft" :draft="draft" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
     <Teleport to="body">
@@ -74,6 +73,8 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
 </template>
 <style scoped>
 .theme-section { display: grid; gap: 16px; container-type: inline-size; padding-bottom: 100px; }
+.theme-list-actions { display: flex; align-items: center; gap: 8px; }
+.pagination-slot { display: flex; }.pagination-placeholder { visibility: hidden; pointer-events: none; }
 .theme-status { height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; font-size: 12px; color: var(--ink-2); }.theme-status p { max-height: 56px; overflow-y: auto; }.theme-status.error { color: var(--danger); }
 .theme-list { max-height: 288px; overflow-y: auto; scrollbar-gutter: stable; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .theme-row { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; height: 96px; padding: 12px; border-bottom: 1px solid var(--line); }.theme-row:last-child { border-bottom: 0; }.theme-row.selected { background: var(--row-selected); }
@@ -81,7 +82,7 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
 .theme-dots { display: flex; gap: 3px; }.theme-dots i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line-2); }.choice-indicator { height: 14px; }
 .theme-details { display: grid; gap: 4px; min-width: 0; }.theme-name { display: block; font-size: 13px; font-weight: 600; line-height: 44px; height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border: 0; background: none; padding: 0; color: var(--ink); text-align: left; }.theme-name-input { width: 100%; min-width: 0; height: 44px; padding: 0 4px; font-size: 13px; }.scope { color: var(--ink-2); font-size: 11px; }
 .row-actions { display: flex; gap: 12px; }.text-link { border: 0; background: transparent; color: var(--teal-ink); font-size: 12px; min-height: 44px; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
-.delete-confirm { position: absolute; inset: 0; background: var(--surface-raised); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }.confirm-actions { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 8px; }.confirm-actions button { min-height: 44px; }.delete-confirm p { font-size: 12px; overflow-wrap: anywhere; overflow-y: auto; min-height: 0; }.load-more { margin-top: 12px; }
+.delete-confirm { position: absolute; inset: 0; background: var(--surface-raised); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }.confirm-actions { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 8px; }.confirm-actions button { min-height: 44px; }.delete-confirm p { font-size: 12px; overflow-wrap: anywhere; overflow-y: auto; min-height: 0; }
 .theme-savebar { position: fixed; z-index: 80; bottom: calc(var(--footer-h) + 12px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); width: min(48rem, calc(100vw - 32px)); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; padding: 12px 16px; border-radius: 14px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }.theme-savebar p { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }.theme-savebar strong { color: var(--ink); }.theme-savebar > div { display: flex; gap: 8px; }.theme-savebar button { min-height: 44px; }
 @container (max-width: 640px) { .theme-row { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 64px 44px; height: 136px; gap: 4px 12px; }.theme-choice { height: 60px; }.row-actions { grid-column: 2; gap: 16px; }.theme-list { max-height: 408px; } }
 @media (max-width: 600px) { .theme-savebar { left: 0; bottom: var(--footer-h); transform: none; width: 100%; border-radius: 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); grid-template-columns: minmax(0, 1fr); }.theme-savebar > div { justify-content: flex-end; }.theme-savebar p { max-height: 3em; overflow-y: auto; }.theme-section { padding-bottom: 150px; } }

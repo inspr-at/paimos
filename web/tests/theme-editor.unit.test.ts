@@ -138,6 +138,24 @@ it('identity change resets drafts and drops a delayed save result', async () => 
   release({ ...theme(), name: 'Old person draft', revision: 5 }); await saving
   expect(editor.draft.value).toBeNull(); expect(editor.items.value).toEqual([]); expect(editor.message.value).toBe('')
 })
+it('New theme can resolve a conflict by selecting a copy, but never duplicates after a failed default read', async () => {
+  vi.mocked(api.deleteTheme).mockRejectedValue(Object.assign(new Error('Theme changed'), { status: 409 }))
+  await editor.remove(theme())
+  const source = { ...theme(), id: 'default', name: 'Default', scope: 'default' as const, owner_principal_id: null }
+  const copy = { ...theme(), id: 'copy', name: 'Default copy', revision: 1 }
+  vi.mocked(api.getTheme).mockRejectedValueOnce(new Error('Default read failed'))
+  await editor.newTheme()
+  expect(api.duplicateTheme).not.toHaveBeenCalled()
+  expect(editor.error.value).toBe('Default read failed'); expect(editor.conflict.value).toBe(true)
+  vi.mocked(api.getTheme).mockResolvedValue(source)
+  vi.mocked(api.duplicateTheme).mockResolvedValue(copy)
+  vi.mocked(api.selectTheme).mockResolvedValue({ ...chosen(), theme: copy, selected_theme_id: copy.id, revision: 13 })
+  await editor.newTheme()
+  expect(api.duplicateTheme).toHaveBeenCalledWith(source, 'Default copy')
+  expect(api.selectTheme).toHaveBeenCalledWith('copy', 12)
+  expect(editor.active.value!.theme.id).toBe('copy')
+  expect(editor.conflict.value).toBe(false); expect(editor.error.value).toBe('')
+})
 it('a revision conflict prevents blind resave; discard reloads the current record', async () => {
   editor.draft.value!.name = 'Changed'; vi.mocked(api.updateTheme).mockRejectedValue(Object.assign(new Error('Conflict'), { status: 409 }))
   await editor.save(); await editor.save(); expect(api.updateTheme).toHaveBeenCalledTimes(1)

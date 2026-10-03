@@ -28,6 +28,7 @@ export function useThemeEditor() {
   const clone = (theme: ThemeRecord) => JSON.parse(JSON.stringify(theme)) as ThemeRecord
   function install(current: ActiveTheme) {
     failedOperation.value = null
+    error.value = ''
     active.value = current; draft.value = clone(current.theme)
     merge(current.theme)
     if (current.fallback_notice) message.value = `${current.fallback_notice.deleted_theme_name} was deleted. You are using the workspace default.`
@@ -41,7 +42,10 @@ export function useThemeEditor() {
     if (busy.value || !identity.value) return
     const started = epoch, person = identity.value
     const current = () => started === epoch && identity.value === person
-    busy.value = true; error.value = ''; message.value = ''
+    busy.value = true; message.value = ''
+    // Listing more themes does not refresh the conflicted active record.
+    // Keep its feedback and recovery link until fresh state is installed.
+    if (!conflict.value) error.value = ''
     try { await fn(current) }
     catch (failure) {
       if (current()) {
@@ -106,10 +110,11 @@ export function useThemeEditor() {
     const id = active.value?.default_theme_id
     if (!id || dirty.value || !selfWrite.value) return
     const started = epoch
+    let fetched = false
     // Read the actual default even when it lives on a later list page.
-    await perform(async current => { const source = await themes.getTheme(id); if (current()) merge(source) })
+    await perform(async current => { const source = await themes.getTheme(id); if (current()) { merge(source); fetched = true } })
     const source = items.value.find(item => item.id === id)
-    if (started === epoch && source && !error.value) await duplicate(source)
+    if (started === epoch && fetched && source) await duplicate(source)
   }
   async function remove(theme: ThemeRecord) {
     if (dirty.value || !editable(theme) || theme.id === active.value?.default_theme_id) return

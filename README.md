@@ -18,7 +18,10 @@ deletion on the page. New theme copies the current workspace default. Members
 duplicate workspace themes to edit their own; managers with `settings.manage`
 can edit shared themes, including the workspace default (`scope: default`).
 Fresh selection or reload resolves a prior conflict; a conflict on another
-theme does not disable the selected theme's editor.
+theme does not disable the selected theme's editor. Loading more themes keeps
+unresolved conflict feedback and recovery available until fresh active state loads.
+Pagination sits above the scrolling list and retains its space when the last
+page arrives, keeping New theme, recovery and Colours controls in place.
 Colours has separate light and dark accents, optional derived dark values,
 presets, a native picker and hex input, plus recurring marker choices. The light
 and dark previews update while editing; the rest of the page keeps its saved

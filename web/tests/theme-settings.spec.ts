@@ -43,6 +43,16 @@ async function setup(page: Page, options: { admin?: boolean; fail?: number; defa
   })
   return data
 }
+async function setupPaged(page: Page, options: { fail?: number } = {}) {
+  const data = await setup(page, { ...options, defaultLater: true })
+  // A real next cursor follows a full bounded page, so the list already scrolls.
+  for (let index = 0; index < 48; index++) data.items.push(record(`later-${index}`, `Workspace theme ${index}`, 'workspace'))
+  await page.route('**/api/themes?*', route => {
+    const after = new URL(route.request().url()).searchParams.has('after')
+    return route.fulfill({ json: { items: clone(data.items.filter(item => after ? item.id === 'default' : item.id !== 'default')), next_cursor: after ? null : 'later-47' } })
+  })
+  return data
+}
 const card = (page: Page) => page.locator('#colours')
 const bar = (page: Page) => page.getByRole('region', { name: 'Unsaved theme changes' })
 async function colour(page: Page, label: string, hex: string, screenshot?: string) {
@@ -163,8 +173,12 @@ test('selection after a deletion conflict restores editable Colours and Save', a
   await expect(page.locator('.theme-status')).toContainText('Saved.')
   expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
 })
-test('pagination keeps deletion conflict feedback and Reload until fresh active state resolves it', async ({ page }) => {
-  const data = await setup(page, { fail: 409, defaultLater: true }); await page.goto('/settings/theme')
+for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) test(`pagination keeps deletion conflict feedback and Reload until fresh active state resolves it (${width} ${mode})`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 950 })
+  const data = await setupPaged(page, { fail: 409 })
+  await page.goto('/settings/theme')
+  await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+  await mkdir('test-results/aeon-642-pagination', { recursive: true })
   await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
   await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
   const status = page.locator('.theme-status')
@@ -173,7 +187,8 @@ test('pagination keeps deletion conflict feedback and Reload until fresh active 
   await expect(status).toContainText('changed elsewhere')
   await expect(reload).toBeVisible(); await expect(primary).toBeDisabled()
   await page.getByRole('button', { name: 'Keep theme', exact: true }).click()
-  await expectStableControls({ controls: { reload, primary }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+  await page.screenshot({ path: `test-results/aeon-642-pagination/conflict-before-${width}-${mode}.png`, fullPage: true })
+  await expectStableControls({ controls: { reload, primary, newTheme: page.getByRole('button', { name: 'New theme', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
     { name: 'pagination retains conflict and recovery', run: async () => {
       await page.getByRole('button', { name: 'Load more themes', exact: true }).click()
       await expect(page.getByRole('button', { name: 'Load more themes', exact: true })).toHaveCount(0)
@@ -183,6 +198,7 @@ test('pagination keeps deletion conflict feedback and Reload until fresh active 
       await expect(primary).toBeDisabled()
     } },
   ] })
+  await page.screenshot({ path: `test-results/aeon-642-pagination/conflict-after-${width}-${mode}.png`, fullPage: true })
   expect(data.writes).toHaveLength(1)
   expect(data.writes[0]).toMatchObject({ method: 'DELETE', path: '/api/themes/copper' })
   data.fail = 0
@@ -190,10 +206,23 @@ test('pagination keeps deletion conflict feedback and Reload until fresh active 
   await reload.click()
   await expect(status).not.toContainText('changed elsewhere')
   await expect(reload).toBeHidden(); await expect(primary).toBeEnabled()
+  await page.screenshot({ path: `test-results/aeon-642-pagination/resolved-${width}-${mode}.png`, fullPage: true })
   await colour(page, 'Primary accent, light', '#3a5fc4')
   await bar(page).getByRole('button', { name: /^Save/ }).click()
   await expect(bar(page)).toHaveCount(0); await expect(status).toContainText('Saved.')
   expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
+})
+test('pagination keeps New theme and Colours still when the final page arrives', async ({ page }) => {
+  await setupPaged(page); await page.goto('/settings/theme')
+  const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
+  await expectStableControls({ controls: { primary, newTheme: page.getByRole('button', { name: 'New theme', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'final page does not move controls', run: async () => {
+      await page.getByRole('button', { name: 'Load more themes', exact: true }).click()
+      await expect(page.getByRole('button', { name: 'Load more themes', exact: true })).toHaveCount(0)
+      await expect(page.locator('[data-theme-id="default"]')).toBeVisible()
+      await expect(primary).toBeEnabled()
+    } },
+  ] })
 })
 test('New theme duplicates the default even on a later list page; managers may edit it', async ({ page }) => {
   const data = await setup(page, { admin: true, defaultLater: true }); await page.goto('/settings/theme')
