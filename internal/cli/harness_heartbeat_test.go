@@ -36,8 +36,11 @@ type hbCall struct {
 
 func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
 	project := map[string]any{"id": transcriptProjectID, "key": "PRJ-1", "kind_id": "project-kind", "title": "AEON", "fields": map[string]any{"project_key": "AEON"}}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		t.Helper()
 		var body map[string]any
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
