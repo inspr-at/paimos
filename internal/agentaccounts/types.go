@@ -21,6 +21,9 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	ShareUsage           bool                `json:"share_usage"`
+	PendingCheck         *AccountCheck       `json:"pending_check,omitempty"`
+	ReadinessResources   []ReadinessResource `json:"readiness_resources,omitempty"`
 	OwnerPersonID        *string             `json:"owner_person_id,omitempty"`
 	OwnerPersonName      string              `json:"owner_person_name,omitempty"`
 	LinkedAt             *time.Time          `json:"linked_at,omitempty"`
@@ -58,6 +61,7 @@ type Account struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	Windows           []Window   `json:"windows"`
 	daemonGeneration  *string
+	residencyEvidence *ResidencyEvidence
 }
 
 // Window is one allowance bound for a single unit.

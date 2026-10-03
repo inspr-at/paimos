@@ -55,3 +55,39 @@ func TestAuthorFamilyRejections(t *testing.T) {
 		})
 	}
 }
+
+func TestProfileFamilyMustMatchProvider(t *testing.T) {
+	for _, tc := range []struct{ harness, model, family string }{
+		{"grok", "grok-4.7", "anthropic"},
+		{"claude", "fable", "xai"},
+		{"codex", "gpt-6-astra", "anthropic"},
+		{"gemini", "gemini-2.5-pro", "openai"},
+		{"cursor", "grok-4.7-xhigh", "anthropic"},
+		{"cursor", "auto", "openai"},
+		{"pi", "anthropic/claude-opus-5", "xai"},
+		{"pi", "openrouter/stealth/space-bunny-alpha", "anthropic"},
+		{"opencode", "custom/private-model", "openai"},
+		{"opencode", "google/gemini-2.5-pro", "openai"},
+	} {
+		t.Run(tc.harness+"/"+tc.model, func(t *testing.T) {
+			effort := "xhigh"
+			if tc.harness == "gemini" {
+				effort = "16384"
+			}
+			if err := validateProfile(profileWrite{Slug: "fixture", Version: "1", Harness: tc.harness, Model: tc.model, Family: tc.family, Effort: effort, Tier: "frontier"}); err == nil {
+				t.Fatal("mislabelled family accepted")
+			}
+			role, _ := roleByName("review-gate")
+			step := ladderStep{Profile: Profile{Harness: tc.harness, Model: tc.model, Family: tc.family, Enabled: true}}
+			reasons := skipReasons(step, role, resolveQuery{AuthorFamily: "local"}, time.Now(), nil)
+			if len(reasons) == 0 {
+				t.Fatal("legacy mislabelled profile remained routable")
+			}
+		})
+	}
+	for _, profile := range catalogProfiles() {
+		if err := validateProfile(profileWrite{Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness, Model: profile.Model, Family: profile.Family, Effort: profile.Effort, Tier: profile.Tier}); err != nil {
+			t.Fatalf("existing catalog pin %s rejected: %v", profile.Slug, err)
+		}
+	}
+}

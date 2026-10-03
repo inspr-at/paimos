@@ -181,15 +181,15 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   const calls = await mockWork(page, data)
   await page.goto(`/p/PHAROS?priority=high&v=${MINE}`)
   await expect(rows(page)).toHaveCount(2)
-  const options = () => bar(page).getByRole('button', { name: /^Options for view/ })
-  await options().click()
+  const options = (name: string) => bar(page).getByRole('button', { name: `Options for view ${name}`, exact: true })
+  await options('Mine').click()
   let menu = page.getByRole('menu', { name: 'View Mine' })
   await menu.getByRole('menuitem', { name: 'Rename' }).click()
   await page.getByRole('dialog', { name: 'Rename view' }).getByLabel('View name').fill('High priority')
   await page.keyboard.press('Enter')
   await expect(bar(page).getByRole('link', { name: 'High priority' })).toBeVisible()
   // Default: the next visit to the project opens the view.
-  await options().click()
+  await options('High priority').click()
   await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Open the project with it' }).click()
   await expect.poll(() => (data.preferences['list:p-pharos'] as { defaultView?: string } | undefined)?.defaultView).toBe(MINE)
   await page.goto('/p/PHAROS')
@@ -198,24 +198,28 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   // Only the first list request is the view's: the plain list never loads first.
   expect(calls.filter(call => call.path === '/api/nodes' && call.query.get('limit') === '200' && !call.query.get('priority'))).toHaveLength(0)
   // Copy link and share.
-  await options().click()
+  await options('High priority').click()
   await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Copy link' }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(`v=${MINE}`)
-  await options().click()
+  await options('High priority').click()
   await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Share with the project' }).click()
   await expect(page.getByText('“High priority” is shared with everyone in Pharos')).toBeVisible()
   expect(data.views.find(v => v.id === MINE)!.shared).toBe(true)
   // A shared view of someone else: copy it to my views.
-  await bar(page).getByRole('link', { name: /Team/ }).click()
+  await bar(page).getByRole('link', { name: 'Team', exact: true }).click()
+  // Both views contain two rows; the count alone cannot prove navigation. Wait
+  // for Team to be current before resolving its options, rather than capturing
+  // the old view's button while the router is still changing the selection.
+  await expect(bar(page).getByRole('link', { name: 'Team', exact: true })).toHaveAttribute('aria-current', 'page')
   await expect(rows(page)).toHaveCount(2)
-  await options().click()
+  await options('Team').click()
   menu = page.getByRole('menu', { name: 'View Team' })
   await expect(menu.getByRole('menuitem', { name: 'Rename' })).toHaveCount(0)
   await expect(menu.getByRole('menuitem', { name: 'Delete view' })).toHaveCount(0)
   await menu.getByRole('menuitem', { name: 'Copy to my views' }).click()
   await expect(bar(page).getByRole('link', { name: 'Team copy' })).toHaveAttribute('aria-current', 'page')
   // Delete, then Undo brings the view back with its id.
-  await options().click()
+  await options('Team copy').click()
   await page.getByRole('menu', { name: 'View Team copy' }).getByRole('menuitem', { name: 'Delete view' }).click()
   await expect(bar(page).getByRole('link', { name: 'Team copy' })).toHaveCount(0)
   await expect(page).not.toHaveURL(/v=/)
@@ -326,25 +330,27 @@ test('a link to a view someone cannot see keeps its filters and drops the view',
   await expect(bar(page).getByRole('link', { name: 'All tickets' })).toHaveAttribute('aria-current', 'page')
 })
 
-test('filters and views have no axe violations in light and dark', async ({ page }) => {
-  const data = world()
-  data.views.push(mockView({ id: MINE, name: 'Mine', filters: { priority: 'high' } }), mockView({ id: SHARED, name: 'Team', owner_principal_id: mira, shared: true }))
-  data.preferences['list:p-pharos'] = { defaultView: MINE }
-  await mockWork(page, data)
-  const scan = async () => {
-    // Judge settled states only. A sort or filter change re-queries the list, and
-    // until the answer arrives the previous rows stay on screen dimmed as stale
-    // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
-    // initials, a loading transition rather than the page. Popovers mount off
-    // screen and are placed on the next frame.
-    await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
-    await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
-    for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
-    const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
-    expect(summary, summary.join('\n')).toEqual([])
-  }
-  for (const colorScheme of ['light', 'dark'] as const) {
+// Seven full-page scans per scheme get independent test budgets; combining both
+// schemes timed out during the final scan on hosted CI, without an axe failure.
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`filters and views have no axe violations in ${colorScheme}`, async ({ page }) => {
+    const data = world()
+    data.views.push(mockView({ id: MINE, name: 'Mine', filters: { priority: 'high' } }), mockView({ id: SHARED, name: 'Team', owner_principal_id: mira, shared: true }))
+    data.preferences['list:p-pharos'] = { defaultView: MINE }
+    await mockWork(page, data)
+    const scan = async () => {
+      // Judge settled states only. A sort or filter change re-queries the list, and
+      // until the answer arrives the previous rows stay on screen dimmed as stale
+      // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
+      // initials, a loading transition rather than the page. Popovers mount off
+      // screen and are placed on the next frame.
+      await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
+      await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
+      for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+      const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
+      expect(summary, summary.join('\n')).toEqual([])
+    }
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await page.goto(`/p/PHAROS?priority=high,!low&tag=!docs&date=updated:30d&v=${MINE}&status=!done`)
     await expect(rows(page).first()).toBeVisible()
@@ -369,8 +375,8 @@ test('filters and views have no axe violations in light and dark', async ({ page
     await expect(page.getByRole('dialog', { name: 'Save view' })).toBeVisible()
     await scan()
     await page.keyboard.press('Escape')
-  }
-})
+  })
+}
 
 for (const width of [1920, 1440, 1280, 1024, 390]) {
   test(`at ${width}px the view bar and toolbar never overflow the page`, async ({ page }) => {

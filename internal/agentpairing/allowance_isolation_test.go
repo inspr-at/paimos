@@ -102,6 +102,13 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	}
 	// The launcher catalog and normal account health must use the same ordinary
 	// budgets as managed routing, not the exhausted internal verification cap.
+	// AEON-478's accountprivacy.Load/mask withholds quota windows from an
+	// unlinked person, including the pairing approver. Confirm ownership through
+	// the real account-link flow before asserting the owner's budget details;
+	// pairing approval alone grants ongoing use, not quota visibility.
+	offer := offerLink(t, f, p, key, e.AccountID)
+	review := reviewLink(t, f, offer)
+	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 200)
 	var catalog agentaccounts.Catalog
 	decodeResult(t, f.call("GET", "/api/agent-accounts/catalog", nil, true, "", 200), &catalog)
 	found := false
@@ -112,8 +119,20 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 					continue
 				}
 				found = true
-				if !account.Available || len(account.Windows) != 2 {
-					t.Fatal("verification cap blocked the regular-work launcher catalog")
+				hasProfile := false
+				for _, model := range account.Models {
+					for _, effort := range model.Efforts {
+						hasProfile = hasProfile || effort.ProfileID == e.ProfileID
+					}
+				}
+				if !hasProfile {
+					t.Fatalf("paired model profile missing from regular-work launcher catalog: %+v", account.Models)
+				}
+				if len(account.Windows) != 2 {
+					t.Fatalf("regular-work launcher catalog has %d windows, want 2", len(account.Windows))
+				}
+				if !account.Available {
+					t.Fatalf("regular-work launcher catalog account unavailable: reasons=%v wait=%+v", account.UnavailableReasons, account.Wait)
 				}
 				for _, window := range account.Windows {
 					if window.ID == verificationWindow {

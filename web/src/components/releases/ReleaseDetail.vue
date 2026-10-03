@@ -29,6 +29,8 @@ const emit = defineEmits<{ evidence: [open: boolean] }>()
 
 const at = computed(() => releasedAt(props.release))
 const reserved = computed(() => props.release.state === 'reserved')
+const candidate = computed(() => props.release.state === 'candidate')
+const pendingLabels: Record<string, string> = { tag_message: 'Tag message', tagged_at: 'Tag time', published_at: 'Publication time', image: 'Image digest', ci: 'CI run', release_run: 'Release run', release_url: 'GitHub release' }
 const lines = computed(() => presentRelease(props.release, locale.value))
 const tickets = computed(() => ticketsOf(props.release))
 const counted = computed(() => lines.value.features.length + lines.value.fixes.length + lines.value.other.length)
@@ -47,7 +49,7 @@ const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(
 const liveLine = computed(() => {
   const live = props.current && props.liveSince ? Date.parse(props.liveSince) : NaN
   if (Number.isNaN(live) || !at.value) return ''
-  return `Live here since ${clockSince(live, props.now)} · ${props.release.published_at ? 'published' : 'tagged'} ${clockSince(Date.parse(at.value), props.now)}, ${relativeTime(at.value, { now: props.now, long: true })}`
+  return `Live here since ${clockSince(live, props.now)} · ${candidate.value ? 'reserved' : props.release.published_at ? 'published' : 'tagged'} ${clockSince(Date.parse(at.value), props.now)}, ${relativeTime(at.value, { now: props.now, long: true })}`
 })
 const channel = computed(() => props.release.release_channel ? `${props.release.release_channel.charAt(0).toUpperCase()}${props.release.release_channel.slice(1)} release` : 'Release')
 // Details: the numbers behind the name in one quiet line.
@@ -86,12 +88,13 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 <template>
   <article class="detail" :class="{ reserved }" aria-labelledby="release-detail-title">
     <div class="top-row">
-      <p class="eyebrow top">{{ reserved ? 'Reserved version' : channel }}</p>
+      <p class="eyebrow top">{{ reserved ? 'Reserved version' : candidate ? 'Candidate release' : channel }}</p>
       <div class="badges">
         <span v-if="current" class="chip live-chip"><span class="live-dot" aria-hidden="true" />{{ liveLine ? 'Live here' : 'Current' }}</span>
         <span v-if="fresh" class="chip new">New since your last visit</span>
         <span v-if="rollback" class="chip"><AppIcon name="rollback" :size="11" />Rollback target</span>
         <span v-if="reserved" class="chip">Reserved, never published</span>
+        <span v-if="candidate" class="chip">Publication pending</span>
       </div>
     </div>
     <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseCodename :version="release.version" :name="release.codename" :quiet="reserved"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseCodename></h2>
@@ -99,6 +102,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     <p v-if="liveLine" class="when live-line" :data-tip="liveSince ? `Live on this server since ${absoluteTime(liveSince)}` : undefined">{{ liveLine }}</p>
     <p v-else-if="at" class="when">
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
+      <template v-else-if="candidate">Reserved {{ absoluteTime(at) }} · publication pending</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
     <div v-if="!reserved && (lines.features.length || lines.fixes.length || tickets.length)" class="counts">
@@ -127,7 +131,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
     <!-- Details shows it open; Highlights keeps it behind a toggle. -->
-    <section v-if="release.tag" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
+    <section v-if="release.tag || candidate" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
       <h3 v-if="details" id="release-evidence-title" class="ev-toggle ev-head">
         <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
         <span class="ev-title">Evidence</span>
@@ -159,11 +163,11 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
             <dd><a v-if="ev.source_url" class="mono ext" :href="ev.source_url" target="_blank" rel="noopener">{{ shortCommit(ev.source_commit) }}<AppIcon name="external" :size="11" /></a><span v-else class="mono">{{ shortCommit(ev.source_commit) }}</span>
               <button type="button" class="copy" :aria-label="`Copy commit ${ev.source_commit}`" @click="copy('commit', ev.source_commit)"><AppIcon :name="copied === 'commit' ? 'check' : 'copy'" :size="12" />{{ copyLabel('commit', 'Copy') }}</button></dd>
           </div>
-          <div v-if="ev.ci">
+          <div v-if="ev.ci?.url">
             <dt>CI run</dt>
             <dd><a class="ext" :href="ev.ci.url" target="_blank" rel="noopener"><span class="run" :class="ev.ci.conclusion">{{ runWord(ev.ci) }}</span>{{ ev.ci.name }}<AppIcon name="external" :size="11" /></a></dd>
           </div>
-          <div v-if="ev.release_run">
+          <div v-if="ev.release_run?.url">
             <dt>Release run</dt>
             <dd><a class="ext" :href="ev.release_run.url" target="_blank" rel="noopener"><span class="run" :class="ev.release_run.conclusion">{{ runWord(ev.release_run) }}</span>{{ ev.release_run.name }}<AppIcon name="external" :size="11" /></a></dd>
           </div>
@@ -181,6 +185,9 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
             <dd><a class="ext" :href="ev.release_url" target="_blank" rel="noopener">{{ release.tag }}<AppIcon name="external" :size="11" /></a></dd>
           </div>
         </dl>
+        <ul v-if="ev.pending?.length" class="unavailable" aria-label="Pending evidence">
+          <li v-for="field in ev.pending" :key="field"><AppIcon name="info" :size="12" />{{ pendingLabels[field] ?? field }}: pending</li>
+        </ul>
         <ul v-if="ev.unavailable.length" class="unavailable" aria-label="Not available">
           <li v-for="note in ev.unavailable" :key="note"><AppIcon name="info" :size="12" />{{ note }}</li>
         </ul>

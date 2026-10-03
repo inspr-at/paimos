@@ -13,7 +13,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
 // ModelsForRun projects the same catalog as /agent-accounts/catalog, scoped to
@@ -114,7 +116,7 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		role = "build"
 	}
 	if !slices.Contains([]string{"scout", "mechanical", "build", "build-hard", "review-gate", "review-gate-security"}, role) ||
-		(family != "" && !slices.Contains([]string{"openai", "anthropic", "xai", "cursor"}, family)) ||
+		(family != "" && !reviewgate.ValidFamily(family)) ||
 		(strings.HasPrefix(role, "review-gate") && family == "") {
 		writeErr(w, fail(http.StatusBadRequest, "invalid role or author family"))
 		return
@@ -204,6 +206,10 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		var p catalogProfile
 		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.Priority); err != nil {
 			return nil, err
+		}
+		family := harnesslaunch.ModelFamily(p.Harness, p.Model)
+		if family != p.Family || role == "review-gate" && (!harnesslaunch.FamilyMatches(p.Harness, p.Model, p.Family) || family == authorFamily) {
+			continue
 		}
 		profiles = append(profiles, p)
 	}

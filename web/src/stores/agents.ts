@@ -268,7 +268,7 @@ export const useAgents = defineStore('agents', () => {
     })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now()) })
     return loadFlight
   }
-  // The header badge: approvals and held action requests, at most every 30 seconds.
+  // P6/P8 switches the badge and briefing together with the complete desk UI.
   async function loadNeeds(force = false) {
     if (!force && Date.now() - needsAt < 30_000) return
     needsAt = Date.now()
