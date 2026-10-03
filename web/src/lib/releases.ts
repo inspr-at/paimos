@@ -471,7 +471,7 @@ export function compare(releases: Release[], a: string, b: string) {
 export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en', { numeric: true }) }
 
 // ---------- Search and filters ----------
-export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
+export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; other?: boolean; tickets?: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
@@ -482,6 +482,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
   if (f.fixes && !presented.fixes.length) return false
+  if (f.other && !presented.other.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true

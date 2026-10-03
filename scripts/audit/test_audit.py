@@ -99,12 +99,20 @@ class CoverageTests(unittest.TestCase):
     def test_original_coverage_gaps_are_owned(self):
         config = load(HERE / 'slices.json')
         expected = {'deploy/compose/compose.yaml': 'S7', 'embed.go': 'S1',
+                    'internal/accountprivacy/privacy.go': 'S1',
+                    'internal/accountprivacy/privacy_test.go': 'S1',
                     'web/embed.go': 'S9', 'web/vite.config.ts': 'S9',
                     'web/tsconfig.app.json': 'S9', 'web/e2e/smoke.spec.ts': 'S9',
                     'web/src/views/Test.vue': 'S8', 'web/src/lib/test.ts': 'S9'}
         for path, sid in expected.items():
             self.assertEqual(owners(path, config), [sid])
         self.assertFalse(check(['internal/new-package/main.go'], config)['ok'])
+
+    def test_stepup_contract_is_owned_by_security_core(self):
+        config = load(HERE / 'slices.json')
+        for path in ('internal/stepup/contract.go', 'internal/stepup/contract_test.go'):
+            with self.subTest(path=path):
+                self.assertEqual(owners(path, config), ['S1'])
 
     def test_service_tiers_belong_to_agent_runtime(self):
         config = load(HERE / 'slices.json')

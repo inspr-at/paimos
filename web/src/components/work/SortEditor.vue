@@ -6,7 +6,7 @@ import AppIcon from '../AppIcon.vue'
 
 // Multi-key sort by keyboard and pointer: the same keys as Shift-clicking column
 // headers. The first key decides, the next ones break ties.
-const props = defineProps<{ sort: SortKey[] }>()
+const props = defineProps<{ sort: SortKey[]; stable?: boolean }>()
 const emit = defineEmits<{ change: [keys: SortKey[]] }>()
 const free = computed(() => SORT_FIELDS.filter(field => field !== 'paid' && !props.sort.some(key => key.field === field)))
 const FIRST_DIRECTION: Partial<Record<SortField, boolean>> = { updated_at: true, created_at: true, priority: false }
@@ -40,7 +40,7 @@ function keydown(event: KeyboardEvent, index: number) {
 </script>
 
 <template>
-  <div ref="root" class="sort-editor">
+  <div ref="root" class="sort-editor" :class="{ stable }">
     <div class="head">
       <p class="eyebrow">Sort</p>
       <button v-if="sort.length" type="button" class="reset" data-tip="Newest updated first" @click="emit('change', [])">Default</button>
@@ -63,7 +63,7 @@ function keydown(event: KeyboardEvent, index: number) {
     </ol>
     <p v-else class="default">Newest updated first</p>
     <p id="sort-move-hint" class="sr-only">Alt and the arrow keys move the sort key.</p>
-    <button v-if="free.length" type="button" class="add" @click="add"><AppIcon name="plus" :size="13" />{{ sort.length ? 'Then by' : 'Sort by' }}</button>
+    <button v-if="free.length" type="button" class="add" @click="add"><AppIcon name="plus" :size="13" />{{ stable ? 'Add sort key' : sort.length ? 'Then by' : 'Sort by' }}</button>
   </div>
 </template>
 
@@ -84,4 +84,7 @@ function keydown(event: KeyboardEvent, index: number) {
 .add { display: inline-flex; align-items: center; gap: 6px; justify-self: start; height: 28px; margin-left: 14px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .add:hover { background: var(--row-hover); }
 .add:focus-visible { box-shadow: var(--focus-ring); }
+/* Sheet actions precede the variable key list, so adding keys never moves Add. */
+.stable .head { order: -2; }
+.stable .add { order: -1; }
 </style>

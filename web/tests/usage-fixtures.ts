@@ -28,7 +28,7 @@ export interface UsageSetup extends CapacityOptions {
   theme?: 'light' | 'dark'
   /** No account.read: the capacity band is hidden, the rest works. */
   noAccounts?: boolean
-  /** No accounts enrolled at all. */
+  /** No capacity pools or configured accounts, including computer enrollments. */
   noPools?: boolean
 }
 
@@ -40,6 +40,9 @@ export async function setupUsage(page: Page, options: UsageSetup = {}) {
   await mockWork(page, data, { admin: true })
   const agents = agentData(WORLD)
   const capacity = capacityWorld(options)
+  if (options.noPools) {
+    for (const computer of capacity.computers) computer.enrollments = []
+  }
   agents.accounts = (options.noPools ? [] : capacity.accounts) as unknown as typeof agents.accounts
   await mockAgents(page, agents, { capacity })
   if (options.noAccounts) {

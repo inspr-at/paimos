@@ -261,6 +261,7 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(ctx, `UPDATE work_kinds SET archived_at=NULL WHERE id=$1`, id); err != nil {
 				return err
 			}
+			ev = "work_kind.restored"
 		}
 		var err error
 		out, err = kindScan(ctx, tx, id)

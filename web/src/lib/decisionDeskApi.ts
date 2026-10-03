@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
+import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
 import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
@@ -27,7 +28,7 @@ export interface Question {
   answer?: QuestionAnswer; created_at: string; updated_at: string
   pending: { id: string; revision: number; kind: 'inbox' | 'comment' | 'outcome'; state: 'pending' | 'delivered' | 'failed' | 'replaced'; deliver_after: string; receipt_state?: 'queued' | 'handed_off' | 'failed'; error_code?: string }[]
 }
-export interface QuestionPage { items: Question[]; has_more: boolean }
+export interface QuestionPage { items: Question[]; has_more: boolean; next_cursor?: string }
 export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
   const response = await api(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {
@@ -38,16 +39,31 @@ export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
 }
 export type QuestionState = 'open' | 'answered'
 export const MAX_QUESTION_PAGES = 10
-export const readQuestions = (offset = 0, state: QuestionState = 'open') => deskRequest<QuestionPage>(`/decision-desk?state=${state}&limit=100&offset=${offset}`)
-async function readQuestionPages(state: QuestionState, pages: number): Promise<QuestionPage> {
-  const items: Question[] = []
-  let has_more = false
+export type QuestionQuery = { state: 'open'; offset?: number } | { state: 'answered'; cursor?: string }
+export const readQuestions = (query: QuestionQuery) => deskRequest<QuestionPage>(query.state === 'answered'
+  ? `/decision-desk?state=answered&order=desc&limit=100${query.cursor ? `&cursor=${encodeURIComponent(query.cursor)}` : ''}`
+  : `/decision-desk?state=open&limit=100&offset=${query.offset ?? 0}`)
+interface QuestionPosition { pages: number; nextCursor?: string; cursors: string[] }
+interface QuestionPages extends QuestionPage { position: QuestionPosition }
+function pagePosition(state: QuestionState, result: QuestionPage, previous: QuestionPosition): QuestionPosition {
+  if (result.items.length > 100) throw new Error('The question page exceeded its limit. Refresh before loading more.')
+  const cursors = [...previous.cursors]
+  if (state === 'answered' && result.has_more) {
+    if (!result.next_cursor || result.next_cursor.length > 512 || cursors.includes(result.next_cursor)) throw new Error('The answered page cursor is unavailable. Refresh before loading more.')
+    cursors.push(result.next_cursor)
+  }
+  return { pages: previous.pages + 1, nextCursor: state === 'answered' && result.has_more ? result.next_cursor : undefined, cursors }
+}
+async function readQuestionPages(state: QuestionState, pages: number): Promise<QuestionPages> {
+  const items = new Map<string, Question>()
+  let has_more = false, position: QuestionPosition = { pages: 0, cursors: [] }
   for (let page = 0; page < Math.min(MAX_QUESTION_PAGES, Math.max(1, pages)); page++) {
-    const result = await readQuestions(page * 100, state)
-    items.push(...result.items); has_more = result.has_more
+    const result = await readQuestions(state === 'answered' ? { state, cursor: position.nextCursor } : { state, offset: page * 100 })
+    position = pagePosition(state, result, position)
+    result.items.forEach(question => items.set(question.id, question)); has_more = result.has_more
     if (!has_more) break
   }
-  return { items, has_more }
+  return { items: [...items.values()], has_more, position }
 }
 export function deliveryTime(value?: string): string {
   const timestamp = value ? Date.parse(value) : NaN
@@ -101,8 +117,21 @@ export function ruleItem(rule: DoctrineInboxItem): DeskItem {
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
   ]), prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
-export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem> }
-export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map() })
+export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
+  const pending = proposal.state === 'pending'
+  return { ...base(`k:${proposal.id}`, 'key_trim', `Trim ${proposal.key_name}?`, proposal.evidence.summary, []),
+    projectName: 'Workspace', revision: proposal.revision, createdAt: proposal.created_at,
+    expiresAt: pending ? proposal.expires_at : undefined, decided: !pending, keyTrim: proposal,
+    answer: pending ? undefined : proposal.state === 'applied' ? 'Trim approved' : proposal.state === 'restored' ? 'Previous scopes restored' : proposal.state === 'expired' ? 'Expired without a decision' : 'Trim declined',
+    unavailable: pending ? proposal.blocked_reason : undefined,
+    meanwhile: 'The key keeps its current permissions until a person approves.',
+    destination: 'This key only. Approval and restore recheck live scopes and permissions and record an audit event.',
+    suggestion: 'Approve applies this exact scope reduction. Decline keeps the current set.',
+    delivery: proposal.state === 'applied' ? 'Trim applied. Restore is available for 30 days, subject to current scopes and grant authority.' : proposal.state === 'restored' ? 'The previous scope set was restored.' : undefined,
+  }
+}
+export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal> }
+export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map() })
 /** Upstream owners supply their native, permission-checked flows here. No
  * guessed endpoints, boolean verification bypass, or Q&A fallback is accepted. */
 export interface ProtectedDeskAdapters {
@@ -169,10 +198,35 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
   const result = await decidePhone(review, { decision, reason, request_hash: review.request_hash })
   if (result.pending || result.approval?.decision !== decision) throw new Error('The verified decision was not confirmed.')
 }
-export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean> }
-export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
+export interface DeskRead {
+  items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean>
+  questionPositions: Record<QuestionState, QuestionPosition | undefined>; projectNames: Map<string, string>
+  nextKeyTrims: KeyTrimCursors
+}
+/** Continue only the requested list. Refresh uses loadDesk to recheck all
+ * sources from the beginning; callers keep this snapshot bound to its owner.
+ * Read the latest snapshot after the request so recorded decisions survive. */
+export async function loadMoreQuestions(previous: DeskRead, state: QuestionState, latest: () => DeskRead = () => previous): Promise<DeskRead> {
+  const position = previous.questionPositions[state]
+  if (!previous.hasMore[state] || !position || position.pages >= MAX_QUESTION_PAGES) return previous
+  const result = await readQuestions(state === 'answered' ? { state, cursor: position.nextCursor } : { state, offset: position.pages * 100 })
+  const nextPosition = pagePosition(state, result, position)
+  const current = latest()
+  const sources = { ...current.sources, questions: new Map(current.sources.questions), actions: new Map(current.sources.actions) }
+  const items = new Map(current.items.filter(item => item.kind === 'question' || item.kind === 'handover').map(item => [item.id, item]))
+  for (const question of result.items) {
+    const item = questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable')
+    sources.questions.set(item.id, question); items.set(item.id, item)
+  }
+  const projected = new Set([...sources.questions.values()].map(question => question.input.source_request_id).filter(Boolean))
+  for (const [id, message] of sources.actions) if (projected.has(message.id)) sources.actions.delete(id)
+  const protectedItems = current.items.filter(item => item.kind !== 'question' && item.kind !== 'handover' && !(item.kind === 'action' && projected.has(item.id.slice(2))))
+  return { ...current, sources, items: [...items.values(), ...protectedItems], hasMore: { ...current.hasMore, [state]: result.has_more },
+    questionPositions: { ...current.questionPositions, [state]: nextPosition } }
+}
+export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}, trimCursors: KeyTrimCursors = {}): Promise<DeskRead> {
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
-  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox()])
+  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors)])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
   if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
@@ -211,20 +265,37 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       const item = actionItem(message, read.value.project.id, read.value.project.title); sources.actions.set(item.id, message); items.push(item)
     }
   }
+  if (trimsResult.status === 'fulfilled') {
+    warnings.push(...trimsResult.value.warnings)
+    for (const proposal of trimsResult.value.items) { const item = keyTrimItem(proposal); sources.keyTrims.set(item.id, proposal); items.push(item) }
+  } else warnings.push('Key trim proposals could not be read; key management rights are required.')
   if (adapters.tiers) {
     try { const read = await adapters.tiers.read(); items.push(...read.items.slice(0, 100).map(item => ({ ...item, kind: 'tier' as const }))); warnings.push(...read.warnings); if (read.items.length > 100) warnings.push('Only the first 100 tier requests are shown.') }
     catch { warnings.push('Tier requests could not be read.') }
   }
-  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more } }
+  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more },
+    questionPositions: { open: openResult.status === 'fulfilled' ? openResult.value.position : undefined, answered: answeredResult.status === 'fulfilled' ? answeredResult.value.position : undefined },
+    projectNames: new Map(projects.map(project => [project.id, project.title])), nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {} }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
+  if (item.kind === 'key_trim') return can('keys.manage')
   if (item.kind === 'approval') { const approval = sources.approvals.get(item.id); return !!approval && canDecideApproval(approval, can) }
   if (item.kind === 'action') return can('inbox.manage')
   if (item.kind === 'rule') return can('rules.write')
   return item.kind === 'tier' && adapters.tiers?.allowed(item) === true
 }
 export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: DeskSources, requestId: string, phone: boolean, adapters: ProtectedDeskAdapters = {}): Promise<DeskItem> {
+  if (item.kind === 'key_trim') {
+    const source = sources.keyTrims.get(item.id)
+    if (!source || !item.keyTrim || source.key_id !== item.keyTrim.key_id || source.revision !== item.revision || source.state !== item.keyTrim.state) throw new Error('The key trim source changed. Reopen the memo.')
+    const decision = draft.optionId
+    if (decision !== 'approve' && decision !== 'decline' && decision !== 'restore') throw new Error('Choose a key trim action.')
+    if (source.blocked_reason && decision !== 'decline') throw new Error(source.blocked_reason)
+    const updated = await decideKeyTrim(source, decision, requestId)
+    sources.keyTrims.set(item.id, updated)
+    return keyTrimItem(updated)
+  }
   if (item.kind === 'question' || item.kind === 'handover') {
     const question = sources.questions.get(item.id)
     if (!question || question.revision !== item.revision) throw new Error('The question changed. Reopen it before deciding.')
