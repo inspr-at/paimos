@@ -619,7 +619,7 @@ const KINDS = [
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
-                    <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline summary-size" aria-hidden="true">{{ railLine(r, lang === 'en' ? 'de' : 'en').text }}</span><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
+                    <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="summary-size" aria-hidden="true">{{ railLine(r, lang === 'en' ? 'de' : 'en').text }}</span><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
 
                   </template>
                   <span class="row-foot"><ReleaseVersionCopy :value="r.version" class="row-version" @click.stop /></span>
@@ -641,7 +641,7 @@ const KINDS = [
               <span class="detail-action-state">{{ selectedIndex < 0 ? '—' : selectedIndex + 1 }} of {{ order.length }}</span>
               <button type="button" class="icon-btn flat" aria-label="Next release" :disabled="selectedIndex < 0 || selectedIndex >= order.length - 1" @click="step(1)"><AppIcon name="chevron-right" :size="14" /></button>
             </div>
-            <button type="button" class="evidence-control" :aria-pressed="evidence || view === 'details'" :disabled="!selected" @click="evidence = !evidence"><AppIcon name="shield" :size="13" />Evidence<kbd class="keycap">E</kbd></button>
+            <button type="button" class="evidence-control" :aria-pressed="evidence || view === 'details'" :disabled="!selected || (!selected.tag && selected.state !== 'candidate')" @click="evidence = !evidence"><AppIcon name="shield" :size="13" />Evidence<kbd class="keycap">E</kbd></button>
           </div>
           <div ref="detailScroll" class="detail-scroll" :inert="covered">
             <ReleaseCompare
@@ -755,10 +755,11 @@ const KINDS = [
 .row.reserved .clock,.row.reserved .row-name { color:var(--ink-2); }
 .time { display:grid; gap:2px; justify-items:start; }
 .clock { font-size:12px; font-weight:600; color:var(--ink); }
-.age { font-size:10px; color:var(--ink-3); white-space:nowrap; }
+.age { font-size:10px; color:var(--ink); white-space:nowrap; }
+.time-badge.rollback-tag { color:var(--ink); }
 .time-badge { display:block; margin-top:6px; padding:4px 0; width:100%; text-align:center; font:650 10px/1.2 var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-2); background:var(--surface-2); border-radius:7px; }
 .current-tag { color:var(--teal-ink); background:var(--row-selected); box-shadow:inset 0 0 0 1px var(--chip-teal-line); }
-.new-tag { color:var(--gold-ink); background:var(--gold-wash); }
+.new-tag { color:color-mix(in oklab,var(--gold-ink),var(--ink) 35%); background:var(--gold-wash); }
 .main { display:grid; gap:3px; min-width:0; }
 .line1 { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:start; gap:10px; min-width:0; }
 .row-name { font-size:14.5px; line-height:20px; font-weight:600; color:var(--ink); }
@@ -766,8 +767,8 @@ const KINDS = [
 .counts { display:flex; flex:none; align-items:center; gap:9px; margin-top:3px; font-size:10px; color:var(--ink-3); }
 .count { display:inline-flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums; }
 .rail-name { display:grid; margin-top:3px; min-width:0; }
-.rail-name .headline { grid-area:1/1; }
-.headline { color:var(--ink-2); font-size:12.5px; line-height:1.4; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+.rail-name .headline,.rail-name .summary-size { grid-area:1/1; }
+.headline,.summary-size { color:var(--ink-2); font-size:12.5px; line-height:1.4; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
 .summary-size { visibility:hidden; pointer-events:none; }
 .rail-name > .lang-badge { justify-self:end; }
 .row-foot { display:flex; justify-content:flex-end; margin-top:4px; }
@@ -825,7 +826,7 @@ const KINDS = [
  .head { gap:10px; padding:12px 0 10px; }
  .title-row { flex-wrap:wrap; gap:10px; }
  .mark-backing { display:none; }
- .titles { flex:1; padding:4px 0; gap:10px; }
+ .titles { flex:1; max-width:calc(100% - 54px); padding:4px 0; gap:10px; }
  .titles .eyebrow { font-size:9px; letter-spacing:.12em; gap:8px; }
  .hero { font-size:clamp(26px,7.4vw,34px); }
  .status-dock { gap:2px 10px; padding:4px 12px; }

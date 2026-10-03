@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { brand } from '../../lib/brand'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { generationLabel } from '../../lib/brand'
 import { clockSince } from '../../lib/releaseStats'
 import { absoluteTime, relativeTime } from '../../lib/work'
@@ -31,7 +31,6 @@ const reserved = computed(() => props.release.state === 'reserved')
 const candidate = computed(() => props.release.state === 'candidate')
 const pendingLabels: Record<string, string> = { tag_message: 'Tag message', tagged_at: 'Tag time', published_at: 'Publication time', image: 'Image digest', ci: 'CI run', release_run: 'Release run', release_url: 'GitHub release' }
 const lines = computed(() => presentRelease(props.release, locale.value))
-const tickets = computed(() => ticketsOf(props.release))
 const counted = computed(() => lines.value.features.length + lines.value.fixes.length + lines.value.other.length)
 // The header: theme, headline and intro when the release has them. The pills
 // and benefits are the blocks below; Git tag messages are evidence only.
@@ -53,8 +52,6 @@ const techLine = computed(() => [
   generationLabel.value, props.release.release_sequence > 0 ? `Release ${props.release.release_sequence}` : '', props.release.release_channel, props.release.version,
   ev.value?.image?.digest ? `image ${digestShort(ev.value.image.digest)}` : '', props.release.tag ? `tag ${props.release.tag}` : '',
 ].filter(Boolean).join(' · '))
-// Changes name their ticket only when the release has more than one.
-const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] : '')
 
 // ---------- Evidence ----------
 const ev = computed(() => props.release.evidence)
@@ -115,7 +112,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
         <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.introLang)" :lang="presented.introLang" /></p>
       </div>
       <p v-if="noted && !(noted.public_items ?? noted.items).length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
-      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
+      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :view="view" :lang="lang" />
       <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
       <template v-if="noted">
         <p v-for="gap in noted.gaps" :key="gap" class="none">{{ gap }}</p>

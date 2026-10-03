@@ -11556,15 +11556,15 @@ components:
       required: [live_version, base_commit, head_commit, checked_at, source, status, total, known_total, changes, next_cursor, unavailable]
       properties:
         live_version: {type: string, description: The running build version used as the baseline}
-        base_commit: {type: string, description: The running published release's exact source commit, empty when unavailable}
-        head_commit: {type: string, description: The pinned GitHub main head, empty when unavailable}
+        base_commit: {type: string, description: "The running published release's exact source commit, empty when unavailable"}
+        head_commit: {type: string, description: "The pinned GitHub main head, empty when unavailable"}
         checked_at: {type: string, format: date-time, description: When the cached main comparison was checked}
         source: {type: string, enum: [github-main]}
         status: {type: string, enum: [available, partial, unavailable]}
-        total: {type: [integer, 'null'], minimum: 0, description: Exact non-merge, non-release change count; null for partial or unavailable evidence}
-        known_total: {type: integer, minimum: 0, description: Number of confirmed changes in the bounded snapshot, independent of the page limit; a lower bound when partial}
+        total: {type: [integer, 'null'], minimum: 0, description: "Exact non-merge, non-release change count; null for partial or unavailable evidence"}
+        known_total: {type: integer, minimum: 0, description: "Number of confirmed changes in the bounded snapshot, independent of the page limit; a lower bound when partial"}
         changes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Release/properties/changes/items'}}
-        next_cursor: {type: [string, 'null'], description: Continuation for the next page of this snapshot, null at the end of the bounded list}
+        next_cursor: {type: [string, 'null'], description: "Continuation for the next page of this snapshot, null at the end of the bounded list"}
         unavailable: {type: array, items: {type: string}, description: Plain-language evidence gaps or reasons for a partial or unavailable result}
     ReleaseHistory:
       description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.

@@ -161,12 +161,12 @@ test('a thirty-day release gap keeps the timeline inside the phone card', async 
   expect(geometry.right).toBeLessThanOrEqual(geometry.width)
 })
 
-test('the light codename leads one glass status dock; Details adds the generation and counts', async ({ page }) => {
+test('the light codename leads one glass status dock; Details keeps it steady and shows generation and counts in the notes', async ({ page }) => {
   const history = await open(page)
   const live = history.releases.find(r => r.version === history.current)!
   const head = sheet(page).locator('.head')
   await expect(head.getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
-  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · Release')
+  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · RELEASE')
   await expect(head.getByRole('heading', { level: 1 })).toHaveCSS('font-weight', '300')
   await expect(head.locator('.codename-label')).toHaveCSS('text-transform', 'none')
   const headingSpacing = await head.getByRole('heading', { level: 1 }).evaluate(el => getComputedStyle(el).letterSpacing)
@@ -184,7 +184,9 @@ test('the light codename leads one glass status dock; Details adds the generatio
   await expect(version.locator('.version-pretty')).toHaveAttribute('data-canonical', history.current)
   await expect(version.locator('.version-canonical')).toHaveText(history.current)
   await sheet(page).getByRole('radio', { name: 'Details' }).click()
-  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS 7 · AEON releases · 6 published · 1 reserved')
+  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · RELEASE')
+  await expect(sheet(page).locator('.detail-info')).toHaveText('PAIMOS 7 · AEON releases · 6 published')
+  await expect(sheet(page).locator('.detail .tech')).toContainText('PAIMOS 7 · Release')
 })
 
 test('Pretty dock separators use the muted ink in both themes and after a live theme change', async ({ page }) => {
