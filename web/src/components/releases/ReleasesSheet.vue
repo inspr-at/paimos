@@ -26,7 +26,7 @@ import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
 import ReleaseVersionCopy from './ReleaseVersionCopy.vue'
 import TicketLink from './TicketLink.vue'
 import { onAccessChange, permissionsRevoked } from '../../lib/authz'
-import { getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
+import { appendPendingChanges, getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
 import { plainSubject, shortCommit } from '../../lib/releases'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 
@@ -325,12 +325,17 @@ const waitingClose = ref<HTMLButtonElement>()
 let waitingOpener: HTMLElement | null = null
 async function openWaiting(event: MouseEvent) { waitingOpener = event.currentTarget as HTMLElement; showWaiting.value = true; await nextTick(); waitingClose.value?.focus() }
 function closeWaiting() { showWaiting.value = false; void nextTick(() => { waitingOpener?.focus({ preventScroll: true }); waitingOpener = null }) }
+function waitingKeys(event: KeyboardEvent) {
+  event.stopPropagation()
+  if (event.key === 'Escape') keydown(event)
+}
 const waitingLabel = computed(() => pendingLine(waiting.value, waitingLoading.value, waitingError.value))
 let waitingRequest: AbortController | undefined
 let waitingEpoch = 0
 async function loadWaiting(more = false) {
-  if (!current.value || !session.identity || permissionsRevoked()) return
-  if (more && (waitingLoading.value || !waiting.value?.next_cursor)) return
+  if (waitingLoading.value || !current.value || !session.identity || permissionsRevoked()) return
+  if (more && (!waiting.value?.next_cursor || waiting.value.changes.length >= 250)) return
+  const focused = document.activeElement instanceof HTMLElement && document.activeElement.closest('.pending-controls') ? document.activeElement : null
   const before = waiting.value
   const cursor = more ? before?.next_cursor ?? undefined : undefined
   waitingRequest?.abort()
@@ -343,10 +348,17 @@ async function loadWaiting(more = false) {
     const answer = await getPendingChanges(cursor, controller.signal)
     if (epoch !== waitingEpoch || current.value !== live) return
     if (answer.live_version !== live || (more && (answer.head_commit !== before?.head_commit || answer.base_commit !== before.base_commit))) throw new Error('The live release or main branch changed. Refresh waiting changes.')
-    waiting.value = more && before ? { ...answer, changes: [...before.changes, ...answer.changes].slice(0, 250) } : answer
+    waiting.value = more && before ? appendPendingChanges(before, answer) : answer
   } catch (error) {
     if (epoch === waitingEpoch && !controller.signal.aborted) waitingError.value = error instanceof Error ? error.message : 'Waiting changes could not be loaded.'
-  } finally { if (epoch === waitingEpoch) waitingLoading.value = false }
+  } finally {
+    if (epoch === waitingEpoch) {
+      waitingLoading.value = false
+      await nextTick()
+      // The final page removes Show more; keep keyboard focus inside the panel.
+      if (epoch === waitingEpoch && showWaiting.value && focused && !focused.isConnected && document.activeElement === document.body) waitingClose.value?.focus({ preventScroll: true })
+    }
+  }
 }
 function resetWaiting(keepOpen = false) {
   waitingRequest?.abort(); waitingEpoch++
@@ -644,11 +656,11 @@ const KINDS = [
             />
             <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
           </div>
-          <section v-if="showWaiting" class="pending-pane" aria-label="Changes waiting for the next release" :inert="phone && !!peekKey">
+          <section v-if="showWaiting" class="pending-pane" aria-label="Changes waiting for the next release" :inert="phone && !!peekKey" @keydown="waitingKeys">
             <header class="pending-head"><h2>Next release</h2><button type="button" ref="waitingClose" class="icon-btn flat" aria-label="Close waiting changes" @click="closeWaiting"><AppIcon name="close" :size="14" /></button></header>
             <div class="pending-controls">
-              <button type="button" class="btn sm" :disabled="waitingLoading" @click="loadWaiting()"><AppIcon name="refresh" :size="12" />Refresh</button>
-              <button v-if="waiting?.next_cursor" type="button" class="btn sm" :disabled="waitingLoading || waiting.changes.length >= 250" @click="loadWaiting(true)">Show more</button>
+              <button type="button" class="btn sm" :aria-disabled="waitingLoading" @click="loadWaiting()"><AppIcon name="refresh" :size="12" />Refresh</button>
+              <button v-if="waiting?.next_cursor" type="button" class="btn sm" :aria-disabled="waitingLoading || waiting.changes.length >= 250" @click="loadWaiting(true)">Show more</button>
             </div>
             <div class="pending-scroll">
               <p class="pending-status" role="status">{{ waitingLabel }}</p>
@@ -696,15 +708,16 @@ const KINDS = [
 @media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: rgba(127,216,207,.2); --aurora-2: rgba(164,229,223,.08); --aurora-3: rgba(232,192,122,.12); } }
 .shell { position:relative; display:grid; grid-template-rows:auto minmax(0,1fr); height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
 .head { display:grid; gap:18px; padding:18px 0 20px; }
-.title-row { display:flex; align-items:flex-start; gap:12px; min-width:0; }
+.title-row { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; min-width:0; }
 .mark-backing { display:grid; place-items:center; flex:none; width:52px; height:52px; border-radius:15px; background:var(--glass); box-shadow:0 0 0 1px var(--glass-rim),0 6px 16px -10px var(--line-2); }
-.titles { flex:0 1 390px; display:flex; flex-direction:column; align-items:center; gap:12px; min-width:0; padding:4px 0; }
+.titles { flex:0 0 auto; width:max-content; max-width:100%; display:flex; flex-direction:column; align-items:center; gap:12px; min-width:0; padding:4px 0; }
 .titles .eyebrow { display:flex; align-items:center; gap:12px; width:100%; margin:0; font:600 10.5px/1.4 var(--mono); letter-spacing:.18em; white-space:nowrap; text-align:center; }
 .titles .eyebrow::before,.titles .eyebrow::after { content:''; flex:1; min-width:0; height:1px; background:var(--line-2); }
 .hero { max-width:100%; margin:0; font:300 clamp(28px,3.4vw,48px)/1.1 var(--serif); text-align:center; overflow-wrap:anywhere; }
 .status-dock { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px 14px; max-width:100%; min-height:44px; padding:6px 16px; border-radius:24px; background:linear-gradient(135deg,var(--glass),var(--glass-2)); box-shadow:inset 0 1px 0 var(--glass-edge),0 0 0 1px var(--glass-rim); }
 .dock-version { padding-left:14px; border-left:1px solid var(--line-2); }
 .status-line { display:flex; align-items:center; gap:8px; font-size:12px; line-height:1.45; color:var(--ink-2); }
+@media(min-width:600px) { .status-dock:not(:has(.outdated)) { flex-wrap:nowrap; } .status-line:not(.outdated),.status-dock:not(:has(.outdated)) .dock-version { flex:none; white-space:nowrap; } }
 .status-dot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--gold); }
 .status-dot.live { background:var(--ok); }
 .reload { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 12px; border-radius:999px; color:var(--teal-ink); background:var(--surface); }
@@ -787,6 +800,7 @@ const KINDS = [
 .peek-pane :deep(.peek.inline) { padding:0; }
 .pending-pane { padding:16px; gap:12px; }
 .pending-controls { display:flex; gap:8px; }
+.pending-controls button[aria-disabled="true"] { cursor:default; opacity:.55; }
 .pending-scroll { overflow:auto; min-height:0; }
 .pending-status { font-size:12px; margin-bottom:12px; color:var(--ink-2); }
 .pending-head { display:flex; align-items:center; gap:12px; }

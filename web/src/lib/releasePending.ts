@@ -25,6 +25,17 @@ export async function getPendingChanges(cursor?: string, signal?: AbortSignal): 
   return body
 }
 
+// Appended entries retain their earlier evidence gaps until a full refresh.
+export function appendPendingChanges(before: PendingChanges, page: PendingChanges): PendingChanges {
+  const status = before.status === 'unavailable' || page.status === 'unavailable' ? 'unavailable'
+    : before.status === 'partial' || page.status === 'partial' ? 'partial' : 'available'
+  return {
+    ...page, status, total: status === 'available' ? page.total : null,
+    changes: [...before.changes, ...page.changes].slice(0, 250),
+    unavailable: [...new Set([...before.unavailable, ...page.unavailable])],
+  }
+}
+
 export function pendingLine(data: PendingChanges | null, loading: boolean, error: string) {
   if (loading && !data) return 'Checking changes waiting for the next release'
   if (error || !data || data.status === 'unavailable') return 'Waiting changes unavailable'

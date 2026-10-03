@@ -2,6 +2,7 @@
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { presentRelease, type ReleaseHistory } from '../src/lib/releases'
+import type { PendingChanges } from '../src/lib/releasePending'
 import { expectStableControls } from './helpers/stable'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockReleases, presentedHistory } from './releases-fixtures'
@@ -33,12 +34,12 @@ function data() {
   return { history, tickets }
 }
 
-async function open(page: Page, pendingStatus: 'available' | 'partial' | 'unavailable' = 'available') {
+async function open(page: Page, pendingStatus: 'available' | 'partial' | 'unavailable' = 'available', pendingPage?: (snapshot: PendingChanges, cursor: string | null) => PendingChanges | Promise<PendingChanges>, running?: string) {
   const { history, tickets } = data()
   const errors = watchErrors(page)
   await mockWork(page, tickets)
-  await mockReleases(page, history as unknown as Record<string, unknown>)
-  await page.route('**/api/releases/pending**', route => route.fulfill({ json: {
+  await mockReleases(page, history as unknown as Record<string, unknown>, { running })
+  const snapshot: PendingChanges = {
     live_version: history.current, base_commit: history.releases[0]!.evidence.source_commit, head_commit: 'c'.repeat(40),
     checked_at: new Date(NOW).toISOString(), source: 'github-main', status: pendingStatus,
     total: pendingStatus === 'available' ? 2 : null, known_total: pendingStatus === 'unavailable' ? 0 : 2,
@@ -47,7 +48,8 @@ async function open(page: Page, pendingStatus: 'available' | 'partial' | 'unavai
       { commit: 'e'.repeat(40), type: 'fix', group: 'fixes', subject: 'AEON-626: Agents page shows the model in use', scope: '', tickets: ['AEON-626'], at: new Date(NOW).toISOString() },
     ],
     next_cursor: null, unavailable: pendingStatus === 'available' ? [] : ['The main branch could not be read completely.'],
-  } }))
+  }
+  await page.route('**/api/releases/pending**', async route => route.fulfill({ json: pendingPage ? await pendingPage(snapshot, new URL(route.request().url()).searchParams.get('cursor')) : snapshot }))
   await page.goto(`/releases/${history.current}?release_lang=en&release_view=highlights`)
   await expect(sheet(page)).toBeVisible()
   await expect(detailName(page)).toHaveText(history.releases[0]!.codename!)
@@ -225,4 +227,165 @@ test('partial and unavailable pending data never report an exact zero (AEON-635)
   await expect(context).not.toContainText('0 changes waiting')
   await context.locator('button').click()
   await expect(pendingPane(page)).toContainText('The main branch could not be read completely.')
+})
+
+for (const width of [390, 1024, 1440]) {
+  test(`waiting-panel keys keep the selected release and native controls at ${width} (AEON-635 fix2)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const { history, errors } = await open(page)
+    const root = sheet(page), pane = pendingPane(page)
+    const close = pane.getByRole('button', { name: 'Close waiting changes', exact: true })
+    const refresh = pane.getByRole('button', { name: 'Refresh', exact: true })
+    const url = page.url()
+    const evidence = root.locator('.evidence-control')
+    const controls = { close, refresh, panelHeader: pane.locator('.pending-head'), panelActions: pane.locator('.pending-controls') }
+    await root.locator('.detail-left button').click()
+    await expect(close).toBeFocused()
+    await expectStableControls({
+      controls, scrollAreas: { panel: pane, content: pane.locator('.pending-scroll') },
+      interactions: ['/', 'j', 'k', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'c', 'e', '?'].map(key => ({
+        name: `waiting key ${key}`, run: async () => {
+          await close.focus()
+          await page.keyboard.press(key)
+          await expect(pane).toBeVisible()
+          await expect(close).toBeFocused()
+          await expect(detailName(page)).toHaveText(history.releases[0]!.codename!)
+          await expect(evidence).toHaveAttribute('aria-pressed', 'false')
+          await expect(root.locator('.help-scrim')).toHaveCount(0)
+          await expect(root.locator('.compare-hint')).toHaveCount(0)
+          expect(page.url()).toBe(url)
+        },
+      })),
+    })
+    await close.focus()
+    await page.keyboard.press('Tab')
+    await expect(refresh).toBeFocused()
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/releases/pending')
+    await page.keyboard.press('Enter')
+    expect((await response).status()).toBe(200)
+    await expect(refresh).toBeEnabled()
+    await expect(refresh).toBeFocused()
+    // Native modifiers keep their default behavior; no release action consumes them.
+    for (const key of ['s', 'r', 'd', 'p', 'a']) {
+      expect(await close.evaluate((el, key) => el.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })), key)).toBe(true)
+      expect(await close.evaluate((el, key) => el.dispatchEvent(new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true })), key)).toBe(true)
+    }
+    await page.keyboard.press('Escape')
+    await expect(pane).toHaveCount(0)
+    await expect(detail(page)).toBeVisible()
+    await expect(root.locator('.detail-left button')).toBeFocused()
+    expect(page.url()).toBe(url)
+    expect(errors).toEqual([])
+  })
+}
+
+test('busy waiting refresh retains keyboard focus and rejects repeated activation (AEON-635 fix2)', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  let requests = 0, entered!: () => void, resume!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { resume = resolve })
+  await open(page, 'available', async snapshot => {
+    if (++requests === 2) { entered(); await held }
+    return snapshot
+  })
+  await sheet(page).locator('.detail-left button').click()
+  const pane = pendingPane(page), refresh = pane.getByRole('button', { name: 'Refresh', exact: true })
+  await expect(refresh).toBeEnabled()
+  await refresh.focus()
+  const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/releases/pending')
+  try {
+    await page.keyboard.press('Enter')
+    await started
+    await expect(refresh).toBeFocused()
+    await expect(refresh).toBeDisabled()
+    await page.keyboard.press('Enter')
+    resume()
+    expect((await response).status()).toBe(200)
+    await expect(refresh).toBeEnabled()
+    await expect(refresh).toBeFocused()
+    expect(requests).toBe(2)
+    await page.keyboard.press('Escape')
+    await expect(pane).toHaveCount(0)
+    await expect(detail(page)).toBeVisible()
+  } finally { resume(); await response.catch(() => {}) }
+})
+
+test('successful pagination retains earlier incomplete evidence until a full refresh (AEON-635 fix2)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  let refreshed = false
+  const reason = 'Ticket classification on the first page was incomplete.'
+  const { errors } = await open(page, 'available', (snapshot, cursor) => {
+    if (refreshed) return snapshot
+    return { ...snapshot, status: cursor ? 'available' : 'partial', total: cursor ? 2 : null,
+      changes: [snapshot.changes[cursor ? 1 : 0]!], next_cursor: cursor ? null : 'page-two', unavailable: cursor ? [] : [reason] }
+  })
+  await sheet(page).locator('.detail-left button').click()
+  const pane = pendingPane(page)
+  await expect(pane.getByRole('status')).toHaveText('At least 2 changes waiting for the next release')
+  await expect(pane.locator('.pending-list li')).toHaveCount(1)
+  await expect(pane).toContainText(reason)
+  await pane.getByRole('button', { name: 'Show more', exact: true }).click()
+  await expect(pane.locator('.pending-list li')).toHaveCount(2)
+  await expect(pane.getByRole('status')).toHaveText('At least 2 changes waiting for the next release')
+  await expect(pane).toContainText(reason)
+  await expect(pane.getByRole('button', { name: 'Show more', exact: true })).toHaveCount(0)
+  await expect(pane.getByRole('button', { name: 'Close waiting changes', exact: true })).toBeFocused()
+  refreshed = true
+  await pane.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(pane.getByRole('status')).toHaveText('2 changes waiting for the next release')
+  await expect(pane.locator('.pending-list li')).toHaveCount(2)
+  await expect(pane).not.toContainText(reason)
+  expect(errors).toEqual([])
+})
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`header status stays on one line from 600px and stacks cleanly on phones ${colorScheme} (AEON-635 fix2)`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+    await page.clock.setFixedTime(NOW + 30 * 60_000)
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    const { errors } = await open(page)
+    for (const width of [1440, 1280, 1181, 1024, 761, 760, 600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      const dock = sheet(page).locator('.status-dock')
+      await expect(dock).toBeVisible()
+      const layout = await dock.evaluate(el => {
+        const status = el.querySelector('.status-line')!, version = el.querySelector('.dock-version')!
+        const range = document.createRange()
+        range.selectNodeContents(status.querySelector('span:last-child')!)
+        const lines = Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0)
+        const a = status.getBoundingClientRect(), b = version.getBoundingClientRect(), box = el.getBoundingClientRect()
+        const dialog = el.closest('dialog')!
+        return { lines: lines.length, sameLine: a.top < b.bottom && b.top < a.bottom,
+          inside: Math.min(a.left, b.left) >= box.left - 0.5 && Math.max(a.right, b.right) <= box.right + 0.5,
+          divider: parseFloat(getComputedStyle(version).borderLeftWidth), overflow: dialog.scrollWidth - dialog.clientWidth }
+      })
+      expect(layout.inside, `dock contents at ${width}`).toBe(true)
+      expect(layout.overflow, `sheet overflow at ${width}`).toBeLessThanOrEqual(1)
+      if (width >= 600) {
+        expect(layout.lines, `status text lines at ${width}`).toBe(1)
+        expect(layout.sameLine, `status and version at ${width}`).toBe(true)
+      } else expect(layout.divider).toBe(0)
+      if ([390, 1024, 1440].includes(width)) {
+        await expectStableControls({ controls: headerControls(page, width === 390), scrollAreas: { sheet: sheet(page) },
+          interactions: [
+            { name: 'German header', run: async () => { await radio(page, 'DE').click(); await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true') } },
+            { name: 'Details header', run: async () => { await radio(page, 'Details').click(); await expect(radio(page, 'Details')).toHaveAttribute('aria-checked', 'true') } },
+          ] })
+        await shot(page, width, colorScheme, 'fix2-header-de')
+      }
+    }
+    expect(errors).toEqual([])
+  })
+}
+
+test('longer outdated-page status can wrap while Reload stays inside the sheet (AEON-635 fix2)', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 1000 })
+  await open(page, 'available', undefined, data().history.releases[2]!.version)
+  const dock = sheet(page).locator('.status-dock')
+  await expect(dock.locator('.outdated')).toContainText('this page still runs')
+  for (const width of [600, 390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await expect(dock.getByRole('button', { name: 'Reload', exact: true })).toBeVisible()
+    for (const area of [dock, sheet(page)]) expect(await area.evaluate(el => el.scrollWidth - el.clientWidth), `update status overflow at ${width}`).toBeLessThanOrEqual(1)
+  }
 })
