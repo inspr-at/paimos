@@ -4436,42 +4436,10 @@
     "261003095616.0.0": {
       "release_channel": "stable",
       "release_sequence": 122,
-      "snapshot_sha256": "d303e43e8f97005403b383e4b84de6c1f0243d8e0f61eec14e35b6517817490c",
-      "captured_at": "2026-10-03T14:47:43Z",
+      "snapshot_sha256": "dfde20330af8aa3444e09684ba25cf68a40c49ccef4dcca6aff4a38ff8621d10",
+      "captured_at": "2026-10-03T16:34:37Z",
       "release_revision": 1,
       "items": [
-        {
-          "key": "AEON-536",
-          "pill_en": "Questions in one place",
-          "pill_de": "Fragen an einem Ort",
-          "benefit_en": "Agents can send questions to the Decision Desk. You answer them one at a time and see their delivery status.",
-          "benefit_de": "Agents können Fragen am Entscheidungstisch ablegen. Du beantwortest sie einzeln und siehst ihren Zustellstatus.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-564",
-          "pill_en": "Correct recorded answers",
-          "pill_de": "Antworten gezielt korrigieren",
-          "benefit_en": "New question answers wait 10 seconds before delivery; editing them restarts that window. Later corrections keep the previous answer in the record, and delivery failures remain visible.",
-          "benefit_de": "Neue Antworten auf Fragen warten vor der Zustellung zehn Sekunden; eine Änderung startet diese Frist neu. Spätere Korrekturen erhalten den bisherigen Eintrag, und Zustellfehler bleiben sichtbar.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-573",
-          "pill_en": "Manage recurring tickets",
-          "pill_de": "Wiederkehrende Tickets verwalten",
-          "benefit_en": "Set up recurring tickets from the Repeat menu and manage schedules in project settings, including pause, resume and run now.",
-          "benefit_de": "Lege wiederkehrende Tickets über das Menü Wiederholen an und verwalte ihre Pläne in den Projekteinstellungen, mit Pausieren, Fortsetzen und Jetzt ausführen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-580",
-          "pill_en": "Owner workstation key",
-          "pill_de": "Eigentümer verwalten per Schlüssel",
-          "benefit_en": "As owner, you can use the CLI to designate one paired workstation key for workspace administration. The key stays within its granted permissions.",
-          "benefit_de": "Als Eigentümer kannst du per CLI einen gekoppelten Arbeitsplatzschlüssel für die Verwaltung deines Arbeitsbereichs markieren. Der Schlüssel arbeitet im Rahmen seiner erteilten Rechte.",
-          "group": "features"
-        },
         {
           "key": "AEON-611",
           "pill_en": "Newest decisions first",
