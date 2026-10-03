@@ -175,7 +175,6 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	if err != nil {
 		return Effective{}, err
 	}
-	result := effectiveGrants(g, projectID)
 	var creator *grants
 	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
 		c, err := readGrants(ctx, tx, tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person})
@@ -183,16 +182,46 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 			return Effective{}, err
 		}
 		creator = &c
-		ceiling := effectiveGrants(c, projectID)
+	}
+	return effectiveWithCreator(p, g, creator, projectID), nil
+}
+
+// ReadPermissionCheckerTx reads live grants once for a bounded project inventory
+// in the caller's read snapshot. Mutations still use RequireTx after their locks.
+func ReadPermissionCheckerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) (func(string) error, error) {
+	if _, ok := Lookup(permission); !ok {
+		return nil, ErrForbidden
+	}
+	g, err := readGrants(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	var creator *grants
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
+		c, e := readGrants(ctx, tx, tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person})
+		if e != nil {
+			return nil, e
+		}
+		creator = &c
+	}
+	return func(project string) error {
+		return permitEffective(p, permission, effectiveWithCreator(p, g, creator, project), Scope{ProjectID: project})
+	}, nil
+}
+
+// Derived reads use the same project in the acting principal's and creator's grants.
+func effectiveWithCreator(p tenant.Principal, g grants, creator *grants, projectID string) Effective {
+	result := effectiveGrants(g, projectID)
+	if creator != nil {
+		ceiling := effectiveGrants(*creator, projectID)
 		result.Workspace.Permissions = intersect(result.Workspace.Permissions, ceiling.Workspace.Permissions)
 		if result.Project != nil && ceiling.Project != nil {
 			result.Project.Permissions = intersect(result.Project.Permissions, ceiling.Project.Permissions)
 		}
 		result.anyProject = intersect(result.anyProject, ceiling.anyProject)
 	}
-	// Derived reads must use the same project in both sets of live grants.
 	applyCoordinatorReads(&result, p, g, creator)
-	return result, nil
+	return result
 }
 
 func effectiveGrants(g grants, projectID string) Effective {

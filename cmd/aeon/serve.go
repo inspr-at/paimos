@@ -46,6 +46,7 @@ import (
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/decisiondesk"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deliveryadoption"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
@@ -355,7 +356,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			tenantbrand.New(pool),
 			workspaceModels,
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(delivery.NewStore(pool).UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),

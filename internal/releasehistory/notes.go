@@ -18,6 +18,7 @@ import (
 
 const SnapshotSchema = "aeon.release-note-snapshot.v1"
 const MembershipSource = "journey_tickets.release_node_id"
+const ShipsInMembershipSource = "ships_in.release_node_id"
 const ManifestMembershipSource = "release-manifest-tickets"
 const FieldSource = "nodes.fields"
 
@@ -102,7 +103,53 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return nil, fmt.Errorf("ticket snapshot must contain one JSON object")
 	}
-	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && !CalendarScheme(s.VersionScheme)) || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || (s.MembershipSource != MembershipSource && s.MembershipSource != ManifestMembershipSource) || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || (s.MembershipSource == MembershipSource && !noteUUID.MatchString(s.ReleaseID)) {
+	if (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && !CalendarScheme(s.VersionScheme)) || (s.Version == "" && s.VersionScheme != "") {
+		return nil, fmt.Errorf("ticket snapshot identity, version or provenance is incomplete")
+	}
+	return notesFromDecoded(raw, s, source)
+}
+
+// ProjectSnapshotBinding is supplied from an authorized project release row.
+// Empty version and scheme bind an uncut preview or a historical journey
+// capture made before a version was assigned, never a new frozen capture.
+type ProjectSnapshotBinding struct{ TenantID, ProjectID, ReleaseID, VersionScheme, Version string }
+
+func ProjectNotesFromSnapshot(raw []byte, expected ProjectSnapshotBinding, source string) (*Notes, error) {
+	// Historical captures retain the existing ceiling. The new ships_in
+	// ceiling is checked after bounded decoding and before projecting notes.
+	if len(raw) > 16<<20 {
+		return nil, fmt.Errorf("ticket snapshot exceeds 16 MiB")
+	}
+	var s NoteSnapshot
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&s); err != nil {
+		return nil, fmt.Errorf("invalid ticket snapshot: %w", err)
+	}
+	if d.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("ticket snapshot must contain one JSON object")
+	}
+	if s.MembershipSource == ShipsInMembershipSource && len(raw) > 12<<20 {
+		return nil, fmt.Errorf("ticket snapshot exceeds 12 MiB")
+	}
+	if !noteUUID.MatchString(expected.TenantID) || !noteUUID.MatchString(expected.ProjectID) || !noteUUID.MatchString(expected.ReleaseID) || s.TenantID != expected.TenantID || s.ProjectID != expected.ProjectID || s.ReleaseID != expected.ReleaseID || s.Version != expected.Version || s.VersionScheme != expected.VersionScheme {
+		return nil, fmt.Errorf("project snapshot does not match the authorized release identity and version pair")
+	}
+	if s.Version == "" && s.VersionScheme == "" {
+		if s.Frozen && s.MembershipSource == ShipsInMembershipSource {
+			return nil, fmt.Errorf("frozen project snapshot requires a version pair")
+		}
+	} else if !ValidProjectVersion(s.VersionScheme, s.Version) {
+		return nil, fmt.Errorf("invalid project snapshot version pair")
+	}
+	if s.MembershipSource != ShipsInMembershipSource && s.MembershipSource != MembershipSource {
+		return nil, fmt.Errorf("invalid project snapshot provenance")
+	}
+	return notesFromDecoded(raw, s, source)
+}
+
+func notesFromDecoded(raw []byte, s NoteSnapshot, source string) (*Notes, error) {
+	if s.Schema != SnapshotSchema || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || (s.MembershipSource == ShipsInMembershipSource && len(s.Tickets) > 5000) || (s.MembershipSource != MembershipSource && s.MembershipSource != ShipsInMembershipSource && s.MembershipSource != ManifestMembershipSource) || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || (s.MembershipSource != ManifestMembershipSource && !noteUUID.MatchString(s.ReleaseID)) {
 		return nil, fmt.Errorf("ticket snapshot identity, version or provenance is incomplete")
 	}
 	if s.MembershipSource == ManifestMembershipSource && (s.ReleaseID != "" || s.Version == "" || !s.Backfilled || s.Label != BackfillLabel || !noteUUID.MatchString(s.ActorID)) {
@@ -139,7 +186,13 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			return nil, fmt.Errorf("invalid snapshot ticket identity")
 		}
 		canonical, _ := json.Marshal(t)
+		if s.MembershipSource == ShipsInMembershipSource && !ValidCapturedNoteKey(t.Key) {
+			return nil, fmt.Errorf("invalid captured node key")
+		}
 		if old, ok := seen[t.ID]; ok {
+			if s.MembershipSource == ShipsInMembershipSource {
+				return nil, fmt.Errorf("duplicate snapshot ticket identity")
+			}
 			if !bytes.Equal(old, canonical) {
 				return nil, fmt.Errorf("conflicting duplicate snapshot ticket")
 			}

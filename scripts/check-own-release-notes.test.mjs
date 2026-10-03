@@ -114,3 +114,15 @@ test('the PR must contain its own sequence, not just the previous release', () =
   save();
   assert.equal(checkOwnReleaseNotes(root).public_items, 1);
 });
+
+test('captured task keys keep identity and malformed or duplicate keys fail', () => {
+  const { root, notes, save } = fixture(122);
+  const item = { key: 'TSK-1', group: 'features', pill_en: 'Captured task notes', pill_de: 'Erfasste Aufgaben Hinweise', benefit_en: 'Tasks retain their actual keys.', benefit_de: 'Aufgaben behalten ihre Schlüssel.' };
+  notes.items.push(item); save();
+  assert.equal(checkOwnReleaseNotes(root).public_items, 1);
+  for (const key of ['TSK-0', 'TSK-01', 'tsk-1', 'T-1', 'A'.repeat(11) + '-1', 'TSK-' + '1'.repeat(27)]) {
+    item.key = key; save(); assert.throws(() => checkOwnReleaseNotes(root), /invalid public item/);
+  }
+  item.key = 'TSK-1'; notes.items.push({ ...item }); save();
+  assert.throws(() => checkOwnReleaseNotes(root), /invalid public item/);
+});

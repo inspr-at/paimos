@@ -48,6 +48,7 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	addR1Tool(s, "knowledge_create", "Create a knowledge entry.", knowledgeCreateArgs{})
 	addR1Tool(s, "knowledge_update", "Update a knowledge entry.", knowledgeUpdateArgs{})
 	addR1Tool(s, "search", "Search issues by free text.", searchArgs{})
+	rt.addReleaseTools(s)
 	return s
 }
 

@@ -42,18 +42,19 @@ func (s *Store) WithClock(now func() time.Time) *Store {
 }
 
 type Release struct {
-	ProjectID     string     `json:"project_id"`
-	ID            string     `json:"release_id"`
-	Visibility    string     `json:"visibility"`
-	Sequence      int        `json:"sequence,omitempty"`
-	State         string     `json:"state"`
-	Rank          string     `json:"rank"`
-	Revision      int64      `json:"revision"`
-	EntryClosesAt *time.Time `json:"entry_closes_at"`
-	VersionScheme string     `json:"version_scheme,omitempty"`
-	Version       string     `json:"version,omitempty"`
-	CutAt         *time.Time `json:"cut_at,omitempty"`
-	ReleasedAt    *time.Time `json:"released_at,omitempty"`
+	Recovery      *RecoveryCounts `json:"recovery,omitempty"`
+	ProjectID     string          `json:"project_id"`
+	ID            string          `json:"release_id"`
+	Visibility    string          `json:"visibility"`
+	Sequence      int             `json:"sequence,omitempty"`
+	State         string          `json:"state"`
+	Rank          string          `json:"rank"`
+	Revision      int64           `json:"revision"`
+	EntryClosesAt *time.Time      `json:"entry_closes_at"`
+	VersionScheme string          `json:"version_scheme,omitempty"`
+	Version       string          `json:"version,omitempty"`
+	CutAt         *time.Time      `json:"cut_at,omitempty"`
+	ReleasedAt    *time.Time      `json:"released_at,omitempty"`
 }
 
 const releaseColumns = `project_node_id::text,release_node_id::text,visibility,coalesce(sequence,0),state,rank,revision,entry_closes_at,coalesce(version_scheme,''),coalesce(version,''),cut_at,released_at`
@@ -223,14 +224,16 @@ func (w *write) counts(releases []string) error {
 }
 
 type PlanRequest struct {
-	ProjectID   string
-	Visibility  string
-	Title       string
-	CreationKey string
+	ProjectID      string
+	Visibility     string
+	Title          string
+	CreationKey    string
+	EntryClosesAt  *time.Time
+	AfterReleaseID string
 }
 
 func (s *Store) Plan(ctx context.Context, p tenant.Principal, in PlanRequest) (Release, error) {
-	if (in.Visibility != "internal" && in.Visibility != "published") || len(in.Title) > 512 || strings.TrimSpace(in.Title) == "" || len(in.CreationKey) > 128 {
+	if (in.Visibility != "internal" && in.Visibility != "published") || len(in.Title) > 512 || (in.Title != "" && strings.TrimSpace(in.Title) == "") || len(in.CreationKey) > 128 || (in.AfterReleaseID != "" && !uuid(in.AfterReleaseID)) {
 		return Release{}, errors.New("invalid release plan")
 	}
 	var out Release
@@ -245,9 +248,38 @@ func (s *Store) Plan(ctx context.Context, p tenant.Principal, in PlanRequest) (R
 				return err
 			}
 		}
-		r, err := w.plan(in.Visibility, in.Title, in.CreationKey)
+		title := in.Title
+		if title == "" {
+			title = "Internal release"
+			if in.Visibility == "published" {
+				title = fmt.Sprintf("Release %d", w.nextSequence)
+			}
+		}
+		r, err := w.plan(in.Visibility, title, in.CreationKey)
 		if err != nil {
 			return err
+		}
+		if in.AfterReleaseID != "" {
+			rank, e := w.rank(Container{TenantID: p.TenantID, ProjectID: w.project}, Slot{AfterID: in.AfterReleaseID}, r.ID, false)
+			if e != nil {
+				return e
+			}
+			r, e = w.setRank(r, rank)
+			if e != nil {
+				return e
+			}
+		}
+		if in.EntryClosesAt != nil {
+			r, err = scanRelease(w.tx.QueryRow(w.ctx, `UPDATE project_releases SET entry_closes_at=$4 WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3 RETURNING `+releaseColumns, p.TenantID, w.project, r.ID, in.EntryClosesAt))
+			if err != nil {
+				return err
+			}
+		}
+		// The creation event describes the final optional position/deadline.
+		for i := range w.changes {
+			if w.changes[i].Type == "release.planned" && w.changes[i].NodeID != nil && *w.changes[i].NodeID == r.ID {
+				w.changes[i].After = r
+			}
 		}
 		out = r
 		return w.counts(nil)

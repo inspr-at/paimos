@@ -303,6 +303,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if read && (len(parts) == 2 || len(parts) == 3 && parts[2] == "status") {
 			return "questions.read", true
 		}
+	case "delivery":
+		if read && len(parts) == 2 && parts[1] == "adoptions" {
+			return "releases.read", true
+		}
 	case "releases":
 		// Build history is readable by agents. Presentation writes remain person-only.
 		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] != "") {
@@ -354,6 +358,15 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if len(parts) == 3 && read {
 				return "harness.read", true
 			}
+		case "delivery", "backlog":
+			if read && (len(parts) == 3 || len(parts) == 4 && (parts[3] == "overview" || parts[3] == "adoption-report" || parts[3] == "verify")) {
+				return "releases.read", true
+			}
+			break
+		case "ships-in":
+			if len(parts) == 4 && parts[3] == "batch" && r.Method == http.MethodPost {
+				return "releases.write", true
+			}
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
@@ -366,6 +379,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "intake":
 			return scope("intake")
 		case "releases":
+			if read && (len(parts) == 3 || len(parts) == 4 || len(parts) == 5 && parts[4] == "items") {
+				return "releases.read", true
+			}
+			if len(parts) == 5 && r.Method == http.MethodPost && (parts[4] == "cut" || parts[4] == "close" || parts[4] == "publish" || parts[4] == "state") {
+				return "releases.deploy", true
+			}
 			if len(parts) == 5 && parts[4] == "note-snapshot" {
 				if read {
 					return "releases.read", true
@@ -394,6 +413,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "stage.<op>", true
 		}
 	case "nodes":
+		if len(parts) == 3 && parts[2] == "ships-in" && r.Method == http.MethodPut {
+			return "releases.write", true
+		}
+
 		// A person marks a delivery for rework. An agent key must not inherit nodes.read here.
 		if len(parts) == 3 && parts[2] == "delivery-ratings" {
 			return "", false

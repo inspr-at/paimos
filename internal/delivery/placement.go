@@ -21,6 +21,9 @@ type PlacementRequest struct {
 	Slot                    Slot
 	Expedite                bool
 	DueOn                   *string
+	Top                     bool
+	PreserveExpedite        bool
+	PreserveDueOn           bool
 }
 
 type Placement struct {
@@ -68,22 +71,36 @@ func validatePlacements(project string, requests []PlacementRequest) error {
 	return nil
 }
 
+type PlacementResult struct {
+	Items           []Placement `json:"items"`
+	ReleaseRevision int64       `json:"release_revision,omitempty"`
+}
+
 func (s *Store) Place(ctx context.Context, p tenant.Principal, project string, requests []PlacementRequest) ([]Placement, error) {
+	result, err := s.PlaceWithRevision(ctx, p, project, requests)
+	return result.Items, err
+}
+func (s *Store) PlaceWithRevision(ctx context.Context, p tenant.Principal, project string, requests []PlacementRequest) (PlacementResult, error) {
 	if err := validatePlacements(project, requests); err != nil {
-		return nil, err
+		return PlacementResult{}, err
 	}
-	var out []Placement
+	var out PlacementResult
 	err := s.mutate(ctx, p, project, "", false, func(w *write) error {
 		before, after, err := w.place(requests, nil)
 		if err != nil {
 			return err
 		}
+		out.Items = after
+		if requests[0].ReleaseID != "" {
+			if err = w.tx.QueryRow(w.ctx, `SELECT revision FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3`, p.TenantID, project, requests[0].ReleaseID).Scan(&out.ReleaseRevision); err != nil {
+				return err
+			}
+		}
 		w.placementEvents(before, after)
-		out = after
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return PlacementResult{}, err
 	}
 	return out, nil
 }
@@ -255,6 +272,15 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 			return nil, nil, err
 		}
 	}
+	for i := range requests {
+		old := placements[requests[i].ItemID]
+		if requests[i].PreserveExpedite {
+			requests[i].Expedite = old.Expedite
+		}
+		if requests[i].PreserveDueOn {
+			requests[i].DueOn = old.DueOn
+		}
+	}
 	requested := map[string]bool{}
 	// Release unique expedite flags first without changing revisions. Both a
 	// forward batch and undo may transfer the flag before the old holder's turn;
@@ -357,6 +383,15 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 				next.Rank, err = w.restoreRank(restored, true)
 			}
 		} else {
+			if request.Top {
+				neighbours, e := ItemNeighbours(w.ctx, w.tx, Container{TenantID: w.p.TenantID, ProjectID: w.project, ReleaseID: request.ReleaseID}, "", n.id)
+				if e != nil {
+					return nil, nil, e
+				}
+				if neighbours.Next != nil {
+					request.Slot = Slot{BeforeID: neighbours.Next.ID}
+				}
+			}
 			next.Rank, err = w.rank(Container{TenantID: w.p.TenantID, ProjectID: w.project, ReleaseID: request.ReleaseID}, request.Slot, n.id, true)
 		}
 		if err != nil {

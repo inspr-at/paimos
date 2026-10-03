@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"time"
 
@@ -23,32 +22,9 @@ type TransitionRequest struct {
 	VersionScheme, Version string
 }
 
-var legacyVersion = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
-var calendarV1 = regexp.MustCompile(`^[1-9][0-9]\.[0-9]{2}\.[0-9]{2}(?:\.[0-9]{2}\.[0-9]{2}\.[0-9]{2})?$`)
-
-// ValidProjectVersion is explicitly scheme-tagged; adoption never silently
-// migrates a legacy or calendar-v1 project to the product's calendar scheme.
+// ValidProjectVersion preserves the P2 store API and shares the tagged validator.
 func ValidProjectVersion(scheme, version string) bool {
-	if len(scheme) > 64 || len(version) > 64 {
-		return false
-	}
-	switch scheme {
-	case "legacy":
-		return legacyVersion.MatchString(version)
-	case "inspr-calendar-v1":
-		if !calendarV1.MatchString(version) {
-			return false
-		}
-		layout := "2006.01.02"
-		if len(version) == 17 {
-			layout += ".15.04.05"
-		}
-		_, err := time.Parse(layout, "20"+version)
-		return err == nil
-	case "inspr-calendar-v2", "inspr-calver-3":
-		return releasehistory.ValidVersion(version)
-	}
-	return false
+	return releasehistory.ValidProjectVersion(scheme, version)
 }
 
 func (s *Store) Transition(ctx context.Context, p tenant.Principal, in TransitionRequest) (Release, error) {
@@ -62,6 +38,8 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 	case "abandon":
 		// Its required permission depends on the current fenced state.
 		permission, person = "", true
+	case "state_building":
+		permission, person = "", false
 	case "freeze", "unfreeze", "close":
 	case "cut":
 		if !ValidProjectVersion(in.VersionScheme, in.Version) {
@@ -78,15 +56,32 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 		if err != nil {
 			return err
 		}
-		if old.Revision != in.ExpectedRevision {
-			return ErrRevisionChanged
-		}
 		if in.Action == "cut" && old.CutAt != nil {
 			if old.State == "frozen" && old.VersionScheme == in.VersionScheme && old.Version == in.Version {
 				out = old
-				return nil
+				out.Recovery, err = recoveryCounts(w.ctx, w.tx, p, old)
+				return err
 			}
 			return ErrTransition
+		}
+		if old.Revision != in.ExpectedRevision {
+			return ErrRevisionChanged
+		}
+		if in.Action == "state_building" {
+			if old.State == "frozen" {
+				in.Action = "unfreeze"
+				if err = w.require("releases.deploy"); err != nil {
+					return err
+				}
+			} else {
+				in.Action = "building"
+				if p.Kind != tenant.Person {
+					return authz.ErrForbidden
+				}
+				if err = w.require("releases.write"); err != nil {
+					return err
+				}
+			}
 		}
 		state := old.State
 		if in.Action == "abandon" {
@@ -197,6 +192,13 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 		if in.Action == "close" {
 			typ = "release.closed"
 		}
+		if in.Action == "freeze" || in.Action == "cut" || in.Action == "close" {
+			out.Recovery, err = recoveryCounts(w.ctx, w.tx, p, out)
+			if err != nil {
+				return err
+			}
+		}
+
 		w.audit(typ, old.ID, old, out)
 		return nil
 	})
@@ -405,7 +407,7 @@ func (s *Store) Publish(ctx context.Context, p tenant.Principal, in ReleaseEdit,
 	}
 	var out Release
 	err := s.mutate(ctx, p, in.ProjectID, "releases.deploy", false, func(w *write) error {
-		r, err := w.lockReleases([]string{in.ReleaseID})
+		r, err := w.publicationLocks(in.ReleaseID)
 		if err != nil {
 			return err
 		}
@@ -438,6 +440,11 @@ func (s *Store) Publish(ctx context.Context, p tenant.Principal, in ReleaseEdit,
 		}
 		// PublishTx may re-enter the tree lock, already held exclusively from
 		// the start. It runs before our audit flush; no lock upgrade occurs.
+		out.Recovery, err = recoveryCounts(w.ctx, w.tx, p, out)
+		if err != nil {
+			return err
+		}
+
 		if err = proof.Settle(w.ctx, w.tx, out); err != nil {
 			return err
 		}
