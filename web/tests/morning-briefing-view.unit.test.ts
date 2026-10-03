@@ -104,6 +104,54 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
   return { root, saves, paths }
 }
 
+function mountAllowance(dashboard: UsageDashboard) {
+  const options = { dashboard, noCost: false }
+  return mount(options)
+}
+
+function allowanceDashboard(state: string, truncated: boolean, visible = true) {
+  const dashboard = usageDashboard('reported')
+  Object.assign(dashboard.allowance, { state, truncated, windows: visible ? [{
+    account_id: 'permitted-account', label: 'Permitted budget', harness: 'codex', account_state: 'ready',
+    window_id: 'permitted-window', unit: 'requests', allowance: 100, used: null, reserved: 2,
+    pace_model: 'steady', burst_ratio: '1', starts_at: START, ends_at: END,
+    provisional: true, pace_cap: 50, headroom: null, hard_remaining: null,
+  }] : [], accounts: [{ account_id: 'withheld-account', label: 'Private account', harness: 'codex', account_state: 'ready' }] })
+  return dashboard
+}
+
+it.each([false, true])('renders permitted partial windows and explains omissions with truncated=%s', async truncated => {
+  const { root, saves } = await mountAllowance(allowanceDashboard('partial', truncated))
+  const text = textOf(root)
+  expect(text).toContain('Accounts now')
+  expect(flatten(root).find(el => el.tag === 'a' && textOf(el) === 'Permitted budget')?.props.href).toBe('/agents')
+  expect(text).toContain('Usage not reported · provisional')
+  expect(text).toContain(`Window ends ${END}`)
+  expect(text).toContain('Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
+  expect(text.includes('Account budget windows are truncated. Additional windows and accounts are omitted.')).toBe(truncated)
+  expect(text).not.toContain('No account budget windows recorded.')
+  expect(text).not.toContain('Private account')
+  expect(saves[0]?.last_visit).toBe(END)
+})
+
+it('reports truncation when all account budgets are withheld without exposing their details', async () => {
+  const { root } = await mountAllowance(allowanceDashboard('withheld', true, false))
+  const text = textOf(root)
+  expect(text).toContain('Account budgets require account access.')
+  expect(text).toContain('Account budget windows are truncated. Additional windows and accounts are omitted.')
+  expect(text).not.toContain('No account budget windows recorded.')
+  expect(text).not.toContain('Permitted budget')
+  expect(text).not.toContain('Private account')
+})
+
+it('keeps complete visible budgets free of omission notices', async () => {
+  const { root } = await mountAllowance(allowanceDashboard('visible', false))
+  const text = textOf(root)
+  expect(text).toContain('Permitted budget')
+  expect(text).not.toContain('Account budget coverage is partial.')
+  expect(text).not.toContain('Account budget windows are truncated.')
+})
+
 it('saves the database snapshot cutoff even when the browser clock is ahead', async () => {
   const { saves } = await mount()
   expect(saves[0]?.last_visit).toBe(END)
@@ -195,52 +243,4 @@ it('preserves held request body, project label and an app Source link', async ()
 it('records calls to the real desk reader export in the briefing harness', async () => {
   const { paths } = await mount({}, "import { readDeskProjection } from '../lib/decisionDesk'\nvoid readDeskProjection(100)\n")
   expect(paths.filter(path => path.startsWith('/decision-desk/projection'))).toEqual(['/decision-desk/projection?limit=100'])
-})
-
-function mountAllowance(dashboard: UsageDashboard) {
-  const options = { dashboard, noCost: false }
-  return mount(options)
-}
-
-function allowanceDashboard(state: string, truncated: boolean, visible = true) {
-  const dashboard = usageDashboard('reported')
-  Object.assign(dashboard.allowance, { state, truncated, windows: visible ? [{
-    account_id: 'permitted-account', label: 'Permitted budget', harness: 'codex', account_state: 'ready',
-    window_id: 'permitted-window', unit: 'requests', allowance: 100, used: null, reserved: 2,
-    pace_model: 'steady', burst_ratio: '1', starts_at: START, ends_at: END,
-    provisional: true, pace_cap: 50, headroom: null, hard_remaining: null,
-  }] : [], accounts: [{ account_id: 'withheld-account', label: 'Private account', harness: 'codex', account_state: 'ready' }] })
-  return dashboard
-}
-
-it.each([false, true])('renders permitted partial windows and explains omissions with truncated=%s', async truncated => {
-  const { root, saves } = await mountAllowance(allowanceDashboard('partial', truncated))
-  const text = textOf(root)
-  expect(text).toContain('Accounts now')
-  expect(flatten(root).find(el => el.tag === 'a' && textOf(el) === 'Permitted budget')?.props.href).toBe('/agents')
-  expect(text).toContain('Usage not reported · provisional')
-  expect(text).toContain(`Window ends ${END}`)
-  expect(text).toContain('Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
-  expect(text.includes('Account budget windows are truncated. Additional windows and accounts are omitted.')).toBe(truncated)
-  expect(text).not.toContain('No account budget windows recorded.')
-  expect(text).not.toContain('Private account')
-  expect(saves[0]?.last_visit).toBe(END)
-})
-
-it('reports truncation when all account budgets are withheld without exposing their details', async () => {
-  const { root } = await mountAllowance(allowanceDashboard('withheld', true, false))
-  const text = textOf(root)
-  expect(text).toContain('Account budgets require account access.')
-  expect(text).toContain('Account budget windows are truncated. Additional windows and accounts are omitted.')
-  expect(text).not.toContain('No account budget windows recorded.')
-  expect(text).not.toContain('Permitted budget')
-  expect(text).not.toContain('Private account')
-})
-
-it('keeps complete visible budgets free of omission notices', async () => {
-  const { root } = await mountAllowance(allowanceDashboard('visible', false))
-  const text = textOf(root)
-  expect(text).toContain('Permitted budget')
-  expect(text).not.toContain('Account budget coverage is partial.')
-  expect(text).not.toContain('Account budget windows are truncated.')
 })
