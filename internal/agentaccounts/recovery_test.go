@@ -141,7 +141,7 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 		t.Fatal("owner check did not capture its wait")
 	}
 	runs := []string{insertRun(t, f.admin, f.runner, f.profile), insertRun(t, f.admin, f.runner, f.profile)}
-	// Pause the first transaction after it owns the tenant fence. The second
+	// Pause the first transaction after it owns the pairing fence. The second
 	// must already be inside its transaction attempting that same fence before
 	// the first can continue; channels prove overlap without elapsed time.
 	tracer := &bRaceTracer{held: make(chan struct{}), competing: make(chan struct{}), release: make(chan struct{})}
@@ -221,7 +221,7 @@ type bRaceTracer struct {
 type bRaceKey struct{}
 
 func (b *bRaceTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.HasPrefix(data.SQL, "SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE") {
+	if strings.HasPrefix(data.SQL, "SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'") {
 		n := b.count.Add(1)
 		if n == 2 {
 			<-b.held
