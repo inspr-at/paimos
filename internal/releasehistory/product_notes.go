@@ -83,7 +83,7 @@ func ReadProductNotes(raw []byte) (ProductNotes, error) {
 		}
 		seen := map[string]bool{}
 		for _, item := range notes.Items {
-			if ticketKey.FindString(item.Key) != item.Key || !strings.HasPrefix(item.Key, "AEON-") || seen[item.Key] || (item.Group != "" && item.Group != GroupFeatures && item.Group != GroupFixes && item.Group != GroupOther) {
+			if !ValidCapturedNoteKey(item.Key) || seen[item.Key] || (item.Group != "" && item.Group != GroupFeatures && item.Group != GroupFixes && item.Group != GroupOther) {
 				return bundle, fmt.Errorf("product note ticket identity or group is invalid")
 			}
 			seen[item.Key] = true

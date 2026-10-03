@@ -2,8 +2,11 @@
 package releases
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/releasehistory"
@@ -16,6 +19,35 @@ import (
 func (m *module) noteSnapshot(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r, false)
 	if !ok {
+		return
+	}
+	var adopted bool
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	modeErr := db.ReadSnapshot(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_delivery WHERE tenant_id=$1 AND project_node_id=$2)`, p.TenantID, r.PathValue("projectId")).Scan(&adopted)
+	})
+	if modeErr != nil {
+		containerResponse(w, nil, modeErr)
+		return
+	}
+	if adopted {
+		result, err := m.store.NoteSnapshot(ctx, p, r.PathValue("projectId"), r.PathValue("releaseId"))
+		if err != nil {
+			containerResponse(w, nil, err)
+			return
+		}
+		if result.Unavailable {
+			missing := releasehistory.MissingNotes()
+			missing.Gaps = []string{"Not captured before this project adopted releases."}
+			containerResponse(w, missing, nil)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Aeon-Notes-Waiting", strconv.Itoa(len(result.Waiting)))
+		w.Header().Set("Aeon-Notes-Carried-Forward", strconv.Itoa(len(result.CarriedForward)))
+		_, _ = w.Write(result.Raw)
 		return
 	}
 	var out releasehistory.NoteSnapshot

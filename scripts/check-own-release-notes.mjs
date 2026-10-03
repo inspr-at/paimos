@@ -25,8 +25,10 @@ export function checkOwnReleaseNotes(root = resolve(dirname(fileURLToPath(import
   }
   // Legacy fields are checked when present. From sequence 114, all EN/DE text
   // is required; written_after_release cannot waive metadata or translations.
+  const seen = new Set();
   for (const item of notes.items) {
-    if (!/^AEON-[1-9][0-9]*$/.test(item.key) || !['features', 'fixes', 'other'].includes(item.group)) fail('invalid public item');
+    if (typeof item.key !== 'string' || item.key.length > 30 || !/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$/.test(item.key) || seen.has(item.key) || !['features', 'fixes', 'other'].includes(item.group)) fail('invalid public item');
+    seen.add(item.key);
     for (const field of ['pill_en', 'pill_de', 'benefit_en', 'benefit_de']) {
       if (legacy && !Object.hasOwn(item, field)) continue;
       if (typeof item[field] !== 'string' || !item[field].trim()) fail(`${item.key}: ${field} is required`);

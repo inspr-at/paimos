@@ -73,7 +73,7 @@ func TestProductNotesProjectionAndImmutability(t *testing.T) {
 	if _, err := PublicNotesFromSnapshot(raw, notesVersion, s.TenantID, s.ProjectID, true); err == nil {
 		t.Fatal("invalid hide flag became public")
 	}
-	for _, bad := range []string{strings.Replace(string(encoded), `"items":`, `"internal_comment":"private","items":`, 1), strings.Replace(string(encoded), "AEON-7", "CLIENT-7", 1), string(encoded) + "{}"} {
+	for _, bad := range []string{strings.Replace(string(encoded), `"items":`, `"internal_comment":"private","items":`, 1), strings.Replace(string(encoded), "AEON-7", "CLIENT-0", 1), string(encoded) + "{}"} {
 		if _, err := ReadProductNotes([]byte(bad)); err == nil {
 			t.Fatal("accepted invalid public bundle")
 		}

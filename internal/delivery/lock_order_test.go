@@ -18,23 +18,27 @@ import (
 // actual competing paths. No fresh lock may follow events.Append.
 func TestDeliveryResourceLockInventory(t *testing.T) {
 	want := map[string]string{
-		"store.go:fence":              "project.Write",
-		"store.go:Plan":               "mutation plan",
-		"placement.go:Place":          "mutation placements",
-		"store.go:mutate":             "fence project events",
-		"store.go:projectWrite":       "project:NO KEY UPDATE",
-		"store.go:lockReleases":       "release:NO KEY UPDATE",
-		"store.go:Rerank":             "mutation releases",
-		"store.go:PromoteRelease":     "mutation releases",
-		"store.go:SetEntryDeadline":   "mutation releases",
-		"placement.go:placementLocks": "releases items",
-		"placement.go:lockItems":      "node:SHARE placement:UPDATE",
-		"placement.go:place":          "placements",
-		"transition.go:Transition":    "mutation rollover releases",
-		"transition.go:rollover":      "releases plan items",
-		"transition.go:Publish":       "mutation releases publication",
-		"undo.go:undoPlacements":      "fence project placements",
-		"undo.go:undoRank":            "fence project releases",
+		"store.go:fence":                  "project.Write",
+		"store.go:Plan":                   "mutation plan",
+		"placement.go:PlaceWithRevision":  "mutation placements",
+		"store.go:mutate":                 "fence project events",
+		"store.go:projectWrite":           "project:NO KEY UPDATE",
+		"store.go:lockReleases":           "release:NO KEY UPDATE",
+		"store.go:Rerank":                 "mutation releases",
+		"store.go:PromoteRelease":         "mutation releases",
+		"store.go:SetEntryDeadline":       "mutation releases",
+		"placement.go:placementLocks":     "releases items",
+		"placement.go:lockItems":          "node:SHARE placement:UPDATE",
+		"placement.go:place":              "placements",
+		"transition.go:Transition":        "mutation rollover releases",
+		"transition.go:rollover":          "releases plan items",
+		"transition.go:Publish":           "mutation publicationLocks publication",
+		"snapshot.go:publicationLocks":    "releases items",
+		"settings.go:Update":              "mutation releases",
+		"settings.go:SetDefaults":         "mutation",
+		"adoption_api.go:RequestAdoption": "project.Mutation",
+		"undo.go:undoPlacements":          "fence project placements",
+		"undo.go:undoRank":                "fence project releases",
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -88,7 +92,7 @@ func resourceSequence(t *testing.T, body *ast.BlockStmt) string {
 					name = receiver.Name + "." + f.Sel.Name
 				}
 			}
-			label = map[string]string{"fence": "fence", "authz.LockProjectWrite": "project.Write", "s.mutate": "mutation", "s.projectWrite": "project", "w.lockReleases": "releases", "w.lockItems": "items", "w.placementLocks": "placements", "w.place": "placements", "w.rollover": "rollover", "w.plan": "plan", "events.Append": "events", "proof.Settle": "publication"}[name]
+			label = map[string]string{"authz.LockProjectMutation": "project.Mutation", "w.publicationLocks": "publicationLocks", "fence": "fence", "authz.LockProjectWrite": "project.Write", "s.mutate": "mutation", "s.projectWrite": "project", "w.lockReleases": "releases", "w.lockItems": "items", "w.placementLocks": "placements", "w.place": "placements", "w.rollover": "rollover", "w.plan": "plan", "events.Append": "events", "proof.Settle": "publication"}[name]
 		case *ast.BasicLit:
 			if n.Kind != token.STRING {
 				break

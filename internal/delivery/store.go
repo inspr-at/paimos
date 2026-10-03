@@ -223,14 +223,16 @@ func (w *write) counts(releases []string) error {
 }
 
 type PlanRequest struct {
-	ProjectID   string
-	Visibility  string
-	Title       string
-	CreationKey string
+	ProjectID      string
+	Visibility     string
+	Title          string
+	CreationKey    string
+	EntryClosesAt  *time.Time
+	AfterReleaseID string
 }
 
 func (s *Store) Plan(ctx context.Context, p tenant.Principal, in PlanRequest) (Release, error) {
-	if (in.Visibility != "internal" && in.Visibility != "published") || len(in.Title) > 512 || strings.TrimSpace(in.Title) == "" || len(in.CreationKey) > 128 {
+	if (in.Visibility != "internal" && in.Visibility != "published") || len(in.Title) > 512 || (in.Title != "" && strings.TrimSpace(in.Title) == "") || len(in.CreationKey) > 128 || (in.AfterReleaseID != "" && !uuid(in.AfterReleaseID)) {
 		return Release{}, errors.New("invalid release plan")
 	}
 	var out Release
@@ -245,9 +247,32 @@ func (s *Store) Plan(ctx context.Context, p tenant.Principal, in PlanRequest) (R
 				return err
 			}
 		}
-		r, err := w.plan(in.Visibility, in.Title, in.CreationKey)
+		title := in.Title
+		if title == "" {
+			title = "Internal release"
+			if in.Visibility == "published" {
+				title = fmt.Sprintf("Release %d", w.nextSequence)
+			}
+		}
+		r, err := w.plan(in.Visibility, title, in.CreationKey)
 		if err != nil {
 			return err
+		}
+		if in.AfterReleaseID != "" {
+			rank, e := w.rank(Container{TenantID: p.TenantID, ProjectID: w.project}, Slot{AfterID: in.AfterReleaseID}, r.ID, false)
+			if e != nil {
+				return e
+			}
+			r, e = w.setRank(r, rank)
+			if e != nil {
+				return e
+			}
+		}
+		if in.EntryClosesAt != nil {
+			r, err = scanRelease(w.tx.QueryRow(w.ctx, `UPDATE project_releases SET entry_closes_at=$4 WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3 RETURNING `+releaseColumns, p.TenantID, w.project, r.ID, in.EntryClosesAt))
+			if err != nil {
+				return err
+			}
 		}
 		out = r
 		return w.counts(nil)
