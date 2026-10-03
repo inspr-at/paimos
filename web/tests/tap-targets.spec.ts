@@ -17,9 +17,10 @@ const report: TierReport = {
     price_multiplier: i + 1, usage_multiplier: i + 1, speed_factor: i + 1, mechanism: 'fixture',
   })),
 }
-async function setup(page: Page, theme: 'light' | 'dark') {
+async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable' | 'compact') {
   const data = fixtures()
   data.preferences.theme = { choice: theme }
+  data.preferences['list:display'] = { density }
   data.nodes.find(n => n.id === 'n-epic')!.title = longName
   data.nodes.find(n => n.id === 'n-2')!.title = longName
   // Keep the person's chosen columns constant while lazy children load: this
@@ -43,7 +44,7 @@ async function setup(page: Page, theme: 'light' | 'dark') {
 
 // Chromium excludes the right/bottom boundary of a box. Sample -22 exactly,
 // and the last fraction of a pixel inside +22, on all four sides of the centre.
-async function expectReach(control: Locator, expanded: boolean, phone: boolean) {
+async function expectReach(control: Locator, expanded: boolean) {
   await control.scrollIntoViewIfNeeded()
   const hits = await control.evaluate(el => {
     const rect = el.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2
@@ -52,10 +53,20 @@ async function expectReach(control: Locator, expanded: boolean, phone: boolean) 
       return { dx, dy, own: !!hit && (hit === el || el.contains(hit)), hit: hit?.outerHTML.slice(0, 200) }
     })
   })
-  // Phone cards have room for all four edges. Dense desktop table rows retain
-  // their existing height: sticky/group headers can cover the vertical reach.
-  const exposed = phone ? hits : hits.filter(hit => hit.dy === 0)
-  if (expanded) expect(exposed, 'exposed edges of the 44px reach belong to the control').toEqual(exposed.map(hit => ({ ...hit, own: true })))
+  if (expanded) expect(hits, 'all four edges of the 44px reach belong to the control').toEqual(hits.map(hit => ({ ...hit, own: true })))
+  if (expanded) {
+    const bounds = await control.evaluate(el => {
+      const row = el.closest('tr.ticket-row')
+      if (!row) return null
+      const rect = el.getBoundingClientRect(), parent = row.getBoundingClientRect()
+      const centre = rect.y + rect.height / 2
+      return { top: centre - 22 - parent.top, bottom: parent.bottom - (centre + 22) }
+    })
+    if (bounds) {
+      expect(bounds.top, 'hit area stays below the row top').toBeGreaterThanOrEqual(0)
+      expect(bounds.bottom, 'hit area stays above the row bottom').toBeGreaterThanOrEqual(0)
+    }
+  }
   const pseudo = await control.evaluate(el => getComputedStyle(el, '::before').content)
   expect(pseudo).toBe(expanded ? '""' : 'none')
   if (expanded) {
@@ -66,9 +77,18 @@ async function expectReach(control: Locator, expanded: boolean, phone: boolean) 
     expect(size.width).toBeGreaterThanOrEqual(44); expect(size.height).toBeGreaterThanOrEqual(44)
   }
 }
+// Actual pointer events can round fractional coordinates. Click 1px inside
+// the boundary; expectReach separately checks the full 44px hit-test footprint.
 async function edgeClick(page: Page, control: Locator, expanded: boolean, phone: boolean) {
   const rect = (await control.boundingBox())!
-  await page.mouse.click(rect.x + rect.width / 2 + (expanded && !phone ? 21.99 : 0), rect.y + rect.height / 2 + (expanded && phone ? 21.99 : 0))
+  const x = rect.x + rect.width / 2 + (expanded && !phone ? 21 : 0)
+  const y = rect.y + rect.height / 2 + (expanded && phone ? 21 : 0)
+  const hit = await control.evaluate((el, { x, y }) => {
+    const target = document.elementFromPoint(x, y)
+    return { own: !!target && (target === el || el.contains(target)), x, y, hit: target?.outerHTML.slice(0, 200) }
+  }, { x, y })
+  expect(hit, 'the coordinate click still hits the control').toMatchObject({ own: true })
+  await page.mouse.click(x, y)
 }
 async function capture(page: Page, label: string) {
   const directory = 'test-results/aeon-630-tap-targets'
@@ -80,14 +100,14 @@ async function capture(page: Page, label: string) {
 
 for (const { width, coarse } of [
   { width: 390, coarse: false }, { width: 700, coarse: false }, { width: 720, coarse: false },
-  { width: 768, coarse: false }, { width: 1024, coarse: true }, { width: 1440, coarse: false },
-]) for (const theme of ['light', 'dark'] as const) {
-  test.describe(`${width}px ${coarse ? 'coarse' : 'fine'} ${theme}`, () => {
+  { width: 768, coarse: false }, { width: 768, coarse: true }, { width: 1024, coarse: true }, { width: 1440, coarse: false },
+]) for (const theme of ['light', 'dark'] as const) for (const density of ['comfortable', 'compact'] as const) {
+  test.describe(`${width}px ${coarse ? 'coarse' : 'fine'} ${theme} ${density}`, () => {
     test.use({ viewport: { width, height: 1100 }, hasTouch: coarse })
     test('ticket and tier controls keep their visuals, reach and position', async ({ page }) => {
       const expanded = width <= 720 || coarse
       const phone = width <= 720
-      await setup(page, theme)
+      await setup(page, theme, density)
       await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse)
@@ -95,13 +115,14 @@ for (const { width, coarse } of [
       const row = table.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-10$/ }) })
       const twisty = row.locator('.twisty'), status = row.locator('.status-btn')
       await expect(twisty).toBeVisible()
+      await expect(page.locator('.table-card')).toHaveClass(new RegExp(density))
       const visual = (await twisty.boundingBox())!
       expect(visual.width).toBe(width <= 720 ? 36 : 18)
       expect(visual.height).toBe(width <= 720 ? 36 : 22)
-      expect((await status.boundingBox())!.height).toBe(width <= 720 ? 24 : 26)
-      await expectReach(twisty, expanded, phone)
-      await expectReach(status, expanded, phone)
-      await capture(page, `tickets-${width}-${theme}`)
+      expect((await status.boundingBox())!.height).toBe(density === 'compact' ? 22 : phone ? 24 : 26)
+      await expectReach(twisty, expanded)
+      await expectReach(status, expanded)
+      await capture(page, `tickets-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}`)
       await expectStableControls({ controls: { row, twisty, status, ...(phone ? { title: row.locator('.title-link') } : {}) }, interactions: [
         { name: 'hover arrow', run: () => twisty.hover() },
         { name: 'expand at hit-area edge', run: async () => {
@@ -121,16 +142,52 @@ for (const { width, coarse } of [
       // centred when phone rows switch from absolute positioning to flow.
       await twisty.click()
       const nested = table.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) }).locator('.twisty')
-      await expectReach(nested, expanded, phone)
+      await expectReach(nested, expanded)
+      // Consecutive rows must own every edge of their status targets. Clicking
+      // each edge must open that exact row's menu, without moving either row.
+      const first = table.locator('#row-n-1'), second = table.locator('#row-n-2')
+      await expect(first).toBeVisible(); await expect(second).toBeVisible()
+      expect(await first.evaluate(el => el.nextElementSibling?.id)).toBe('row-n-2')
+      if (!phone) {
+        for (const ticket of [first, second]) {
+          const height = (await ticket.boundingBox())!.height
+          if (coarse) expect(height).toBeGreaterThanOrEqual(44)
+          else expect(height).toBe(density === 'compact' ? 30 : 36)
+        }
+      }
+      if (expanded) {
+        for (const [ticket, key] of [[first, 'PHAROS-11'], [second, 'PHAROS-12']] as const) {
+          const control = ticket.locator('.status-btn')
+          await expectReach(control, true)
+          const edges = [[-21, 0], [21, 0], [0, -21], [0, 21]] as const
+          const menu = page.getByRole('menu', { name: `Status of ${key}`, exact: true })
+          await expectStableControls({ controls: { first, second, status: control }, interactions: edges.map(([dx, dy]) => ({
+            name: `${key} status edge ${dx},${dy}`,
+            run: async () => {
+              const rect = (await control.boundingBox())!
+              await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
+              await expect(menu).toBeVisible()
+              await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0)
+            },
+          })) })
+        }
+      }
+      await capture(page, `tickets-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}-consecutive`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 
       await page.goto('/agents')
       const session = page.locator(`[data-row="s:${sessionId}"]`)
       const tier = session.locator('.tier-mark:visible')
       await expect(tier).toBeVisible()
-      expect((await tier.boundingBox())!.height).toBe(26)
-      await expectReach(tier, expanded, phone)
-      await capture(page, `agents-${width}-${theme}`)
+      // The initial report can replace a read-only span with the live button.
+      // Wait for the actionable control before measuring its settled visual.
+      await expect(tier).toHaveAttribute('aria-haspopup', 'dialog')
+      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(26)
+      await expectReach(tier, expanded)
+      await capture(page, `agents-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}`)
+      // Element screenshots can scroll the enclosing list. Restore the control
+      // to the viewport before the guard records its coordinate-click baseline.
+      await tier.scrollIntoViewIfNeeded()
       const picker = page.getByRole('dialog', { name: 'Change tier', exact: true })
       await expectStableControls({ controls: { tier, session, title: session.locator('.result') }, interactions: [
         { name: 'tier picker at hit-area edge', run: async () => { await edgeClick(page, tier, expanded, phone); await expect(picker).toBeVisible() } },
