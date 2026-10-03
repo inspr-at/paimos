@@ -216,9 +216,11 @@ func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	}
 	// The request already passed releases.read for the original project. Its
 	// reader may no longer see a member or the destination references in move
-	// events. Use only the configured executor bound to this adopted job, within
-	// the same read-only snapshot. No destination data leaves this aggregate
-	// check, and the caller's visibility (including its key creator) is restored.
+	// events. Bind the configured executor to this adopted job and check its
+	// current source permission in the same read-only snapshot. Even that
+	// executor may have project-only visibility; the bounded evidence step below
+	// uses service visibility. No destination data leaves this aggregate check,
+	// and the caller's visibility (including its key creator) is restored.
 	a, ok := s.authority(p.TenantID)
 	if !ok {
 		return ErrPrerequisite
@@ -252,7 +254,7 @@ func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	return enterSnapshotPrincipal(ctx, tx, p)
 }
 
-func (s *Service) verifyMembersWithAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, out *Verification) error {
+func (s *Service) verifyMembersWithAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, out *Verification) (err error) {
 	// The adoption event binds the immutable report. Placement.source describes
 	// the latest edit, so a legitimate rerank, move or rollover may replace it.
 	var ref, digest string
@@ -286,7 +288,23 @@ func (s *Service) verifyMembersWithAuthority(ctx context.Context, tx pgx.Tx, p t
 			adopted[member.ID] = member.Release
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT j.ticket_node_id::text,j.release_node_id::text,s.item_node_id IS NOT NULL FROM journey_tickets j LEFT JOIN ships_in s ON s.tenant_id=j.tenant_id AND s.item_node_id=j.ticket_node_id WHERE j.project_node_id=$1 AND j.release_node_id IS NOT NULL ORDER BY j.ticket_node_id LIMIT 5001`, project)
+	// Only the source archive's bounded membership checks and latest matching
+	// mutation booleans need tenant-wide project visibility. Authorization and
+	// immutable-report loading above retain the executor's actual visibility.
+	// Preserve tenant/principal/key-creator context, read-only isolation and the
+	// exact visibility setting; no destination rows or event payloads escape.
+	var priorVisibility string
+	if err = tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects')`).Scan(&priorVisibility); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+		return err
+	}
+	defer func() {
+		_, restoreErr := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true)`, priorVisibility)
+		err = errors.Join(err, restoreErr)
+	}()
+	rows, err := tx.Query(ctx, `SELECT j.ticket_node_id::text,j.release_node_id::text,s.item_node_id IS NOT NULL FROM journey_tickets j LEFT JOIN ships_in s ON s.tenant_id=j.tenant_id AND s.item_node_id=j.ticket_node_id WHERE j.project_node_id=$1 AND j.tenant_id=$2 AND j.release_node_id IS NOT NULL ORDER BY j.ticket_node_id LIMIT 5001`, project, p.TenantID)
 	if err != nil {
 		return err
 	}

@@ -61,10 +61,14 @@ later authorized reranking, release moves and rollover can change placement
 source without losing adoption evidence. Authorized project moves and Undo may
 remove the ranked backlog row while preserving its journey archive; verification
 requires the latest post-adoption membership event to explain that absence.
-The check reads evidence through the configured executor bound to the adoption
-job after authorizing the original project reader, and returns only aggregate
-verification counts. Destination projects and events remain hidden from that
-reader. Undo records the placements it actually removes, including backlog
+The check authorizes the original project reader and the configured executor
+bound to the adoption job. Bounded membership and mutation checks then use
+tenant-scoped service visibility in the same read-only snapshot, including when
+that executor has only project access, and return only aggregate verification
+counts. The executor's visibility is restored before restoring the reader and
+its key-creator cap; project-only readers and executors gain no destination
+access.
+Undo records the placements it actually removes, including backlog
 rankings created after the original move and removals by bulk Undo. An ancestor
 Undo without a recorded removal cannot excuse a later missing placement for a
 descendant that left the subtree. Missing, unbound or revoked executor authority
