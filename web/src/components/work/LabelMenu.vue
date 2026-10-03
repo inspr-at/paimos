@@ -75,7 +75,6 @@ function keydown(event: KeyboardEvent) {
         <button v-if="term.trim() && !exact" type="button" class="option create" @click="create"><AppIcon name="plus" :size="13" /><span v-clip-tip class="name">Add “{{ term.trim() }}”</span></button>
         <button
           v-for="label in shown" :key="label.name" type="button" role="checkbox" class="option" :aria-checked="state(label) === 'all' ? 'true' : state(label) === 'some' ? 'mixed' : 'false'"
-          :data-clip-tip="label.name"
           :class="{ changed: pending.has(label.name.toLowerCase()) }" @click="toggle(label)"
         >
           <span class="box" :class="state(label)" aria-hidden="true"><AppIcon v-if="state(label) === 'all'" name="check" :size="11" /><AppIcon v-else-if="state(label) === 'some'" name="minus" :size="11" /></span>

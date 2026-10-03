@@ -4,6 +4,7 @@ export interface Choice { value: string; label: string; hint?: string; detail?: 
 </script>
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 
@@ -42,10 +43,9 @@ function move(event: KeyboardEvent) {
       <div ref="list" class="menu" role="listbox" :aria-label="label">
         <button
           v-for="choice in shown" :key="choice.value" type="button" role="option" class="choice" :aria-selected="choice.value === current"
-          :data-clip-tip="[choice.label, choice.detail].filter(Boolean).join('\n')"
           @click="emit('choose', choice.value)"
         >
-          <span class="text"><span class="label">{{ choice.label }}</span><span v-if="choice.detail" class="detail">{{ choice.detail }}</span></span>
+          <span class="text"><span v-clip-tip class="label">{{ choice.label }}</span><span v-if="choice.detail" v-clip-tip class="detail">{{ choice.detail }}</span></span>
           <span v-if="choice.hint" class="hint">{{ choice.hint }}</span>
           <AppIcon :style="{ visibility: choice.value === current ? 'visible' : 'hidden' }" name="check" :size="14" class="tick" />
         </button>

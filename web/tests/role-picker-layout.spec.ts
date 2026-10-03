@@ -118,8 +118,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     await page.keyboard.press('Tab')
     await page.keyboard.press('Shift+Tab')
     await expect(admin).toBeFocused()
-    await expect(page.locator('.tooltip.clip')).toContainText(LONG_DETAIL)
-    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r3')
+    await expect(page.locator('.tooltip')).toContainText(LONG_DETAIL)
+    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `aeon-624-role-picker-${width}-${theme}.png`) })
     await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -213,7 +213,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     const panel = page.locator('.floating[role="dialog"]')
     await expect(panel).toBeVisible()
     const list = panel.locator('.menu, .options, .picker-list')
-    const rows = list.locator(':scope > button, :scope > label, :scope > li, :scope > .option')
+    const rows = list.locator('[role="option"], [role="menuitemradio"], [role="checkbox"], :scope > label')
     await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(8)
     expect(await list.evaluate(el => el.scrollHeight - el.clientHeight), 'no nested clipping').toBeLessThanOrEqual(1)
     await insideViewport(panel, page)
@@ -231,24 +231,50 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
       } }],
     })
     expect(await panel.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-    // Every changed caller gets a real option interaction, with its search,
-    // group, clicked row and action controls measured in scroll coordinates.
+    // Measure navigation/disclosure while the real parent keeps the menu
+    // open. Selection is checked separately because it unmounts the controls.
     const row = rows.last()
     const search = panel.locator('input:not([type="checkbox"])')
+    const read = panel.locator('.read-name').last()
     await expectStableControls({
-      controls: { panel, group: list, row, ...(await search.count() ? { search } : {}), ...(kind === 'label' ? { apply: panel.getByRole('button', { name: 'Apply', exact: true }) } : {}) },
+      controls: { panel, group: list, row, ...(await search.count() ? { search } : {}), ...(await read.count() ? { read } : {}), ...(kind === 'label' ? { apply: panel.getByRole('button', { name: 'Apply', exact: true }) } : {}) },
       scrollAreas: { panel, list },
-      interactions: [{ name: `choose ${kind} option`, run: async () => {
-        const before = await page.evaluate(() => (window as unknown as { __floatingEvents: unknown[] }).__floatingEvents.length)
-        await row.click()
-        if (kind === 'label') await expect(row).toHaveAttribute('aria-checked', 'false')
-        else await expect.poll(() => page.evaluate(() => (window as unknown as { __floatingEvents: unknown[] }).__floatingEvents.length)).toBe(before + 1)
+      interactions: [{ name: `read ${kind} option before choosing`, run: async () => {
+        await page.keyboard.press('ArrowRight')
+        if (await read.count()) {
+          await read.focus()
+          await expect(page.locator('.tooltip')).toContainText('Projektübergreifende Entwicklungszusammenarbeit')
+        } else if (kind === 'choice') {
+          // Settings choices already wrap the whole name without an ellipsis.
+          await row.focus()
+          await expect(row.locator('.label')).toContainText('Projektübergreifende Entwicklungszusammenarbeit')
+          expect(await row.locator('.label').evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
+        } else {
+          if (await row.getByRole('checkbox').count()) await row.getByRole('checkbox').focus()
+          else await row.focus()
+          await expect(page.locator('.tooltip')).toContainText('Projektübergreifende Entwicklungszusammenarbeit')
+        }
       } }],
     })
-    await expect(page.locator('.tooltip.clip')).toContainText('Projektübergreifende Entwicklungszusammenarbeit')
-    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r3')
+    const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `aeon-624-${kind}-${width}-${theme}.png`) })
+    const before = await page.evaluate(() => (window as unknown as { __floatingEvents: unknown[] }).__floatingEvents.length)
+    if (kind === 'label' || kind === 'facet') {
+      await expectStableControls({
+        controls: { panel, group: list, row, ...(await search.count() ? { search } : {}), ...(kind === 'label' ? { apply: panel.getByRole('button', { name: 'Apply', exact: true }) } : {}) },
+        scrollAreas: { panel, list },
+        interactions: [{ name: `choose ${kind} option`, run: () => row.click() }],
+      })
+    } else await row.click()
+    if (kind === 'label') await expect(row).toHaveAttribute('aria-checked', 'false')
+    else {
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __floatingEvents: unknown[] }).__floatingEvents.length)).toBe(before + 1)
+      if (kind !== 'facet') {
+        await expect(panel).toHaveCount(0)
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+      }
+    }
     expect(errors).toEqual([])
   })
 }
@@ -283,23 +309,23 @@ test('touch and keyboard expose complete role names, descriptions and refusal re
     await page.getByRole('button', { name: `Role of ${LONG_SUBJECT}: Member. Change`, exact: true }).click()
     const row = picker.getByRole('radio', { name: /^Laufzeitverantwortung/ })
     await row.tap()
-    await expect(page.locator('.tooltip.clip')).toHaveText(`${runtime.name}\n${LONG_DETAIL}`)
-    await insideViewport(page.locator('.tooltip.clip'), page)
+    await expect(page.locator('.tooltip')).toHaveText(`${runtime.name}\n${LONG_DETAIL}`)
+    await insideViewport(page.locator('.tooltip'), page)
     const desc = row.locator('.desc')
     expect(await desc.evaluate(el => getComputedStyle(el).webkitLineClamp)).toBe('2')
     expect(await desc.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('normal')
     const refused = picker.getByRole('radio', { name: /^Owner/ })
     await refused.tap()
-    await expect(page.locator('.tooltip.clip')).toContainText('you do not hold')
+    await expect(page.locator('.tooltip')).toContainText('you do not hold')
     await expect(picker.locator('.actions .primary')).toBeDisabled()
     await expect(picker.getByRole('region', { name: 'What changes' })).toContainText('you do not hold')
     await page.keyboard.press('Tab')
     await page.keyboard.press('Shift+Tab')
     await expect(refused).toBeFocused()
-    await expect(page.locator('.tooltip.clip')).toContainText('you do not hold')
+    await expect(page.locator('.tooltip')).toContainText('you do not hold')
     await row.focus()
-    await expect(page.locator('.tooltip.clip')).toContainText(LONG_DETAIL)
-    await expect(page.locator('.tooltip.clip')).toContainText(runtime.name)
+    await expect(page.locator('.tooltip')).toContainText(LONG_DETAIL)
+    await expect(page.locator('.tooltip')).toContainText(runtime.name)
   } finally { await context.close() }
 })
 
@@ -312,8 +338,8 @@ for (const width of [390, 1024, 1440]) test(`long German heading wraps to two li
   expect(await title.evaluate(el => getComputedStyle(el).webkitLineClamp)).toBe('2')
   await page.keyboard.press('Shift+Tab')
   await expect(title).toBeFocused()
-  await expect(page.locator('.tooltip.clip')).toHaveText(`Workspace role · ${LONG_SUBJECT}`)
-  await insideViewport(page.locator('.tooltip.clip'), page)
+  await expect(page.locator('.tooltip')).toHaveText(`Workspace role · ${LONG_SUBJECT}`)
+  await insideViewport(page.locator('.tooltip'), page)
   await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
   const place = 'Projektübergreifende Entwicklungszusammenarbeit und langfristige Infrastrukturqualität'
   await page.evaluate(async ({ subject, place }) => {
@@ -327,8 +353,8 @@ for (const width of [390, 1024, 1440]) test(`long German heading wraps to two li
   await expect(project.getByRole('radio', { name: /^Member/ })).toBeFocused()
   await page.keyboard.press('Shift+Tab')
   await expect(project.locator('.title')).toBeFocused()
-  await expect(page.locator('.tooltip.clip')).toContainText(place)
-  await insideViewport(page.locator('.tooltip.clip'), page)
+  await expect(page.locator('.tooltip')).toContainText(place)
+  await insideViewport(page.locator('.tooltip'), page)
 })
 
 test('keyboard focus reveals the complete role decision text', async ({ page }) => {
@@ -338,10 +364,10 @@ test('keyboard focus reveals the complete role decision text', async ({ page }) 
   await page.keyboard.press('Tab')
   await page.keyboard.press('Shift+Tab')
   await expect(admin).toBeFocused()
-  await expect(page.locator('.tooltip.clip')).toHaveText(`Admin\n${LONG_DETAIL}`)
+  await expect(page.locator('.tooltip')).toHaveText(`Admin\n${LONG_DETAIL}`)
   await page.mouse.move(1, 1)
   await expect(admin).toBeFocused()
-  await expect(page.locator('.tooltip.clip')).toHaveText(`Admin\n${LONG_DETAIL}`)
+  await expect(page.locator('.tooltip')).toHaveText(`Admin\n${LONG_DETAIL}`)
 })
 
 test('facet search stays still when Clear appears and disappears', async ({ page }) => {
@@ -388,7 +414,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
   const controls = { input, save: panel.getByRole('button', { name: 'Save', exact: true }), reset, cancel: panel.getByRole('button', { name: 'Cancel', exact: true }) }
   for (const control of Object.values(controls)) await insidePanel(control, panel, page)
   await expectStableControls({ controls, scrollAreas: { panel }, interactions: [{ name: 'type the full hostname', run: () => input.fill(registeredHost) }] })
-  const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r3')
+  const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r4')
   mkdirSync(shots, { recursive: true })
   await page.screenshot({ path: join(shots, `aeon-624-session-host-${width}-${theme}.png`) })
   await reset.click()

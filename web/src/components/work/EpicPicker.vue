@@ -7,6 +7,7 @@ import { highlight } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
+import ReadName from '../ReadName.vue'
 
 // Pick an epic of this project by searching key or title; never by typed IDs.
 const props = defineProps<{ anchor: HTMLElement | null; projectId: string; current: string | null; subject: string; allowNone?: boolean }>()
@@ -53,16 +54,18 @@ function keydown(event: KeyboardEvent) {
       <button v-if="allowNone" id="epic-option-0" type="button" role="option" class="option" :aria-selected="active === 0" @click="emit('choose', null)" @pointermove="active = 0">
         <span class="none-mark" /><span class="title muted">No epic</span><AppIcon v-if="!current" name="check" :size="14" class="tick" />
       </button>
-      <button
-        v-for="(epic, index) in epics" :id="`epic-option-${index + (allowNone ? 1 : 0)}`" :key="epic.id" type="button" role="option" class="option"
-        :aria-selected="active === index + (allowNone ? 1 : 0)" @click="emit('choose', { id: epic.id, key: epic.key, title: epic.title })" @pointermove="active = index + (allowNone ? 1 : 0)"
-        :data-clip-tip="`${epic.key} · ${epic.title}`"
-      >
-        <StatusIcon :state="epic.state" :size="12" />
-        <span class="key">{{ epic.key }}</span>
-        <span v-clip-tip="epic.title" class="title"><template v-for="(part, i) in highlight(epic.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-        <AppIcon v-if="epic.id === current" name="check" :size="14" class="tick" />
-      </button>
+      <div v-for="(epic, index) in epics" :key="epic.id" class="option-row" role="presentation">
+        <button
+          :id="`epic-option-${index + (allowNone ? 1 : 0)}`" type="button" role="option" class="option"
+          :aria-selected="active === index + (allowNone ? 1 : 0)" @click="emit('choose', { id: epic.id, key: epic.key, title: epic.title })" @pointermove="active = index + (allowNone ? 1 : 0)"
+        >
+          <StatusIcon :state="epic.state" :size="12" />
+          <span class="key">{{ epic.key }}</span>
+          <span v-clip-tip="epic.title" class="title"><template v-for="(part, i) in highlight(epic.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+          <AppIcon v-if="epic.id === current" name="check" :size="14" class="tick" />
+        </button>
+        <ReadName :text="`${epic.key} · ${epic.title}`" />
+      </div>
       <p v-if="loading && !epics.length" class="note" role="status">Looking for epics…</p>
       <p v-else-if="failed" class="note error" role="alert">{{ failed }}</p>
       <p v-else-if="!epics.length" class="note">{{ term ? 'No epic matches.' : 'This project has no epics yet.' }}</p>
@@ -74,7 +77,8 @@ function keydown(event: KeyboardEvent) {
 .menu-title { padding: 6px 10px 4px; }
 .picker-search { height: 32px; margin: 0 0 6px; font-size: 13px; }
 .options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
-.option { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; text-align: left; }
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.option { display: flex; align-items: center; min-width: 0; gap: 9px; min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; text-align: left; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .key { flex-shrink: 0; font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -83,6 +87,7 @@ function keydown(event: KeyboardEvent) {
 .none-mark { width: 12px; height: 2px; border-radius: 2px; background: var(--line-2); }
 .note { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 .note.error { color: var(--danger); }
+@media (pointer: coarse) { .option { min-height: 44px; } }
 
 @media (max-width: 720px) {
   .option { height: 52px; min-height: 52px; }

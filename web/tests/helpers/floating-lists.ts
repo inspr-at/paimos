@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Mount the real floating list callers with enough choices to exceed their old
 // inner caps. The fixture app provides their router, session and mocked APIs.
-import { h, reactive, render, type App, type Component } from 'vue'
+import { defineComponent, h, reactive, ref, render, type App, type Component } from 'vue'
 import ChoicePicker from '../../src/components/settings/ChoicePicker.vue'
 import MoveToGroup from '../../src/components/projects/MoveToGroup.vue'
 import EpicPicker from '../../src/components/work/EpicPicker.vue'
@@ -34,11 +34,14 @@ export function mountFloatingList(kind: FloatingList, longNames = false) {
   })
   const components: Record<FloatingList, Component> = { choice: ChoicePicker, group: MoveToGroup, epic: EpicPicker, option: OptionMenu, label: LabelMenu, relation: RelationPicker, facet: ChoiceFacet, business: PickerMenu }
   let props: Record<string, unknown> = { anchor }
-  // Keep the component alive after its emitted action so the guard can compare
-  // the clicked row and sibling controls; record the real emission as evidence.
+  // Match production: a single choice unmounts the menu through its parent.
+  // Disclosure and navigation are measured while it is open; selection must
+  // still emit once, close it, and discard any tooltip attached to that row.
+  const opened = ref(true)
   const events: unknown[] = []
   Object.assign(window, { __floatingEvents: events })
-  const choose = (value: unknown) => { events.push(value) }
+  const choose = (value: unknown) => { events.push(value); if (kind !== 'facet') opened.value = false }
+  const close = (restore: boolean) => { opened.value = false; if (restore) anchor?.focus() }
   if (kind === 'choice') props = { ...props, label: 'Choose a setting', choices, current: choices[0]!.value }
   if (kind === 'group') props = { ...props, subject: 'Pharos', options: choices.map(choice => ({ group: { id: choice.value, name: choice.label, kind: 'shared', color: '' }, count: 1, current: false })) }
   if (kind === 'epic') props = { ...props, subject: 'PHAROS-11', projectId: 'p-pharos', current: null }
@@ -54,7 +57,10 @@ export function mountFloatingList(kind: FloatingList, longNames = false) {
   }
   if (kind === 'business') props = { ...props, title: 'Choose a customer', options: choices }
   const app = (document.querySelector('#app') as HTMLElement & { __vue_app__: App }).__vue_app__
-  const vnode = h(components[kind], ['facet', 'label', 'relation'].includes(kind) ? props : { ...props, onChoose: choose })
+  const parent = defineComponent({ setup: () => () => opened.value
+    ? h(components[kind], { ...props, onClose: close, ...(['facet', 'label', 'relation'].includes(kind) ? {} : { onChoose: choose }) })
+    : null })
+  const vnode = h(parent)
   vnode.appContext = app._context
   render(vnode, host)
 }

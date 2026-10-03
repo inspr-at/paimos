@@ -89,7 +89,7 @@ function reveal() {
 <template>
   <FloatingPanel :anchor="anchor" :tallest="960" :label="`Role of ${whom}`" sheet cycle @close="restore => emit('close', restore)">
     <div class="picker" @keydown="keys">
-      <p class="eyebrow title" tabindex="0" :data-clip-tip="`${scope === 'workspace' ? 'Workspace role' : 'Project role'} · ${whom}`">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ whom }}</p>
+      <p class="eyebrow title" tabindex="0" :data-tip="`${scope === 'workspace' ? 'Workspace role' : 'Project role'} · ${whom}`" data-clip-tip>{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ whom }}</p>
       <div ref="body" class="picker-body">
         <p v-if="lockReason" :id="`${id}-locked`" class="locked"><AppIcon name="shield" :size="14" /><span>{{ lockReason }}</span></p>
         <div ref="list" class="options" role="radiogroup" :aria-label="`Role for ${whom}`">
@@ -97,7 +97,7 @@ function reveal() {
             v-for="option in options" :id="`${id}-${option.id}`" :key="option.id" type="button" role="radio" class="option"
             :aria-checked="picked === option.id" :tabindex="picked === option.id ? 0 : -1" :class="{ off: !!reasonFor(option.role) }"
             :data-autofocus="picked === option.id ? '' : undefined"
-            :data-clip-tip="fullOptionText(option.role)"
+            :data-tip="fullOptionText(option.role)" data-clip-tip
             :aria-describedby="reasonFor(option.role) ? (lockReason ? `${id}-locked` : `${id}-${option.id}-why`) : undefined" @click="picked = option.id"
           >
             <span class="dot" aria-hidden="true"><span /></span>
