@@ -6,6 +6,82 @@ info:
 servers:
   - url: /api
 paths:
+  /projects/{projectId}/chat-roles:
+    post:
+      operationId: createChatRole
+      description: chat-v1, disabled by default. A person creates only their own authorized project role. Lead uses the stored person_project scope and the fixed lead slot; workers need a distinct assignment slot. No session is started or controlled.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatRoleCreate'}
+      responses:
+        '200': {description: Created or existing own role, content: {application/json: {schema: {$ref: '#/components/schemas/ChatRole'}}}}
+        '400': {description: Invalid bounded request}
+        '404': {description: Disabled or unauthorized target}
+        '409': {description: Slot belongs to a different role kind}
+  /projects/{projectId}/chat-threads/resolve:
+    post:
+      operationId: resolveChatThread
+      description: chat-v1. Idempotently resolve the person's durable thread for an already authorized role. No newest-session selection or principal-wide fallback.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role_id]
+              properties:
+                role_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Durable conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '400': {description: Invalid bounded request}
+        '404': {description: Disabled or unauthorized target}
+  /chat-threads/{id}:
+    get:
+      operationId: getChatThread
+      description: chat-v1. Person participant only, with current project authority. Explicit allowlisted readiness; registration alone grants no boundary_input, wake_idle, confirm_received or interrupt capability.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Participant conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '404': {description: Disabled or unauthorized conversation}
+  /chat-threads/{id}/binding:
+    post:
+      operationId: bindChatThread
+      description: chat-v1. Person participant compare-and-swap handover. Validate owner, tenant, project, external registration, live lease state and role under the final access fence. Session ID is a candidate, never proof. No automation delegation is implemented in R1.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatBindingWrite'}
+      responses:
+        '200': {description: New binding epoch and unchanged conversation identity, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '400': {description: Invalid bounded request}
+        '404': {description: Disabled or unauthorized target}
+        '409': {description: Stale epoch or session already used by another role}
+  /chat-deliveries/binding/resolve:
+    post:
+      operationId: resolveChatWorkerBinding
+      description: chat-v1. Authenticate an existing external registration with the principal and its private worker lease, then verify exact current conversation and binding epoch. A reference, label, X-session-id or shared principal alone never suffices. This read does not claim, ACK, extend a lease or alter native execution authority.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: Private existing registration proof; never returned or logged}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatWorkerBindingRequest'}
+      responses:
+        '200': {description: Verified exact binding, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '400': {description: Invalid bounded request}
+        '404': {description: Disabled or unavailable proof/binding}
   /reviews/github:
     post:
       operationId: receiveReviewPullChange
@@ -9261,6 +9337,86 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    ChatPosition:
+      type: string
+      pattern: '^(0|[1-9][0-9]{0,18})$'
+      maxLength: 19
+      description: Decimal int64 position or epoch. Never a floating-point JSON number.
+    ChatRoleCreate:
+      type: object
+      additionalProperties: false
+      required: [kind, slot_key]
+      properties:
+        kind: {type: string, enum: [lead, worker]}
+        slot_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-z0-9][a-z0-9._:/-]*$', description: "lead for lead roles; a distinct work assignment for each worker, never the generic worker label"}
+    ChatRole:
+      type: object
+      additionalProperties: false
+      required: [contract, role_id, project_id, kind, slot_key, conversation_scope]
+      properties:
+        contract: {type: string, const: chat-v1}
+        role_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        kind: {type: string, enum: [lead, worker]}
+        slot_key: {type: string, maxLength: 128}
+        conversation_scope: {type: string, const: person_project}
+    ChatReadiness:
+      type: object
+      additionalProperties: false
+      required: [state, capabilities, reason]
+      description: Conversation-local allowlist. Excludes account/quota/usage/reset/billing data, host paths and private native references. All capabilities remain absent until qualified in later packages.
+      properties:
+        state: {type: string, enum: [idle, busy, offline, unavailable]}
+        capabilities: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [boundary_input, wake_idle, confirm_received, interrupt]}}
+        reason: {type: string, maxLength: 128}
+    ChatThread:
+      type: object
+      additionalProperties: false
+      required: [contract, conversation_id, role, revision, binding_epoch, readiness]
+      properties:
+        contract: {type: string, const: chat-v1}
+        conversation_id: {type: string, format: uuid}
+        role: {$ref: '#/components/schemas/ChatRole'}
+        revision: {$ref: '#/components/schemas/ChatPosition'}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        readiness: {$ref: '#/components/schemas/ChatReadiness'}
+    ChatBindingWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_epoch, session_id]
+      properties:
+        expected_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        session_id: {type: string, format: uuid}
+    ChatWorkerBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [conversation_id, session_id, binding_epoch]
+      properties:
+        conversation_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      description: Separate future history DTO; legacy InboxMessage and ProjectMessage remain unchanged. New messages store at most 64 KiB of valid UTF-8 with no NUL; previews never imply full receipt.
+      required: [message_id, conversation_id, position, body, payload_mode]
+      properties:
+        message_id: {type: string, format: uuid}
+        conversation_id: {type: string, format: uuid}
+        position: {$ref: '#/components/schemas/ChatPosition'}
+        body: {type: string, maxLength: 65536}
+        payload_mode: {type: string, enum: [inline, preview]}
+        reply_to: {type: [string, 'null'], format: uuid}
+    ChatReceipt:
+      type: object
+      additionalProperties: false
+      description: Future evidence projection; fetch/queue/legacy ACK never means agent_confirmed. Preview receipt cannot confirm the full body. No legacy receipt enum is extended.
+      required: [message_id, binding_epoch, state, payload_mode]
+      properties:
+        message_id: {type: string, format: uuid}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        state: {type: string, enum: [pending, queued, offered, handed_off, preview_received, agent_confirmed, replying, replied, failed, uncertain, cancelled]}
+        payload_mode: {type: string, enum: [inline, preview]}
     QuestionOption:
       type: object
       additionalProperties: false

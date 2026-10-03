@@ -179,7 +179,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		}
 		existing, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages
-			WHERE sender_principal_id = $1::uuid AND idempotency_key = $2
+			WHERE chat_thread_id IS NULL AND sender_principal_id = $1::uuid AND idempotency_key = $2
 			FOR UPDATE`, p.ID, in.Key))
 		if err == nil {
 			if !sameSend(existing, in) {
@@ -211,7 +211,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		if in.ReplyTo != nil {
 			var visible bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages
-				WHERE id = $1::uuid AND (sender_principal_id = $2::uuid OR recipient_principal_id = $2::uuid))`,
+				WHERE chat_thread_id IS NULL AND id = $1::uuid AND (sender_principal_id = $2::uuid OR recipient_principal_id = $2::uuid))`,
 				*in.ReplyTo, p.ID).Scan(&visible); err != nil {
 				return err
 			}
@@ -332,7 +332,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		// recipient and session are immutable, so an unlocked read picks the lock.
 		var recipient, sender string
 		var session *string
-		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &sender, &session)
+		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE chat_thread_id IS NULL AND id=$1::uuid`, id).Scan(&recipient, &sender, &session)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -350,7 +350,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 			return err
 		}
 		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
-			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
+			FROM inbox_messages WHERE chat_thread_id IS NULL AND id = $1::uuid FOR UPDATE`, id))
 		if err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		before := metaFrom(current)
 		updated, err := scanMessage(tx.QueryRow(ctx, `UPDATE inbox_messages
 			SET acked_at = clock_timestamp(), acked_by_principal_id = $2::uuid
-			WHERE id = $1::uuid AND acked_at IS NULL
+			WHERE chat_thread_id IS NULL AND id = $1::uuid AND acked_at IS NULL
 			RETURNING `+messageCols, id, p.ID))
 		if err != nil {
 			return mapWrite(err)
