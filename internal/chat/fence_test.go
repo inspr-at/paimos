@@ -61,7 +61,12 @@ func TestNewModeExcludedFromLegacyReadAckReplyStreamAndDrain(t *testing.T) {
 	// The raw reply path is person-authenticated and cannot import a new-mode
 	// parent into a legacy chain even when the person owns the conversation.
 	expect(t, f.call(f.alice, "POST", "/api/inbox/messages", map[string]any{"recipient_principal_id": f.agent.ID, "body": "raw reply", "idempotency_key": "raw-parent", "reply_to_id": id}, ""), 404)
-	legacy := decode[inbox.Message](t, f.call(f.alice, "POST", "/api/inbox/messages", map[string]any{"recipient_principal_id": f.agent.ID, "body": "legacy-visible-canary", "idempotency_key": "legacy-visible"}, ""))
+	created := f.call(f.alice, "POST", "/api/inbox/messages", map[string]any{"recipient_principal_id": f.agent.ID, "body": "legacy-visible-canary", "idempotency_key": "legacy-visible"}, "")
+	expect(t, created, 201)
+	var legacy inbox.Message
+	if err := json.Unmarshal(created.Body.Bytes(), &legacy); err != nil {
+		t.Fatal(err)
+	}
 	// A strict snapshot checks the complete unbound legacy response field set.
 	payload := f.call(f.agent, "GET", "/api/inbox/messages", nil, "")
 	expect(t, payload, 200)

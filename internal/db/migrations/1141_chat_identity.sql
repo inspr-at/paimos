@@ -71,7 +71,7 @@ ALTER TABLE chat_session_contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_session_contexts FORCE ROW LEVEL SECURITY;
 CREATE POLICY chat_session_contexts_tenant ON chat_session_contexts USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 CREATE POLICY chat_session_contexts_participant ON chat_session_contexts AS RESTRICTIVE USING (
-    owner_person_id=ANY((SELECT aeon_current_principals()))
+    owner_person_id=ANY((SELECT aeon_current_principals())::uuid[])
     OR session_id=NULLIF(current_setting('aeon.chat_session_id',true),'')::uuid);
 
 CREATE FUNCTION aeon_chat_identity_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -92,19 +92,19 @@ ALTER TABLE chat_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_roles FORCE ROW LEVEL SECURITY;
 CREATE POLICY chat_roles_tenant ON chat_roles USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 CREATE POLICY chat_roles_participant ON chat_roles AS RESTRICTIVE USING (
-    owner_person_id=ANY((SELECT aeon_current_principals()))
+    owner_person_id=ANY((SELECT aeon_current_principals())::uuid[])
     OR id=NULLIF(current_setting('aeon.chat_role_id',true),'')::uuid);
 ALTER TABLE chat_threads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_threads FORCE ROW LEVEL SECURITY;
 CREATE POLICY chat_threads_tenant ON chat_threads USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 CREATE POLICY chat_threads_participant ON chat_threads AS RESTRICTIVE USING (
-    person_id=ANY((SELECT aeon_current_principals()))
+    person_id=ANY((SELECT aeon_current_principals())::uuid[])
     OR role_id=NULLIF(current_setting('aeon.chat_role_id',true),'')::uuid);
 ALTER TABLE chat_session_bindings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_session_bindings FORCE ROW LEVEL SECURITY;
 CREATE POLICY chat_session_bindings_tenant ON chat_session_bindings USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 CREATE POLICY chat_session_bindings_participant ON chat_session_bindings AS RESTRICTIVE USING (
-    owner_person_id=ANY((SELECT aeon_current_principals()))
+    owner_person_id=ANY((SELECT aeon_current_principals())::uuid[])
     OR (valid_to IS NULL AND session_id=NULLIF(current_setting('aeon.chat_session_id',true),'')::uuid));
 
 -- Only verified chat transactions set these local context values. Service
