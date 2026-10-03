@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readDeskProjection, loadDeskProjection, type DeskItem, type DeskProjection } from '../src/lib/decisionDesk.ts'
+import { readDeskProjection, loadDeskProjection, type DeskProjectionItem as DeskItem, type DeskProjection } from '../src/lib/decisionDesk.ts'
 
 const item = (id: string, held = false): DeskItem => ({ id, kind: 'question', revision: 1, title: id, held, created_at: '', href: `/agents?needs=q:${id}`, source: `/api/questions/${id}` })
 const page = (items: DeskItem[], next?: string, open = 3): DeskProjection => ({ items, counts: { open, held: 1, chores: 2 }, has_more: !!next, next_cursor: next, as_of: '2026-10-02T12:00:00Z' })

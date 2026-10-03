@@ -11,7 +11,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -48,18 +47,10 @@ type checkGapError struct {
 
 func (e *checkGapError) Error() string { return "check minimum gap" }
 
-// inReadinessWrite fences permission changes BEFORE pairing/account/resource
-// locks. Every new write rechecks RequireTx inside this final transaction.
+// inReadinessWrite takes pairing, tree, then the tenant authorization fence
+// before account/resource locks. Every write rechecks RequireTx in this transaction.
 func (m *Module) inReadinessWrite(ctx context.Context, p tenant.Principal, fn func(pgx.Tx) error) error {
-	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
-			return err
-		}
-		if err := agentpairing.Lock(ctx, tx); err != nil {
-			return err
-		}
-		return fn(tx)
-	})
+	return m.in(ctx, p.TenantID, fn)
 }
 
 func requireReadinessOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, revision int64) (Account, error) {
