@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// ResidencyClassifier is the evidence boundary supplied by AEON-473. No
-// classifier means any, regardless of vendor, harness or workstation label.
+// ResidencyClassifier is the evidence boundary. The default reads host-owned
+// evidence loaded with the account; callers may inject a classifier for tests.
 type ResidencyClassifier interface {
 	ResidencyClass(context.Context, pgx.Tx, Account, string) (class, evidenceRef string, expiresAt *time.Time, err error)
 }
@@ -22,7 +22,7 @@ func WithResidencyClassifier(ctx context.Context, c ResidencyClassifier) context
 func ResidencyClass(ctx context.Context, tx pgx.Tx, a Account, profileID string, now time.Time) (string, error) {
 	classifier, _ := ctx.Value(residencyKey{}).(ResidencyClassifier)
 	if classifier == nil {
-		return "any", nil
+		classifier = storedResidencyClassifier{now: now}
 	}
 	class, ref, expires, err := classifier.ResidencyClass(ctx, tx, a, profileID)
 	if err != nil {

@@ -140,6 +140,11 @@ func ladderHasHarness(steps []ladderStep, harness string) bool {
 
 func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, health map[string]agentaccounts.HarnessHealth) []string {
 	var reasons []string
+	// Immutable legacy mislabels remain in history, but are retired from
+	// dispatch. The same check guards ordinary resolution and managed reviews.
+	if harnesslaunch.ModelFamily(step.Profile.Harness, step.Profile.Model) != step.Profile.Family {
+		reasons = append(reasons, "profile family does not match its harness/provider binding")
+	}
 	if role.cross && step.Profile.Family == "unknown" {
 		reasons = append(reasons, "unknown author family")
 	}

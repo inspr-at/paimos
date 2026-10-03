@@ -62,8 +62,12 @@ func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 }
 func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
+	return watchFixtureWithHarness(t, publicKey, "codex")
+}
+func watchFixtureWithHarness(t *testing.T, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
 	f := newFixture(t)
-	p := f.proposePlatformKey("darwin", "arm64", publicKey, "codex")
+	p := f.proposePlatformKey("darwin", "arm64", publicKey, harness)
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	project, ticket := uuid(t, f.db), uuid(t, f.db)
@@ -79,6 +83,8 @@ func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, atta
 		t.Fatal(err)
 	}
 	in := attachwatch.DeviceRequest{Operation: "request", RequestID: uuid(t, f.db), ComputerID: *v.ComputerID, DeviceProof: p.lifecycle, Snapshot: attachwatch.Snapshot{ComputerID: *v.ComputerID, ProjectID: project, TicketID: ticket, Host: "Test workstation", Harness: "codex", Process: attachwatch.Process{PID: 123, UID: 501, Started: "fixture-start", Executable: "/usr/local/bin/codex", CWD: "/tmp/pairing-fixture/repo"}, Transcript: "/tmp/fixture/transcript.jsonl", FileID: "1:234"}}
+	in.Snapshot.Harness = harness
+	in.Snapshot.Process.Executable = "/usr/local/bin/" + harness
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()

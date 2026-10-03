@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -29,6 +30,11 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 		}
 		// Serialize email repairs with invitation candidate selection, imports
 		// and manual linking. Acquire this before taking any principal row locks.
+		// Tree and tenant precede alias, since repairs also write node rows and
+		// may create the import actor (whose FK takes a tenant key-share lock).
+		if err := authz.LockProjectMutation(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
 			return err
 		}

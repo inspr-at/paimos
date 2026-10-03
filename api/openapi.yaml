@@ -6,6 +6,137 @@ info:
 servers:
   - url: /api
 paths:
+  /reviews/github:
+    post:
+      operationId: receiveReviewPullChange
+      description: Host-configured GitHub webhook. Requires an HMAC-SHA256 signature over the original bounded body, the configured installation and repository, and a pull_request edited, synchronize or reopened event. Immediately revokes stale review bindings independently of publication retries. Replays can never approve or revive a review. Missing host configuration disables this route.
+      security: []
+      parameters:
+        - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
+        - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, const: pull_request}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, installation, repository, pull_request]
+              properties:
+                action: {type: string, enum: [edited, synchronize, reopened]}
+                installation: {type: object, required: [id], properties: {id: {type: integer}}}
+                repository: {type: object, required: [full_name], properties: {full_name: {type: string}}}
+                pull_request: {type: object, required: [number, head, base], properties: {number: {type: integer, minimum: 1}, head: {type: object, required: [sha], properties: {sha: {type: string}}}, base: {type: object, required: [sha, repo], properties: {sha: {type: string}, repo: {type: object, required: [full_name], properties: {full_name: {type: string}}}}}}}
+      responses:
+        '204': {description: Authenticated signal processed; no approval is published}
+        '400': {description: Unsupported or invalid event}
+        '401': {description: Invalid signature or installation/repository binding}
+        '404': {description: Host webhook configuration absent}
+        '413': {description: Body exceeds 2 MiB}
+        '502': {description: Revocation incomplete; delivery may be retried and the reporter also retries}
+  /recurrences:
+    get:
+      operationId: listRecurrences
+      description: Project-visible recurring work managed by the caller. recurrences.manage is required; agents require an explicit custom-role grant and key scope. Results are bounded to 100, with an optional after UUID cursor.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Recurrences, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Recurrence'}}, next_cursor: {type: [string, 'null'], format: uuid}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createRecurrence
+      description: Create a ticket template in a live project and parent. Requires recurrences.manage and nodes.write in that project. queue_each also requires run.create and work_orders.write. The schedule lives in the server; no external timer is needed. Definitions persist across restarts. Creation appends recurrence.created.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceInput'}}}}
+      responses:
+        '201': {description: Created recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRecurrence
+      description: Read a visible recurrence with recurrences.manage in its project. Invisible IDs return 404.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: updateRecurrence
+      description: Replace the template and options at expected_revision. Project and parent are immutable. A changed trigger starts after the database clock; an unchanged trigger retains overdue work. Paused state is preserved. Appends recurrence.updated.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/RecurrenceInput'}
+                - {type: object, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: Updated recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/pause:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: pauseRecurrence
+      description: Requires recurrences.manage and expected_revision. Resume starts after the database clock and discards work accumulated while paused. Repeating the current state is a no-op. Appends recurrence.paused on a state change.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '200': {description: Recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/resume:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resumeRecurrence
+      description: Requires recurrences.manage and expected_revision. Resume starts after the database clock and discards work accumulated while paused. Repeating the current state is a no-op. Appends recurrence.resumed on a state change.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '200': {description: Recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/run-now:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: runRecurrenceNow
+      description: Manually attempt one occurrence, including while paused. An idempotency_key is required; retrying it returns the original receipt without creating another ticket, even after template edits. Manual runs do not move the schedule or event cursor. Uses the overlap policy and existing queue readiness. The occurrence number counts both created and skipped attempts. Creates ordinary tickets with Recurring work system-actor provenance; appends recurrence.occurred or recurrence.skipped with a reason.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [idempotency_key], properties: {idempotency_key: {type: string, minLength: 1, maxLength: 128}}}}}}
+      responses:
+        '200': {description: Durable occurrence receipt, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceOccurrence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/preview:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewRecurrence
+      description: Read-only next N scheduled times, strictly after the supplied after instant or the database clock, even while paused. The same calendar engine runs the scheduler. Event triggers have no predictable dates and return an empty list. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant. UTC timestamps are returned.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: count, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 5}}
+        - {name: after, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200': {description: Occurrence preview, content: {application/json: {schema: {type: object, required: [times, trigger_kind], properties: {times: {type: array, items: {type: string, format: date-time}}, trigger_kind: {type: string, enum: [time, event]}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/questions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -101,6 +232,30 @@ paths:
       responses:
         '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /decision-desk/projection:
+    get:
+      operationId: decisionDeskProjection
+      security: [{session: []}]
+      description: >-
+        Person-only canonical open desk pointers and exact counts, reauthorized per source and project.
+        Held approvals sort by expiry, then other held items by creation time, then other items by creation time;
+        stable source ID breaks ties. Merged askers count once and a question replaces its linked held request.
+        Answered questions (including grace/corrections), decided/expired approvals and resolved requests are excluded.
+        A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
+        Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
+        Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
+        counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
+        The existing question-only decision-desk endpoint remains available.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      responses:
+        '200': {description: Canonically ordered visible sources, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskProjection'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/Error'}
   /queue:
     get:
       operationId: listWorkQueue
@@ -2509,7 +2664,9 @@ paths:
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
         Owner diagnostics are additive: errors retain their existing code and error fields
         and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
-        or code_expired). Registration authenticates the computer lifecycle proof before
+        code_expired, draining, or enrollment_unavailable). Draining or removed enrollments
+        refuse new attachment authority, including status-only attachment of a running process.
+        Registration authenticates the computer lifecycle proof before
         reporting version mismatch; later operations authenticate the registered poll key
         and computer principal before reporting a cause. Unauthenticated and foreign callers
         receive generic refusals without attach_refusal. Revoked bearer credentials remain
@@ -3307,7 +3464,7 @@ paths:
                   type: [array, "null"]
                   maxItems: 256
                   items: {type: string}
-                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. A workspace role caps workspace grants; project-only agents keep their project ceiling. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. For shared roles, that ceiling combines workspace-role permissions with project-grantable and self-service permissions from the agent's project roles, restricted to agent_grantable permissions. Generated private workspace roles (non-builtin agent_<principal hex> roles) additionally cap rotation at their configured workspace permissions; project grants cannot restore scopes removed from that role. The coordinator rules.read exception remains derived from live project access. Project permissions remain confined to the agent's bound projects on requests. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label
@@ -3382,8 +3539,8 @@ paths:
         '409': {description: Key is revoked or expired}
     patch:
       operationId: changeAgentKeyScopes
-      summary: Add or remove scopes without rotating the key
-      description: Requires a person with keys.manage. Applies add/remove atomically to the latest scopes; overlapping deltas are invalid. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after, any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      summary: Edit scopes and expiry without rotating the key
+      description: Requires a person with keys.manage. Applies add/remove and optional expires_at atomically to the latest key; overlapping deltas are invalid. Omitted expires_at preserves the current expiry, null means Never, and a timestamp must be in the future. At least one of add, remove or expires_at is required. Revoked or expired keys cannot be edited. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling, including expiry-only changes. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after (including expiry), any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
       security: [{session: []}]
       requestBody:
         required: true
@@ -3393,9 +3550,14 @@ paths:
               type: object
               additionalProperties: false
               minProperties: 1
+              anyOf:
+                - {required: [add]}
+                - {required: [remove]}
+                - {required: [expires_at]}
               properties:
                 add: {type: array, maxItems: 256, items: {type: string}}
                 remove: {type: array, maxItems: 256, items: {type: string}}
+                expires_at: {type: [string, 'null'], format: date-time, description: 'Omit to preserve expiry; null means Never; a timestamp must be in the future.'}
                 role_extension:
                   type: object
                   additionalProperties: false
@@ -3409,7 +3571,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AgentKey'}
-        '400': {description: Invalid scopes}
+        '400': {description: Invalid scopes or expiry}
         '401': {description: Not signed in}
         '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
         '404': {description: Key not found in this tenant}
@@ -4766,21 +4928,64 @@ paths:
           $ref: '#/components/responses/View'
         '400':
           $ref: '#/components/responses/Error'
+  /agents/plan:
+    get:
+      operationId: getAgentsPlan
+      security: *auth
+      description: >-
+        Read the calling person's agents.working plan, or the plan of an agent
+        key's live person creator. Requires agents.plan.read in the key ceiling
+        and live role grants; no person or tenant selector is accepted.
+        Plan ownership and principal_id resolve to the canonical person, as do
+        running counts. A linked alias's saved plan is used when the canonical
+        row is absent. Conflicting effective plans across linked rows fail closed.
+        An unset plan defaults to total 15 and no harness limits. Legacy cap
+        maps to total; legacy area/model reservations are ignored.
+        Running counts include all unended, unarchived sessions owned by this
+        person across projects, including starting, waiting, idle, throttled and
+        stopping sessions. Silence alone never frees a slot. Legacy sessions
+        without an owner count only when a key creator unambiguously identifies
+        this person. Counts disclose no session or project details.
+        This is a snapshot, not a start reservation; launchers must serialize
+        starts and check account capacity separately. Lowering a plan never
+        pauses or stops existing work.
+      responses:
+        '200':
+          description: Personal plan and running counts
+          content: {application/json: {schema: {$ref: '#/components/schemas/AgentsPlanSnapshot'}}}
+        '401': {description: Authentication required}
+        '403': {description: 'Missing scope, live role permission or person creator'}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
   /preferences/{key}:
     parameters:
       - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_.:-]{0,127}$'}}
     get:
       operationId: getPreference
-      description: The calling person's own UI preference (for example list columns and widths). A key never written returns value null.
+      description: >-
+        The calling person's own UI preference (for example list columns and
+        widths). A key never written returns value null. For agents.working,
+        read the canonical person's row, falling back to a linked alias's row
+        when absent; invalid or conflicting effective plans fail closed.
       responses:
         '200':
           description: Preference
           content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
         '400': {description: Invalid key}
         '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
     put:
       operationId: putPreference
-      description: Replace the calling person's preference. The value is a JSON object of at most 16 KiB. Private to the principal; no event is appended.
+      description: >-
+        Replace the calling person's preference. The value is a JSON object of
+        at most 16 KiB. Private to the principal; no event is appended.
+        For agents.working, validate AgentsPlan or the legacy cap/view/area/model
+        shape (cap 1–12, optional). Preserve the legacy shape for existing UI
+        clients; its reservations do not become limits. Plan reads for enforcers
+        use GET /agents/plan. Agents cannot write this plan.
+        Plan writes belong to the active canonical person and reconcile existing
+        linked alias copies to the saved value; other preferences remain private
+        to the calling principal.
       requestBody:
         required: true
         content:
@@ -4797,6 +5002,7 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
         '400': {description: Invalid key or value}
         '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
         '413': {description: Value too large}
   /views/{viewId}:
     parameters: [{$ref: '#/components/parameters/ViewId'}]
@@ -6495,7 +6701,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6505,6 +6711,7 @@ paths:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
@@ -6901,6 +7108,30 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/residency-evidence:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAgentAccountResidencyEvidence
+      summary: Read the account's recorded residency evidence
+      description: Requires account.read. People can inspect workspace evidence; agent keys must be the account's paired host identity. Missing evidence returns 404. Expired or superseded evidence remains inspectable but does not qualify a route.
+      security: *auth
+      responses:
+        '200': {description: Recorded evidence, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidenceRecord'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putAgentAccountResidencyEvidence
+      summary: Replace host-owned account residency evidence
+      description: Requires account.manage for the linked owning person, or account.probe for the connected paired host's bound runtime key. Workspace admins and agent key creators are not owners by implication. Authorization is repeated under the tenant and pairing locks in the write transaction. Each write emits account.residency_evidence_updated. Evidence covers only the listed model profiles and current account binding; a host, owner, provider or model change invalidates it. No proof reference is fetched by the server.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidence'}}}}
+      responses:
+        '200': {description: Saved evidence, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidenceRecord'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/metadata:
     put:
       operationId: replaceAgentAccountMetadata
@@ -8946,6 +9177,99 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Question'}}
         has_more: {type: boolean}
+    DecisionDeskItem:
+      type: object
+      required: [id, kind, revision, title, created_at, held, href, source]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [question, approval, action_request, doctrine]}
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        title: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        held: {type: boolean}
+        href: {type: string, description: App review link to the exact source}
+        source: {type: string, description: Authorized app route or API link to the exact source}
+    DecisionDeskProjection:
+      type: object
+      required: [items, counts, has_more, as_of]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DecisionDeskItem'}}
+        counts:
+          type: object
+          required: [open, held, chores]
+          properties:
+            open: {type: integer, minimum: 0}
+            held: {type: integer, minimum: 0}
+            chores: {type: integer, minimum: 0}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+        as_of: {type: string, format: date-time}
+    RecurrenceTrigger:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [time, event]}
+        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1). Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
+        time_of_day: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', description: Time only; HH:MM wall time.}
+        timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
+        start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}
+        event: {type: string, enum: [release.published], description: Event only; the project's journey publications and configured product release history. Historical publications before creation and those during pause are ignored.}
+    RecurrenceTemplate:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 512}
+        description: {type: string, maxLength: 65536}
+        acceptance_criteria: {type: array, maxItems: 100, items: {type: string, minLength: 1, maxLength: 4096}}
+        estimate_hours: {type: number, minimum: 0, maximum: 200}
+        priority: {type: string, enum: [critical, high, medium, low]}
+        tags: {type: array, maxItems: 50, uniqueItems: true, items: {type: string, format: uuid}, description: Existing tag-node UUIDs in this project or workspace; stored as current tag names in ordinary node fields.tags.}
+        type: {type: string, enum: [ticket, task], default: ticket}
+      description: 'Variables in title, description and criteria: {{occurrence}}, {{date}}, {{release_name}}, {{release_version}}. Unknown variables are rejected. Release variables are empty for time and manual runs. queue_each requires positive estimate_hours and non-empty acceptance_criteria.'
+    RecurrenceInput:
+      type: object
+      required: [project_id, parent_id, template, trigger]
+      properties:
+        project_id: {type: string, format: uuid}
+        parent_id: {type: string, format: uuid}
+        template: {$ref: '#/components/schemas/RecurrenceTemplate'}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
+        queue_each: {type: boolean, default: false}
+        overlap_policy: {type: string, enum: [skip, create], default: skip, description: Skip if any preceding occurrence ticket is still nonterminal and live.}
+        catch_up_policy: {type: string, enum: [one], default: one, description: Consume only the latest missed time or publication per scheduler pass; no burst.}
+    Recurrence:
+      allOf:
+        - {$ref: '#/components/schemas/RecurrenceInput'}
+        - type: object
+          required: [id, paused, revision, occurrence_count, created_at, updated_at]
+          properties:
+            id: {type: string, format: uuid}
+            paused: {type: boolean}
+            revision: {type: integer}
+            occurrence_count: {type: integer}
+            next_at: {type: [string, 'null'], format: date-time}
+            event_cursor: {type: integer}
+            active_since: {type: string, format: date-time}
+            created_by_principal_id: {type: string, format: uuid}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    RecurrenceOccurrence:
+      type: object
+      required: [recurrence_id, occurrence_key, number, scheduled_at, outcome, reason]
+      properties:
+        recurrence_id: {type: string, format: uuid}
+        occurrence_key: {type: string}
+        number: {type: integer}
+        scheduled_at: {type: string, format: date-time}
+        node_id: {type: [string, 'null'], format: uuid}
+        source_event_id: {type: [integer, 'null']}
+        outcome: {type: string, enum: [created, skipped]}
+        reason: {type: string}
+        created_at: {type: string, format: date-time}
     StatusAutopilotRule:
       type: object
       required: [enabled]
@@ -9265,7 +9589,7 @@ components:
         error: {type: string}
         attach_refusal:
           type: string
-          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired]
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable]
           description: Optional fixed cause, disclosed only after authenticating this computer's proof and principal. Includes no identifiers or request contents.
     AttachDeviceRequest:
       type: object
@@ -10927,7 +11251,7 @@ components:
         release_channel: {type: string}
         release_sequence: {type: integer}
         codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
-        state: {type: string, enum: [published, reserved]}
+        state: {type: string, enum: [published, reserved, candidate]}
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}
         published_at: {type: [string, 'null'], format: date-time}
@@ -10974,6 +11298,10 @@ components:
             ci: {$ref: '#/components/schemas/ReleaseRun'}
             release_run: {$ref: '#/components/schemas/ReleaseRun'}
             release_url: {type: string}
+            pending:
+              type: array
+              description: 'Candidate evidence not yet established. Corresponding fields stay empty or null until a later tagged build records them.'
+              items: {type: string, enum: [tag_message, tagged_at, published_at, image, ci, release_run, release_url]}
             unavailable: {type: array, items: {type: string}, description: 'What could not be established, in plain words'}
     ReleaseRun:
       type: [object, 'null']
@@ -12847,6 +13175,31 @@ components:
               project_id: {type: string, format: uuid}
               group_id: {type: [string, 'null'], format: uuid}
         event_id: {type: [integer, 'null'], format: int64}
+    AgentsPlan:
+      type: object
+      additionalProperties: false
+      required: [total]
+      properties:
+        total: {type: integer, minimum: 0, maximum: 30, description: Planned maximum running agents; zero starts nothing new.}
+        limits:
+          type: object
+          propertyNames: {enum: [claude, codex, cursor, gemini, grok, opencode, pi]}
+          additionalProperties:
+            oneOf:
+              - {type: integer, minimum: 0, maximum: 30, description: At most this many; numeric zero allows no starts.}
+              - {type: string, enum: [no_limit, off]}
+          description: Missing harnesses have no limit. Off explicitly disables a harness. Limits may sum above total.
+    AgentsPlanSnapshot:
+      type: object
+      required: [total, limits, principal_id, running, running_total, source, updated_at]
+      properties:
+        total: {$ref: '#/components/schemas/AgentsPlan/properties/total'}
+        limits: {$ref: '#/components/schemas/AgentsPlan/properties/limits'}
+        principal_id: {type: string, format: uuid, description: Canonical person whose plan and running counts are read.}
+        running: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        running_total: {type: integer, minimum: 0}
+        source: {type: string, enum: [default, legacy, plan]}
+        updated_at: {type: [string, 'null'], format: date-time}
     Preference:
       type: object
       required: [key, value, updated_at]
@@ -14041,6 +14394,7 @@ components:
             target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
     ModelProfileWrite:
       type: object
+      description: Family must match the fixed harness provider or an explicitly supported provider/model binding. Ambiguous multi-provider pins may use unknown and cannot perform independent review. Existing inconsistent immutable profiles are excluded from routing and review approval.
       required: [slug, version, harness, family, model, effort, tier]
       properties:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
@@ -14395,6 +14749,31 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         label: {type: string, minLength: 1, maxLength: 128}
         max_parallel_runs: {type: integer, minimum: 1}
+    AccountResidencyEvidence:
+      type: object
+      additionalProperties: false
+      required: [model_profile_ids, inference_countries, storage_countries, log_countries, local_execution, verified_at, expires_at, proof_ref]
+      description: Host attestation, not an automated compliance certification. Country sets use uppercase ISO 3166-1 alpha-2 codes. EU and local require all three nonempty sets to contain only EU member countries; local additionally requires explicit operator-local execution. Both classes require a covered profile, a proof reference, verified_at no later than now and expires_at strictly after now. The validity interval from verified_at to expires_at must be positive and at most 400 days. Optional retention and training declarations are recorded without changing the residency class.
+      properties:
+        model_profile_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+        inference_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        storage_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        log_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        local_execution: {type: boolean}
+        retention_days: {type: [integer, 'null'], minimum: 0, maximum: 36500}
+        training_opt_out: {type: [boolean, 'null']}
+        verified_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        proof_ref: {type: string, minLength: 1, maxLength: 1024, description: Opaque reference to proof documents; never credentials or signed access URLs.}
+    AccountResidencyEvidenceRecord:
+      type: object
+      required: [account_id, evidence, recorded_by, recorded_at, binding_current]
+      properties:
+        account_id: {type: string, format: uuid}
+        evidence: {$ref: '#/components/schemas/AccountResidencyEvidence'}
+        recorded_by: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        binding_current: {type: boolean, description: False after the account's ownership or provider route changes; such evidence never qualifies a route.}
     AgentAccount:
       allOf:
         - {$ref: '#/components/schemas/AgentAccountWrite'}
