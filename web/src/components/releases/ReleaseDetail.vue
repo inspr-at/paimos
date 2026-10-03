@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { brand } from '../../lib/brand'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { generationLabel } from '../../lib/brand'
 import { clockSince } from '../../lib/releaseStats'
 import { absoluteTime, relativeTime } from '../../lib/work'
@@ -9,10 +10,9 @@ import AppIcon from '../AppIcon.vue'
 import LangBadge from './LangBadge.vue'
 import ReleaseCodename from './ReleaseCodename.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
-import TicketChips from './TicketChips.vue'
 
 // One release: its codename as the heading (AEON-488), when it went live and
-// shipped in one line, its features, fixes and tickets as counts, what it
+// shipped in one line, its features, fixes and other changes as counts, what it
 // brings, and the evidence behind it. Details adds the technical line. Every release reads the same (AEON-305): backfilled
 // notes and linked tickets both become blocks under Features and Fixes.
 // Highlights tells the benefits; Details lists the commits and shows the
@@ -20,19 +20,17 @@ import TicketChips from './TicketChips.vue'
 const props = defineProps<{
   release: Release; repository: string; current: boolean; rollback: boolean; fresh: boolean
   liveSince: string | null; now: number; query: string; evidence: boolean
-  lang: ReleaseLang; view: ReleaseView; hiddenInHistory?: boolean
+  lang: ReleaseLang; view: ReleaseView; hiddenInHistory?: boolean; publishedCount?: number
 }>()
 const locale = computed(() => props.lang)
 const details = computed(() => props.view === 'details')
 const evidenceOpen = computed(() => details.value || props.evidence)
-const emit = defineEmits<{ evidence: [open: boolean] }>()
 
 const at = computed(() => releasedAt(props.release))
 const reserved = computed(() => props.release.state === 'reserved')
 const candidate = computed(() => props.release.state === 'candidate')
 const pendingLabels: Record<string, string> = { tag_message: 'Tag message', tagged_at: 'Tag time', published_at: 'Publication time', image: 'Image digest', ci: 'CI run', release_run: 'Release run', release_url: 'GitHub release' }
 const lines = computed(() => presentRelease(props.release, locale.value))
-const tickets = computed(() => ticketsOf(props.release))
 const counted = computed(() => lines.value.features.length + lines.value.fixes.length + lines.value.other.length)
 // The header: theme, headline and intro when the release has them. The pills
 // and benefits are the blocks below; Git tag messages are evidence only.
@@ -42,9 +40,6 @@ const badge = (lang: ReleaseLang, own = false) => lang !== props.lang && (own ||
 const noted = computed(() => hasUsableNotes(props.release) ? props.release.notes : null)
 const parts = (text: string) => markParts(text, props.query)
 const copyText = computed(() => releaseCopy(locale.value))
-// A ticket already heading a block needs no chip.
-const lined = computed(() => new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key)))
-const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(key)))
 // "Live here since Thu 12:15 · published 09:56, 3 hours ago" for the release this server runs.
 const liveLine = computed(() => {
   const live = props.current && props.liveSince ? Date.parse(props.liveSince) : NaN
@@ -57,8 +52,6 @@ const techLine = computed(() => [
   generationLabel.value, props.release.release_sequence > 0 ? `Release ${props.release.release_sequence}` : '', props.release.release_channel, props.release.version,
   ev.value?.image?.digest ? `image ${digestShort(ev.value.image.digest)}` : '', props.release.tag ? `tag ${props.release.tag}` : '',
 ].filter(Boolean).join(' · '))
-// Changes name their ticket only when the release has more than one.
-const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] : '')
 
 // ---------- Evidence ----------
 const ev = computed(() => props.release.evidence)
@@ -98,6 +91,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       </div>
     </div>
     <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseCodename :version="release.version" :name="release.codename" :quiet="reserved"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseCodename></h2>
+    <p class="detail-info">{{ generationLabel }} · {{ brand.short_name }} releases<template v-if="publishedCount !== undefined"> · {{ publishedCount }} published</template></p>
     <p v-if="reserved && hiddenInHistory" class="none hidden-history">Hidden in the history. Show reserved versions in Developer settings.</p>
     <p v-if="liveLine" class="when live-line" :data-tip="liveSince ? `Live on this server since ${absoluteTime(liveSince)}` : undefined">{{ liveLine }}</p>
     <p v-else-if="at" class="when">
@@ -105,10 +99,10 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-else-if="candidate">Reserved {{ absoluteTime(at) }} · publication pending</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <div v-if="!reserved && (lines.features.length || lines.fixes.length || tickets.length)" class="counts">
-      <span v-if="lines.features.length" class="count-chip"><strong>{{ lines.features.length }}</strong> {{ lines.features.length === 1 ? 'feature' : 'features' }}</span>
-      <span v-if="lines.fixes.length" class="count-chip"><strong>{{ lines.fixes.length }}</strong> {{ lines.fixes.length === 1 ? 'fix' : 'fixes' }}</span>
-      <span v-if="tickets.length" class="count-chip"><strong>{{ tickets.length }}</strong> {{ tickets.length === 1 ? 'ticket' : 'tickets' }}</span>
+    <div v-if="!reserved" class="counts" aria-label="Release change counts">
+      <span><strong>{{ lines.features.length }}</strong> {{ lines.features.length === 1 ? 'feature' : 'features' }}</span><span aria-hidden="true">·</span>
+      <span><strong>{{ lines.fixes.length }}</strong> {{ lines.fixes.length === 1 ? 'fix' : 'fixes' }}</span><span aria-hidden="true">·</span>
+      <span><strong>{{ lines.other.length }}</strong> other</span>
     </div>
     <p v-if="details" class="tech mono">{{ techLine }}</p>
     <section class="notes" aria-label="Release notes">
@@ -118,8 +112,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
         <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.introLang)" :lang="presented.introLang" /></p>
       </div>
       <p v-if="noted && !(noted.public_items ?? noted.items).length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
-      <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
-      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
+      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :view="view" :lang="lang" />
       <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
       <template v-if="noted">
         <p v-for="gap in noted.gaps" :key="gap" class="none">{{ gap }}</p>
@@ -131,17 +124,8 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
     <!-- Details shows it open; Highlights keeps it behind a toggle. -->
-    <section v-if="release.tag || candidate" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
-      <h3 v-if="details" id="release-evidence-title" class="ev-toggle ev-head">
-        <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
-        <span class="ev-title">Evidence</span>
-      </h3>
-      <button v-else type="button" class="ev-toggle" :aria-expanded="evidence" aria-controls="release-evidence" aria-keyshortcuts="e" @click="emit('evidence', !evidence)">
-        <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
-        <span id="release-evidence-title" class="ev-title">Evidence</span>
-        <span class="ev-summary">{{ summary }}</span>
-        <AppIcon name="chevron" :size="14" class="ev-chev" />
-      </button>
+    <section v-if="(release.tag || candidate) && evidenceOpen" class="evidence open" aria-labelledby="release-evidence-title">
+      <h3 class="ev-toggle ev-head"><span class="ev-icon"><AppIcon name="shield" :size="14" /></span><span id="release-evidence-title" class="ev-title">Evidence</span><span class="ev-summary">{{ summary }}</span></h3>
       <div v-if="evidenceOpen" id="release-evidence" class="ev-body">
         <p class="sr" role="status">{{ copyStatus }}</p>
         <p v-if="release.headline" class="none">Tag message: {{ release.headline }}</p>
@@ -214,22 +198,21 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .chip { height: 24px; font-size: 11.5px; letter-spacing: .02em; }
 .live-chip { height: 22px; gap: 6px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .live-chip .live-dot { width: 6px; height: 6px; box-shadow: none; }
-.counts { display: flex; flex-wrap: wrap; gap: 8px; }
-.count-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: 13.5px; color: var(--ink); }
-.count-chip strong { font-weight: 650; font-variant-numeric: tabular-nums; }
+.counts { display:flex; flex-wrap:wrap; gap:7px; font-size:13px; color:var(--ink-2); }
+.counts strong { font-weight:650; color:var(--ink); }
 .chip.new { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: color-mix(in oklab, var(--gold-ink), var(--ink) 35%); }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
+.detail-info { font-size:11px; color:var(--ink-3); }
 .when { font-size: 13px; color: var(--ink-2); }
 .live-line { font-size: 15px; line-height: 1.5; color: var(--ink-2); }
 .reserved .version { color: var(--ink-2); }
 /* AEON-305: a compact header for a named release; the blocks below stay the main content. */
 .notes { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
-.summary { display: grid; gap: 4px; margin-bottom: 8px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklab, var(--surface-2), transparent 40%); box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+.summary { display:grid; gap:4px; margin-bottom:8px; min-width:0; }
 .kicker { margin: 0; font: 700 11px/1.35 var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--teal-ink); overflow-wrap: anywhere; }
 .summary .headline { margin: 0; font: 650 19px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); text-wrap: balance; overflow-wrap: anywhere; }
 .intro { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); text-wrap: pretty; overflow-wrap: anywhere; }
 mark { background: var(--mark-hl); color: inherit; border-radius: 3px; padding: 0 1px; }
-.tickets { margin-top: 2px; }
 .none { font-size: 13px; color: var(--ink-3); }
 .written-after { font-size: 12.5px; }
 .evidence { margin-top: 14px; border-radius: 14px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }

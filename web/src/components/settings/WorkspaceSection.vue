@@ -9,6 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import BrandCard from './BrandCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
+import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import StatusAutopilot from './StatusAutopilot.vue'
 import AgentActivityCard from './AgentActivityCard.vue'
 
@@ -66,6 +67,7 @@ async function saveInterval() {
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
     </SettingsCard>
+    <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />
     <SettingsCard v-if="intervalReady" title="Estimates" icon="clock" anchor="estimates">

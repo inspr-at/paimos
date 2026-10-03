@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
@@ -1174,6 +1175,11 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	modelUpdate := putHeartbeatModel(ctx, o, session, body)
 
+	if model, ok := body["model"].(string); ok && model != "" {
+		if effort, ok := body["reasoning_effort"].(string); ok && modelreport.ValidTuple(model, effort) {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(session.id + "/advertised/" + model + "/" + effort), Harness: o.Harness, Model: model, Effort: effort, Status: "advertised"}}
+		}
+	}
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
