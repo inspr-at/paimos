@@ -957,7 +957,8 @@ Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
 
 Usage lists configured accounts even before a reading or successful verification,
-with their current computer/account readiness and any reported repair. Cursor,
+with their current computer/account readiness and any reported repair. A failed
+computer lookup retains the last account inventory and marks it incomplete. Cursor,
 Grok and Pi do not expose a supported limit reading; their rows say so instead
 of promising a reading after the first run. Codex's quota-neutral idle capture
 uses the enrolled Node interpreter, checks the account identity in that same

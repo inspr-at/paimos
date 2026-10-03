@@ -89,9 +89,8 @@ describe('online, no readings yet', () => {
   it('each account is ready, and capacity says honestly that nothing was read', () => {
     expect(cards[0].accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
     expect(cards[0].accounts[0].capacity).toEqual({ kind: 'none' })
-    // The approved Ready state: Cursor without a reading is "No reading yet" with Check now,
-    // never "doesn't report a usage limit" (nothing in the projection confirms that).
-    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'none' })
+    // Cursor has no quota reader, independently of whether learning has begun.
+    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: "Cursor doesn't show its limit · one run at a time by day" })
     expect(cards[0].legend).toBe(false)
     expect(readySummary(cards)).toEqual({ text: '2 of 2 ready', tone: 'ok' })
   })
@@ -220,4 +219,44 @@ describe('words', () => {
     expect(middleEllipsis('admin@augmentoring.com', 40)).toBe('admin@augmentoring.com')
     expect(middleEllipsis('admin@augmentoring.com', 15)).toBe('admin@a…ing.com')
   })
+})
+
+
+describe('AEON-623 account diagnostics', () => {
+  it('keeps a blocked Claude account without a capacity projection, with its exact cause and repair', () => {
+    const view = computer({
+      harness_statuses: { claude: 'blocked' },
+      harness_details: { claude: { state: 'blocked', reason: 'probe_failed', reason_detail: 'the default Claude profile is not private (requires mode 0700)' } },
+    })
+    view.enrollments = [{ ...view.enrollments[0], harness: 'claude', verification_state: 'queued' }]
+    const rows = buildRows([{ ...inputs('online')[0], harness: 'claude', last_probe_ok: false }], [])
+    const line = buildComputerCards({ computers: [view], rows, now: NOW })[0].accounts[0]
+    expect(line.id).toBe(CODEX)
+    expect(line.readiness.kind).toBe('attention')
+    expect(line.readiness.hint).toBe('Claude: sign-in check failed: the default Claude profile is not private (requires mode 0700).')
+    expect(line.readiness.command).toBe('chmod 700 "$HOME/.claude"')
+    expect(line.capacity.kind).toBe('none')
+  })
+
+  it('does not call an unverified account ready even when the harness is ready', () => {
+    const view = computer()
+    view.enrollments[0].verification_state = 'queued'
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), []), now: NOW })
+    expect(cards[0].accounts[0].readiness.text).toBe('Verification queued')
+    expect(cards[0].accounts[0].readiness.kind).toBe('waiting')
+    expect(cards[0].accounts[1].readiness.kind).toBe('ready')
+  })
+})
+
+it('AEON-623: revoked bindings cannot reappear as live loose accounts; active and unrelated accounts stay', () => {
+  const revoked = computer({ computer_state: 'revoked' })
+  const unrelated = { ...inputs('online')[0], id: 'unpaired', label: 'Unpaired account' }
+  const rows = buildRows([...inputs('online'), unrelated], capacity([weekly(42)]))
+  const hidden = buildComputerCards({ computers: [revoked], rows, now: NOW }).flatMap(c => c.accounts)
+  expect(hidden.map(a => a.id)).toEqual(['unpaired'])
+  const active = computer({ computer_id: 'active-computer' })
+  active.enrollments = [active.enrollments[0]]
+  const kept = buildComputerCards({ computers: [revoked, active], rows, now: NOW }).flatMap(c => c.accounts)
+  expect(kept.map(a => a.id).sort()).toEqual([CODEX, 'unpaired'].sort())
+  expect(kept.find(a => a.id === CODEX)?.capacity.kind).toBe('bar')
 })
