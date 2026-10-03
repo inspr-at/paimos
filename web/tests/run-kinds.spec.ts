@@ -54,6 +54,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     const labelLefts = await page.locator('.exec-copy').evaluateAll(items => items.map(item => item.getBoundingClientRect().left))
     expect(new Set(labelLefts).size).toBe(1)
     const workerHost = page.locator(`[data-row="s:${ai.id}"] .host-badge`)
+    const hostCell = page.locator(`[data-row="s:${ai.id}"] .c-host`)
     // The working-plan card can put this row below the viewport. Complete
     // Playwright's action scroll before measuring hover-induced movement.
     await workerHost.scrollIntoViewIfNeeded()
@@ -66,6 +67,9 @@ test('execution kinds and person-specific host names on the real agents table', 
         await workerHost.hover()
         await expect(pencil).toHaveCSS('opacity', '1')
         expect((await pencil.boundingBox())!.x).toBeGreaterThanOrEqual(original!.x + original!.width)
+        const pencilBox = await pencil.boundingBox()
+        const cellBox = await hostCell.boundingBox()
+        expect(pencilBox!.x + pencilBox!.width).toBeLessThanOrEqual(cellBox!.x + cellBox!.width + 0.5)
       } },
       { name: 'open and type a proposed label', run: async () => {
         await workerHost.click()
@@ -107,8 +111,8 @@ test('execution kinds and person-specific host names on the real agents table', 
     const longBadge = await workerHost.boundingBox()
     expect(longBadge!.width).toBeLessThanOrEqual(160)
     expect(longBadge!.width).toBeGreaterThan(original!.width)
-    const hostCell = await page.locator(`[data-row="s:${ai.id}"] .c-host`).boundingBox()
-    expect(longBadge!.x + longBadge!.width).toBeLessThanOrEqual(hostCell!.x + hostCell!.width + 0.5)
+    const longHostCell = await hostCell.boundingBox()
+    expect(longBadge!.x + longBadge!.width).toBeLessThanOrEqual(longHostCell!.x + longHostCell!.width + 0.5)
     expect(await workerHost.locator('.host-name').evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis')).toBe(true)
 
     const shots = process.env.AEON_657_SHOTS
@@ -123,9 +127,20 @@ test('execution kinds and person-specific host names on the real agents table', 
         const responsiveBadge = await workerHost.boundingBox()
         const responsiveCell = await page.locator(`[data-row="s:${ai.id}"] .c-host`).boundingBox()
         expect(responsiveBadge!.x + responsiveBadge!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
+        const responsivePencil = await page.locator(`[data-row="s:${ai.id}"] .host-pencil`).boundingBox()
+        expect(responsivePencil!.x + responsivePencil!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
         if (width === 390) {
-          const execution = await page.locator(`[data-row="s:${ai.id}"] .exec-copy`).boundingBox()
-          expect(execution!.x + execution!.width).toBeLessThanOrEqual(responsiveBadge!.x + 0.5)
+          expect(responsiveBadge!.width).toBeLessThanOrEqual(104)
+          for (const child of [ai, xai, media, terminal]) {
+            const row = page.locator(`[data-row="s:${child.id}"]`)
+            const copy = row.locator('.exec-copy')
+            const copySize = await copy.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
+            expect(copySize.scrollWidth).toBeLessThanOrEqual(copySize.clientWidth)
+            if (child.model) expect(await row.locator('.exec-model').evaluate(el => el.clientWidth)).toBeGreaterThan(0)
+            const harnessBox = await row.locator('.exec-harness').boundingBox()
+            const badgeBox = await row.locator('.host-badge').boundingBox()
+            expect(harnessBox!.x + harnessBox!.width).toBeLessThanOrEqual(badgeBox!.x + 0.5)
+          }
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
         await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })

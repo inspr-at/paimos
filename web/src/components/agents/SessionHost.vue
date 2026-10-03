@@ -72,7 +72,7 @@ async function save(reset = false) {
 </template>
 
 <style scoped>
-.host-control { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
+.host-control { position: relative; display: inline-flex; align-items: center; max-width: calc(100% - 22px); }
 .host-badge { display: inline-flex; align-items: center; gap: 5px; width: auto; min-width: 0; max-width: 160px; height: 24px; box-sizing: border-box; padding: 0 7px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ink-3) 8%, transparent); color: var(--ink-3); font: 11px/1 var(--mono); cursor: pointer; }
 .host-badge:disabled { opacity: 1; cursor: default; }
 .host-badge svg { flex: none; }
@@ -85,5 +85,6 @@ async function save(reset = false) {
 .host-form input { width: 100%; box-sizing: border-box; }
 .host-form p { font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
 .host-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 720px) { .host-badge { max-width: 104px; } }
 @media (hover: none) { .host-pencil { opacity: 1; } }
 </style>
