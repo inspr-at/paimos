@@ -38,6 +38,13 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 
 // Build the same registration and exchange callbacks used by paired serve.
 func pairedAttachConfig(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote, clock agentd.AttachRetryClock) (agentd.AttachConfig, error) {
+	return pairedAttachConfigWithProof(c, remote, clock, func() (string, string, error) {
+		host, proof, err := agentsetup.ReadAttachProof(root, c)
+		return host, string(proof), err
+	})
+}
+
+func pairedAttachConfigWithProof(c agentsetup.RuntimeConfig, remote *agentd.Remote, clock agentd.AttachRetryClock, readProof func() (string, string, error)) (agentd.AttachConfig, error) {
 	// Startup cannot grandfather a fallback whose provenance is unavailable.
 	// Drop it without disabling signed images or other healthy installations.
 	c.AttachIdentities = startupAttachIdentities(c)
@@ -51,10 +58,12 @@ func pairedAttachConfig(root string, c agentsetup.RuntimeConfig, remote *agentd.
 	pairedHTTP := *remote.Client.HTTP
 	pairedHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	pairedClient.HTTP = &pairedHTTP
-	// The first read validates startup and supplies the host. Registration reads
-	// again immediately before sending, so cleanup/config changes during startup
-	// cannot use stale authority. The proof is never retained between attempts.
-	host, _, err := agentsetup.ReadAttachProof(root, c)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	authority := newAttachProofReader(readProof)
+	// One bounded startup read supplies both host and registration authority.
+	// Its proof is consumed below; later recovery always reads fresh state.
+	host, startupProof, err := authority.read(ctx)
 	if err != nil {
 		return agentd.AttachConfig{}, err
 	}
@@ -70,17 +79,18 @@ func pairedAttachConfig(root string, c agentsetup.RuntimeConfig, remote *agentd.
 	}
 	pollKey := hex.EncodeToString(key[:])
 	clear(key[:])
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	capability := agentd.CurrentLocalAuthCapability()
-	registration := func() (map[string]any, error) {
-		// Re-read approved pairing state for each registration, including recovery.
-		// Do not retain the long-lived lifecycle proof in a transport closure.
-		_, proof, err := agentsetup.ReadAttachProof(root, c)
-		if err != nil {
-			return nil, err
+	registration := func(ctx context.Context) (map[string]any, error) {
+		proof := startupProof
+		startupProof = ""
+		if proof == "" {
+			var err error
+			_, proof, err = authority.read(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
-		return map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": capability}, nil
+		return map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": proof, "poll_key": pollKey, "local_auth_capability": capability}, nil
 	}
 	transport, err := pairedAttachTransport(ctx, &pairedClient, registration, pollKey, clock)
 	if err != nil {
@@ -96,9 +106,9 @@ func pairedAttachConfig(root string, c agentsetup.RuntimeConfig, remote *agentd.
 		Exchange: transport.Exchange}, nil
 }
 
-func pairedAttachTransport(ctx context.Context, c *client.Client, registration func() (map[string]any, error), pollKey string, clock agentd.AttachRetryClock) (*agentd.AttachTransport, error) {
+func pairedAttachTransport(ctx context.Context, c *client.Client, registration func(context.Context) (map[string]any, error), pollKey string, clock agentd.AttachRetryClock) (*agentd.AttachTransport, error) {
 	register := func(ctx context.Context) error {
-		body, err := registration()
+		body, err := registration(ctx)
 		if err != nil {
 			return err
 		}

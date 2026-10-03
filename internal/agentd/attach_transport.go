@@ -44,13 +44,15 @@ func (attachRetryClock) Wait(ctx context.Context, delay time.Duration) error {
 // attempt; that proof is not retained by the transport.
 // Registration still invalidates earlier approvals, including active watches.
 type AttachTransport struct {
-	exchange func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error)
-	register func(context.Context) error
-	clock    AttachRetryClock
-	random   func(int64) int64
-	gate     chan struct{}
-	next     time.Time
-	backoff  time.Duration
+	exchange    func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error)
+	register    func(context.Context) error
+	clock       AttachRetryClock
+	random      func(int64) int64
+	gate        chan struct{}
+	next        time.Time
+	backoff     time.Duration
+	serverNext  time.Time
+	serverError error
 }
 
 func NewAttachTransport(exchange func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error), register func(context.Context) error, clock AttachRetryClock) *AttachTransport {
@@ -75,13 +77,25 @@ func (t *AttachTransport) Exchange(ctx context.Context, in attachwatch.DeviceReq
 	if err := ctx.Err(); err != nil {
 		return attachwatch.View{}, err
 	}
+	if t.clock.Now().Before(t.serverNext) {
+		return attachwatch.View{}, t.serverError
+	}
+	t.serverError = nil
+	rememberDelay := func(err error) {
+		var status *client.StatusError
+		if errors.As(err, &status) && status.RetryAfter > 0 {
+			t.serverNext = t.clock.Now().Add(status.RetryAfter)
+			t.serverError = err
+		}
+	}
 	out, err := t.exchange(ctx, in)
+	rememberDelay(err)
 	if err == nil {
 		t.backoff = attachRetryMin
 		return out, nil
 	}
 	var status *client.StatusError
-	if !errors.As(err, &status) || status.Status != http.StatusForbidden || status.AttachRefusal != attachwatch.RefusalPollKeyUnknown || status.ReasonCode != "" || t.clock.Now().Before(t.next) {
+	if !errors.As(err, &status) || status.Status != http.StatusForbidden || status.AttachRefusal != attachwatch.RefusalPollKeyUnknown || status.ReasonCode != "" || t.clock.Now().Before(t.next) || t.clock.Now().Before(t.serverNext) {
 		return out, err
 	}
 	delay := t.backoff/2 + time.Duration(t.random(int64(t.backoff/2)+1))
@@ -96,9 +110,11 @@ func (t *AttachTransport) Exchange(ctx context.Context, in attachwatch.DeviceReq
 		return attachwatch.View{}, err
 	}
 	if err = t.register(ctx); err != nil {
+		rememberDelay(err)
 		return attachwatch.View{}, err
 	}
 	out, err = t.exchange(ctx, in)
+	rememberDelay(err)
 	if err == nil {
 		t.backoff = attachRetryMin
 	}

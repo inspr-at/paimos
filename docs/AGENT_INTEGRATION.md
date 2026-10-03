@@ -542,12 +542,21 @@ exact membership source, snapshot capture and offline release-history behavior.
 Recovery reads the long-lived computer lifecycle proof from the approved setup
 store for each registration attempt; the transport retains the memory-only poll
 key and pinned origin, without retaining that proof for the daemon lifetime.
+Startup obtains the host and registration proof together in one read. Store or
+Keychain stalls can leave at most one authority reader in flight per daemon;
+cancellation or the total deadline releases the transport gate, and abandoned
+results are discarded rather than used by a later registration.
 Local cleanup, disconnect or configuration changes refuse recovery before a
 registration is sent. Unknown-key diagnostics use a separate server-local budget
 of 30 attempts per minute per authenticated computer principal before computer, scope or watch
 lookups; they never consume the tenant attach request budget. The server holds
-at most 4096 live budgets. A capped call returns `attach_recovery_limited` with
-`Retry-After` seconds, without authorizing registration. If the explicit
+at most 4096 live budgets across tenants. As an accepted AEON-608 limitation,
+new principals (including those in another tenant) are refused until a slot
+expires when that shared cap is full; existing budgets retain their counters.
+A capped call returns `attach_recovery_limited` with
+`Retry-After` seconds, without authorizing registration. The daemon retains
+the server refusal and performs no exchange or registration until that delay
+expires (valid server delays are bounded to one day). If the explicit
 `poll_key_unknown` refusal reaches the helper during cooldown, run attach again
 in a few seconds and give fresh approval; a daemon restart is not required.
 

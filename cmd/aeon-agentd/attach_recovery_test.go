@@ -77,7 +77,7 @@ func TestPairedAttachRecoveryReusesOnlyPinnedMemoryAuthority(t *testing.T) {
 			defer server.Close()
 			c := client.New(server.URL, "fixture")
 			c.HTTP = server.Client()
-			transport, err := pairedAttachTransport(t.Context(), c, func() (map[string]any, error) {
+			transport, err := pairedAttachTransport(t.Context(), c, func(context.Context) (map[string]any, error) {
 				return map[string]any{"operation": "register", "device_proof": proof, "poll_key": pollKey, "attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "local_auth_capability": attachwatch.LocalAuthUnsupported}, nil
 			}, pollKey, &attachRecoveryClock{})
 			if err != nil {

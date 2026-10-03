@@ -2679,7 +2679,10 @@ paths:
         minute per authenticated computer principal, checked before database eligibility reads.
         Recovery does not spend the tenant-wide attach request budget. A capped recovery
         returns 429 with code=attach_recovery_limited and Retry-After in seconds; it does
-        not authorize registration. The server retains at most 4096 live recovery budgets.
+        not authorize registration. The daemon honors valid Retry-After delays before any
+        further exchange or registration. The server retains at most 4096 live recovery
+        budgets across tenants; at capacity, new principals are refused until an existing
+        slot expires, including principals from other tenants (accepted AEON-608 limitation).
         Requests, activation and every poll
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
         be resurrected. The server pins the owner's consent_mode at person approval.

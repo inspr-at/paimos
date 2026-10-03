@@ -206,3 +206,69 @@ func TestAttachTransportDeadlineBoundsBackoffAndRegistration(t *testing.T) {
 		}
 	})
 }
+
+func TestAttachTransportHonorsServerDelayWithoutExchangeOrRegistration(t *testing.T) {
+	for _, phase := range []string{"opaque exchange", "registration", "replay", "unknown exchange"} {
+		t.Run(phase, func(t *testing.T) {
+			clock := &retryTestClock{now: time.Unix(1_700_000_000, 0)}
+			calls, registrations := 0, 0
+			refusal := &client.StatusError{Status: 429, Message: "computer recovery attempt cap reached", RetryAfter: time.Minute}
+			if phase == "opaque exchange" {
+				refusal.Status, refusal.Message = 403, "daemon poll key rejected"
+			}
+			if phase == "unknown exchange" {
+				refusal.Status, refusal.AttachRefusal = 403, attachwatch.RefusalPollKeyUnknown
+			}
+			transport := NewAttachTransport(func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error) {
+				calls++
+				if phase == "registration" || phase == "replay" && calls == 1 {
+					return attachwatch.View{}, missingPollKey()
+				}
+				return attachwatch.View{}, refusal
+			}, func(context.Context) error {
+				registrations++
+				if phase == "registration" {
+					return refusal
+				}
+				return nil
+			}, clock)
+			_, err := transport.Exchange(t.Context(), attachwatch.DeviceRequest{})
+			if err != refusal {
+				t.Fatal("server refusal was replaced")
+			}
+			wantCalls, wantRegistrations := 1, 0
+			if phase == "registration" {
+				wantRegistrations = 1
+			}
+			if phase == "replay" {
+				wantCalls, wantRegistrations = 2, 1
+			}
+			if calls != wantCalls || registrations != wantRegistrations {
+				t.Fatal("delay caused an immediate exchange or registration")
+			}
+			until := clock.Now().Add(time.Minute)
+			for _, at := range []time.Time{clock.Now(), until.Add(-time.Nanosecond)} {
+				clock.now = at
+				for i := 0; i < 40; i++ {
+					_, err := transport.Exchange(t.Context(), attachwatch.DeviceRequest{})
+					if err != refusal {
+						t.Fatal("cooldown lost original server refusal")
+					}
+				}
+			}
+			if calls != wantCalls || registrations != wantRegistrations {
+				t.Fatal("server delay allowed exchange or registration")
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if _, err := transport.Exchange(ctx, attachwatch.DeviceRequest{}); !errors.Is(err, context.Canceled) {
+				t.Fatal("cached refusal masked cancellation")
+			}
+			clock.now = until
+			_, _ = transport.Exchange(t.Context(), attachwatch.DeviceRequest{})
+			if calls != wantCalls+1 {
+				t.Fatal("server delay did not end at the exact boundary")
+			}
+		})
+	}
+}

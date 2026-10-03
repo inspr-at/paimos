@@ -42,6 +42,13 @@ func TestWatchRecoveryBudgetBoundsIdentityMemoryAndRetry(t *testing.T) {
 	if w.Code != 429 || err != nil || retry != 60 || len(limits.computers) != recoveryCapacity {
 		t.Fatal("recovery map grew beyond its bound or lost capacity retry guidance")
 	}
+	// The ticket explicitly accepts the shared-cap admission limitation. Keep
+	// evidence honest: a completely new tenant is also refused at capacity.
+	w = httptest.NewRecorder()
+	WriteError(w, limits.limit(tenant.Principal{TenantID: "new-tenant", ID: "new-computer"}, now))
+	if w.Code != 429 || w.Header().Get("Retry-After") != "60" || len(limits.computers) != recoveryCapacity {
+		t.Fatal("accepted shared-cap behavior or retry guidance changed")
+	}
 	// Exhausting the map never denies a retained computer with slots left.
 	if err := limits.limit(other, now); err != nil {
 		t.Fatal("full map refused an existing computer", err)
