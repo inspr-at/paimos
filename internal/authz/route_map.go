@@ -353,6 +353,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/quotes/{quoteId}/versions/{version}/public-link":                        "quotes.manage",
 	"GET /api/relations":                                                              "relations.read",
 	"GET /api/releases":                                                               "releases.read",
+	"GET /api/releases/pending":                                                       "releases.read",
 	"GET /api/releases/{version}":                                                     "releases.read",
 	"PUT /api/releases/{version}/presentation":                                        "releases.deploy",
 	"DELETE /api/releases/{version}/presentation":                                     "releases.deploy",

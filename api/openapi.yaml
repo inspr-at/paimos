@@ -3201,6 +3201,24 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Agent key requires the releases.read scope}
         '500': {description: Stored release notes could not be read}
+  /releases/pending:
+    get:
+      operationId: listPendingReleaseChanges
+      summary: Changes on main since the running release
+      description: "AEON-635. Same authentication as the release history: people need a session and agent keys need releases.read. Compares the running published release's exact source commit with a pinned GitHub main head, never ticket status or timestamps. Merge and release/version-bump commits are excluded, as in displayed release groups. The public GitHub lookup is bounded to 250 commits, 4 MiB and six seconds, and cached for two minutes. Ticket classification reads at most 1000 keys from the caller's tenant per page; live ticket benefit text is never returned. A truncated comparison or incomplete classification reports partial, total null and known_total as a lower bound. Missing source evidence or a failed upstream lookup reports unavailable with total null, never zero. Pagination uses the last commit key within a pinned snapshot; a changed snapshot answers 409 and callers restart without a cursor."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque continuation returned by the previous page}
+      responses:
+        '200':
+          description: Exact, partial or explicitly unavailable pending changes
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PendingReleaseChanges'}
+        '400': {description: Invalid page limit or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
+        '409': {description: The pinned main snapshot changed; restart pagination}
   /releases/{version}:
     get:
       operationId: getRelease
@@ -11533,6 +11551,21 @@ components:
         changed: {type: boolean}
         before: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
         after: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
+    PendingReleaseChanges:
+      type: object
+      required: [live_version, base_commit, head_commit, checked_at, source, status, total, known_total, changes, next_cursor, unavailable]
+      properties:
+        live_version: {type: string, description: The running build version used as the baseline}
+        base_commit: {type: string, description: The running published release's exact source commit, empty when unavailable}
+        head_commit: {type: string, description: The pinned GitHub main head, empty when unavailable}
+        checked_at: {type: string, format: date-time, description: When the cached main comparison was checked}
+        source: {type: string, enum: [github-main]}
+        status: {type: string, enum: [available, partial, unavailable]}
+        total: {type: [integer, 'null'], minimum: 0, description: Exact non-merge, non-release change count; null for partial or unavailable evidence}
+        known_total: {type: integer, minimum: 0, description: Number of confirmed changes in the bounded snapshot, independent of the page limit; a lower bound when partial}
+        changes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Release/properties/changes/items'}}
+        next_cursor: {type: [string, 'null'], description: Continuation for the next page of this snapshot, null at the end of the bounded list}
+        unavailable: {type: array, items: {type: string}, description: Plain-language evidence gaps or reasons for a partial or unavailable result}
     ReleaseHistory:
       description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
       type: object
