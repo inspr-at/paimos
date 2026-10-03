@@ -90,6 +90,15 @@ func workNotClosedSQL(stateExpr, categoryAlias string) string {
 	return workCountBucketSQL(stateExpr, categoryAlias) + ` NOT IN ('done','cancelled','archived')`
 }
 
+// workHideStateSQL splits the done bucket into its three Hide choices. Custom
+// done-bucket states use Done; per-kind bucket overrides still take precedence.
+func workHideStateSQL(stateExpr, categoryAlias string) string {
+	return `CASE ` + workCountBucketSQL(stateExpr, categoryAlias) + `
+		WHEN 'done' THEN CASE ` + workStatusSQL(stateExpr) + `
+			WHEN 'delivered' THEN 'delivered' WHEN 'accepted' THEN 'accepted' ELSE 'done' END
+		WHEN 'cancelled' THEN 'cancelled' WHEN 'archived' THEN 'archived' ELSE '' END`
+}
+
 // workStateKnownSQL is 0 for a workflow state and 1 otherwise. It stays
 // ascending in both sort directions, so an unknown spelling stays after the
 // workflow. The state is normalised the same way as the buckets, so " OPEN ",

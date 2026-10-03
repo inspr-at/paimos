@@ -104,6 +104,7 @@ type listQuery struct {
 	ParentID    *string   `json:"parent_id"`
 	Descendants bool      `json:"descendants"`
 	HideClosed  bool      `json:"hide_closed"`
+	HideStates  []string  `json:"hide_states,omitempty"`
 	Sort        []sortKey `json:"sort"`
 	FacetNames  []string  `json:"facets"`
 	Limit       int       `json:"limit"`
@@ -269,7 +270,7 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	}
 	// Bound the new header selectors before parsing or building SQL. Legacy
 	// exact state filters retain their established semantics.
-	for name, max := range map[string]int{"work_state": 64, "work_bucket": 5} {
+	for name, max := range map[string]int{"work_state": 64, "work_bucket": 5, "hide_states": 5} {
 		raw := v[name]
 		bytes := 0
 		tokens := len(raw)
@@ -378,6 +379,24 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	}
 	if out.HideClosed, err = queryBool(r, "hide_closed"); err != nil {
 		return out, err
+	}
+	if v.Has("hide_states") {
+		if out.HideStates, err = queryList(r, "hide_states"); err != nil {
+			return out, err
+		}
+		if len(out.HideStates) == 0 {
+			return out, badRequest("hide_states requires at least one status")
+		}
+		for i, state := range out.HideStates {
+			state = normaliseWorkState(state)
+			if state == "canceled" { state = "cancelled" }
+			switch state {
+			case "done", "delivered", "accepted", "cancelled", "archived":
+				out.HideStates[i] = state
+			default:
+				return out, badRequest("invalid hide_states")
+			}
+		}
 	}
 	if out.Descendants && !out.ParentSet && out.Within == nil {
 		return out, badRequest("include_descendants requires parent_id")
@@ -1116,9 +1135,8 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
             coalesce(n.fields->>'priority','') AS priority_raw,`
 	}
-	// Hide closed uses the same buckets as the project counts. Until the filter
-	// is on, the predicate stays the previous literal so an unfiltered list
-	// keeps its plan.
+	// Hide shares the kind-aware project-count buckets. Custom choices split
+	// the finished bucket without changing the default or unfiltered plans.
 	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
 	configuredCTE := ""
 	configuredJoin := ""
@@ -1126,6 +1144,9 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		configuredCTE = `, ` + workStateCategoryCTE()
 		configuredJoin = ` LEFT JOIN configured cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state")
 		closedPred = workNotClosedSQL("n.state", "cfg")
+		if q.HideClosed && len(q.HideStates) > 0 {
+			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
+		}
 	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
