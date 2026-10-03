@@ -196,3 +196,111 @@ func TestInitialExplicitDefaultPersistsAndWinsAfterLink(t *testing.T) {
 		t.Fatalf("unlink lost explicit canonical default: %+v", got)
 	}
 }
+
+func TestUndoInitialSelectionRestoresAliasInheritance(t *testing.T) {
+	for _, initialChoice := range []string{"default", "theme"} {
+		for _, linkAt := range []string{"before undo", "after undo"} {
+			t.Run(initialChoice+"/"+linkAt, func(t *testing.T) {
+				f := setup(t)
+				mux := http.NewServeMux()
+				New(f.d.App).Mount(mux)
+				initial := activeHTTP(t, mux, f.other)
+				var themeID *string
+				if initialChoice == "theme" {
+					theme := mustTheme(t, f.s, f.other, "First choice", "personal")
+					themeID = &theme.ID
+				}
+				chosen, err := f.s.Select(t.Context(), f.other, SelectionInput{ThemeID: themeID, Revision: initial.Revision})
+				if err != nil || chosen.Revision == 0 {
+					t.Fatalf("initial choice was not saved: %+v %v", chosen, err)
+				}
+				firstChoice := lastEvent(t, f, "theme.selected")
+				alias := mustTheme(t, f.s, f.member, "Inherited alias choice", "personal")
+				aliasChoice, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &alias.ID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if linkAt == "before undo" {
+					linkPeople(t, f, f.member, f.other)
+				}
+				undo(t, f, f.other, firstChoice, 201)
+				if linkAt == "after undo" {
+					linkPeople(t, f, f.member, f.other)
+				}
+				for _, person := range []tenant.Principal{f.other, f.member} {
+					if got := activeHTTP(t, mux, person); !same(got, aliasChoice) {
+						t.Fatalf("undo kept canonical precedence over alias inheritance: %+v; want %+v", got, aliasChoice)
+					}
+				}
+				beforeEvents := eventCount(t, f)
+				for _, stale := range []int64{initial.Revision, chosen.Revision} {
+					expect(t, call(t, mux, f.other, "PUT", "/api/me/theme", fmt.Sprintf(`{"theme_id":null,"revision":%d}`, stale)), 409)
+				}
+				if got := activeHTTP(t, mux, f.other); !same(got, aliasChoice) || eventCount(t, f) != beforeEvents {
+					t.Fatalf("stale generation changed inherited choice or audit: %+v", got)
+				}
+				unlinkPerson(t, f, f.member)
+				restored := activeHTTP(t, mux, f.other)
+				if restored.SelectedThemeID != nil || restored.Theme.ID != initial.Theme.ID || restored.Revision == 0 || restored.Revision == chosen.Revision || restored.Revision == aliasChoice.Revision {
+					t.Fatalf("unsaved state lost its fresh CAS generation after unlink: %+v", restored)
+				}
+				if got := activeHTTP(t, mux, f.member); !same(got, aliasChoice) {
+					t.Fatalf("undo changed the alias's physical preference: %+v", got)
+				}
+				// A stale inherited generation must also fail after unlink.
+				expect(t, call(t, mux, f.other, "PUT", "/api/me/theme", fmt.Sprintf(`{"theme_id":null,"revision":%d}`, aliasChoice.Revision)), 409)
+				expect(t, call(t, mux, f.other, "PUT", "/api/me/theme", fmt.Sprintf(`{"theme_id":null,"revision":%d}`, restored.Revision)), 200)
+				explicit := activeHTTP(t, mux, f.other)
+				if explicit.Revision == restored.Revision || eventCount(t, f) != beforeEvents+1 {
+					t.Fatalf("fresh explicit default was treated as an unsaved no-op: %+v", explicit)
+				}
+				linkPeople(t, f, f.member, f.other)
+				if got := activeHTTP(t, mux, f.other); !same(got, explicit) {
+					t.Fatalf("new explicit default did not regain precedence: %+v", got)
+				}
+			})
+		}
+	}
+}
+
+func TestUndoInitialSelectionKeepsFreshCAS(t *testing.T) {
+	f := setup(t)
+	mux := http.NewServeMux()
+	New(f.d.App).Mount(mux)
+	initial := activeHTTP(t, mux, f.other)
+	expect(t, call(t, mux, f.other, "PUT", "/api/me/theme", `{"theme_id":null,"revision":0}`), 200)
+	chosen := activeHTTP(t, mux, f.other)
+	undo(t, f, f.other, lastEvent(t, f, "theme.selected"), 201)
+	restored := activeHTTP(t, mux, f.other)
+	if restored.Theme.ID != initial.Theme.ID || restored.SelectedThemeID != nil || restored.Revision == 0 || restored.Revision == chosen.Revision {
+		t.Fatalf("undo must restore absence with a fresh generation: %+v", restored)
+	}
+	beforeEvents := eventCount(t, f)
+	for _, stale := range []int64{initial.Revision, chosen.Revision} {
+		expect(t, call(t, mux, f.other, "PUT", "/api/me/theme", fmt.Sprintf(`{"theme_id":null,"revision":%d}`, stale)), 409)
+	}
+	if got := activeHTTP(t, mux, f.other); !same(got, restored) || eventCount(t, f) != beforeEvents {
+		t.Fatalf("stale generation changed unsaved choice or audit: %+v", got)
+	}
+	expect(t, call(t, mux, f.other, "PUT", "/api/me/theme", fmt.Sprintf(`{"theme_id":null,"revision":%d}`, restored.Revision)), 200)
+	explicit := activeHTTP(t, mux, f.other)
+	if explicit.Revision == restored.Revision || eventCount(t, f) != beforeEvents+1 {
+		t.Fatalf("explicit default after undo was not saved and audited: %+v", explicit)
+	}
+	// Undo must also recognize a newer absence snapshot with a positive
+	// physical revision; absence cannot be inferred from revision 0 alone.
+	undo(t, f, f.other, lastEvent(t, f, "theme.selected"), 201)
+	secondUndo := activeHTTP(t, mux, f.other)
+	if secondUndo.Revision == explicit.Revision || secondUndo.Revision == restored.Revision {
+		t.Fatalf("repeated undo reused a prior generation: %+v", secondUndo)
+	}
+	alias := mustTheme(t, f.s, f.member, "Alias after repeated undo", "personal")
+	aliasChoice, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &alias.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkPeople(t, f, f.member, f.other)
+	if got := activeHTTP(t, mux, f.other); !same(got, aliasChoice) {
+		t.Fatalf("positive-revision absence snapshot blocked inheritance: %+v", got)
+	}
+}
