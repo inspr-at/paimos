@@ -174,7 +174,8 @@ func (rt *runtime) cmdTagCreate() *Command {
 			if !found {
 				tags = append(tags, name)
 				fields["tags"] = tags
-				if err := rt.do(http.MethodPatch, "/api/nodes/"+p.ID, map[string]any{"fields": fields}, nil); err != nil {
+				if err := rt.patchNode(p, map[string]any{"fields": fields}, nil); err != nil {
+					fmt.Fprintf(rt.stderr, "created tag %s (#%s), but attachment to project %s failed; the tag remains created\n", name, n.ID, project)
 					return err
 				}
 			}

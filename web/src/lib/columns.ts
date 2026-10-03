@@ -102,9 +102,9 @@ export function widthOf(id: ColumnId, prefs: ListPrefs | null | undefined): numb
 
 // The columns to show, in order. `customised` is true when a saved choice applies.
 export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean }): { columns: ColumnDef[]; customised: boolean } {
-  if (options.phone) {
-    // A phone card keeps its own set. Progress, ETA and an hour estimate join it when a
-    // loaded row has one; a saved choice does not hide them.
+  if (options.phone && !options.prefs?.visible) {
+    // Automatic phone cards keep their compact set. Saved choices below apply
+    // to cards too; their optional cells grow downward instead of scrolling.
     const phone: ColumnId[] = [...PHONE]
     if (options.present?.progress) phone.push('progress')
     if (options.present?.eta) phone.push('eta')
