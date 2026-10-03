@@ -36,7 +36,7 @@ func makeRegistry() []Permission {
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"questions", "ask read decide"}, {"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
-		{"models", "read manage resolve"}, {"plugins", "read manage invoke"},
+		{"model_prefs", "manage"}, {"models", "read manage resolve"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
 		{"events", "read undo undo_other"}, {"search", "read"}, {"outcome", "read write"},
 		{"hours", "read write approve"}, {"quotes", "read write issue accept delete manage portal_read portal_accept"},
@@ -66,6 +66,7 @@ func makeRegistry() []Permission {
 		}
 	}
 	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
+	out = append(out, Permission{Key: "agents.plan.read", Group: "Agents", Description: "Read the person's agent start plan and running counts", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }
@@ -74,7 +75,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "model_prefs.manage", "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"questions.decide", "approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
@@ -146,6 +147,9 @@ func builtinPermissions(key string) []string {
 			allow = p.Key == "comments.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && guestReadGroup(resource))
 		case "customer":
 			allow = p.Key == "profile.portal_read" || p.Key == "profile.portal_write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
+		}
+		if p.Key == "agents.plan.read" && key != "customer" {
+			allow = true
 		}
 		if allow {
 			out = append(out, p.Key)

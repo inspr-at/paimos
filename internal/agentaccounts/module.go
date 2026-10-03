@@ -37,6 +37,8 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 // Mount registers account, allowance and routing routes.
 func (m *Module) Mount(mux *http.ServeMux) {
 	handle := func(pattern string, fn http.HandlerFunc) { mux.HandleFunc(pattern, m.privateResponse(fn)) }
+	handle("GET /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
+	handle("PUT /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("GET /api/agent-accounts/readiness", m.readinessList)
 	handle("GET /api/agent-accounts/quota-warnings", m.warningSessions)
 	handle("GET /api/settings/quota-warnings", m.warningSettings)
@@ -93,7 +95,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := agentpairing.Lock(ctx, tx); err != nil {
+		if err := agentpairing.LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -293,6 +295,7 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
+	var completionErr *committedProbeError
 	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
 		scopes, err := keyScopes(r.Context(), tx, r, p)
 		if err != nil {
@@ -313,10 +316,18 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		var reportErr error
 		out, reportErr = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
+		if errors.As(reportErr, &completionErr) {
+			return nil
+		}
 		return reportErr
 	})
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if completionErr != nil {
+		w.Header().Set("X-Aeon-Write-Committed", "true")
+		writeErr(w, completionErr.rejection)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)

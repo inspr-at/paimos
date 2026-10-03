@@ -24,14 +24,15 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 	var fixture struct {
 		Registry []authz.Permission `json:"registry"`
 		Cases    []struct {
-			Name         string     `json:"name"`
-			Workspace    []string   `json:"workspace"`
-			Projects     [][]string `json:"projects"`
-			Want         []string   `json:"want"`
-			PrivateRole  bool       `json:"private_role"`
-			RotationWant []string   `json:"rotation_want"`
-			BuiltinRole  string     `json:"builtin_role"`
-			Outside      string     `json:"outside_ceiling"`
+			Name                string     `json:"name"`
+			Workspace           []string   `json:"workspace"`
+			Projects            [][]string `json:"projects"`
+			Want                []string   `json:"want"`
+			PrivateRole         bool       `json:"private_role"`
+			RotationWant        []string   `json:"rotation_want"`
+			BuiltinRole         string     `json:"builtin_role"`
+			ProjectBuiltinRoles []string   `json:"project_builtin_roles"`
+			Outside             string     `json:"outside_ceiling"`
 		} `json:"cases"`
 	}
 	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
@@ -40,6 +41,9 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 	}
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
+	}
+	if len(fixture.Registry) != len(authz.Registry) {
+		t.Fatalf("client/server parity registry size drift: fixture=%d server=%d", len(fixture.Registry), len(authz.Registry))
 	}
 	for _, permission := range fixture.Registry {
 		actual, ok := authz.Lookup(permission.Key)
@@ -60,6 +64,15 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 				permissions, ok := authz.BuiltinPermissions(tc.BuiltinRole)
 				if !ok || !slices.Equal(permissions, tc.Workspace) {
 					t.Fatal("client/server built-in role permissions drift")
+				}
+			}
+			if tc.ProjectBuiltinRoles != nil && len(tc.ProjectBuiltinRoles) != len(tc.Projects) {
+				t.Fatal("fixture requires one built-in role key per project binding")
+			}
+			for i, role := range tc.ProjectBuiltinRoles {
+				permissions, ok := authz.BuiltinPermissions(role)
+				if !ok || !slices.Equal(permissions, tc.Projects[i]) {
+					t.Fatalf("client/server built-in project role permissions drift: %s", role)
 				}
 			}
 			m, owner := keyFixture(t)
@@ -113,7 +126,16 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 						RETURNING id::text`, owner.TenantID, fmt.Sprintf("CEIL-%d", i+1)).Scan(&projectID); err != nil {
 						return err
 					}
-					if err := bind(fmt.Sprintf("ceiling_project_%d", i), projectID, permissions); err != nil {
+					if tc.ProjectBuiltinRoles != nil {
+						var roleID string
+						if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1::uuid AND key=$2 AND builtin`, owner.TenantID, tc.ProjectBuiltinRoles[i]).Scan(&roleID); err != nil {
+							return err
+						}
+						if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+							VALUES($1::uuid,$2::uuid,$3::uuid,'project',$4::uuid)`, owner.TenantID, agent.ID, roleID, projectID); err != nil {
+							return err
+						}
+					} else if err := bind(fmt.Sprintf("ceiling_project_%d", i), projectID, permissions); err != nil {
 						return err
 					}
 				}
@@ -164,7 +186,7 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 			for _, tc := range []struct {
 				scope  string
 				status int
-			}{{outside, http.StatusForbidden}, {"keys.read", http.StatusBadRequest}, {"retired.scope", http.StatusBadRequest}} {
+			}{{outside, http.StatusForbidden}, {"keys.read", http.StatusBadRequest}, {"model_prefs.manage", http.StatusBadRequest}, {"retired.scope", http.StatusBadRequest}} {
 				if w := keyRequest(m, owner, map[string]any{"rotate_key_id": key.ID, "rotation_scopes": []string{tc.scope}}); w.Code != tc.status {
 					t.Fatalf("outside-ceiling rotation status = %d for %s", w.Code, tc.scope)
 				}

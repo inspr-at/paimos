@@ -156,7 +156,9 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		return nil, err
 	}
 	for i := range accounts {
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision, &accounts[i].ShareUsage); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,
+ (SELECT e.evidence FROM agent_account_residency_evidence e WHERE e.tenant_id=a.tenant_id AND e.account_id=a.id AND e.binding=`+residencyBindingSQL+`)
+ FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision, &accounts[i].ShareUsage, &accounts[i].residencyEvidence); err != nil {
 			return nil, err
 		}
 		if ws := byAccount[accounts[i].ID]; ws != nil {
@@ -297,6 +299,12 @@ type probeWrite struct {
 	Failure string `json:"failure,omitempty"`
 }
 
+// committedProbeError rejects a stale completion after a successful heartbeat.
+// The handler must commit the transaction before exposing this rejection.
+type committedProbeError struct{ rejection *httpError }
+
+func (e *committedProbeError) Error() string { return e.rejection.Error() }
+
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
 	if !uuidRE.MatchString(accountID) {
 		return Account{}, fail(http.StatusNotFound, "account not found")
@@ -351,11 +359,11 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
 		return Account{}, err
 	}
+	var completionErr *committedProbeError
 	if in.Readiness != nil {
 		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
-			return Account{}, fail(409, "readiness daemon generation changed")
-		}
-		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+			completionErr = &committedProbeError{rejection: &httpError{status: 409, code: "stale_binding", msg: "heartbeat committed; readiness daemon generation changed; refresh pending work"}}
+		} else if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
 			return Account{}, err
 		}
 	}
@@ -388,6 +396,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
 		return Account{}, err
+	}
+	if completionErr != nil {
+		return after, completionErr
 	}
 	return after, nil
 }

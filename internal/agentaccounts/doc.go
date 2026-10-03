@@ -41,6 +41,25 @@
 // PUT {id}/label (person account.manage) renames only, so Settings' inline
 // rename never turns a legacy null grant into an explicit one.
 //
+// GET/PUT {id}/residency-evidence reads/replaces a bounded host attestation.
+// People read with account.read; only the linked owning person (account.manage)
+// or the connected paired host's bound runtime key (account.probe) may write.
+// An unpaired registering key, workspace admin or key creator is not implicitly
+// an owner. Writes share the pairing -> tree -> tenant -> account lock order with
+// readiness and pairing lifecycle operations, rechecking live permissions inside
+// the final transaction. The tenant fence uses NO KEY UPDATE so FK share locks
+// remain compatible. Writes append account.residency_evidence_updated last;
+// advisory GETs avoid write fences.
+// Evidence names covered profiles, inference/storage/log country sets, explicit
+// local execution, verification/expiry times and an opaque proof reference;
+// optional retention days and training opt-out are retained as declarations.
+// EU needs three nonempty EU-only sets; local needs explicit local execution.
+// Neither class qualifies without unexpired proof for that profile. Evidence
+// is loaded with accounts and evaluated using the routing transaction's clock.
+// A host/owner/provider/model binding change invalidates prior evidence. GET
+// keeps it inspectable with binding_current=false; history lives in events.
+// Evidence is an attestation, not automated verification of proof documents.
+//
 // Agentd's local account enrollment accepts an optional metadata object with
 // exactly those four fields and publishes it once on daemon startup. Owner
 // probes can fill a missing host label; configured labels take precedence.
@@ -199,15 +218,18 @@
 // Pending captures expire after five minutes from their original requested_at;
 // aliases never renew them. Polling and reports reject expired captures, new
 // keys invalidate them and request fresh work, and old keys return 409.
-// Automatic restart reports may advance daemon generation while check-bound
-// completion remains fenced. Account-local capture errors never affect peers.
+// Restart reports advance daemon generation even when carrying an old check:
+// the heartbeat commits, completion/facts are rejected with 409 stale_binding
+// and X-Aeon-Write-Committed, and the daemon refreshes pending work.
+// Account-local capture errors never affect peers.
 // Owners/registered daemons retain their own check result/controls while
 // pooled quota detail remains withheld until all resource owners share it.
 // Legacy readings and key caps use the account's canonical local membership;
 // positive key caps with unknown total balance still carry UsageUnknownReason.
 // Availability-only advice uses historical state enums. Dashboard windows and
-// harness reset details use the same current accountprivacy policy. If a
+// harness reset details use the same current accountprivacy policy. Dashboard
+// allowances consider at most 1024 windows, mark truncation explicitly, and
+// report partial when visible windows omit withheld or truncated windows. If a
 // successful mutation's response cannot be delivered safely, the error states
 // "write committed" and sets X-Aeon-Write-Committed so callers refresh first.
-
 package agentaccounts

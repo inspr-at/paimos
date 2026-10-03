@@ -18,6 +18,8 @@ func TestCoordinatorPermissionsCoverCLIHeartbeatPath(t *testing.T) {
 		"GET /api/kinds",
 		"GET /api/projects",
 		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",
+		"GET /api/model-preferences",
+		"GET /api/work-kinds",
 		"GET /api/models",
 		"GET /api/models/resolve",
 		"GET /api/rules/layers",
@@ -32,7 +34,7 @@ func TestCoordinatorPermissionsCoverCLIHeartbeatPath(t *testing.T) {
 			t.Errorf("%s needs %s, which the coordinator key set lacks", pattern, want)
 		}
 	}
-	for _, forbidden := range []string{"rules.write", "rules.publish", "models.manage"} {
+	for _, forbidden := range []string{"rules.write", "rules.publish", "models.manage", "model_prefs.manage"} {
 		if slices.Contains(have, forbidden) {
 			t.Errorf("coordinator ceiling includes %s", forbidden)
 		}
