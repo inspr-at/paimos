@@ -38,6 +38,10 @@ func TestAgentsPlanPrivateOwnershipValidationAndCounts(t *testing.T) {
 	must(d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'plan_only','Own plan only') RETURNING id::text`, tid).Scan(&planRole))
 	_, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, tid, planRole, agentplan.ReadScope)
 	must(err)
+	// Preference writes require views.write at the route and in the final
+	// transaction; this grant still exposes no project/session information.
+	_, err = d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'views.write')`, tid, planRole)
+	must(err)
 	_, err = d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, alice.ID, planRole)
 	must(err)
 	bob := person(tid, "person", "Bob")
@@ -183,6 +187,10 @@ func TestAgentsPlanLinkedPersonReadWriteAndConflicts(t *testing.T) {
 		must(d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,linked_to) VALUES($1,$2,$3,$4) RETURNING id::text`, tid, kind, name, linked).Scan(&p.ID))
 		if linked == nil {
 			dbtest.BindRole(t, d, tid, p.ID, "viewer")
+			if kind == "person" {
+				// Canonical people make preference writes in this fixture.
+				dbtest.BindRole(t, d, tid, p.ID, "member")
+			}
 		}
 		return p
 	}

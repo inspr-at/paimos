@@ -345,6 +345,18 @@ jobs:
             ${{ runner.temp }}/aeon-recurrence-shots/
             web/test-results/
           retention-days: 7
+      - name: Decision Desk keyboard, protected adapters and geometry (AEON-567)
+        working-directory: web
+        env:
+          AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
+        run: npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure
+      - name: Upload Decision Desk captures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aeon-567-desk-shots
+          path: ${{ runner.temp }}/aeon-desk-shots
+          if-no-files-found: ignore
       - name: Session linking, approval and security regressions
         working-directory: web
         env:

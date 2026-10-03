@@ -372,7 +372,12 @@ explicit person save updates the canonical row and reconciles existing alias
 copies. Other preferences remain private to the calling principal.
 
 The person saves the plan through `PUT /api/preferences/agents.working`:
-`{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}}}`.
+`{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}},"expected_updated_at":null}`.
+`expected_updated_at` is the exact timestamp from the last plan snapshot;
+null requires an unset plan. The check and save are atomic across linked aliases.
+A stale revision returns 409 without writing; re-read before another change.
+Legacy clients may omit this optional precondition. The dial always supplies it,
+discards queued stale edits on conflict, and shows the re-read values for review.
 Total and numeric limits range from 0 to 30. Missing limits mean No limit;
 numeric zero means at most zero, while `"off"` explicitly disables a harness.
 Limits may add up to more than the total. Legacy `cap` (1–12) maps to total;
@@ -387,9 +392,26 @@ when their agent's key creators identify one person unambiguously. The API
 returns counts without session or project details. Malformed saved plans fail
 closed. `agentplan.CanStart` checks total and harness limits without changing
 running work; launchers must serialize starts and check account room separately.
-This backend change supplies the read path and helper; launcher integration
-and the revised control are separate AEON-540 parts. Lowering the plan never
-pauses or stops existing work.
+On **Agents**, the control reads “Run up to … agents at once.” The total and
+harness limits save to the same canonical plan used by coordinators. The folded
+line keeps compact − / + controls and a harness mark that cycles No limit →
+At most → Off; a muted number means no own limit, capped by the total and measured
+account room. Expanded numeric controls stop at 1; folded − from 1 selects Off.
+A stored API/CLI zero stays visible and only + is enabled. Details grow below the
+dial with each harness's controls and the
+read-only Now, Accounts, Waiting and Checks. Folding is remembered separately
+for the signed-in viewer in `agents.working.display`; it never changes the plan.
+Arrow keys step a focused − / + or move between harness modes, preserving
+browser and OS modifier shortcuts. Failed saves stay visible across successful
+polls until another deliberate change. Repeated selections and arrows at a
+boundary do not write. The live line announces total changes once.
+Unknown account or queue readings stay explicit. The visible queue's ready work
+is not reported as starting until the launcher picks it up. Lowering the total
+or turning a harness off never pauses or stops existing work. Launcher
+integration remains a separate AEON-540 part. The approved start-check copy
+requires part D to read `/api/agents/plan` before every start and enforce the
+total, harness limit and account-room checks before this UI is released; keep
+AEON-540's pill and benefit out of release notes until enforcement is live.
 
 ## Local models for in-app AI
 
@@ -2718,6 +2740,23 @@ kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
 rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
 tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
 this worker, and missing images, recipes or admission refuse execution.
+
+The Decision Desk UI (AEON-567) lives at `/decision-desk`. Open and answered
+questions are paged separately; refresh retains up to ten loaded pages per state
+(1,000 questions), with remaining results stated explicitly. Each memo freezes its
+source for the round. New arrivals wait for the next round, including rounds opened
+from Decided. Expired approvals appear in history. Approvals and tier requests
+require an explicit choice; Enter on another focused control performs that control's
+action. In a field, Enter finishes editing and the platform modifier plus Enter
+submits. Access loss, expiry and changed sources block the write and retain drafts.
+
+Tier requests are read only for sessions advertising AEON-436's `service_tier_v1`.
+AEON-455 server availability selects request-bound phone verification on every
+screen size; a server without that package keeps the existing approvals API.
+Held replies address the original principal UUID and, when supplied, its exact
+session. Related ticket records use permission-checked node relations; specialised
+Always/doctrine publishing and its context projection remain upstream package
+integration work. The unavailable stamps explain their restrictions in the memo.
 
 Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
 --option '["Title","Description","Answer"]' "Question"` stores a bounded,
