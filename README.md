@@ -1024,6 +1024,8 @@ The same change is available as `aeon keys scopes <key-id> --add harness.worker 
 
 `whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
 
+Rendered skill files, onboarding output, and the rendered-skill index are written through exclusive `0600` temporary files in the output directory, synced and closed before atomic replacement. Symlink destinations (including dangling links) are refused; choose a regular output path.
+
 `paimos model resolve review-gate --author-family codex` resolves a reviewer outside the author's family. `--author-family` accepts `openai`, `anthropic`, `xai` and `cursor`, plus harness aliases `codex` → `openai`, `claude` → `anthropic` and `grok` → `xai`. `pi` is ambiguous: pass the model's family explicitly. The API response and CLI JSON echo the normalised `author_family`; omitting it for other roles returns an empty string.
 
 Release metadata lives in `version.json`. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`; historical release metadata remains unchanged.
