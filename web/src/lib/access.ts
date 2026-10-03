@@ -110,19 +110,20 @@ export const deactivate = (principalId: string) => call<Person>(`/members/${id(p
 export const reactivate = (principalId: string) => call<Person>(`/members/${id(principalId)}/reactivate`, 'POST')
 export const linkAlias = (principalId: string, fromPrincipalId: string) => call<Person>(`/members/${id(principalId)}/aliases`, 'POST', { from_principal_id: fromPrincipalId })
 export const unlinkAlias = (principalId: string, fromPrincipalId: string) => call<void>(`/members/${id(principalId)}/aliases/${id(fromPrincipalId)}`, 'DELETE')
-// The server pages oldest first (?after=<id>); the log reads newest first, so
-// every page is read (up to a ceiling) and the result reversed.
+// Read a bounded newest-first window. The server's legacy ascending pagination
+// remains available to other clients; before walks toward older access events.
 export const AUDIT_MAX_PAGES = 40
 export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boolean }> {
   const items: AuditEvent[] = []
-  let after: number | null = null
+  let before: number | null = null
   for (let page = 0; page < AUDIT_MAX_PAGES; page++) {
-    const body: { items: AuditEvent[]; next_after: number | null } = await call(`/audit?category=access${after != null ? `&after=${after}` : ''}`)
+    const body: { items: AuditEvent[]; next_before: number | null } = await call(`/audit?category=access&order=desc${before != null ? `&before=${before}` : ''}`)
+    if (!Object.hasOwn(body, 'next_before')) throw new Error('Newest access history is unavailable. Try again after the server update.')
     items.push(...body.items)
-    after = body.next_after
-    if (after == null) return { items: items.reverse(), complete: true }
+    before = body.next_before
+    if (before == null) return { items, complete: true }
   }
-  return { items: items.reverse(), complete: false }
+  return { items, complete: false }
 }
 export const createAgent = (body: { name: string; description?: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[] }) => call<Agent>('/members/agents', 'POST', body)
 

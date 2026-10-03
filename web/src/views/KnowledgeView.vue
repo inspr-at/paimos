@@ -44,12 +44,14 @@ function setQuery(patch: Record<string, string>) {
 async function load() {
   controller?.abort()
   const current = controller = new AbortController()
-  loading.value = true; error.value = ''
+  const query = q.value
+  loading.value = true
   try {
-    const page = await listKnowledge({ q: q.value, limit: 1000 }, current.signal)
+    const page = await listKnowledge({ q: query, limit: 1000 }, current.signal)
     if (current.signal.aborted) return
     items.value = page.items
-    searchedFor.value = q.value
+    searchedFor.value = query
+    error.value = ''
     loaded.value = true
     cursorId.value = null
   } catch (e) {
@@ -59,6 +61,7 @@ async function load() {
   }
 }
 watch(q, () => { expanded.value = new Set(); void load() }, { immediate: true })
+const stale = computed(() => loaded.value && (loading.value || !!error.value || searchedFor.value !== q.value))
 
 const statuses = computed<KnowledgeStatus[]>(() => archived.value ? [] : ['active', 'proposed'])
 const counts = computed(() => countBy(filterItems(items.value, [], statuses.value)).type)
@@ -151,15 +154,15 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
       </div>
     </div>
 
-    <div ref="listEl" class="kp-results" :class="{ stale: loading && loaded }" aria-live="polite">
+    <div v-if="error" class="kp-state" role="alert">
+      <h2>{{ loaded ? 'Search could not be refreshed' : 'Knowledge could not be loaded' }}</h2>
+      <p>{{ error }}</p>
+      <button type="button" class="btn" :disabled="loading" @click="load()"><AppIcon name="refresh" :size="14" />Try again</button>
+    </div>
+    <p v-if="stale" class="kp-retained" role="status">{{ searchedFor ? `Previous results for “${searchedFor}”` : 'Previous results across all knowledge' }}.{{ loading ? ' Loading the requested search…' : ' The requested search has not completed.' }}</p>
+    <div v-if="loaded || !error" ref="listEl" class="kp-results" :class="{ stale }" aria-live="polite">
       <div v-if="!loaded && !error" class="kp-skeleton" role="status" aria-label="Loading knowledge">
         <div v-for="n in 3" :key="n" class="kp-group glass-card"><div class="kp-group-head"><span class="skeleton sk-badge" /><span class="skeleton sk-head" /></div><div v-for="m in 3" :key="m" class="sk-row"><span class="skeleton sk-title" :style="{ width: `${40 + (n * m * 11) % 36}%` }" /><span class="skeleton sk-line" /></div></div>
-      </div>
-      <div v-else-if="error && !loaded" class="kp-state glass-card" role="alert">
-        <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
-        <h2>Knowledge could not be loaded</h2>
-        <p>{{ error }}</p>
-        <button type="button" class="btn" @click="load()"><AppIcon name="refresh" :size="14" />Try again</button>
       </div>
       <div v-else-if="!items.length && !searchedFor" class="kp-state glass-card">
         <span class="state-icon"><AppIcon name="book" :size="20" /></span>
@@ -218,6 +221,7 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
 .kp-lead { max-width: 760px; margin-top: 10px; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
 .kp-lead code { padding: 1px 5px; border-radius: 5px; background: var(--code-bg); font-size: 12px; color: var(--ink); white-space: nowrap; }
 .kp-controls { display: grid; gap: 12px; margin: 22px 0 18px; }
+.kp-retained { margin: 12px 0; font-size: 13px; color: var(--ink-2); }
 .kp-search .field { height: 46px; padding-left: 40px; padding-right: 40px; border-radius: 14px; font-size: 15.5px; }
 .kp-search > svg { left: 14px; }
 .kp-search .field::-webkit-search-cancel-button { display: none; }

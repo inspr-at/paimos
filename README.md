@@ -2040,6 +2040,10 @@ may read, including the project permission and scoped ownership checks.
 
 ## Web workspace
 
+Quote presence coalesces selection changes made during an outstanding request and sends the latest state after completion, preserving throttling, rejoin backoff and disposal. In Hours, an incomplete start time keeps the selected cost unit and its options; completing the time rechecks rate eligibility against that start's UTC date. Incomplete times cannot be logged.
+
+**Settings → Access → Access log** reads the newest 2,000 access changes and says when older changes are omitted. The API keeps its existing ascending `after` pagination; `GET /api/audit?category=access&order=desc` returns newest first, with `next_before` for older pages through `before`. Each page is bounded to 50 events.
+
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
 menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no
