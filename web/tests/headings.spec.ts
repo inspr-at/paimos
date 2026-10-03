@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockView, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
@@ -62,12 +62,23 @@ async function profileHeading(page: Page, text: string) {
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 }
+function projectControls(page: Page, width: number) {
+  return {
+    tabs: page.getByRole('tablist', { name: 'Project sections' }),
+    views: page.getByRole('navigation', { name: 'Saved views' }),
+    modes: page.getByRole('tablist', { name: 'Ticket views' }),
+    search: page.getByRole('searchbox', { name: 'Search tickets in this project' }),
+    ...(width > 900 ? { display: page.getByRole('button', { name: /^Display:/ }) } : { filters: page.getByRole('button', { name: 'Filters', exact: true }) }),
+    add: page.getByRole('button', { name: 'New ticket', exact: true }),
+  }
+}
 
 for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`project description and Done gate headings (${width} ${theme})`, async ({ page }) => {
     const errors = watchErrors(page)
     await scene(page, width, theme)
     const data = fixtures()
+    data.views.push(mockView({ id: 'heading-view', name: 'Saved heading view' }))
     const projectDescription = width === 390 ? description : 'ProjektbeschreibungMitAußergewöhnlichLangemZusammenhängendemBezeichner'
     Object.assign(data.projects[0]!, { title: longTitle, description: projectDescription })
     await mockWork(page, data)
@@ -79,15 +90,24 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       const more = page.getByRole('button', { name: 'More', exact: true })
       await expect(more).toBeVisible()
       await expectStableControls({
-        controls: { more: page.locator('.description-more') },
+        controls: { more: page.locator('.description-more'), ...projectControls(page, width) },
         scrollAreas: { heading: page.locator('.head-main') },
         interactions: [
-          { name: 'expand description downward', run: async () => { await more.click(); await fullText(desc, description) } },
+          { name: 'reveal full description', run: async () => { await more.click(); await expect(page.locator('.description-more')).toHaveAttribute('aria-expanded', 'true') } },
           { name: 'collapse description', run: async () => { await page.getByRole('button', { name: 'Less', exact: true }).click(); await expect(more).toHaveAttribute('aria-expanded', 'false') } },
         ],
       })
       await more.click()
+      const revealed = page.locator('#project-description-full')
+      await fullText(revealed, description)
+      expect(await revealed.evaluate(el => {
+        const box = el.getBoundingClientRect()
+        return el.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2))
+      }), 'full description must paint above project stats').toBe(true)
       await screenshot(page, 'project-expanded', width, theme)
+      await page.keyboard.press('Escape')
+      await expect(revealed).toHaveCount(0)
+      await expect(more).toBeFocused()
       // Navigation resets the reveal state to the project now on screen.
       await page.goto('/p/AEON/tickets')
       await expect(page.locator('.description-more')).toHaveCount(0)
@@ -200,6 +220,13 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     const preview = page.getByRole('dialog', { name: 'What agents receive' })
     // Wait for RulesDialog's scheduled autofocus before testing keyboard tips.
     await expect(preview.locator('.for .btn')).toBeFocused()
+    await expect(preview.locator('.summary')).toBeVisible()
+    await preview.evaluate(async el => {
+      await document.fonts.ready
+      await Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})))
+    })
+    // Keep incidental mouse hover from competing with this keyboard scenario.
+    await page.mouse.move(0, 0)
     const identity = preview.locator('.for-value')
     const forText = `${longTitle} · Markus Barta · Builder`
     await expect(identity).toHaveText(forText)
@@ -263,7 +290,62 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
 // Real touch input does not synthesize keyboard :focus-visible or mouse hover.
 test.describe('touch full-text reveal', () => {
   test.use({ hasTouch: true })
+  for (const width of [768, 1024]) for (const theme of ['light', 'dark'] as const) {
+    test(`project description tap reveals without moving controls (${width} ${theme})`, async ({ page }) => {
+      const errors = watchErrors(page)
+      await scene(page, width, theme)
+      const data = fixtures()
+      data.views.push(mockView({ id: 'heading-view', name: 'Saved heading view' }))
+      const text = `${description} ${description} ${description}`
+      data.projects[0]!.description = text
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS/tickets')
+      const desc = page.locator('#project-description'), tip = page.locator('.tooltip')
+      await expect(desc).toHaveAttribute('data-tip', text)
+      expect((await desc.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      await expectStableControls({
+        controls: { description: desc, ...projectControls(page, width) },
+        scrollAreas: { header: page.locator('.head-main') },
+        interactions: [
+          { name: 'tap clipped description', run: async () => { await desc.tap(); await fittingTip(tip, text); await screenshot(page, 'project-touch', width, theme) } },
+          { name: 'tap again to dismiss', run: async () => { await desc.tap(); await expect(tip).toHaveCount(0) } },
+          { name: 'tap then outside', run: async () => { await desc.tap(); await fittingTip(tip, text); await page.locator('#project-title').tap(); await expect(tip).toHaveCount(0) } },
+        ],
+      })
+      await noOverflow(page)
+      expect(errors).toEqual([])
+    })
+  }
   for (const theme of ['light', 'dark'] as const) {
+    test(`phone long description scrolls without moving controls (${theme})`, async ({ page }) => {
+      await scene(page, 390, theme)
+      const data = fixtures(), text = `${description.repeat(30)} Vollständiger Schluss.`
+      data.views.push(mockView({ id: 'heading-view', name: 'Saved heading view' }))
+      data.projects[0]!.description = text
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS/tickets')
+      const more = page.locator('.description-more'), full = page.locator('#project-description-full')
+      await expectStableControls({
+        controls: { more, ...projectControls(page, 390) },
+        interactions: [
+          { name: 'tap More', run: async () => {
+            await more.tap()
+            await expect(full).toHaveText(text)
+            expect(await full.evaluate(el => {
+              const rect = el.getBoundingClientRect()
+              return el.scrollHeight > el.clientHeight && rect.bottom <= innerHeight && el.scrollWidth <= el.clientWidth + 1
+            })).toBe(true)
+          } },
+          { name: 'scroll full description', run: async () => {
+            await full.evaluate(el => { el.scrollTop = el.scrollHeight })
+            expect(await full.evaluate(el => Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight))).toBeLessThanOrEqual(1)
+            await screenshot(page, 'project-phone-long', 390, theme)
+          } },
+          { name: 'tap Less', run: async () => { await more.tap(); await expect(full).toHaveCount(0) } },
+          { name: 'tap outside', run: async () => { await more.tap(); await expect(full).toBeVisible(); await page.locator('#project-title').tap(); await expect(full).toHaveCount(0) } },
+        ],
+      })
+    })
     test(`done gate tap reveals and dismisses the title (${theme})`, async ({ page }) => {
       await scene(page, 390, theme)
       await mockWork(page, fixtures())
