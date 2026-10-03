@@ -21,11 +21,12 @@ import (
 // order; repeated helpers are reentrant, not new acquisitions after row locks.
 func TestTenantTreePairingLockOrder(t *testing.T) {
 	want := map[string]string{
-		"agentaccounts/module.go:in":                        "pairing.Lock",
+		"agentaccounts/module.go:in":                        "pairing.Mutation",
 		"agentaccounts/route.go:reserve":                    "pairing.Lock",
 		"agentaccounts/route.go:ValidateReservedCapacity":   "pairing.Lock",
-		"agentpairing/module.go:in":                         "pairing.Lock",
-		"agentpairing/lifecycle.go:Lock":                    "pairing tree tenant:NO KEY UPDATE",
+		"agentpairing/module.go:in":                         "pairing.Mutation",
+		"agentpairing/lifecycle.go:Lock":                    "pairing",
+		"agentpairing/lifecycle.go:LockMutation":            "pairing.Lock tree tenant:NO KEY UPDATE",
 		"authz/accept.go:AcceptInvite":                      "tenant:NO KEY UPDATE advisory:alias",
 		"authz/agent_creation.go:createAgent":               "project.Mutation",
 		"authz/aliases.go:linkAlias":                        "access.Mutation",
@@ -89,13 +90,19 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 							}
 						}
 						label := map[string]string{
-							"agentpairing.Lock": "pairing.Lock", "LockProjectMutation": "project.Mutation",
-							"LockProjectWrite": "project.Write", "authz.LockProjectMutation": "project.Mutation",
+							"agentpairing.Lock": "pairing.Lock", "agentpairing.LockMutation": "pairing.Mutation",
+							"LockProjectMutation": "project.Mutation",
+							"LockProjectWrite":    "project.Write", "authz.LockProjectMutation": "project.Mutation",
 							"authz.LockProjectWrite": "project.Write", "m.authorizeMutation": "access.Mutation",
 							"m.authorizeProjectMutation": "project.Authorize",
 						}[name]
-						if pkg == "agentpairing" && name == "Lock" {
-							label = "pairing.Lock"
+						if pkg == "agentpairing" {
+							if name == "Lock" {
+								label = "pairing.Lock"
+							}
+							if name == "LockMutation" {
+								label = "pairing.Mutation"
+							}
 						}
 						if pkg == "recurrences" && name == "lock" {
 							label = "recurrence.lock"

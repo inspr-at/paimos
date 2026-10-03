@@ -16,14 +16,22 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Lock acquires pairing, then tree, then the tenant authorization fence before
-// work-order/run/account rows. Shipped node, queue and knowledge writers already
-// take pairing before tree; project/recurrence/operator writers take tree before
-// tenant. Access-only writers take tenant without later entering pairing/tree.
-// Re-entry is safe only after this complete prefix is held. NO KEY UPDATE keeps
-// tenant FK checks compatible while final-transaction RequireTx sees live grants.
+// Lock is acquired before work-order/run/account locks by every paired
+// dispatch, claim, probe, settlement and lifecycle mutation. This serializes
+// revocation with in-flight credentials that passed the HTTP auth boundary.
+// Keep this primitive pairing-only: run polling and telemetry do not need tree.
 func Lock(ctx context.Context, tx pgx.Tx) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`); err != nil {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+
+// LockMutation enters an account/lifecycle transaction in the shipped order:
+// pairing, tree, tenant, then resource rows. Take the tree before the new tenant
+// authorization fence, even if this particular operation does not need tree;
+// callers may later write tree rows. Call only at transaction entry, before
+// resource locks. NO KEY UPDATE permits FK checks while RequireTx sees live grants.
+func LockMutation(ctx context.Context, tx pgx.Tx) error {
+	if err := Lock(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {

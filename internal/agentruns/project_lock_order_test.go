@@ -40,7 +40,7 @@ func TestProjectWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
  VALUES($1,$2,repeat('ab',32),'fixture.txt','text/plain',7,$3) RETURNING id::text`, f.person.TenantID, ticket, f.person.ID).Scan(&attachment)
 				})
 				pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
-					return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))")
+					return strings.Contains(query, "pg_advisory_xact_lock") && !strings.Contains(query, "aeon-pairing:")
 				})
 				ctx, cancel := context.WithCancel(ctx)
 				defer cancel()
