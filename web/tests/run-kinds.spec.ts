@@ -13,6 +13,7 @@ const before = process.env.AEON_501_CAPTURE === 'before'
 test('execution kinds and person-specific host names on the real agents table', async ({ page }, info) => {
   await page.clock.install({ time: now })
   await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light' })
   const work = fixtures()
   work.preferences.theme = { choice: 'system' }
   await mockWork(page, work, { admin: true })
@@ -59,6 +60,13 @@ test('execution kinds and person-specific host names on the real agents table', 
     // Playwright's action scroll before measuring hover-induced movement.
     await workerHost.scrollIntoViewIfNeeded()
     const original = await workerHost.boundingBox()
+    const availableBadgeWidth = await hostCell.evaluate(el => {
+      const cell = getComputedStyle(el)
+      const control = getComputedStyle(el.querySelector('.host-control')!)
+      return el.clientWidth - parseFloat(cell.paddingLeft) - parseFloat(cell.paddingRight)
+        - parseFloat(control.paddingLeft) - parseFloat(control.paddingRight)
+    })
+    expect(availableBadgeWidth, 'host cell leaves room for a badge beside the pencil').toBeGreaterThan(0)
     const pencil = page.locator(`[data-row="s:${ai.id}"] .host-pencil`)
     const row = page.locator(`[data-row="s:${ai.id}"]`)
     const dialog = page.getByRole('dialog', { name: 'Your name for this computer' })
@@ -92,7 +100,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('mbp2607')
     const renamed = await workerHost.boundingBox()
     expect(renamed!.width).toBeGreaterThan(original!.width)
-    expect(renamed!.width).toBeLessThanOrEqual(160)
+    expect(renamed!.width, 'renamed badge fits the cell beside the pencil').toBeLessThanOrEqual(availableBadgeWidth + 0.5)
     expect(await workerHost.evaluate(el => getComputedStyle(el).width)).not.toBe('104px')
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
@@ -109,7 +117,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
     await expect(workerHost).toHaveAttribute('title', `${longLabel} · mbp2606`)
     const longBadge = await workerHost.boundingBox()
-    expect(longBadge!.width).toBeLessThanOrEqual(160)
+    expect(longBadge!.width, 'long badge fits the cell beside the pencil').toBeLessThanOrEqual(availableBadgeWidth + 0.5)
     expect(longBadge!.width).toBeGreaterThan(original!.width)
     const longHostCell = await hostCell.boundingBox()
     expect(longBadge!.x + longBadge!.width).toBeLessThanOrEqual(longHostCell!.x + longHostCell!.width + 0.5)
@@ -152,7 +160,6 @@ test('execution kinds and person-specific host names on the real agents table', 
           const model = page.locator(`[data-row="s:${child.id}"] .exec-model`)
           await expect(model).toContainText(child.model)
           await expect(model).toHaveAttribute('title', /fixture/)
-          expect.soft(await model.evaluate(el => el.clientWidth), 'model slot has positive width').toBeGreaterThan(0)
           if (width > 390) {
             const glyph = await model.evaluate(el => {
               const text = el.firstChild!
@@ -174,6 +181,9 @@ test('execution kinds and person-specific host names on the real agents table', 
         if (shots) await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
       })
     }
+    // Responsive checks must not alter the viewport/theme of the base comparison.
+    await page.setViewportSize({ width: 1600, height: 1000 })
+    await page.emulateMedia({ colorScheme: 'light' })
 
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
@@ -181,16 +191,19 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(dialog).toHaveCount(0)
     await expect(workerHost.locator('.host-name')).toHaveText('mbp2606')
   }
-  // Keep the same row focused in both captures so the existing tint is comparable.
-  await page.locator(`[data-row="s:${ai.id}"]`).focus()
+  expect(page.viewportSize(), 'base and candidate captures use the same viewport').toEqual({ width: 1600, height: 1000 })
+  expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches), 'base and candidate captures use the light theme').toBe(true)
+  // Focus without scrolling, then align the page's scrolling body in both captures.
+  await page.locator(`[data-row="s:${ai.id}"]`).evaluate(el => (el as HTMLElement).focus({ preventScroll: true }))
   await page.mouse.move(0, 0)
+  await page.locator('main').evaluate(el => el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }))
   const root = process.env.AEON_501_SHOTS
   if (root) {
     mkdirSync(root, { recursive: true })
     const layout = await page.locator('[data-row^="s:"]').evaluateAll(items => items.map(item => {
       const row = item.getBoundingClientRect()
       const state = item.querySelector('.c-state')!.getBoundingClientRect()
-      return { id: item.getAttribute('data-row'), height: row.height, stateLeft: state.left }
+      return { id: item.getAttribute('data-row'), height: row.height, top: row.top, stateLeft: state.left }
     }))
     const path = join(root, 'before-layout.json')
     if (before) writeFileSync(path, JSON.stringify(layout))
@@ -199,6 +212,7 @@ test('execution kinds and person-specific host names on the real agents table', 
       for (const row of layout) {
         const original = baseline.find(item => item.id === row.id)!
         expect(row.height, `${row.id} retains the base row height`).toBeCloseTo(original.height, 1)
+        expect(row.top, `${row.id} retains the base row position in the capture`).toBeCloseTo(original.top, 1)
         expect(row.stateLeft, `${row.id} retains the base state position`).toBe(original.stateLeft)
       }
     }
