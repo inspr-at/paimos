@@ -1567,8 +1567,8 @@ func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
 	proof["progress"] = progress
 	report = agentpairing.View{}
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
-	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
-		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
+	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 1 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("blocked account attention was lost: %+v", report.HarnessDetails["claude"])
 	}
 }
 

@@ -476,6 +476,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 2 {
+			if parts[1] == "refresh" {
+				return "models.refresh", true
+			}
+			if parts[1] == "reports" {
+				return "models.report", true
+			}
+		}
 		if read {
 			return "models.read", true
 		}
@@ -592,7 +600,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}
