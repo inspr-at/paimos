@@ -669,6 +669,8 @@ remain visible with an uncalibrated label so work-start comparisons survive.
 Page planning reads live descendants from their selected parents; whole-list
 model, token and cost sorts retain batch joins. The 6,000-node regression checks
 request latency and descendant node visits under stale kind statistics.
+This regression runs with the other wall-clock budgets in CI's isolated
+`go-timing` job; both the four- and seven-shard layouts skip it.
 
 Speed factors need five exact-cell samples with frozen positive size estimates:
 model-adjusted hours are size × median(active hours / size), while `estimate_hours`
