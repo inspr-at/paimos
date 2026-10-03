@@ -2,6 +2,9 @@
 package agentaccounts
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -9,8 +12,60 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestQuotaWarningRestartHeartbeatRetainsNotices(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "quota-restart", now)
+	project, run := insertProjectRun(t, f.admin, f.runner, f.profile, "Restart project")
+	lead := quotaSession(t, f, project, "", nil, "Lead")
+	quotaSession(t, f, project, run, &lead, "Worker")
+	fact := quotaFact(t, f, 95, now, now.Add(time.Hour))
+	quotaReport(t, f, fact, now)
+	if n := scalar(t, f.admin, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'quota-warning/%'`); n != 1 {
+		t.Fatalf("fixture needs one delivered early notice: %d", n)
+	}
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":10,"urgent_percent":6}`, 200, nil)
+	path := "/api/agent-accounts/" + f.account.ID
+	var check AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("quota-old-generation", 0), 202, &check)
+	if check.DaemonGeneration == nil || *check.DaemonGeneration != "g1" {
+		t.Fatalf("fixture must bind the pending check to g1: %+v", check)
+	}
+	later := fixedClockModule{Module: New(appPool), at: now.Add(time.Second)}
+	// The rejected old check claims recovery. Only the already accepted fresh
+	// measurement may drive the newly configured urgent notice.
+	rejectedFact := quotaFact(t, f, 20, later.at, now.Add(time.Hour))
+	probe := probeWrite{DaemonID: f.account.DaemonID, DaemonGeneration: "g2", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{rejectedFact}}}
+	mux := http.NewServeMux()
+	later.Mount(mux)
+	r := httptest.NewRequest("POST", path+"/probe", strings.NewReader(encoded(t, probe)))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), f.runner))
+	r.Header.Set("Authorization", "Bearer "+f.token)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	var rejection struct{ Code string }
+	if err := json.Unmarshal(w.Body.Bytes(), &rejection); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 409 || rejection.Code != "stale_binding" || w.Header().Get("X-Aeon-Write-Committed") != "true" {
+		t.Fatalf("restart must honestly reject the stale check after committing: %d %s %s", w.Code, w.Header().Get("X-Aeon-Write-Committed"), w.Body.String())
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_daemon_generation='g2' AND last_probe_at=$2 AND last_probe_ok`, f.account.ID, later.at) != 1 {
+		t.Fatal("restart heartbeat was not committed")
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated' AND result IS NULL`, check.ID) != 1 || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='5h' AND used_percent=95`, fact.ResourceID) != 1 {
+		t.Fatal("stale check facts replaced the accepted measurement")
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE severity='urgent' AND threshold_percent=6 AND NOT suppressed AND recovered_at IS NULL`); n != 1 {
+		t.Fatalf("committed restart skipped the urgent notice from accepted fresh evidence: %d", n)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id WHERE m.idempotency_key LIKE 'quota-warning/%' AND r.state='queued'`); n != 2 {
+		t.Fatalf("both notices need durable inbox acceptance: %d", n)
+	}
+}
 
 func quotaPoolComputer(t *testing.T, f limitFixture) limitFixture {
 	t.Helper()

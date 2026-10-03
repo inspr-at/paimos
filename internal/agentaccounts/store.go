@@ -376,7 +376,21 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 			if err := learnOnline(ctx, tx, after, now); err != nil {
 				return Account{}, err
 			}
+			// The heartbeat commits even though the old check's facts do not.
+			// Evaluate only the already accepted measurements, before events take
+			// the counter lock, just as for an ordinary successful probe.
+			notices, err := prepareQuotaWarnings(ctx, tx, p, after, now)
+			if err != nil {
+				return Account{}, err
+			}
+			system, err := quotaSystemActor(ctx, tx, p.TenantID, len(notices) > 0)
+			if err != nil {
+				return Account{}, err
+			}
 			if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+				return Account{}, err
+			}
+			if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
 				return Account{}, err
 			}
 			return after, &probeHeartbeatCommitted{&httpError{status: 409, code: "stale_binding", msg: "check belongs to previous daemon generation; heartbeat recorded, check facts discarded"}}
