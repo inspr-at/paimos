@@ -75,4 +75,5 @@ function keys(event: KeyboardEvent) {
 .option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { font-size: 11.5px; color: var(--ink-3); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
+@media (pointer: coarse), (max-width: 720px) { .option { min-height: 44px; } }
 </style>

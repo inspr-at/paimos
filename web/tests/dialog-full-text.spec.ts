@@ -46,7 +46,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         const rows = panel.locator(kind === 'facet' ? '.option' : '[role="option"]')
         const first = rows.first(), second = rows.nth(1)
         const firstName = first.locator(kind === 'facet' ? '.option-label' : kind === 'group' ? '.name' : '.opt-label')
-        await expect(firstName).toHaveAttribute('data-tip', `${name} 1`)
+        expect(await firstName.evaluate(el => el.scrollWidth - el.clientWidth), 'the keyboard regression must exercise a clipped name').toBeGreaterThan(1)
         const controls = { panel, search, group: panel.locator('.options, .picker-list'), first, second }
         await expectStableControls({ controls, scrollAreas: { panel }, interactions: [
           { name: 'navigate to a clipped name', run: async () => {
@@ -113,6 +113,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
               await read.tap()
               await expect(page.locator('.tooltip')).toHaveText(text as string)
               expect(await events(page)).toEqual([])
+            } }, { name: 'native disclosure keys do not select the row', run: async () => {
+              await expect(read).toBeFocused()
+              for (const key of ['Enter', 'Space']) {
+                await read.press(key)
+                await expect(page.locator('.tooltip')).toHaveText(text as string)
+                expect(await events(page)).toEqual([])
+                await expect(panel).toBeVisible()
+              }
             } }],
           })
           mkdirSync(shots, { recursive: true })

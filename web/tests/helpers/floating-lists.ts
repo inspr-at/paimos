@@ -58,7 +58,7 @@ export function mountFloatingList(kind: FloatingList, longNames = false) {
   if (kind === 'business') props = { ...props, title: 'Choose a customer', options: choices }
   const app = (document.querySelector('#app') as HTMLElement & { __vue_app__: App }).__vue_app__
   const parent = defineComponent({ setup: () => () => opened.value
-    ? h(components[kind], { ...props, onClose: close, ...(['facet', 'label', 'relation'].includes(kind) ? {} : { onChoose: choose }) })
+    ? h(components[kind], { ...props, ...(kind === 'facet' ? {} : { onClose: close }), ...(['facet', 'label', 'relation'].includes(kind) ? {} : { onChoose: choose }) })
     : null })
   const vnode = h(parent)
   vnode.appContext = app._context
