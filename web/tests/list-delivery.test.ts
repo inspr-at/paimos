@@ -14,6 +14,17 @@ function row(id: string, order?: DeliveryOrder, extra: Partial<ListItem> = {}): 
 }
 const placed = (release_rank: string | null, rank: string | null, expedite = false): DeliveryOrder => ({ release_id: release_rank ? releaseA : null, release_rank, rank, expedite })
 
+test('release tail and journey order retain microseconds in both directions before the UUID tie-break', () => {
+  for (const order of [undefined, placed(null, null)]) {
+    const older = row(releaseB, order, { created_at: '2026-01-01T00:00:00.123001Z' })
+    const newer = row(releaseA, order, { created_at: '2026-01-01T01:00:00.123002+01:00' })
+    assert.deepEqual([newer, older].toSorted(compareRows([{ field: 'order', desc: false }])).map(item => item.id), [releaseB, releaseA])
+    assert.deepEqual([older, newer].toSorted(compareRows([{ field: 'order', desc: true }])).map(item => item.id), [releaseA, releaseB])
+    const sameTime = row(releaseA, order, { created_at: older.created_at })
+    assert.deepEqual([older, sameTime].toSorted(compareRows([{ field: 'order', desc: false }])).map(item => item.id), [releaseA, releaseB])
+  }
+})
+
 test('ships_in is distinct from imported release and survives URL, API, exclusions and saved views', () => {
   const filters = filtersFromQuery({ ships_in: `${releaseA},!none`, release: 'imported-v1', sort: 'order' })
   assert.deepEqual(filters.ships_in, [releaseA, '!none'])

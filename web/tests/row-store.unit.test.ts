@@ -2,8 +2,10 @@
 // AEON-326: the tab's causal row store. Every read, write and event goes
 // through it; revisions only move forward, a deletion leaves a tombstone that
 // nothing older crosses, and only this tab's exact write revisions are its own.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ListItem, WorkNode } from '../src/lib/api'
+import { listNodes } from '../src/lib/api'
+import { compareRows } from '../src/lib/ticketList'
 import { compareRevision } from '../src/lib/liveUpdates'
 import { RowStore } from '../src/lib/rowStore'
 import { stampAt } from '../src/lib/position'
@@ -18,6 +20,46 @@ function item(id: string, revision: number, over: Partial<ListItem> = {}): ListI
 }
 
 describe('RowStore: revisions only move forward', () => {
+  it('clears release placement when an authoritative list read follows a move into a journey project', async () => {
+    const rows = new RowStore()
+    const order = { release_id: null, release_rank: null, rank: null, expedite: false }
+    const row = rows.adopt(item('n1', 1, { delivery_order: order }), rows.mark(), { show: true })!
+    rows.wrote(node('n1', 2, { parent_id: 'journey' }), rows.mark())
+    const moved = item('n1', 2, { parent_id: 'journey', project: { id: 'journey', key: 'J', title: 'Journey' } })
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [moved], next_cursor: null })))
+    try {
+      const page = await listNodes({ sort: 'order' })
+      rows.adopt(page.items[0], rows.mark(), { show: true })
+      expect(rows.row('n1')).toBe(row)
+      expect(row.delivery_order ?? null).toBeNull()
+      expect(rows.latest('n1')!.delivery_order ?? null).toBeNull()
+      // With journey priority restored, medium precedes this low-priority row.
+      expect([row, item('n2', 2, { priority: 'medium' })].toSorted(compareRows([{ field: 'order', desc: false }])).map(item => item.id)).toEqual(['n2', 'n1'])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('preserves an unrequested placement through list and node reads, then accepts authoritative absence', async () => {
+    for (const query of [{ sort: '-order' }, { sort: 'title,order' }, { ships_in: ['none'] }, { ships_in: ['!none'] }, { facets: ['ships_in'] }]) {
+      const rows = new RowStore()
+      const order = { release_id: null, release_rank: null, rank: 'V', expedite: false }
+      const row = rows.adopt(item('n1', 1, { delivery_order: order }), rows.mark(), { show: true })!
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [item('n1', 1)], next_cursor: null })))
+      try {
+        const unrequested = await listNodes({ sort: 'title' })
+        expect(unrequested.items[0]).not.toHaveProperty('delivery_order')
+        rows.adopt(unrequested.items[0], rows.mark(), { show: true })
+        expect(rows.latest('n1')!.delivery_order).toEqual(order)
+        rows.adoptNode(node('n1', 2), rows.mark(), { show: true })
+        expect(row.delivery_order).toEqual(order)
+        vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [item('n1', 2)], next_cursor: null })))
+        const requested = await listNodes(query)
+        rows.adopt(requested.items[0], rows.mark(), { show: true })
+        expect(row.delivery_order ?? null).toBeNull()
+        rows.adoptNode(node('n1', 3), rows.mark(), { show: true })
+        expect(row.delivery_order ?? null).toBeNull()
+      } finally { vi.unstubAllGlobals() }
+    }
+  })
   it('a late list snapshot cannot restore an ended worker or overdue ETA at the same node revision', () => {
     const rows = new RowStore()
     const old = rows.mark()
