@@ -118,12 +118,16 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
   if (computer?.computer_state === 'draining' || enrollment?.state === 'draining' || row.disconnecting) return { kind: 'paused', text: 'Paused · disconnecting', tone: 'mute', tip: `Disconnecting from ${computer?.computer_name ?? row.host}: agents start nothing new on it.` }
   if (computer && computer.computer_state === 'connected' && computer.setup_state !== 'connected' && computer.connectivity !== 'online') return { kind: 'setup', text: 'Waiting for setup', tone: 'mute', tip: `${computer.computer_name} has not confirmed that setup finished.` }
   const diagnostic = computer && enrollment ? describeEnrollmentDiagnostic(computer, enrollment) : null
-  if (diagnostic?.hint) return { kind: 'attention', text: 'Sign-in check failed', tone: 'warn', ...diagnostic }
+  if (diagnostic?.hint) {
+    const signedOut = /sign in/i.test(describeEnrollmentStatus(computer!, enrollment!))
+    return { kind: signedOut ? 'signin' : 'attention', text: signedOut ? 'Signed out' : 'Sign-in check failed', tone: 'warn', ...diagnostic }
+  }
   if (row.state === 'signin') return { kind: 'signin', text: 'Signed out', tone: 'warn', command: LOGIN_COMMAND[row.harness] ?? '', tip: `Sign in again on ${computer?.computer_name ?? row.host}; the password stays with the vendor.` }
   if (computer && enrollment) {
     const label = describeEnrollmentStatus(computer, enrollment)
     if (label && label !== 'Ready') {
-      const command = /^Verif/.test(label) ? '' : diagnostic?.command ?? describeHarnessFix(computer, row.harness)
+      const soleAccount = computer.enrollments.filter(e => e.harness === row.harness && e.state !== 'revoked').length === 1
+      const command = /^Verif/.test(label) ? '' : diagnostic?.command ?? (soleAccount ? describeHarnessFix(computer, row.harness) : '')
       const signin = /sign in/i.test(label)
       const waiting = /^(Verification queued|Verifying account)/.test(label)
       return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }

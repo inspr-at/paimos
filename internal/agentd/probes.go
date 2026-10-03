@@ -491,7 +491,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		return unavailable(agentsetup.ProbeOutputInvalid)
 	}
 	if !*status.LoggedIn {
-		return probeAuthFailed
+		return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut}
 	}
 	if a.Emails != nil {
 		if a.Emails[key] == "" {

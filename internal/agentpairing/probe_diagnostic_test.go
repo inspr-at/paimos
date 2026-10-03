@@ -39,6 +39,7 @@ func TestProbeDiagnosticPersistenceIsAllowlistedAndClears(t *testing.T) {
 		want, command       string
 	}{
 		{"safe cause", "blocked", "probe_failed", agentsetup.ProbeClaudeDefaultPrivate, agentsetup.ProbeClaudeDefaultPrivate, `chmod 700 "$HOME/.claude"`},
+		{"daemon sign-out", "login_required", "login_required", agentsetup.ProbeSignedOut, agentsetup.ProbeSignedOut, "claude auth login"},
 		{"raw error", "blocked", "probe_failed", "/private/profile: untrusted diagnostic", "", "aeon-agentd setup"},
 		{"malformed extension", "blocked", "probe_failed", map[string]string{"path": "/private/profile"}, "", "aeon-agentd setup"},
 		{"oversized extension", "blocked", "probe_failed", strings.Repeat("x", 4096), "", "aeon-agentd setup"},
@@ -115,6 +116,32 @@ func TestProbeDiagnosticPersistsForBlockedSiblingOnly(t *testing.T) {
 	item, _ := attention[0].(map[string]any)
 	if item["account_id"] != ids[0] || item["reason_detail"] != agentsetup.ProbeOutputInvalid || item["fix"] != nil {
 		t.Fatalf("partial diagnostic unsafe: %+v", item)
+	}
+	// No ready sibling: both account causes must survive storage and person reads.
+	proof["progress"] = agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "blocked"}, HarnessDetails: map[string]agentsetup.HarnessDetail{"claude": {
+		State: "blocked", Reason: "probe_failed", ReasonDetail: agentsetup.ProbeClaudeDefaultPrivate,
+		Attention: []agentsetup.AccountAttention{
+			{AccountID: ids[0], Reason: "probe_failed", ReasonDetail: agentsetup.ProbeClaudeDefaultPrivate},
+			{AccountID: ids[1], Reason: "login_required", ReasonDetail: agentsetup.ProbeSignedOut},
+		}, AttentionCount: 2,
+	}}}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	stored = storedProbeReport(t, f, *v.ComputerID)
+	attention, _ = stored["attention_accounts"].([]any)
+	if len(attention) != 2 || stored["attention_count"] != float64(2) {
+		t.Fatalf("blocked diagnoses lost: %+v", stored)
+	}
+	want := map[string]string{ids[0]: agentsetup.ProbeClaudeDefaultPrivate, ids[1]: agentsetup.ProbeSignedOut}
+	for _, raw := range attention {
+		item := raw.(map[string]any)
+		if item["reason_detail"] != want[item["account_id"].(string)] {
+			t.Fatalf("stored diagnosis misattributed: %+v", item)
+		}
+	}
+	var person agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &person)
+	if len(person.HarnessDetails["claude"].Attention) != 2 {
+		t.Fatal("person response lost blocked diagnoses")
 	}
 	// A successful later report must erase the blocked sibling's old cause.
 	proof["progress"] = agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{"claude": {State: "ready"}}}

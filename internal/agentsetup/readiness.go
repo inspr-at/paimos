@@ -95,6 +95,10 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 				stage = "blocked"
 				reason := strings.ReplaceAll(d.Reason, "_", " ")
 				switch d.Reason {
+				case "login_required":
+					if detail := SafeProbeDetail(d.Reason, d.ReasonDetail); detail != "" {
+						reason = detail
+					}
 				case "probe_timeout":
 					reason = "its sign-in and availability check did not finish within 60 seconds"
 				case "probe_failed":

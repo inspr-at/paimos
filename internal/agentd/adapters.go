@@ -69,9 +69,15 @@ func withEnv(name, value string) []string {
 // Claude authenticates from its pinned account directory. Never inherit daemon
 // credentials, loader flags, provider overrides or arbitrary host configuration.
 func claudeEnvironment(home, nodePath, claudePath string) []string {
-	return []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
-		"PATH=" + strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
-		"LANG=C", "LC_ALL=C"}
+	accountEnv := []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home}
+	// The default profile uses Claude's normal preferences and keychain item.
+	// Setting CLAUDE_CONFIG_DIR, even to ~/.claude, selects a different login.
+	if userHome, err := os.UserHomeDir(); err == nil && home == filepath.Join(userHome, ".claude") {
+		accountEnv = []string{"HOME=" + userHome}
+	}
+	return append(accountEnv,
+		"PATH="+strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"LANG=C", "LC_ALL=C")
 }
 
 func eventProbe(raw json.RawMessage) (method, kind, model string) {

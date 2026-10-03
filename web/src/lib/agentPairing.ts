@@ -1039,6 +1039,7 @@ const PROBE_DETAILS = new Set([
   'the sign-in command exited unsuccessfully',
 ])
 function probeDetail(reason: unknown, detail: unknown, harness: string): string | undefined {
+  if (reason === 'login_required' && detail === "the approved account is signed out in the daemon's view") return detail
   if (detail === 'the default Claude profile is not private (requires mode 0700)' && harness !== 'claude') return undefined
   return reason === 'probe_failed' && typeof detail === 'string' && PROBE_DETAILS.has(detail) ? detail : undefined
 }
@@ -1065,7 +1066,7 @@ export function harnessRecovery(harness: string, reason: string): HarnessFix | u
 interface AttentionReport { accounts: AccountAttention[]; count: number; truncated: boolean }
 
 function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
-  return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
+  return detail && ['ready', 'blocked', 'login_required'].includes(detail.state) ? detail.attention_accounts ?? [] : []
 }
 
 // Parsed details already carry attention_truncated when a five-name list had no count.
@@ -1100,11 +1101,13 @@ export function describeEnrollmentDiagnostic(view: HarnessView, enrollment: { ac
   if (view.computer_state !== 'connected') return null
   const detail = harnessDetail(view, enrollment.harness)
   const report = attentionReport(detail)
-  const item = report ? report.accounts.find(item => item.account_id === enrollment.account_id) : detail?.state === 'blocked' ? detail : undefined
+  const sole = view.enrollments?.filter(item => item.harness === enrollment.harness && item.state !== 'revoked')
+  const item = report ? report.accounts.find(item => item.account_id === enrollment.account_id)
+    : detail && ['blocked', 'login_required'].includes(detail.state) && sole?.length === 1 && sole[0]?.account_id === enrollment.account_id ? detail : undefined
   if (!item) return null
   const cause = probeDetail(item.reason, item.reason_detail, enrollment.harness)
   return {
-    hint: cause ? `${harnessDisplayName(enrollment.harness)}: sign-in check failed: ${cause}.` : '',
+    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : 'sign-in check failed: '}${cause}.` : '',
     command: harnessFix(enrollment.harness, item.reason, cause)?.command ?? '',
   }
 }
@@ -1183,7 +1186,7 @@ export function describeEnrollmentStatus(view: HarnessView, enrollment: { accoun
   if (attention) {
     const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
     if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
-    if (attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
+    if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
     status = freshLabel(view, 'Ready')
   }
   if (status && status !== 'Ready') return status
@@ -1660,8 +1663,8 @@ function attentionTotal(value: unknown, enrolled: number): number | undefined {
   return value
 }
 
-function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown, harness: string): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
-  if (!Array.isArray(raw) || enrolled.size < 2) return
+function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown, harness: string, allowAll = false): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
+  if (!Array.isArray(raw) || enrolled.size < (allowAll ? 1 : 2)) return
   const seen = new Set<string>()
   const items: AccountAttention[] = []
   for (const entry of raw) {
@@ -1675,8 +1678,8 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
     items.push({ account_id: id, reason, ...(reasonDetail ? { reason_detail: reasonDetail } : {}) })
   }
   items.sort((a, b) => a.account_id < b.account_id ? -1 : a.account_id > b.account_id ? 1 : 0)
-  if (items.length === 0 || items.length >= enrolled.size) return
-  const declared = attentionTotal(declaredCount, enrolled.size)
+  if (items.length === 0 || (!allowAll && items.length >= enrolled.size)) return
+  const declared = attentionTotal(declaredCount, enrolled.size + (allowAll ? 1 : 0))
   let count = items.length
   // Five or more names without a total may be the old cap: absence is not readiness.
   // A declared total equal to the list, including exactly five, is complete.
@@ -1685,7 +1688,7 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
     count = declared
     truncated = true
   }
-  if (count >= enrolled.size) return
+  if (!allowAll && count >= enrolled.size) return
   return { accounts: items, count, truncated }
 }
 
@@ -1740,12 +1743,12 @@ function parseView(data: unknown): PairingView {
       const reason = harnessCode(item.reason)
       if (item.reason && !reason) continue
       const enrolled = new Set(view.enrollments.filter(entry => entry.harness === harness && entry.state !== 'revoked').map(entry => entry.account_id))
-      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated, harness) : undefined
+      const attention = ['ready', 'blocked', 'login_required'].includes(state) ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated, harness, state !== 'ready') : undefined
       // A ready or draining detail keeps no top-level reason. Valid attention
       // still survives a mistaken reason so the partial block stays visible.
       if (['ready', 'draining'].includes(state) && reason && !attention) continue
       const storedReason = ['ready', 'draining'].includes(state) ? undefined : reason
-      const reasonDetail = state === 'blocked' ? probeDetail(storedReason, item.reason_detail, harness) : undefined
+      const reasonDetail = ['blocked', 'login_required'].includes(state) ? probeDetail(storedReason, item.reason_detail, harness) : undefined
       const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason, reasonDetail) : undefined
       view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(reasonDetail ? { reason_detail: reasonDetail } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
     }

@@ -7,7 +7,7 @@
 // person's reserve on their own schedule, a pool may carry its own, and Away
 // rides on the person's schedule until its date.
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
+import { computed, onScopeDispose } from 'vue'
 import { listPairingComputers, PairingError, type PairingView } from '../lib/agentPairing'
 import {
   activeOverride, buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride, stripReserve, withReserve,
@@ -15,7 +15,9 @@ import {
 } from '../lib/capacity'
 import { usePreference } from '../lib/preferences'
 import { buildComputerCards } from '../lib/computerAccounts'
-import { usePolledData } from '../lib/usePolledData'
+import { initialRefreshStatus, usePolledData } from '../lib/usePolledData'
+import { onReset } from '../lib/position'
+import { onAccessChange } from '../lib/authz'
 import { useAgents } from './agents'
 
 const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
@@ -42,8 +44,19 @@ export const useCapacity = defineStore('capacity', () => {
     await Promise.all([capacityRead.refresh(), schedulesRead.refresh(), computersRead.refresh()])
   }
   const invalidate = () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() }
+  // Snapshots belong to one person/workspace and access epoch. Retaining them
+  // across a transient failure is safe only until that ownership is reset.
+  function reset() {
+    invalidate()
+    capacityRead.data.value = []
+    schedulesRead.data.value = []
+    computersRead.data.value = []
+    for (const read of [capacityRead, schedulesRead, computersRead]) read.status.value = initialRefreshStatus()
+  }
+  onScopeDispose(onReset(reset))
+  onScopeDispose(onAccessChange(change => { if (change === 'reset') reset() }))
   // Every write on /agents drops these reads too and reads them again (AEON-402).
-  agents.onWrite({ invalidate, refresh: load })
+  onScopeDispose(agents.onWrite({ invalidate, refresh: load }))
 
   const computerOf = computed(() => {
     const out = new Map<string, PairingView>()

@@ -581,7 +581,11 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		delete(s.probeReasonDetails, account.ID)
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
-			s.probeReasonDetails[account.ID] = agentsetup.SafeProbeDetail("probe_failed", status.ReasonDetail)
+			reason := "probe_failed"
+			if status.Failure == ProbeAuthFailed {
+				reason = "login_required"
+			}
+			s.probeReasonDetails[account.ID] = agentsetup.SafeProbeDetail(reason, status.ReasonDetail)
 		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			switch status.Failure {

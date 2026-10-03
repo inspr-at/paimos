@@ -313,35 +313,17 @@ func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAcc
 	priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
 	for harness, accounts := range perHarness {
 		ids := make([]string, 0, len(accounts))
-		ready := false
 		var pending []agentsetup.AccountAttention
 		for _, account := range accounts {
 			ids = append(ids, account.id)
-			if account.status == "ready" {
-				ready = true
+			if account.status != "blocked" && account.status != "login_required" {
+				continue
 			}
-		}
-		if ready {
-			for _, account := range accounts {
-				if account.status != "blocked" && account.status != "login_required" {
-					continue
-				}
-				reason := account.reason
-				if reason == "" {
-					reason = account.status
-				}
-				pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason, ReasonDetail: account.detail})
+			reason := account.reason
+			if reason == "" {
+				reason = account.status
 			}
-			if attention := agentsetup.PartialAttention(harness, ids, "ready", pending); len(attention.Accounts) > 0 {
-				if detail, ok := agentsetup.HarnessReport(harness, "ready", ""); ok {
-					detail.Attention = attention.Accounts
-					detail.AttentionCount = attention.Count
-					detail.AttentionTruncated = attention.Truncated
-					v.HarnessStatuses[harness] = "ready"
-					v.HarnessDetails[harness] = detail
-					continue
-				}
-			}
+			pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason, ReasonDetail: account.detail})
 		}
 		bestStatus, bestReason, bestDetail := "", "", ""
 		bestPriority := 0
@@ -359,7 +341,10 @@ func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAcc
 		}
 		v.HarnessStatuses[harness] = bestStatus
 		if detail, ok := agentsetup.HarnessReport(harness, bestStatus, bestReason); ok {
-			v.HarnessDetails[harness] = detail.WithProbeDetail(harness, bestDetail)
+			detail = detail.WithProbeDetail(harness, bestDetail)
+			attention := agentsetup.PartialAttention(harness, ids, bestStatus, pending)
+			detail.Attention, detail.AttentionCount, detail.AttentionTruncated = attention.Accounts, attention.Count, attention.Truncated
+			v.HarnessDetails[harness] = detail
 		} else {
 			delete(v.HarnessDetails, harness)
 		}

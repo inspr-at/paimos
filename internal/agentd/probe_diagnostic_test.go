@@ -36,7 +36,7 @@ func TestProbeDiagnosticReachesLifecycleJSONAndClearsOnRecovery(t *testing.T) {
 		}
 	}
 	raw, err := json.Marshal(status)
-	if err != nil || strings.Count(string(raw), `"reason_detail"`) != 2 {
+	if err != nil || strings.Count(string(raw), `"reason_detail"`) != 3 {
 		t.Fatalf("lifecycle JSON lost diagnostic: %s, %v", raw, err)
 	}
 	adapter.statuses["local"] = ProbeStatus{OK: true, ReasonDetail: agentsetup.ProbeClaudeDefaultPrivate}
@@ -78,5 +78,37 @@ func TestReadySiblingRetainsOnlyBlockedAccountProbeDetail(t *testing.T) {
 	got := s.Lifecycle("").HarnessDetails[Claude]
 	if got.State != "ready" || got.ReasonDetail != "" || got.Fix.Command != "" || len(got.Attention) != 1 || got.Attention[0].AccountID != "blocked" || got.Attention[0].ReasonDetail != agentsetup.ProbeOutputInvalid {
 		t.Fatalf("sibling diagnosis lost: %+v", got)
+	}
+}
+
+func TestBlockedClaudeAccountsKeepDistinctDiagnostics(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	s.api = &readinessQueueAPI{fakeAPI: api}
+	s.accounts = []EnrolledAccount{{ID: "permissions", Key: "private", Harness: Claude}, {ID: "signed-out", Key: "login", Harness: Claude}}
+	s.adapters[Claude] = &diagnosticProbeAdapter{fakeAdapter: &fakeAdapter{}, statuses: map[string]ProbeStatus{
+		"private": {Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeClaudeDefaultPrivate},
+		"login":   {Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut},
+	}}
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := s.Lifecycle("")
+	raw, err := json.Marshal(status.HarnessDetails[Claude])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded agentsetup.HarnessDetail
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := agentsetup.ResolveAttention(Claude, decoded.State, []string{"permissions", "signed-out"}, decoded.Attention, decoded.AttentionCount, decoded.AttentionTruncated)
+	if got.Count != 2 || got.Truncated || len(got.Accounts) != 2 {
+		t.Fatalf("lost account diagnostics: %+v", got)
+	}
+	if got.Accounts[0].AccountID != "permissions" || got.Accounts[0].ReasonDetail != agentsetup.ProbeClaudeDefaultPrivate || got.Accounts[1].AccountID != "signed-out" || got.Accounts[1].Reason != "login_required" || got.Accounts[1].ReasonDetail != agentsetup.ProbeSignedOut {
+		t.Fatalf("misattributed diagnoses: %+v", got)
+	}
+	if status.AccountStatuses["signed-out"].ReasonDetail != agentsetup.ProbeSignedOut {
+		t.Fatal("sign-out lost its daemon-view diagnostic")
 	}
 }

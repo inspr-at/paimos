@@ -13,6 +13,8 @@ func TestProbeDetailBoundaryAndCanonicalFix(t *testing.T) {
 		fix                                       HarnessFix
 	}{
 		{"default profile", "claude", "blocked", "probe_failed", ProbeClaudeDefaultPrivate, ProbeClaudeDefaultPrivate, HarnessFix{"permissions", `chmod 700 "$HOME/.claude"`}},
+		{"daemon sign-out", "claude", "login_required", "login_required", ProbeSignedOut, ProbeSignedOut, RecoveryFix("claude", "login_required")},
+		{"wrong sign-out reason", "claude", "blocked", "probe_failed", ProbeSignedOut, "", RecoveryFix("claude", "probe_failed")},
 		{"command failure", "claude", "blocked", "probe_failed", ProbeCommandFailed, ProbeCommandFailed, RecoveryFix("claude", "probe_failed")},
 		{"private text", "claude", "blocked", "probe_failed", "/private/account: diagnostic", "", RecoveryFix("claude", "probe_failed")},
 		{"oversized", "claude", "blocked", "probe_failed", strings.Repeat("x", maxProbeDetail+1), "", RecoveryFix("claude", "probe_failed")},

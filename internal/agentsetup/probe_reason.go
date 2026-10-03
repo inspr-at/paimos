@@ -14,12 +14,16 @@ const (
 	ProbeOutputInvalid        = "the sign-in command returned an unreadable or incomplete answer"
 	ProbeIdentityMissing      = "the approved account identity is missing"
 	ProbeEmailMissing         = "the sign-in answer did not identify the account"
+	ProbeSignedOut            = "the approved account is signed out in the daemon's view"
 	ProbeExitFailed           = "the sign-in command exited unsuccessfully"
 )
 
 const maxProbeDetail = 160
 
 func SafeProbeDetail(reason, detail string) string {
+	if reason == "login_required" && detail == ProbeSignedOut {
+		return detail
+	}
 	if reason != "probe_failed" || len(detail) > maxProbeDetail {
 		return ""
 	}
@@ -53,7 +57,7 @@ func (d HarnessDetail) WithProbeDetail(harness, detail string) HarnessDetail {
 		return d
 	}
 	d.Fix = report.Fix
-	if d.State != "blocked" {
+	if d.State != "blocked" && d.State != "login_required" {
 		return d
 	}
 	d.ReasonDetail = SafeProbeDetail(d.Reason, detail)

@@ -118,7 +118,7 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		{"codex unreadable", codex("segmentation fault", 2), ProbeStatus{Failure: ProbeUnavailable}},
 		{"codex signed in but failing", codex("Logged in using ChatGPT", 1), ProbeStatus{Failure: ProbeUnavailable}},
 		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
-		{"claude signed out", claude(`{"loggedIn":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
+		{"claude signed out", claude(`{"loggedIn":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut}},
 		{"claude other identity", claude(`{"loggedIn":true,"email":"b@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"claude empty object", claude(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
 		{"claude malformed", claude(`not json`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
@@ -301,8 +301,11 @@ func TestProbeStatusOutputCap(t *testing.T) {
 		{"claude", claude, `{"loggedIn":false}`, agentsetup.ProbeCommandFailed},
 		{"cursor", cursor, `{"status":"unauthenticated","isAuthenticated":false}`, ""},
 	}
-	signedOut := ProbeStatus{Failure: ProbeAuthFailed}
 	for _, v := range vendors {
+		signedOut := ProbeStatus{Failure: ProbeAuthFailed}
+		if v.name == "claude" {
+			signedOut.ReasonDetail = agentsetup.ProbeSignedOut
+		}
 		unavailable := ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: v.unavailableDetail}
 		answer := "printf '%s' '" + v.signOut + "'"
 		cases := []struct {
@@ -350,7 +353,7 @@ func TestClaudeProfilePermissionReasonReachesStatusAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", userHome)
-	path := fakeScript(t, `: > "$CLAUDE_CONFIG_DIR/probe-ran"
+	path := fakeScript(t, `: > "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/probe-ran"
 printf '%s\n' '{"loggedIn":true,"email":"a@example.test","authMethod":"claude.ai"}'`)
 	node, sdk := claudeAdapterDependencies(t, path)
 	adapter := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"local": home}, Emails: map[string]string{"local": "a@example.test"}}

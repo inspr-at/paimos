@@ -260,3 +260,26 @@ it('AEON-623: revoked bindings cannot reappear as live loose accounts; active an
   expect(kept.map(a => a.id).sort()).toEqual([CODEX, 'unpaired'].sort())
   expect(kept.find(a => a.id === CODEX)?.capacity.kind).toBe('bar')
 })
+
+
+it('AEON-623: account cards keep different blocked causes and never borrow an unknown account repair', () => {
+  const permission = 'the default Claude profile is not private (requires mode 0700)'
+  const signedOut = "the approved account is signed out in the daemon's view"
+  const view = computer({ harness_statuses: { claude: 'blocked' }, harness_details: { claude: {
+    state: 'blocked', reason: 'probe_failed', reason_detail: permission, attention_count: 2,
+    attention_accounts: [{ account_id: CODEX, reason: 'probe_failed', reason_detail: permission }, { account_id: CURSOR, reason: 'login_required', reason_detail: signedOut }],
+  } } })
+  view.enrollments = view.enrollments.map(e => ({ ...e, harness: 'claude' }))
+  const cards = () => buildComputerCards({ computers: [view], rows: [], now: NOW })[0].accounts
+  expect(cards().find(a => a.id === CODEX)?.readiness.command).toBe('chmod 700 "$HOME/.claude"')
+  const login = cards().find(a => a.id === CURSOR)!
+  expect(login.readiness.kind).toBe('signin')
+  expect(login.readiness.text).toBe('Signed out')
+  expect(login.readiness.hint).toBe(`Claude: ${signedOut}.`)
+  expect(login.readiness.command).toBe('claude auth login')
+  delete view.harness_details!.claude.attention_accounts
+  for (const line of cards()) {
+    expect(line.readiness.command).toBeUndefined()
+    expect(line.readiness.hint ?? '').not.toContain(permission)
+  }
+})
