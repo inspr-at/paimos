@@ -40,6 +40,18 @@ describe('exact own receipts and held changes', () => {
     vi.mocked(api).mockResolvedValueOnce(new Response(JSON.stringify({ id: 21, undo_of: 17, type: 'ships_in.changed', after: { members: move().items } }), { status: 201 }))
     await h.live.undoLast(); h.live.receive(event(21)); expect(h.live.pending.value).toBe(0); expect(h.live.undo.value).toBeNull(); expect(h.apply).not.toHaveBeenCalled(); expect(h.changes).toHaveLength(2); h.scope.stop()
   })
+  it('no-op and lifecycle commits offer no Undo, and native foreign events remain held', () => {
+    const h = setup()
+    h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: { items: [], undo_event_id: null } })
+    expect(h.live.undo.value).toBeNull()
+    h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move() })
+    expect(h.live.undo.value?.id).toBe(7)
+    h.live.actions.commit(h.live.actions.begin(), { kind: 'lifecycle' })
+    expect(h.live.undo.value).toBeNull()
+    h.live.receive(JSON.stringify({ id: 9, type: 'node.project_moved', node_changes: [{ id: 'item', project_id: 'project' }] }))
+    h.live.receive(JSON.stringify({ id: 10, type: 'relation.created', after: { type: 'relates', source_node_id: 'note', target_node_id: 'ticket' } }))
+    expect(h.live.pending.value).toBe(2); h.scope.stop()
+  })
   it('placement writes capture item/project/revision and commit only after success', async () => {
     const h = setup(); let answer!: (r: Response) => void
     vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))

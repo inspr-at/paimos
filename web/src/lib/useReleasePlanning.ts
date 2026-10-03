@@ -23,6 +23,7 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
   const pending = ref(0), inFlight = ref(0), queued = ref(0), budgetBlocked = ref(false)
   const paging = reactive(new Set<PlanningSource>())
   const queue: Job[] = [], running = new Set<Job>(), held = new Set<Job>()
+  const ownRows = new Map<string, ItemPage['items'][number]>()
   const tokens = new Map<PlanningSource, number>(), seen = new Map<PlanningSource, Set<string>>()
   let context: PlanningContext | null = null, generation = 0, disposed = false
   const rendered = computed(() => Object.values(work).reduce((n, state) => n + state.items.length, 0))
@@ -135,7 +136,7 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
   }
   function reset(next: PlanningContext | null) {
     const sameOwner = context?.project === next?.project && context?.person === next?.person
-    invalidate(); context = next; error.value = ''; pageError.value = ''; budgetBlocked.value = false
+    invalidate(); ownRows.clear(); context = next; error.value = ''; pageError.value = ''; budgetBlocked.value = false
     if (!sameOwner) { overview.value = null; expanded.clear(); for (const key of Object.keys(work)) delete work[key] }
     stale.value = !!overview.value; loading.value = !!next
     if (next) enqueue('overview')
@@ -164,7 +165,9 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
   function moreWork(source: PlanningSource) { const state = stateOf(source); enqueue(source, state.loaded ? state.cursor : '') }
   function committed(change: DeliveryCommit) {
     if (!overview.value || !context) return
-    if (change.kind === 'lifecycle') { reset(context); return }
+    // Lifecycle owners apply their authoritative result separately; a blanket
+    // refresh here would also expose still-held foreign structural changes.
+    if (change.kind === 'lifecycle') return
     // Cancel pre-commit reads without replacing the visible snapshot: a late
     // continuation must never overwrite or reinsert the old placement.
     invalidate()
@@ -179,8 +182,10 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
     }
     for (const placement of change.result.items) {
       if (placement.project_id !== context.project) continue
-      const known = Object.values(work).flatMap(state => state.items).find(it => it.item_id === placement.item_id)
+      const known = Object.values(work).flatMap(state => state.items).find(it => it.item_id === placement.item_id) ?? ownRows.get(placement.item_id)
       if (!known) continue
+      if (ownRows.size >= 101 && !ownRows.has(placement.item_id)) ownRows.delete(ownRows.keys().next().value!)
+      ownRows.set(placement.item_id, { ...known, ...placement })
       const source: PlanningSource = known.release_id ? `release:${known.release_id}` : known.rank ? 'backlog:ranked' : 'backlog:tail'
       const destination: PlanningSource = placement.release_id ? `release:${placement.release_id}` : placement.rank ? 'backlog:ranked' : 'backlog:tail'
       for (const state of Object.values(work)) state.items = state.items.filter(it => it.item_id !== placement.item_id)
@@ -201,6 +206,8 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
           } else if (key.startsWith('backlog:')) {
             const part = key.slice(8) as 'ranked' | 'tail'
             overview.value.backlog[part] = Math.max(0, overview.value.backlog[part] + delta)
+            const matches = overview.value.backlog_matches?.[part]
+            if (matches) overview.value.backlog_matches![part] = { ...matches, matched_count: Math.max(0, matches.matched_count + delta), shown_count: Math.max(0, matches.shown_count + delta) }
           }
         }
       }
@@ -211,7 +218,7 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
     }
     overview.value = { ...overview.value }
   }
-  function dispose() { disposed = true; invalidate(); context = null }
+  function dispose() { disposed = true; invalidate(); ownRows.clear(); context = null }
   return { overview, expanded, work, loading, stale, error, pageError, pending, inFlight, queued, budgetBlocked, paging, rendered, continuations,
     committed, reset, expand, collapse, expandAll, collapseAll, more, moreWork, flush, dispose }
 }

@@ -75,7 +75,11 @@ func (s *Store) undoPlacements(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if err != nil {
 		return events.Change{}, undoFailure(err)
 	}
-	return events.Change{NodeID: e.NodeID, Type: e.Type, Before: placementSnapshot{before.ProjectID, actualBefore}, After: placementSnapshot{before.ProjectID, actualAfter}}, nil
+	revisions, ranks, err := w.placementReleaseState(actualBefore, actualAfter)
+	if err != nil {
+		return events.Change{}, err
+	}
+	return events.Change{NodeID: e.NodeID, Type: e.Type, Before: placementSnapshot{ProjectID: before.ProjectID, Members: actualBefore}, After: placementSnapshot{ProjectID: before.ProjectID, Members: actualAfter, ReleaseRevisions: revisions, ReleaseRanks: ranks}}, nil
 }
 
 type rankSnapshot struct {

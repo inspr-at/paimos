@@ -39,8 +39,10 @@ type Placement struct {
 }
 
 type placementSnapshot struct {
-	ProjectID string      `json:"project_id"`
-	Members   []Placement `json:"members"`
+	ReleaseRevisions map[string]int64  `json:"release_revisions,omitempty"`
+	ReleaseRanks     map[string]string `json:"release_ranks,omitempty"`
+	ProjectID        string            `json:"project_id"`
+	Members          []Placement       `json:"members"`
 }
 
 type item struct {
@@ -76,10 +78,11 @@ func validatePlacementBound(project string, requests []PlacementRequest, maximum
 }
 
 type PlacementResult struct {
-	ReleaseRevisions map[string]int64 `json:"release_revisions,omitempty"`
-	UndoEventID      *int64           `json:"undo_event_id"`
-	Items            []Placement      `json:"items"`
-	ReleaseRevision  int64            `json:"release_revision,omitempty"`
+	ReleaseRanks     map[string]string `json:"release_ranks,omitempty"`
+	ReleaseRevisions map[string]int64  `json:"release_revisions,omitempty"`
+	UndoEventID      *int64            `json:"undo_event_id"`
+	Items            []Placement       `json:"items"`
+	ReleaseRevision  int64             `json:"release_revision,omitempty"`
 }
 
 func (s *Store) Place(ctx context.Context, p tenant.Principal, project string, requests []PlacementRequest) ([]Placement, error) {
@@ -97,28 +100,9 @@ func (s *Store) PlaceWithRevision(ctx context.Context, p tenant.Principal, proje
 			return err
 		}
 		out.Items = after
-		out.ReleaseRevisions = map[string]int64{}
-		ids := []string{}
-		for _, row := range append(append([]Placement{}, before...), after...) {
-			ids = append(ids, row.ReleaseID)
-		}
-		rows, queryErr := w.tx.Query(w.ctx, `SELECT release_node_id::text,revision FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=ANY($3::uuid[])`, p.TenantID, project, sortedIDs(ids))
-		if queryErr != nil {
-			return queryErr
-		}
-		for rows.Next() {
-			var id string
-			var revision int64
-			if err := rows.Scan(&id, &revision); err != nil {
-				rows.Close()
-				return err
-			}
-			out.ReleaseRevisions[id] = revision
-		}
-		queryErr = rows.Err()
-		rows.Close()
-		if queryErr != nil {
-			return queryErr
+		out.ReleaseRevisions, out.ReleaseRanks, err = w.placementReleaseState(before, after)
+		if err != nil {
+			return err
 		}
 
 		if requests[0].ReleaseID != "" {
@@ -128,7 +112,7 @@ func (s *Store) PlaceWithRevision(ctx context.Context, p tenant.Principal, proje
 		}
 		// One action is one atomic Undo receipt, including an expedite displacement.
 		if len(before) > 0 {
-			w.audit("ships_in.changed", w.project, placementSnapshot{w.project, before}, placementSnapshot{w.project, after})
+			w.audit("ships_in.changed", w.project, placementSnapshot{ProjectID: w.project, Members: before}, placementSnapshot{ProjectID: w.project, Members: after, ReleaseRevisions: out.ReleaseRevisions, ReleaseRanks: out.ReleaseRanks})
 		}
 		return nil
 	})
@@ -546,6 +530,31 @@ func (w *write) restoreRank(p Placement, items bool) (string, error) {
 func (w *write) placementEvents(before, after []Placement) {
 	for start := 0; start < len(before); start += 100 {
 		end := min(start+100, len(before))
-		w.audit("ships_in.changed", w.project, placementSnapshot{w.project, before[start:end]}, placementSnapshot{w.project, after[start:end]})
+		w.audit("ships_in.changed", w.project, placementSnapshot{ProjectID: w.project, Members: before[start:end]}, placementSnapshot{ProjectID: w.project, Members: after[start:end]})
 	}
+}
+
+// Read the touched containers while their mutation fences are held, before the event counter.
+func (w *write) placementReleaseState(before, after []Placement) (map[string]int64, map[string]string, error) {
+	revisions := map[string]int64{}
+	ranks := map[string]string{}
+	ids := []string{}
+	for _, row := range append(append([]Placement{}, before...), after...) {
+		ids = append(ids, row.ReleaseID)
+	}
+	rows, err := w.tx.Query(w.ctx, `SELECT release_node_id::text,revision,rank FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=ANY($3::uuid[])`, w.p.TenantID, w.project, sortedIDs(ids))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, rank string
+		var revision int64
+		if err = rows.Scan(&id, &revision, &rank); err != nil {
+			return nil, nil, err
+		}
+		revisions[id] = revision
+		ranks[id] = rank
+	}
+	return revisions, ranks, rows.Err()
 }

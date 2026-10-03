@@ -17576,6 +17576,7 @@ components:
         undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed ships_in.changed event for the single/all-or-nothing batch; null for no-op. Items carry committed item/project/release identity and revision."}
         items: {type: array, maxItems: 101, items: {$ref: '#/components/schemas/DeliveryPlacement'}}
         release_revision: {type: integer, minimum: 1}
+        release_ranks: {type: object, maxProperties: 102, additionalProperties: {type: string}, description: Committed ordering keys of the touched releases.}
         release_revisions: {type: object, maxProperties: 102, additionalProperties: {type: integer, minimum: 1}, description: Committed revisions of the touched source and destination releases.}
     DeliveryAdoptionJob:
       type: object

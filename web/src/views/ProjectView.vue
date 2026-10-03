@@ -149,9 +149,12 @@ const scopePicker = ref<InstanceType<typeof ReleaseScopePicker>>()
 const planningView = ref<InstanceType<typeof ReleasePlanning>>()
 function deliveryApplied() {
   if (section.value === 'tickets') { void list.load(); if (outlineActive.value) void outline.reload() }
-  if (section.value === 'knowledge') void knowledge.load()
+  if (section.value === 'knowledge') { void knowledge.load(); void knowledgeTab.value?.reloadGraph() }
 }
-function deliveryCommitted(change: DeliveryCommit) { planningView.value?.committed(change) }
+function deliveryCommitted(change: DeliveryCommit) {
+  planningView.value?.committed(change)
+  if (change.kind === 'placement') list.committedDelivery(change.result)
+}
 const deliveryLive = useDeliveryChanges(projectId, scopeOwner, { context: () => projectScope.value, applied: deliveryApplied, committed: deliveryCommitted })
 provide(DELIVERY_ACTIONS, deliveryLive.actions)
 
@@ -398,6 +401,13 @@ const sequence = computed(() => {
   return out
 })
 const total = computed(() => graphActive.value ? graphState.value.loading ? null : graphState.value.visible.nodes.length : totalFrom(list.facets.value))
+const scopeCountText = computed(() => {
+  const label = projectScope.value.kind === 'all' || releasesActive.value ? '' : ` in ${scopeLabel.value}`
+  if (knowledgeActive.value) return `${knowledge.truncated.value ? '≥ ' : ''}${plural(knowledge.total.value, 'entry', 'entries')}${label}`
+  const count = releasesActive.value ? planningSummary.value.total : total.value
+  return `${releasesActive.value && planningSummary.value.incomplete ? '≥ ' : ''}${count === null ? '… tickets' : plural(count, 'ticket')}${label}`
+})
+
 const showAssignee = computed(() => (outlineActive.value ? outline.rows.value : list.rows.value).some(row => row.assignee))
 
 // One source for the header: the project summary (work counts). It arrives with
@@ -463,7 +473,7 @@ watch(section, () => { creating.value = false; openedFromList = false })
 const sectionQueries: Partial<Record<ProjectSection, typeof route.query>> = {}
 watch([projectKey, scopeOwner], (_value, before) => {
   for (const key of Object.keys(sectionQueries)) delete sectionQueries[key as ProjectSection]
-  if (before && _value[1] !== before[1] && scopeValues.value.length) chooseScope([])
+  if (before && before[1] !== ':' && _value[1] !== before[1] && scopeValues.value.length) chooseScope([])
 })
 function setSection(id: string) {
   const target = PROJECT_SECTIONS.find(item => item.id === id)?.id
@@ -1661,9 +1671,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
-        <ReleaseScopePicker ref="scopePicker" :project-id="project.id" :person="scopeOwner" :values="scopeValues" :count-text="knowledgeActive ? `${knowledge.total.value} entries${projectScope.kind === 'all' ? '' : ` in ${scopeLabel}`}` : `${releasesActive ? planningSummary.total ?? '…' : total ?? '…'} tickets${projectScope.kind === 'all' || releasesActive ? '' : ` in ${scopeLabel}`}`" :pending-changes="deliveryLive.pending.value" @apply-changes="deliveryLive.apply()" @choose="chooseScope" @label="scopeLabel = $event" />
+        <ReleaseScopePicker ref="scopePicker" :project-id="project.id" :person="scopeOwner" :values="scopeValues" :count-text="scopeCountText" :pending-changes="deliveryLive.pending.value" :pending-incomplete="deliveryLive.overflow.value" @apply-changes="deliveryLive.apply()" @choose="chooseScope" @label="scopeLabel = $event" />
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="releasesActive ? planningSummary.total : total" :pending-changes="deliveryLive.pending.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' ? '' : scopeLabel" :total-incomplete="releasesActive && planningSummary.incomplete" :loading="releasesActive ? planningSummary.loading : graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
+          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="releasesActive ? planningSummary.total : total" :pending-changes="deliveryLive.pending.value" :pending-incomplete="deliveryLive.overflow.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' || releasesActive ? '' : scopeLabel" :total-incomplete="releasesActive && planningSummary.incomplete" :loading="releasesActive ? planningSummary.loading : graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading" :facet-errors="list.facetErrors"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
@@ -1702,7 +1712,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </section>
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :pending-changes="deliveryLive.pending.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' ? '' : scopeLabel" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
+        :filters="knowledgeFilters" :pending-changes="deliveryLive.pending.value" :pending-incomplete="deliveryLive.overflow.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' ? '' : scopeLabel" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
       />
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />

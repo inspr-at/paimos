@@ -46,7 +46,6 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
 		if !exists {
 			return out, errNotFound
 		}
-
 	}
 	sortBy := q.Sort
 	if sortBy == "" {
@@ -97,7 +96,7 @@ func scopedKnowledge(ctx context.Context, tx pgx.Tx, p tenant.Principal, q listQ
  AND (cardinality($7::text[])=0 OR k.slug=ANY($7::text[])) AND (cardinality($8::text[])=0 OR n.state=ANY($8::text[]))
  AND ($3::text='' OR n.search_document@@t.q OR n.title ILIKE $5 ESCAPE '\' OR coalesce(n.fields->>'slug','') ILIKE $5 ESCAPE '\' OR (cardinality($4::text[])>0 AND NOT EXISTS(SELECT 1 FROM unnest($4::text[]) w WHERE NOT(n.title ILIKE w ESCAPE '\' OR coalesce(n.fields->>'slug','') ILIKE w ESCAPE '\' OR n.key ILIKE w ESCAPE '\' OR n.body ILIKE w ESCAPE '\'))))
  AND EXISTS(SELECT 1 FROM node_relations link JOIN nodes peer ON peer.tenant_id=link.tenant_id AND peer.id=CASE WHEN link.source_node_id=n.id THEN link.target_node_id ELSE link.source_node_id END AND peer.deleted_at IS NULL AND peer.project_id=$2 WHERE link.tenant_id=n.tenant_id AND link.type='relates' AND (link.source_node_id=n.id OR link.target_node_id=n.id) AND (( $9::uuid IS NOT NULL AND peer.id=$9::uuid) OR EXISTS(SELECT 1 FROM ` + delivery.Effective + ` e WHERE e.tenant_id=peer.tenant_id AND e.item_node_id=peer.id AND e.project_node_id=$2 AND e.kind='ticket' AND e.release_node_id IS NOT DISTINCT FROM $9::uuid))))`
-	args := []any{p.TenantID, q.ProjectID, q.Q, patterns, likePattern(strings.TrimSpace(q.Q))[1:], kindSlugs(), types, statuses, nullableScopeID(strings.Replace(q.ShipsIn, "none", "", 1))}
+	args := []any{p.TenantID, q.ProjectID, q.Q, patterns, likePattern(strings.TrimSpace(q.Q))[1:], kindSlugs(), types, statuses, nullableScopeID(scopeRelease(q.ShipsIn))}
 	rows, err := tx.Query(ctx, prefix+` SELECT kind,state,count(*) FROM (SELECT kind,state FROM context_entries LIMIT 10001) bounded GROUP BY kind,state`, args...)
 	if err != nil {
 		return out, err
@@ -235,4 +234,11 @@ func (m *module) readScopedKnowledge(ctx context.Context, p tenant.Principal, q 
 		return err
 	})
 	return out, err
+}
+
+func scopeRelease(value string) string {
+	if value == "none" {
+		return ""
+	}
+	return value
 }

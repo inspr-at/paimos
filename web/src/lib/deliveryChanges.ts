@@ -6,7 +6,7 @@ import type { PlanningItem, PlanningRelease } from './deliveryPlanning'
 
 export interface PlacementReceipt {
   items: { item_id: string; project_id: string; release_id?: string; rank: string; revision: number; expedite: boolean; due_on: string | null }[]
-  release_revision?: number; release_revisions?: Record<string, number>; undo_event_id: number | null
+  release_revision?: number; release_ranks?: Record<string, string>; release_revisions?: Record<string, number>; undo_event_id: number | null
 }
 export type DeliveryCommit = { kind: 'placement'; result: PlacementReceipt } | { kind: 'rank'; result: Pick<PlanningRelease, 'release_id' | 'project_id' | 'revision' | 'rank'> & Partial<PlanningRelease> & { undo_event_id: number | null } } | { kind: 'lifecycle' }
 export interface DeliveryActions {
@@ -48,7 +48,7 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
   function receive(raw: string) {
     if (!project.value) return
     const event = parseDeliveryEvent(raw, project.value)
-    if (!event || own.has(event.id)) return
+    if (!event || own.has(event.id) || held.has(event.id)) return
     if (held.size >= 500) overflow.value = true
     else held.set(event.id, event)
     sync()
@@ -105,7 +105,7 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
       // The compensating response also has its exact event id. Discard only that echo.
       if (body.undo_of !== receipt.id || !Number.isSafeInteger(body.id)) throw new Error('Undo returned an invalid event receipt')
       remember(body.id)
-      if (body.type === 'ships_in.changed' && Array.isArray(body.after?.members)) options.committed?.({ kind: 'placement', result: { items: body.after.members, undo_event_id: null } })
+      if (body.type === 'ships_in.changed' && Array.isArray(body.after?.members)) options.committed?.({ kind: 'placement', result: { items: body.after.members, release_revisions: body.after.release_revisions, release_ranks: body.after.release_ranks, undo_event_id: null } })
       else if (body.type === 'release.reranked' && body.after?.release_id) options.committed?.({ kind: 'rank', result: { ...body.after, undo_event_id: null } })
       undo.value = null; version.value++
     } catch (e) { if (receipt.identity === identity.value) error.value = e instanceof Error ? e.message : 'Undo failed' }

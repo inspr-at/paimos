@@ -191,6 +191,21 @@ func TestKnowledgeScopeValidationAndReleaseContext(t *testing.T) {
 	if rr.Code != 200 || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != memberNote {
 		t.Fatalf("filters %d %s", rr.Code, rr.Body.String())
 	}
+	err = db.InTenant(ctx, f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE id=$1`, f.ticket)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr = call(t, f, f.a, "GET", path, nil)
+	page = ListPage{}
+	if err = json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != 200 || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != linked {
+		t.Fatalf("deleted member/direct context %d %s", rr.Code, rr.Body.String())
+	}
 	rr = call(t, f, f.foreign, "GET", path, nil)
 	if rr.Code != 403 && rr.Code != 404 {
 		t.Fatalf("tenant leak %d", rr.Code)

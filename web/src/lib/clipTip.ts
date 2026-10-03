@@ -3,8 +3,9 @@ import { nextTick, type Directive } from 'vue'
 const observers = new WeakMap<HTMLElement, { value: string; resize: ResizeObserver }>()
 function measure(el: HTMLElement) {
   const value = observers.get(el)?.value
-  if (value && el.scrollWidth > el.clientWidth + 1) el.dataset.tip = value
-  else delete el.dataset.tip
+  const target = el.parentElement?.matches('button') ? el.parentElement : el
+  if (value && el.scrollWidth > el.clientWidth + 1) target.dataset.tip = value
+  else delete target.dataset.tip
 }
 // Use the app's pointer/focus tooltip only where the text is actually clipped.
 export const vClipTip: Directive<HTMLElement, string> = {

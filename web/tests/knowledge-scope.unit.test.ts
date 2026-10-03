@@ -39,3 +39,15 @@ it('saved single UUID/none scopes preserve unrelated ticket filters without a se
     expect(ticketFilters(query).assignee).toEqual(['mira']); expect(query.ships_in).toBe(ships_in)
   }
 })
+
+it('bounds explicitly loaded Knowledge context to 2,000 rows and retains honest total/cursor', async () => {
+  let number=0
+  vi.mocked(listKnowledge).mockImplementation(async()=>{
+    number++
+    return {...page('unused',`cursor-${number}`),total:5000,items:Array.from({length:200},(_,i)=>({...page('unused').items[0]!,id:`${number}-${i}`}))}
+  })
+  const scoped=effectScope(),state=scoped.run(()=>useKnowledge(ref('project'),ref(filtersFromQuery({})),ref(true),ref<ReleaseScope>({kind:'backlog'}),ref('person')))!
+  await flush();for(let n=1;n<10;n++) await state.loadMore()
+  expect(state.items.value).toHaveLength(2000);expect(state.renderLimited.value).toBe(true);expect(state.total.value).toBe(5000)
+  await state.loadMore();expect(listKnowledge).toHaveBeenCalledTimes(10);expect(state.error.value).toContain('2,000');scoped.stop()
+})

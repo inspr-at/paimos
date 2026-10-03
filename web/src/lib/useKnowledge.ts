@@ -42,6 +42,7 @@ export function useKnowledge(projectId: Ref<string | null>, filters: Ref<Knowled
   async function read(more = false) {
     const id = projectId.value, captured = identity.value
     if (!id || !active.value || (more && (!cursor.value || loading.value))) return
+    if (more && items.value.length >= 2000) { error.value = '2,000 entries loaded. Narrow the search to reach more context.'; return }
     clearTimeout(timer); controller?.abort(); controller = new AbortController()
     const signal = controller.signal, request = ++generation, next = more ? cursor.value : ''
     loading.value = true; searching.value = !!filters.value.q.trim(); error.value = ''
@@ -54,7 +55,7 @@ export function useKnowledge(projectId: Ref<string | null>, filters: Ref<Knowled
       if (!Array.isArray(page.items) || page.items.length > (scoped.value ? 200 : 1000)) throw new Error('Knowledge page exceeds the requested bound')
       if (next && page.next_cursor === next) throw new Error('The Knowledge cursor did not advance')
       const seen = new Set(more ? items.value.map(it => it.id) : [])
-      items.value = [...(more ? items.value : []), ...page.items.filter(it => !seen.has(it.id))]
+      items.value = [...(more ? items.value : []), ...page.items.filter(it => !seen.has(it.id))].slice(0, 2000)
       cursor.value = page.next_cursor ?? ''; truncated.value = page.truncated || !!page.counts_incomplete
       serverTotal.value = page.total; serverCounts.value = page.counts
       loaded.value = true; loadedFor = captured; searched.value = filters.value.q.trim()
@@ -66,6 +67,7 @@ export function useKnowledge(projectId: Ref<string | null>, filters: Ref<Knowled
   }
   const load = () => read(false)
   const loadMore = () => read(true)
+  const renderLimited = computed(() => !!cursor.value && items.value.length >= 2000)
   watch([identity, active], ([key, on], before) => {
     clearTimeout(timer); generation++; controller?.abort(); loading.value = false; searching.value = false
     if (key !== before?.[0]) { items.value = []; loaded.value = false; cursor.value = ''; truncated.value = false; serverTotal.value = 0; serverCounts.value = { type: {}, status: {} }; error.value = '' }
@@ -90,6 +92,6 @@ export function useKnowledge(projectId: Ref<string | null>, filters: Ref<Knowled
   function remove(id: string) { items.value = items.value.filter(item => item.id !== id); if (scoped.value) void load() }
   function stop() { generation++; clearTimeout(timer); controller?.abort() }
   onScopeDispose(stop)
-  return { items, loaded, loading, error, truncated, searching, searched, cursor, visible, groups, sequence, typeCounts, statusCounts, total, sortBy, load, loadMore, upsert, remove, slugs, stop }
+  return { renderLimited, items, loaded, loading, error, truncated, searching, searched, cursor, visible, groups, sequence, typeCounts, statusCounts, total, sortBy, load, loadMore, upsert, remove, slugs, stop }
 }
 export type KnowledgeState = ReturnType<typeof useKnowledge>

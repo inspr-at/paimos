@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../lib/clipTip'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, useRoute, useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
@@ -21,6 +22,7 @@ const props = defineProps<{
   project: { id: string; routeKey: string; title: string }
   scopeLabel?: string
   pendingChanges?: number
+  pendingIncomplete?: boolean
   state: KnowledgeState; filters: KnowledgeFilters; canWrite: boolean; person: boolean; now: number
   // An entry page is open over the tab: its keys belong to the entry.
   paused: boolean
@@ -33,7 +35,7 @@ const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
 const graphMode = computed(() => route.query.mode === 'graph')
-const graph = ref<{ focus: () => void }>()
+const graph = ref<{ focus: () => void; reload: () => Promise<void> }>()
 // A selection carries over between the two displays where the pane can show it; on a narrow
 // screen going back to Entries drops it, which would otherwise open the entry's own page.
 let modeIntent = 0
@@ -87,7 +89,7 @@ const statusView = computed(() => STATUS_VIEWS.find(view => view.value === props
 const sortLabel = computed(() => SORTS.find(sort => sort.value === props.state.sortBy.value)?.label ?? 'Recently updated')
 const sortOptions = computed(() => q.value ? SORTS : SORTS.filter(sort => sort.value !== 'relevance'))
 const shown = computed(() => props.state.visible.value.length)
-const nothingYet = computed(() => props.state.loaded.value && !props.state.items.value.length)
+const nothingYet = computed(() => !props.scopeLabel && !props.filters.q && !props.filters.type && props.filters.status === 'current' && props.state.loaded.value && !props.state.items.value.length)
 const skeleton = computed(() => !props.state.loaded.value && (props.state.loading.value || !props.state.error.value))
 const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowledge list --project ${props.project.routeKey}`)
 const statusCount = (view: StatusView) => {
@@ -213,7 +215,7 @@ function reveal(id: string, focus = false) {
 }
 onMounted(() => window.addEventListener('keydown', keydown))
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); phoneQuery.removeEventListener('change', onPhone) })
-defineExpose({ focusSearch, openCreate, reveal })
+defineExpose({ focusSearch, openCreate, reveal, reloadGraph: () => graph.value?.reload() })
 const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_by ? `by ${item.updated_by.name}` : ''
 </script>
 
@@ -236,14 +238,14 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       <kbd v-else-if="!draft" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
-    <button v-if="!nothingYet" type="button" class="btn sm k-menu-btn" :class="{ on: filters.status !== 'current' }" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'status'" :aria-label="`Status: ${statusView.label}`" data-tip="Which entries to show" @click="openMenu('status', $event)">
-      <span class="k-menu-dim">Status</span>{{ statusView.label }}<AppIcon name="chevron" :size="12" class="k-chev" />
+    <button type="button" class="btn sm k-menu-btn" :class="{ on: filters.status !== 'current' }" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'status'" :aria-label="`Status: ${statusView.label}`" data-tip="Which entries to show" @click="openMenu('status', $event)">
+      <span class="k-menu-dim">Status</span><span class="k-label-slot"><span>{{ statusView.label }}</span><span v-for="view in STATUS_VIEWS" :key="view.value" class="k-label-measure" aria-hidden="true">{{ view.label }}</span></span><AppIcon name="chevron" :size="12" class="k-chev" />
     </button>
-    <button v-if="!nothingYet" type="button" class="btn sm k-menu-btn k-sort-btn" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'sort'" :aria-label="`Sort: ${sortLabel}`" data-tip="Order within each kind" @click="openMenu('sort', $event)">
-      <AppIcon name="sliders" :size="13" /><span class="k-sort-label">{{ sortLabel }}</span><AppIcon name="chevron" :size="12" class="k-chev" />
+    <button type="button" class="btn sm k-menu-btn k-sort-btn" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'sort'" :aria-label="`Sort: ${sortLabel}`" data-tip="Order within each kind" @click="openMenu('sort', $event)">
+      <AppIcon name="sliders" :size="13" /><span class="k-sort-label k-label-slot"><span>{{ sortLabel }}</span><span v-for="option in SORTS" :key="option.value" class="k-label-measure" aria-hidden="true">{{ option.label }}</span></span><AppIcon name="chevron" :size="12" class="k-chev" />
     </button>
     <span class="k-spacer" />
-    <span class="k-count mono" :title="scopeLabel ? `${state.total.value} entries in ${scopeLabel}` : undefined" role="status" aria-live="polite"><button v-if="pendingChanges" type="button" class="apply-changes" @click="emit('applyChanges')">{{ pendingChanges }} changes · Apply <kbd class="keycap">a</kbd></button><template v-else-if="state.loaded.value && !nothingYet">{{ state.truncated.value ? '≥ ' : '' }}{{ plural(scopeLabel ? state.total.value : shown, 'entry', 'entries') }}{{ scopeLabel ? ` in ${scopeLabel}` : '' }}</template></span>
+    <span v-clip-tip="scopeLabel ? `${state.total.value} entries in ${scopeLabel}` : ''" class="k-count mono" role="status" aria-live="polite"><button v-if="pendingChanges" type="button" class="apply-changes" @click="emit('applyChanges')">{{ pendingIncomplete ? '≥ ' : '' }}{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><template v-else-if="state.loaded.value">{{ state.truncated.value ? '≥ ' : '' }}{{ plural(scopeLabel ? state.total.value : shown, 'entry', 'entries') }}{{ scopeLabel ? ` in ${scopeLabel}` : '' }}</template></span>
     <button v-if="canWrite" type="button" class="btn primary k-new" aria-label="New knowledge entry" aria-keyshortcuts="n" data-tip="New entry · n" @click="openCreate()">
       <AppIcon name="plus" :size="14" /><span class="k-new-label">New entry</span>
     </button>
@@ -252,8 +254,8 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
   <div class="k-frame">
   <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" @emptied="holdFocus" />
   <div class="k-layout">
-    <div v-if="state.cursor.value" class="knowledge-more"><button type="button" class="btn" :disabled="state.loading.value" @click="state.loadMore()">Load more entries</button></div>
     <nav class="k-rail" aria-label="Kinds of knowledge">
+      <button v-if="scopeLabel" type="button" class="btn knowledge-more" :disabled="state.loading.value || state.renderLimited.value || !state.cursor.value" @click="state.loadMore()">Load more entries</button>
       <div class="k-kinds">
         <button type="button" class="k-kind" :aria-current="!filters.type ? 'true' : undefined" @click="setType('')">
           <span class="k-kind-icon"><AppIcon name="book" :size="14" /></span><span class="k-kind-label">All knowledge</span>
@@ -348,7 +350,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
             </li>
           </ul>
         </section>
-        <p v-if="state.truncated.value" class="k-fine">Showing the newest 1,000 entries. Search to find older ones.</p>
+        <p v-if="state.truncated.value || state.renderLimited.value" class="k-fine">{{ state.renderLimited.value ? '2,000 entries loaded. Narrow the search to reach more context.' : scopeLabel ? 'Counts are partial. Narrow the search or load more entries.' : 'Showing the newest 1,000 entries. Search to find older ones.' }}</p>
       </template>
 
       <p v-if="state.loaded.value && state.items.value.length" class="k-hint">
@@ -397,6 +399,9 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .clear-q:focus-visible { box-shadow: var(--focus-ring); }
 .spinner { position: absolute; right: 32px; width: 12px; height: 12px; border-radius: 50%; border: 1.6px solid var(--line-2); border-right-color: var(--teal); }
 @media (prefers-reduced-motion: no-preference) { .spinner { animation: k-spin .8s linear infinite; } @keyframes k-spin { to { transform: rotate(360deg); } } }
+.k-label-slot { display: inline-grid; }
+.k-label-slot > span { grid-area: 1 / 1; }
+.k-label-measure { visibility: hidden; }
 .k-menu-btn { gap: 6px; padding: 0 9px 0 12px; color: var(--ink-2); }
 .k-menu-btn:hover, .k-menu-btn[aria-expanded="true"] { color: var(--ink); }
 .k-menu-btn.on { color: var(--teal-ink); }
@@ -405,7 +410,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-sort-btn { padding-left: 10px; }
 .k-spacer { flex: 1; }
 .apply-changes { border: 0; padding: 0; background: transparent; color: var(--teal-ink); font: inherit; }
-.k-count { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; min-width: 10ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.k-count { width: clamp(13ch, 19vw, 30ch); max-width: 30ch; overflow: hidden; text-overflow: ellipsis; min-width: 10ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .k-new { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .k-menu { display: grid; gap: 1px; }
 .k-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
@@ -513,7 +518,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 @container toolbar (max-width: 1080px) { .k-mode-label { display: none; } .k-mode button { padding: 0 8px; } }
 /* Beside the preview pane the toolbar is list-wide: the search gives way before anything wraps. */
 @container toolbar (max-width: 720px) { .k-search { width: auto; flex: 1 1 120px; min-width: 120px; } .k-spacer { display: none; } }
-@container toolbar (max-width: 1000px) { .k-count { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; display: none; } .k-new { width: 32px; padding: 0; } .k-new-label { display: none; } .k-menu-dim { display: none; } }
+@container toolbar (max-width: 1000px) { .k-count { width: clamp(13ch, 19vw, 30ch); max-width: 30ch; overflow: hidden; text-overflow: ellipsis; display: none; } .k-new { width: 32px; padding: 0; } .k-new-label { display: none; } .k-menu-dim { display: none; } }
 /* Docked beside an entry (U25) the list is narrower than the window says: the
    frame and the list fold by their own width (selectors carry .k-frame / .k-list
    so they win over the window-width rules below). The rail becomes the row of
@@ -569,7 +574,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
   .k-menu-btn { height: 44px; }
   .k-sort-btn { width: 44px; padding: 0; justify-content: center; }
   .k-sort-btn .k-chev { display: none; }
-  .k-spacer, .k-count { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; display: none; }
+  .k-spacer, .k-count { width: clamp(13ch, 19vw, 30ch); max-width: 30ch; overflow: hidden; text-overflow: ellipsis; display: none; }
   .k-new { width: 44px; height: 44px; padding: 0; }
   .k-new-label { display: none; }
   .k-group-head { padding: 10px 10px 10px 12px; }

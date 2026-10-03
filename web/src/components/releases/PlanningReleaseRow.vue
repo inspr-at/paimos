@@ -9,7 +9,7 @@ const name = computed(() => releaseName(props.release))
 const progress = computed(() => props.release.rollup.units ? Math.round(100 * props.release.rollup.completed / props.release.rollup.units) : 0)
 const outlook = computed(() => ({ fits: 'Fits the budget', does_not_fit: 'Over budget', unknown: 'Unknown' }[props.release.build_summary.budget_outlook ?? 'unknown'] ?? 'Unknown'))
 const agents = computed(() => typeof props.release.build_summary.agents === 'number'
-  ? `${props.release.build_summary.agents_incomplete ? '≥ ' : ''}${props.release.build_summary.agents} agents · ${props.release.build_summary.waiting ?? 0} waiting` : '—')
+  ? `${props.release.build_summary.agents_incomplete ? '≥ ' : ''}${props.release.build_summary.agents} agents · ${props.release.build_summary.agents_incomplete ? '≥ ' : ''}${props.release.build_summary.waiting ?? 0} waiting` : '—')
 </script>
 <template>
   <div class="release-row" :class="{ expanded, scoped }" :data-release-id="release.release_id">

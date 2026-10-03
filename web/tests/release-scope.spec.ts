@@ -17,7 +17,7 @@ async function setup(page: Page, theme = 'light') {
     const sources: FakeSource[] = []
     class FakeSource {
       readyState = 1; onerror = null; listeners = new Map<string, ((e: { data: string }) => void)[]>(); closed = false
-      constructor(public url: string) { sources.push(this) }
+      constructor(public url: string) { sources.push(this); queueMicrotask(() => { for (const fn of this.listeners.get('open') ?? []) fn({ data: '' }) }) }
       addEventListener(type: string, fn: (e: { data: string }) => void) { this.listeners.set(type, [...this.listeners.get(type) ?? [], fn]) }
       close() { this.closed = true }
     }
@@ -25,7 +25,7 @@ async function setup(page: Page, theme = 'light') {
       for (const source of sources) if (!source.closed) for (const fn of source.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) })
     } })
   })
-  const calls: { path: string; query: URLSearchParams }[] = [], state = { reverse: false, mode: 'releases' }
+  const calls: { path: string; query: URLSearchParams }[] = [], state = { reverse: false, mode: 'releases', graphChanged: false }
   await page.route('**/api/projects/p-pharos/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname, query = url.searchParams
     calls.push({ path, query })
@@ -46,6 +46,11 @@ async function setup(page: Page, theme = 'light') {
   })
   await page.route('**/api/knowledge**', async route => {
     const url = new URL(route.request().url()), query = url.searchParams
+    if (url.pathname === '/api/knowledge/graph') return route.fulfill({ json: { nodes: [
+      { id:'note-release',key:'RUN-1',type:'runbook',kind:'knowledge',slug:'release-plan',title:'Notiz zur langfristigen Release-Planung',status:'active',degree:1,updated_at:'2026-10-03T12:00:00Z' },
+      { id:'note-backlog',key:'MEM-1',type:'memory',kind:'knowledge',slug:'backlog-context',title:'Backlog context',status:'proposed',degree:1,updated_at:'2026-10-03T12:00:00Z' },
+      { id:'n-1',key:'PHAROS-11',type:'ticket',kind:'ticket',slug:'',title:'Linked release work',status:'open',degree:1,updated_at:'2026-10-03T12:00:00Z' },
+    ], edges: state.graphChanged ? [] : [{source:'note-release',target:'n-1',kind:'relation',label:'relates'}],truncated:false } })
     if (url.pathname.endsWith('/learnings')) return route.fulfill({ json: { items: [], truncated: false } })
     if (url.pathname !== '/api/knowledge') return route.fallback()
     calls.push({ path: url.pathname, query })
@@ -72,25 +77,59 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     const h = await setup(page, theme); await page.setViewportSize({ width, height: 900 }); await page.goto('/p/PHAROS/tickets?ships_in=none&closed=1')
     await expect(scopeButton(page, width)).toBeVisible(); await expect(page.locator('.ticket-row').first()).toBeVisible()
     const clear = page.getByRole('button', { name: width <= 720 ? 'Clear scope' : 'Clear release scope', exact: true })
-    await expectStableControls({ controls: { header: page.locator('.app-header'), scope: scopeButton(page, width), clear, tabs: page.getByRole('tablist', { name: 'Project sections' }), toolbar: page.locator('.toolbar-wrap'), count: width <= 1024 ? page.locator('.scope-count') : page.locator('.count') }, scrollAreas: { page: page.locator('.project-page') }, interactions: [
+    await expectStableControls({ controls: { header: page.locator('.app-header'), scope: scopeButton(page, width), clear, tabs: page.getByRole('tablist', { name: 'Project sections' }), toolbar: page.locator('.toolbar-wrap'), count: width <= 1024 ? page.locator('.scope-count') : page.locator('.toolbar > .count') }, scrollAreas: { page: page.locator('.project-page') }, interactions: [
       { name: 'release scope', run: async () => { await pick(page, width, longName); await expect(page).toHaveURL(new RegExp(`ships_in=${id}`)); await expect(scopeButton(page, width)).toContainText(longName) } },
       { name: 'Backlog scope', run: async () => { await pick(page, width, 'Backlog'); await expect(page).toHaveURL(/ships_in=none/); await expect(scopeButton(page, width)).toContainText('Backlog') } },
       { name: 'all work', run: async () => { await clear.click(); await expect(page).not.toHaveURL(/ships_in=/); await expect(scopeButton(page, width)).toContainText('All work') } },
     ] })
     await pick(page, width, longName)
-    const ticketCount = width <= 1024 ? page.locator('.scope-count') : page.locator('.count')
+    const ticketCount = width <= 1024 ? page.locator('.scope-count') : page.locator('.toolbar > .count')
     await expect(ticketCount).toContainText(`tickets in ${longName}`)
     if (width === 1024) await expect(page.locator('.search-pill')).toHaveCSS('width', '32px')
     mkdirSync('test-results/aeon-596-p6b', { recursive: true }); await page.screenshot({ path: `test-results/aeon-596-p6b/tickets-${width}-${theme}.png` })
+    await scopeButton(page, width).click()
+    const scopeDialog = page.getByRole('dialog', { name: 'Filters: release scope' })
+    await expect(scopeDialog.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+    if (width <= 720) await expect(scopeDialog).toHaveCSS('width', `${width}px`)
+    await expectStableControls({ controls: { done: width <= 720 ? scopeDialog.locator('.scope-footer .scope-done') : scopeDialog.locator('header .scope-done'), refresh: scopeDialog.getByRole('button', { name: 'Refresh', exact: true }), options: scopeDialog.locator('.scope-options'), all: scopeDialog.getByRole('button', { name: 'All work', exact: true }), backlog: scopeDialog.getByRole('button', { name: 'Backlog', exact: true }), selected: scopeDialog.getByRole('button', { name: longName, exact: true }), ...(width <= 720 ? { frame: scopeDialog } : {}) }, scrollAreas: { options: scopeDialog.locator('.scope-options') }, interactions: [
+      { name: 'refresh scope options', run: async () => { await scopeDialog.getByRole('button', { name: 'Refresh', exact: true }).click(); await expect(scopeDialog.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled() } },
+      { name: 'choose and reopen Backlog', run: async () => { await scopeDialog.getByRole('button', { name: 'Backlog', exact: true }).click(); await expect(page).toHaveURL(/ships_in=none/); await scopeButton(page,width).click(); await expect(scopeDialog.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled() } },
+      { name: 'choose and reopen release', run: async () => { await scopeDialog.getByRole('button', { name: longName, exact: true }).click(); await expect(page).toHaveURL(new RegExp(`ships_in=${id}`)); await scopeButton(page,width).click(); await expect(scopeDialog.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled() } },
+    ] })
+    await page.screenshot({ path: `test-results/aeon-596-p6b/picker-${width}-${theme}.png` })
+    await (width <= 720 ? scopeDialog.locator('.scope-footer .scope-done') : scopeDialog.locator('header .scope-done')).click()
     await page.getByRole('tab', { name: 'Knowledge', exact: true }).click(); await expect(page).toHaveURL(new RegExp(`/knowledge\\?ships_in=${id}`))
     await expect(page.locator('.k-row')).toHaveCount(1)
     const knowledgeCount = width <= 1024 ? page.locator('.scope-count') : page.locator('.k-count')
-    await expect(knowledgeCount).toContainText(`1 entry${width <= 1024 ? 'ies' : ''} in`.replace('entryies','entries'))
+    await expect(knowledgeCount).toContainText('1 entry in')
+    const statusControl = page.locator('.k-menu-btn:not(.k-sort-btn)'), sortControl = page.locator('.k-sort-btn')
+    const filterSearch = page.getByRole('searchbox', { name: 'Search knowledge in Pharos' })
+    await expectStableControls({ controls: { header: page.locator('.app-header'), scope: scopeButton(page,width), count: knowledgeCount, status: statusControl, sort: sortControl, search: page.locator('.k-search'), new: page.getByRole('button', { name: 'New knowledge entry', exact: true }), modes: page.getByRole('tablist', { name: 'Knowledge views', exact: true }) }, scrollAreas: { page: page.locator('.project-page') }, interactions: [
+      { name: 'archived intersection is empty', run: async () => { await statusControl.click(); await page.getByRole('radio', { name: /Archived/, exact: false }).click(); await expect(page.locator('.k-row')).toHaveCount(0); await expect(knowledgeCount).toContainText('0 entries in') } },
+      { name: 'restore Current filter', run: async () => { await statusControl.click(); await page.getByRole('radio', { name: /Current/, exact: false }).click(); await expect(page.locator('.k-row')).toHaveCount(1) } },
+      { name: 'change sort without moving neighbouring controls', run: async () => { await sortControl.click(); await page.getByRole('radio', { name: 'Title', exact: true }).click(); await expect(page).toHaveURL(/sort=title/) } },
+      { name: 'empty scoped search stays honest', run: async () => { await filterSearch.fill('no matching note'); await expect(page).toHaveURL(/q=no\+matching\+note/); await expect(page.locator('.k-row')).toHaveCount(0) } },
+      { name: 'clear scoped search', run: async () => { await filterSearch.fill(''); await expect(page.locator('.k-row')).toHaveCount(1) } },
+    ] })
     await page.screenshot({ path: `test-results/aeon-596-p6b/knowledge-${width}-${theme}.png` })
+    await page.getByRole('tablist',{name:'Knowledge views'}).getByRole('tab',{name:'Graph',exact:true}).click()
+    await expect(page.locator('.kg-canvas')).toHaveAttribute('data-ready','true')
+    await expect(page.locator('.graph-heading [role="status"]')).toHaveText('1 entries, 0 links')
+    await expectStableControls({controls:{header:page.locator('.app-header'),scope:scopeButton(page,width),count:knowledgeCount,fit:page.getByRole('button',{name:'Fit graph to view'}),linked:page.getByRole('button',{name:'Show linked tickets'})},interactions:[
+      {name:'linked satellites remain scoped to visible notes',run:async()=>{await page.getByRole('button',{name:'Show linked tickets'}).click();await expect(page.locator('.graph-heading [role="status"]')).toHaveText('1 entries, 1 link, 1 linked tickets')}},
+    ]})
+    await page.screenshot({path:`test-results/aeon-596-p6b/knowledge-graph-${width}-${theme}.png`})
+    h.state.graphChanged=true
+    await page.evaluate(()=>{(window as unknown as {emitDelivery:(event:unknown)=>void}).emitDelivery({id:61,type:'relation.deleted',before:{type:'relates',source_node_id:'note-release',target_node_id:'n-1'}})})
+    await expect(page.getByRole('button',{name:/1 change · Apply/})).toBeVisible();await expect(page.locator('.graph-heading [role="status"]')).toHaveText('1 entries, 1 link, 1 linked tickets')
+    await page.getByRole('button',{name:/1 change · Apply/}).click();await expect(page.locator('.graph-heading [role="status"]')).toHaveText('1 entries, 0 links')
+    await page.getByRole('tablist',{name:'Knowledge views'}).getByRole('tab',{name:'Entries',exact:true}).click();await expect(page.locator('.k-row')).toHaveCount(1)
     await pick(page, width, 'Backlog'); await expect(page.locator('.k-row')).toHaveCount(1); await expect(page.locator('.k-title')).toHaveText('Backlog context')
-    await page.getByRole('tab', { name: 'Tickets', exact: true }).click(); await expect(page).toHaveURL(/ships_in=none/)
-    await page.goBack(); await expect(page).toHaveURL(/knowledge\?ships_in=none/)
+    await page.getByRole('tab', { name: 'Tickets', exact: true }).click(); await expect(page).toHaveURL(url => url.pathname.endsWith('/tickets') && url.searchParams.get('ships_in') === 'none')
+    await page.goBack(); await expect(page).toHaveURL(url => url.pathname.endsWith('/knowledge') && url.searchParams.get('ships_in') === 'none' && url.searchParams.get('sort') === 'title')
     expect(h.calls.filter(c => c.path === '/api/knowledge' && c.query.has('ships_in')).every(c => c.query.get('limit') === '200')).toBe(true)
+    await page.getByRole('tab', { name: 'Releases', exact: true }).click(); await expect(page.locator('.release-name')).toHaveCount(2)
+    await page.screenshot({ path: `test-results/aeon-596-p6b/releases-${width}-${theme}.png` })
     expect(h.errors).toEqual([])
   })
 }
@@ -102,9 +141,12 @@ test('release names scope and expand; chevrons only expand; foreign reorder/adop
   h.state.reverse = true
   const emit = async (eventId: number, type: string) => page.evaluate(({ eventId, type }) => { (window as unknown as { emitDelivery: (e: unknown) => void }).emitDelivery({ id: eventId, type, node_id: 'p-pharos', after: { project_id: 'p-pharos' } }) }, { eventId, type })
   await emit(7, 'release.reranked'); await expect(page.getByRole('button', { name: /1 change · Apply/ })).toBeVisible(); await expect(names.first()).toContainText(longName)
-  await expectStableControls({ controls: { header: page.locator('.app-header'), count: page.locator('.count'), apply: page.getByRole('button', { name: /1 change · Apply/ }), scope: scopeButton(page, 1440), expansion: page.getByRole('toolbar', { name: 'Release expansion and continuation' }) }, interactions: [{ name: 'held echo', run: async () => { await emit(7, 'release.reranked'); await expect(names.first()).toContainText(longName) } }] })
+  await expectStableControls({ controls: { header: page.locator('.app-header'), count: page.locator('.toolbar > .count'), apply: page.getByRole('button', { name: /1 change · Apply/ }), scope: scopeButton(page, 1440), expansion: page.getByRole('toolbar', { name: 'Release expansion and continuation' }) }, interactions: [{ name: 'held echo', run: async () => { await emit(7, 'release.reranked'); await expect(names.first()).toContainText(longName) } }] })
   await page.getByRole('button', { name: /1 change · Apply/ }).click(); await expect(names.first()).toContainText('Audit sweep'); await expect(page.getByRole('button', { name: `Collapse ${longName}` })).toBeVisible()
   await page.goto('/p/PHAROS/releases'); await expect(names).toHaveCount(2); h.state.mode = 'journey'; await emit(8,'delivery.adopted'); await expect(names).toHaveCount(2); await page.keyboard.press('a'); await expect(page.getByText('This project is still using its journey.')).toBeVisible()
+  h.state.mode = 'releases'; await emit(9, 'delivery.adopted')
+  await expect(page.getByText('This project is still using its journey.')).toBeVisible(); await expect(names).toHaveCount(0)
+  await page.keyboard.press('a'); await expect(names).toHaveCount(2)
 })
 test('ambiguous bookmarks stay a visible repair; missing release refuses without all-work fallback', async ({ page }) => {
   const h = await setup(page); await page.goto(`/p/PHAROS/knowledge?ships_in=none,${id}`)
@@ -113,4 +155,29 @@ test('ambiguous bookmarks stay a visible repair; missing release refuses without
   await pick(page, 1440, 'Backlog'); await expect(page.locator('.k-row')).toHaveCount(1)
   await page.route(`**/api/projects/p-pharos/releases/${id}`, route => route.fulfill({ status: 404, json: { error: 'not found' } }))
   await page.goto(`/p/PHAROS/tickets?ships_in=${id}`); await expect(scopeButton(page,1440)).toContainText('This release scope is unavailable'); await expect(page).toHaveURL(new RegExp(`ships_in=${id}`))
+})
+
+for (const width of [390,1024,1440]) for (const theme of ['light','dark']) test(`own rank receipt and refused/successful Undo keep fixed slots ${width} ${theme}`,async ({page})=>{
+  await setup(page,theme);await page.setViewportSize({width,height:900});await page.goto('/p/PHAROS/releases')
+  const names=page.locator('.release-name');await expect(names).toHaveCount(2)
+  const send=async (eventId:number)=>page.evaluate(eventId=>{(window as unknown as {emitDelivery:(event:unknown)=>void}).emitDelivery({id:eventId,type:'release.reranked',after:{project_id:'p-pharos'}})},eventId)
+  await send(42);await send(43)
+  // Drive P6b's provided receipt boundary; P6c owns the drag/menu authoring UI.
+  await page.locator('.project-page').evaluate((el,result)=>{
+    const instance=(el as unknown as {__vueParentComponent:{provides:Record<symbol,unknown>}}).__vueParentComponent
+    const key=Object.getOwnPropertySymbols(instance.provides).find(key=>key.description==='delivery-actions')!
+    const actions=instance.provides[key] as {begin:()=>string;commit:(identity:string,change:unknown)=>boolean}
+    if(!actions.commit(actions.begin(),{kind:'rank',result})) throw new Error('Receipt refused')
+  },{...row(),rank:'X',revision:2,undo_event_id:42})
+  await expect(names.first()).toContainText('Audit sweep')
+  const undo=page.getByRole('button',{name:'Undo',exact:true}),apply=page.getByRole('button',{name:/1 change · Apply/})
+  await expect(undo).toBeEnabled();await expect(apply).toBeVisible()
+  await page.screenshot({path:`test-results/aeon-596-p6b/undo-${width}-${theme}.png`})
+  let refused=true
+  await page.route('**/api/events/42/undo',route=>route.fulfill(refused?{status:409,json:{error:'Release order changed again'}}:{status:201,json:{id:44,undo_of:42,type:'release.reranked',after:{...row(),revision:3}}}))
+  await expectStableControls({controls:{header:page.locator('.app-header'),scope:scopeButton(page,width),count:width<=1024?page.locator('.scope-count'):page.locator('.toolbar > .count'),undo,apply,notice:page.locator('.delivery-notice')},interactions:[
+    {name:'exact own echo deduplication',run:async()=>{await send(42);await expect(apply).toBeVisible()}},
+    {name:'authoritative Undo refusal',run:async()=>{await undo.click();await expect(page.locator('.delivery-notice')).toContainText('Release order changed again');await expect(undo).toBeEnabled()}},
+  ]})
+  refused=false;await undo.click();await expect(names.first()).toContainText(longName);await expect(apply).toBeVisible();await expect(page.locator('.delivery-notice button')).toBeDisabled()
 })

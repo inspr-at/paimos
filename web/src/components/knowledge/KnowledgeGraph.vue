@@ -30,10 +30,14 @@ const pointer = ref({ x: 0, y: 0 })
 const visible = computed(() => {
   if (props.scopedItems) {
     const ids = new Set(props.scopedItems.map(it => it.id))
-    const entries = props.scopedItems.map(it => ({ ...it, kind: 'knowledge' as const, degree: 0 }))
-    const edges = data.value.edges.filter(e => ids.has(e.source) && ids.has(e.target))
-    for (const entry of entries) entry.degree = edges.filter(e => e.source === entry.id || e.target === entry.id).length
-    return filterGraph({ nodes: entries, edges, truncated: !!props.scopedIncomplete }, props.filters.type)
+    const satellites = new Set(tickets.value ? data.value.nodes.filter(it => it.kind === 'ticket').map(it => it.id) : [])
+    const edges = data.value.edges.filter(e => ids.has(e.source) && (ids.has(e.target) || satellites.has(e.target)) || ids.has(e.target) && satellites.has(e.source))
+    const attached = new Set(edges.flatMap(e => [e.source, e.target]))
+    const degrees = new Map<string, number>()
+    for (const edge of edges) for (const id of [edge.source, edge.target]) degrees.set(id, (degrees.get(id) ?? 0) + 1)
+    const entries = props.scopedItems.map(it => ({ ...it, kind: 'knowledge' as const, degree: degrees.get(it.id) ?? 0 }))
+    const contextTickets = data.value.nodes.filter(it => satellites.has(it.id) && attached.has(it.id)).map(it => ({ ...it, degree: degrees.get(it.id) ?? 0 }))
+    return filterGraph({ nodes: [...entries, ...contextTickets], edges, truncated: !!props.scopedIncomplete || data.value.truncated }, props.filters.type)
   }
   return filterGraph(data.value, props.filters.type)
 })
@@ -103,10 +107,11 @@ function move(event: PointerEvent) {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   pointer.value = { x: Math.max(8, Math.min(event.clientX - rect.left + 18, rect.width - 280)), y: Math.max(8, Math.min(event.clientY - rect.top + 18, rect.height - 150)) }
 }
-watch([() => props.project.id, () => props.filters.status, tickets], () => { if (mounted) void load() })
+watch([viewer, () => props.project.id], () => { data.value = empty; ticketSelection.value = ''; hovered.value = null; loadController?.abort(); if (mounted) void load() }, { flush: 'sync' })
+watch([() => props.filters.status, tickets], () => { if (mounted) void load() })
 onMounted(() => { mounted = true; void load() })
 onBeforeUnmount(() => { mounted = false; loadController?.abort() })
-defineExpose({ focus: () => canvas.value?.focus() })
+defineExpose({ focus: () => canvas.value?.focus(), reload: load })
 </script>
 
 <template>

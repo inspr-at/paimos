@@ -6,7 +6,7 @@ import { api } from '../../lib/api'
 import { releaseScope, type ReleaseScope } from '../../lib/releaseScope'
 import { releaseName, type PlanningRelease } from '../../lib/deliveryPlanning'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ projectId: string; person: string; values: string[]; countText?: string; pendingChanges?: number }>()
+const props = defineProps<{ projectId: string; person: string; values: string[]; countText?: string; pendingChanges?: number; pendingIncomplete?: boolean }>()
 const emit = defineEmits<{ applyChanges: []; choose: [values: string[]]; label: [value: string] }>()
 const scope = computed(() => releaseScope(props.values))
 const identity = computed(() => JSON.stringify([props.projectId, props.person]))
@@ -69,7 +69,7 @@ async function load(more = false) {
   } catch (e) { if (!signal.aborted && token === generation && captured === identity.value) error.value = e instanceof Error ? e.message : 'Scopes could not be loaded' }
   finally { if (token === generation && captured === identity.value) busy.value = false }
 }
-async function open() { opener = document.activeElement as HTMLElement; dialog.value?.showModal(); await nextTick(); dialog.value?.querySelector<HTMLButtonElement>('.scope-done')?.focus(); void load() }
+async function open() { opener = document.activeElement as HTMLElement; dialog.value?.showModal(); await nextTick(); [...dialog.value?.querySelectorAll<HTMLButtonElement>('.scope-done') ?? []].find(button => button.offsetHeight > 0)?.focus(); void load() }
 function close() { dialog.value?.close(); opener?.focus({ preventScroll: true }) }
 function choose(values: string[]) { emit('choose', values); close() }
 function cancel(event: Event) { event.preventDefault(); const field = document.activeElement; if (field instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(field.tagName)) field.blur(); else close() }
@@ -80,13 +80,13 @@ defineExpose({ open })
   <Teleport v-if="scopeTarget" :to="scopeTarget">
     <div class="scope-crumb" role="group" aria-label="Project scope">
       <span aria-hidden="true">/</span>
-      <button type="button" class="scope-picker" aria-label="Choose release scope" aria-haspopup="dialog" :title="label" @click="open"><span v-clip-tip="label">{{ label }}</span><AppIcon name="chevron" :size="12" /></button>
+      <button type="button" class="scope-picker" aria-label="Choose release scope" :aria-description="label" aria-haspopup="dialog" :title="label" @click="open"><span v-clip-tip="label">{{ label }}</span><AppIcon name="chevron" :size="12" /></button>
       <button type="button" class="scope-clear" aria-label="Clear release scope" :disabled="scope.kind === 'all'" @click="choose([])"><AppIcon name="close" :size="13" /></button>
     </div>
   </Teleport>
   <div class="scope-line" role="group" aria-label="Current project scope">
     <button type="button" class="scope-picker" aria-label="Filters: release scope" aria-haspopup="dialog" @click="open"><AppIcon name="filter" :size="14" /><span v-clip-tip="label">{{ label }}</span><AppIcon name="chevron" :size="12" /></button>
-    <span class="scope-count" :title="countText" role="status"><button v-if="pendingChanges" type="button" @click="emit('applyChanges')">{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><span v-else v-clip-tip="countText || ''">{{ countText }}</span></span>
+    <span class="scope-count" :title="countText" role="status"><button v-if="pendingChanges" type="button" @click="emit('applyChanges')">{{ pendingIncomplete ? '≥ ' : '' }}{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><span v-else v-clip-tip="countText || ''">{{ countText }}</span></span>
     <button type="button" class="scope-clear" aria-label="Clear scope" :disabled="scope.kind === 'all'" @click="choose([])"><AppIcon name="close" :size="14" /></button>
   </div>
   <Teleport to="body">
@@ -100,6 +100,7 @@ defineExpose({ open })
           <button type="button" class="scope-option" :disabled="mode !== 'releases'" :aria-pressed="scope.kind === 'backlog'" @click="choose(['none'])">Backlog<AppIcon v-if="scope.kind === 'backlog'" name="check" :size="14" /></button>
           <button v-for="row in rows" :key="row.release_id" type="button" class="scope-option" :aria-pressed="scope.kind === 'release' && scope.id === row.release_id" :title="releaseName(row)" @click="choose([row.release_id])"><span v-clip-tip="releaseName(row)">{{ releaseName(row) }}</span><AppIcon v-if="scope.kind === 'release' && scope.id === row.release_id" name="check" :size="14" /></button>
         </div>
+        <footer class="scope-footer"><button type="button" class="btn scope-done" @click="close">Done</button></footer>
       </div>
     </dialog>
   </Teleport>
@@ -120,6 +121,7 @@ defineExpose({ open })
 .scope-card { display: flex; flex-direction: column; max-height: 80dvh; padding: 18px; gap: 12px; }
 .scope-card header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .scope-card h2 { font-size: 18px; }
+.scope-footer { display: none; }
 .scope-actions { display: flex; gap: 8px; }
 .scope-feedback { min-height: 3lh; margin: 0; color: var(--ink-2); font-size: 13px; }
 .scope-options { overflow-y: auto; scrollbar-gutter: stable; min-height: 0; }
@@ -127,5 +129,5 @@ defineExpose({ open })
 .scope-option > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scope-option[aria-pressed="true"] { background: var(--row-selected); font-weight: 600; }
 @media(max-width:1024px) { .scope-line { display: flex; } }
-@media(max-width:720px) { .scope-dialog { inset: 0; transform: none; width: 100%; height: 100dvh; max-height: 100dvh; } .scope-card { height: 100%; max-height: none; padding-bottom: max(18px, env(safe-area-inset-bottom)); } .scope-options { flex: 1; } .scope-picker, .scope-clear { min-height: 44px; } }
+@media(max-width:720px) { .scope-dialog { inset: 0; transform: none; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; } .scope-card { height: 100%; max-height: none; padding-bottom: max(18px, env(safe-area-inset-bottom)); } .scope-options { flex: 1; } .scope-card header .scope-done { display: none; } .scope-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; padding-top: 8px; border-top: 1px solid var(--line); } .scope-footer .btn { min-height: 44px; } .scope-picker, .scope-clear { min-height: 44px; } .scope-clear { flex-basis: 44px; } }
 </style>

@@ -19,9 +19,10 @@ import (
 func TestDeliveryResourceLockInventory(t *testing.T) {
 	want := map[string]string{
 		"store.go:fence":                  "project.Write",
+		"store.go:mutate":                 "mutation",
 		"store.go:Plan":                   "mutation plan",
 		"placement.go:PlaceWithRevision":  "mutation placements",
-		"store.go:mutate":                 "fence project events",
+		"store.go:mutateWithReceipt":      "fence project events",
 		"store.go:projectWrite":           "project:NO KEY UPDATE",
 		"store.go:lockReleases":           "release:NO KEY UPDATE",
 		"store.go:Rerank":                 "mutation releases",
@@ -92,7 +93,7 @@ func resourceSequence(t *testing.T, body *ast.BlockStmt) string {
 					name = receiver.Name + "." + f.Sel.Name
 				}
 			}
-			label = map[string]string{"authz.LockProjectMutation": "project.Mutation", "w.publicationLocks": "publicationLocks", "fence": "fence", "authz.LockProjectWrite": "project.Write", "s.mutate": "mutation", "s.projectWrite": "project", "w.lockReleases": "releases", "w.lockItems": "items", "w.placementLocks": "placements", "w.place": "placements", "w.rollover": "rollover", "w.plan": "plan", "events.Append": "events", "proof.Settle": "publication"}[name]
+			label = map[string]string{"authz.LockProjectMutation": "project.Mutation", "w.publicationLocks": "publicationLocks", "fence": "fence", "authz.LockProjectWrite": "project.Write", "s.mutate": "mutation", "s.mutateWithReceipt": "mutation", "s.projectWrite": "project", "w.lockReleases": "releases", "w.lockItems": "items", "w.placementLocks": "placements", "w.place": "placements", "w.rollover": "rollover", "w.plan": "plan", "events.Append": "events", "proof.Settle": "publication"}[name]
 		case *ast.BasicLit:
 			if n.Kind != token.STRING {
 				break

@@ -78,7 +78,7 @@ func TestContainerPlacementPreservesFlagsAndReturnsDestinationRevision(t *testin
 	if e := json.Unmarshal(w.Body.Bytes(), &result); e != nil {
 		t.Fatal(e)
 	}
-	if result.ReleaseRevision != 2 || len(result.Items) != 1 || !result.Items[0].Expedite {
+	if result.ReleaseRevision != 2 || result.UndoEventID == nil || result.ReleaseRevisions[f.release] != 2 || result.ReleaseRanks[f.release] == "" || len(result.Items) != 1 || !result.Items[0].Expedite {
 		t.Fatal("missing captured placement revision")
 	}
 	body = fmt.Sprintf(`{"expected_project_id":%q,"expected_revision":1,"release_id":null}`, f.project)
@@ -185,7 +185,7 @@ func TestPlacementBatchReturnsAtomicRefusalPerItem(t *testing.T) {
 	}
 	var placed delivery.PlacementResult
 	_ = json.Unmarshal(w.Body.Bytes(), &placed)
-	if len(placed.Items) != 2 || placed.Items[0].ItemID != first || placed.Items[1].ItemID != second || placed.Items[0].Rank >= placed.Items[1].Rank || placed.ReleaseRevision != 2 {
+	if placed.UndoEventID == nil || placed.ReleaseRevisions[f.release] != 2 || len(placed.Items) != 2 || placed.Items[0].ItemID != first || placed.Items[1].ItemID != second || placed.Items[0].Rank >= placed.Items[1].Rank || placed.ReleaseRevision != 2 {
 		t.Fatalf("top batch order=%+v", placed)
 	}
 }

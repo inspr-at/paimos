@@ -131,6 +131,18 @@ describe('bounded release reads', () => {
     expect(h.requests.filter(r => r.source === 'overview')).toHaveLength(1)
     h.state.dispose()
   })
+  it('Undo restores an own row moved into a collapsed release without reading foreign changes', async () => {
+    const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview()); await settle(); h.state.expand('0')
+    const original = { ...page(1, 'owned').items[0]!, release_id: '0' }
+    h.requests[1]!.resolve({ ...page(0), items: [original] }); await settle()
+    h.state.committed({ kind: 'placement', result: { items: [{ ...original, release_id: '1', revision: 2 }], undo_event_id: 42 } })
+    expect(h.state.work['release:0']?.items).toHaveLength(0); expect(h.state.work['release:1']).toBeUndefined()
+    h.state.committed({ kind: 'placement', result: { items: [{ ...original, revision: 3 }], undo_event_id: null } })
+    expect(h.state.work['release:0']?.items[0]?.revision).toBe(3)
+    expect(h.state.overview.value?.active.map(r => r.rollup.units)).toEqual([1, 1])
+    h.state.committed({ kind: 'lifecycle' })
+    expect(h.requests).toHaveLength(2); h.state.dispose()
+  })
   it('queues passive insertion until active controls leave or a fixed action applies it', async () => {
     let safe = true
     const h = harness(() => safe); h.state.reset(context); h.requests[0]!.resolve(overview()); await settle(); h.state.expand('0'); safe = false

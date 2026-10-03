@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem, type ListPage, type ListQuery } from './api'
+import type { PlacementReceipt } from './deliveryChanges'
 import { releaseScope } from './releaseScope'
 import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
@@ -46,11 +47,12 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const edge = shallowRef<ListItem | null>(null)
   // Counts asked for when a menu opens (labels, cost units, releases), per query.
   const extraFacets = ref<Record<string, Record<string, number>>>({})
+  const deliveryRows = new Map<string, ListItem>()
   let generation = 0
   let identityGeneration = 0
   let epicsGeneration = 0
   watch([projectId, () => JSON.stringify(filtersToQuery(filters.value)), () => listOptions.identity?.() ?? ''], (next, previous) => {
-    generation++; identityGeneration++; rows.value = []; cursor.value = null; edge.value = null; reads.value = null
+    deliveryRows.clear(); generation++; identityGeneration++; rows.value = []; cursor.value = null; edge.value = null; reads.value = null
     facets.value = {}; dimensionFacets.value = {}; extraFacets.value = {}; error.value = ''; moreError.value = ''
     loading.value = false; loadingMore.value = false; releaseNames.value = {}; names.clear(); colors.clear()
     loadedOnce.value = false
@@ -355,6 +357,28 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     while (cursor.value && rows.value.length < cap && request === generation && !moreError.value) await loadMore()
     return !cursor.value
   }
+  function committedDelivery(result: PlacementReceipt) {
+    // In-flight pages cannot put the old placement back after this own commit.
+    generation++; identityGeneration++; loading.value = false; loadingMore.value = false
+    const scope = releaseScope(filters.value.ships_in)
+    for (const placement of result.items) {
+      if (placement.project_id !== projectId.value) continue
+      const row = rows.value.find(it => it.id === placement.item_id) ?? deliveryRows.get(placement.item_id)
+      if (!row) continue
+      if (deliveryRows.size >= 101 && !deliveryRows.has(row.id)) deliveryRows.delete(deliveryRows.keys().next().value!)
+      deliveryRows.set(row.id, row)
+      const order = { release_id: placement.release_id || null, release_rank: placement.release_id ? result.release_ranks?.[placement.release_id] ?? row.delivery_order?.release_rank ?? null : null, rank: placement.rank || null, expedite: placement.expedite }
+      rowStore.committedDelivery(row.id, order, result.undo_event_id)
+      const matches = scope.kind === 'all' || scope.kind === 'backlog' && !placement.release_id || scope.kind === 'release' && placement.release_id === scope.id
+      const present = rows.value.some(it => it.id === row.id)
+      if (present === matches) continue
+      rows.value = matches ? [...rows.value, row] : rows.value.filter(it => it.id !== row.id)
+      for (const [facet, key] of [['kind', row.kind_slug], ['state', row.state]] as const) {
+        const values = facets.value[facet]
+        if (values) values[key] = Math.max(0, (values[key] ?? 0) + (matches ? 1 : -1))
+      }
+    }
+  }
   // Created and deleted work shows up at once, before the next reload.
   function insertRow(item: ListItem) {
     if (rows.value.some(row => row.id === item.id)) return
@@ -377,5 +401,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state]) state[row.state]--
   }
 
-  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, releaseNames, facetErrors, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
+  return { committedDelivery, rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, releaseNames, facetErrors, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

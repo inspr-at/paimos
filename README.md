@@ -2989,3 +2989,26 @@ outcome effects with a database-clock ten-second deadline. They do not dispatch
 messages or claim successful delivery. Always/Requirement/Doctrine publication,
 verified handover sources and post-dispatch corrections require the later adapters;
 unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
+
+AEON-596 P6b shares the `ships_in` project scope between Tickets and Knowledge:
+omitted means All work, one release UUID means that release, and `none` means
+ranked plus tail Backlog. Ordinary filters remain per tab. Saved multiple or
+excluded scope values require visible repair. Knowledge context contains
+same-project notes linked one hop by `relates` to effective ticket members or
+the selected release node; Backlog context uses backlog tickets. Scoped pages
+are bounded to 200, carry query-bound cursors and expose partial counts. The
+browser holds at most 2,000 entries; continuation requires a narrower search.
+
+Placement and release-rank responses return their exact `undo_event_id`;
+placement receipts also report touched release revisions and ordering keys.
+One placement action (up to 100 selected items plus one expedite displacement)
+has one all-or-nothing event. Undo returns the compensating placement/revisions,
+uses the existing permission/CAS checks, and never targets the latest event.
+`DELIVERY_ACTIONS` is the project-owned integration point for later drag/menu
+packages: begin captures project/person/scope identity, commit applies only the
+actual response, and failed releases the pending action. Lifecycle owners apply
+their authoritative results separately and never offer blanket Undo. Own receipt
+echoes are deduplicated even before the response; foreign structural and mode changes wait
+for the fixed count-slot Apply action. Agent/wait summaries are batched in the
+loaded release-page snapshot, omitted without `harness.read`, and marked partial
+past 5,000 active sessions. Budget outlook stays unknown.

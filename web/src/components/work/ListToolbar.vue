@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../lib/clipTip'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
@@ -23,6 +24,7 @@ const props = defineProps<{
   totalIncomplete?: boolean
   scopeLabel?: string
   pendingChanges?: number
+  pendingIncomplete?: boolean
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
@@ -202,7 +204,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     <span class="spacer" />
 
-    <span class="count mono" :class="{ scoped: scopeLabel }" :title="total !== null ? `${plural(total, 'ticket')}${scopeLabel ? ` in ${scopeLabel}` : ''}` : undefined" role="status" aria-live="polite"><button v-if="pendingChanges" type="button" class="apply-changes" @click="emit('applyChanges')">{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><span v-else-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ totalIncomplete ? '≥ ' : '' }}{{ plural(total, 'ticket') }}{{ scopeLabel ? ` in ${scopeLabel}` : '' }}</template></span>
+    <span v-clip-tip="total !== null ? `${plural(total, 'ticket')}${scopeLabel ? ` in ${scopeLabel}` : ''}` : ''" class="count mono" :class="{ scoped: scopeLabel }" :title="total !== null ? `${plural(total, 'ticket')}${scopeLabel ? ` in ${scopeLabel}` : ''}` : undefined" role="status" aria-live="polite"><button v-if="pendingChanges" type="button" class="apply-changes" @click="emit('applyChanges')">{{ pendingIncomplete ? '≥ ' : '' }}{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><span v-else-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ totalIncomplete ? '≥ ' : '' }}{{ plural(total, 'ticket') }}{{ scopeLabel ? ` in ${scopeLabel}` : '' }}</template></span>
     <label class="switch closed-switch">
       <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <span>Hide closed</span>

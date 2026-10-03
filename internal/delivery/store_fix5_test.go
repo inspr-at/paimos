@@ -227,8 +227,8 @@ func TestStoreFix5FullBatchDiscoversEverySource(t *testing.T) {
 			t.Fatalf("source container omitted: %+v", got)
 		}
 	}
-	if f.scalar(t, `SELECT count(*) FROM events WHERE type='ships_in.changed'`) != 2 {
-		t.Fatal("expanded batch events must retain the 100-member bound")
+	if f.scalar(t, `SELECT count(*) FROM events WHERE type='ships_in.changed'`) != 1 {
+		t.Fatal("one 100-item action plus its bounded expedite displacement must have one exact Undo event")
 	}
 }
 

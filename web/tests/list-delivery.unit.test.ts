@@ -65,3 +65,18 @@ for (const change of ['scope', 'person', 'project'] as const) it(`discards late 
   expect(list.reads.value).toBeNull()
   expect(rowStore.row(obsolete.id)).toBeUndefined()
 })
+
+it('own receipts update scope membership and Undo immediately, while a late read cannot restore the old row', async () => {
+  const row = { id: 'owned', key: 'OWN-1', title: 'Owned work', kind_slug: 'ticket', state: 'open', updated_at: '2026-10-03T12:00:00Z', fields: {}, delivery_order: { release_id: release, release_rank: 'V', rank: 'V', expedite: false } } as ListItem
+  let finish!: (page: ListPage) => void
+  const fetchList = vi.fn().mockResolvedValueOnce({ items: [row], next_cursor: null, facets: { kind: { ticket: 1 }, state: { open: 1 } } }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const list = useTicketList(ref('project'), ref(filtersFromQuery({ ships_in: release })), { fetchList })
+  await list.load(); const old = list.load()
+  list.committedDelivery({ items: [{ item_id: row.id, project_id: 'project', rank: 'W', revision: 2, expedite: false, due_on: null }], undo_event_id: 42 })
+  expect(list.rows.value).toEqual([]); expect(list.facets.value.kind.ticket).toBe(0)
+  finish({ items: [row], next_cursor: 'old' }); await old
+  expect(list.rows.value).toEqual([]); expect(list.cursor.value).toBeNull()
+  list.committedDelivery({ items: [{ item_id: row.id, project_id: 'project', release_id: release, rank: 'V', revision: 3, expedite: false, due_on: null }], release_ranks: { [release]: 'V' }, undo_event_id: null })
+  expect(list.rows.value.map(it => it.id)).toEqual([row.id]); expect(list.facets.value.kind.ticket).toBe(1)
+  expect(list.rows.value[0]?.delivery_order?.release_id).toBe(release)
+})

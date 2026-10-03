@@ -20,6 +20,17 @@ function item(id: string, revision: number, over: Partial<ListItem> = {}): ListI
 }
 
 describe('RowStore: revisions only move forward', () => {
+  it('applies exact own delivery receipts without inventing a node revision or accepting old projections', () => {
+    const rows = new RowStore(), old = rows.mark()
+    const before = item('n1', 1, { delivery_order: { release_id: 'A', release_rank: 'V', rank: 'V', expedite: false } })
+    const shown = rows.adopt(before, old, { show: true })!
+    const order = { release_id: 'B', release_rank: 'W', rank: 'Z', expedite: false }
+    rows.committedDelivery('n1', order, 42)
+    expect(shown.delivery_order).toEqual(order); expect(shown.updated_at).toBe(at(1))
+    rows.adopt(stampAt(before, { position: 41 }), old, { show: true })
+    expect(shown.delivery_order).toEqual(order); expect(rows.latest('n1')!.delivery_order).toEqual(order)
+    expect(rows.row('n1')).toBe(shown)
+  })
   it('clears release placement when an authoritative list read follows a move into a journey project', async () => {
     const rows = new RowStore()
     const order = { release_id: null, release_rank: null, rank: null, expedite: false }
