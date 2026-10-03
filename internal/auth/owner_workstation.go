@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -179,9 +180,9 @@ func verifyWorkstationSignature(public, nonce, digest, signature string) bool {
 }
 
 // This fence runs at every handler transaction, including the final write after
-// external I/O. It takes the tenant first and rechecks live roles/scopes/marking;
-// no transaction trusts the earlier middleware authorization snapshot.
-// Pairing precedes the tree (as in run dispatch); both precede record locks.
+// external I/O. It shares lifecycle's pairing -> tenant -> tree entry fence
+// before record locks and rechecks live roles/scopes/marking; no transaction
+// trusts the earlier middleware authorization snapshot.
 func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) db.TenantGuard {
 	return func(ctx context.Context, tx pgx.Tx, tid string) error {
 		if tid != p.TenantID {
@@ -190,13 +191,7 @@ func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) 
 		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true),set_config('statement_timeout','15s',true)`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tid); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`, tid); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`, tid); err != nil {
+		if err := agentpairing.LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		// Pairing disconnect fences on the computer before revoking its keys.
@@ -423,7 +418,9 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 	}
 	var out keyRecord
 	err := m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+		// Enter through the same fence as lifecycle and workstation guards.
+		// Recheck ownership only after every access-change lock is held.
+		if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
 			return err
 		}
 		effective, err := authz.EffectiveTx(r.Context(), tx, p, "")
@@ -432,9 +429,6 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		}
 		if effective.Workspace.Role == nil || effective.Workspace.Role.Key != "owner" {
 			return authz.ErrForbidden
-		}
-		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`, p.TenantID); err != nil {
-			return err
 		}
 		// Pairing lifecycle writes lock the computer before its keys. Include
 		// both the current binding (also for unmark) and any replacement, sorted.
