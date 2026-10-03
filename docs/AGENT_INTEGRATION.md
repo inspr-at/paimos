@@ -539,6 +539,18 @@ exact membership source, snapshot capture and offline release-history behavior.
 
 ## Read-only attached watches (AEON-258)
 
+Recovery reads the long-lived computer lifecycle proof from the approved setup
+store for each registration attempt; the transport retains the memory-only poll
+key and pinned origin, without retaining that proof for the daemon lifetime.
+Local cleanup, disconnect or configuration changes refuse recovery before a
+registration is sent. Unknown-key diagnostics use a separate server-local budget
+of 30 attempts per minute per authenticated computer principal before computer, scope or watch
+lookups; they never consume the tenant attach request budget. The server holds
+at most 4096 live budgets. A capped call returns `attach_recovery_limited` with
+`Retry-After` seconds, without authorizing registration. If the explicit
+`poll_key_unknown` refusal reaches the helper during cooldown, run attach again
+in a few seconds and give fresh approval; a daemon restart is not required.
+
 The paired daemon uses only `POST /api/agent-pairing/attach` for registration,
 requests, activation, polls and detachment. At startup it registers a fresh random
 poll key using the runtime bearer and computer lifecycle proof. The poll key lives
@@ -547,8 +559,20 @@ pairing.json, a setup store, a database, local replies or logs. Watch operations
 require that key plus the snapshot digest; pairing.json alone cannot authorize
 them. Registration ends every earlier pending, approved or active watch for that
 computer: a daemon restart requires new local consent and owner approval. Server
-restart loses poll authority too; restart the daemon to register again. Registration
-is serialized with exchanges and cannot transfer an earlier approval to a new key.
+restart loses poll authority too. A running daemon re-registers only after a 403
+`attach_refusal=poll_key_unknown`, returned solely to the owning connected computer
+with valid attach scope. Incorrect keys, revoked pairing, draining/removed
+enrollments, ended watches and foreign tenants do not trigger recovery. Older
+servers retain the explicit daemon-restart repair. Recovery makes one registration
+attempt and one replay per rejected call, serialized with other exchanges and
+bounded by a 20-second deadline. Jitter uses half to all of an exponential window
+from 500 ms to 8 seconds, followed by an equal cooldown even on failure. Calls
+during cooldown fail without registration; there is no background loop.
+This narrow exception to the former no-in-process-retry design is safe because
+the server rejects the operation before applying it. Network/decode failures and
+uncertain conversation submissions are never retried. Re-registration cannot
+transfer an earlier approval: previous watches end and require fresh consent;
+new requests can succeed without a daemon restart.
 The pairing fence permits exactly this additional route.
 The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
