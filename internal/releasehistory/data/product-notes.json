@@ -4436,8 +4436,8 @@
     "261003095616.0.0": {
       "release_channel": "stable",
       "release_sequence": 122,
-      "snapshot_sha256": "dfde20330af8aa3444e09684ba25cf68a40c49ccef4dcca6aff4a38ff8621d10",
-      "captured_at": "2026-10-03T16:34:37Z",
+      "snapshot_sha256": "829e1c2413dd9a0f5afdebbb7469573672ffafadb2cce2b2e621ef45e5539686",
+      "captured_at": "2026-10-03T18:24:35Z",
       "release_revision": 1,
       "items": [
         {
@@ -4462,14 +4462,6 @@
           "pill_de": "Kontingent wird knapp",
           "benefit_en": "Fresh account readings can trigger low-quota notices for active Aeon runs. Workspace admins can adjust the early and urgent thresholds.",
           "benefit_de": "Aktuelle Kontingentmessungen können Hinweise auf knappes Kontingent für aktive Aeon-Läufe auslösen. Workspace-Admins können die frühe und die dringende Warnschwelle anpassen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-615",
-          "pill_en": "Review key permissions",
-          "pill_de": "Agentenschlüssel gezielt verschlanken",
-          "benefit_en": "Review proposed permission cuts for agent keys on the Decision Desk. You can approve or decline a proposal in one click and restore eligible changes within 30 days.",
-          "benefit_de": "Prüfe vorgeschlagene Kürzungen der Rechte von Agentenschlüsseln am Entscheidungstisch. Du kannst einen Vorschlag mit einem Klick annehmen oder ablehnen und zulässige Änderungen innerhalb von 30 Tagen wiederherstellen.",
           "group": "features"
         },
         {
