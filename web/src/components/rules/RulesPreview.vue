@@ -122,7 +122,7 @@ watch([projectId, role, harness, agentId], load)
   <RulesDialog title="What agents receive" lede="Each rule next to its explanation. Only published rules count." size="sheet" @close="emit('close')">
     <div class="for">
       <span class="for-label">For</span>
-      <span v-clip-tip="forLine" class="for-value" tabindex="0">{{ forLine }}</span>
+      <span v-clip-tip="forLine" class="for-value" tabindex="0" data-tip-touch>{{ forLine }}</span>
       <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">{{ choosing ? 'Done' : 'Change' }}</button>
     </div>
     <div v-if="choosing" class="choose" role="group" aria-label="Preview for">
@@ -201,6 +201,7 @@ watch([projectId, role, harness, agentId], load)
 .for-label { color: var(--ink-3); font-size: 12.5px; font-weight: 600; }
 /* Changing the preview identity must not displace its selectors or search. */
 .for-value { flex: 1; min-width: 0; height: 2lh; line-height: 1.45; font-size: 13.5px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+@media (pointer: coarse) { .for-value { min-height: 44px; } }
 .choose { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .choose label { display: grid; gap: 4px; min-width: 0; color: var(--ink-2); font-size: 12px; font-weight: 650; }
 .choose option:disabled { color: var(--ink-3); }

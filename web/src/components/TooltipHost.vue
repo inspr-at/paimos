@@ -8,6 +8,7 @@ const text = ref('')
 const x = ref(0)
 const y = ref(0)
 const below = ref(false)
+const scrollable = ref(false)
 const tip = ref<HTMLElement>()
 // Inside a modal dialog the tooltip moves into it, above the page (the top layer);
 // otherwise it sits at the end of <body>, above popovers and menus (which leave
@@ -15,6 +16,8 @@ const tip = ref<HTMLElement>()
 const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
+let tap: { element: HTMLElement; x: number; y: number } | null = null
+let tapped: HTMLElement | null = null
 
 function find(node: EventTarget | null): HTMLElement | null {
   return node instanceof Element ? node.closest<HTMLElement>('[data-tip]') : null
@@ -29,6 +32,7 @@ async function show(element: HTMLElement) {
   const rect = element.getBoundingClientRect()
   const width = tip.value?.offsetWidth ?? 0
   const height = tip.value?.offsetHeight ?? 0
+  scrollable.value = (tip.value?.scrollHeight ?? 0) > (tip.value?.clientHeight ?? 0) + 1
   // Menu entries say why beside the menu, so the entries around stay readable.
   if (element.dataset.tipSide === 'end') {
     const menu = element.closest<HTMLElement>('.floating')?.getBoundingClientRect() ?? rect
@@ -42,11 +46,12 @@ async function show(element: HTMLElement) {
   }
   below.value = rect.top - height - 8 < 8
   x.value = Math.round(Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8))
-  y.value = Math.round(below.value ? rect.bottom + 8 : rect.top - height - 8)
+  y.value = Math.round(Math.min(Math.max(8, below.value ? rect.bottom + 8 : rect.top - height - 8), innerHeight - height - 8))
 }
 function hide() { clearTimeout(timer); target = null; text.value = '' }
+function insideTip(node: EventTarget | null) { return node instanceof Node && !!tip.value?.contains(node) }
 function over(event: PointerEvent) {
-  if (event.pointerType === 'touch') return
+  if (event.pointerType === 'touch' || insideTip(event.target)) return
   const element = find(event.target)
   if (element === target) return
   hide()
@@ -56,35 +61,70 @@ function focusIn(event: FocusEvent) {
   const element = find(event.target)
   if (element && element.matches(':focus-visible')) void show(element)
 }
+// Only passive full-text identities opt into tap reveal. Action tooltips keep
+// their existing behaviour, so a tap still performs the action immediately.
+function pointerDown(event: PointerEvent) {
+  tapped = null
+  if (insideTip(event.target)) { tap = null; return }
+  const element = find(event.target)
+  tap = event.pointerType === 'touch' && element?.hasAttribute('data-tip-touch')
+    ? { element, x: event.clientX, y: event.clientY } : null
+  if (!tap || target !== tap.element) hide()
+}
+function pointerUp(event: PointerEvent) {
+  const start = tap
+  tap = null
+  if (!start || find(event.target) !== start.element) return
+  if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) { hide(); return }
+  tapped = start.element
+}
+// Touch's compatibility mouse events move focus after pointerup. Reveal on the
+// resulting click, after focusout, so that focus change cannot erase the tip.
+function click(event: MouseEvent) {
+  const element = tapped
+  tapped = null
+  if (!element || find(event.target) !== element) return
+  if (target === element) hide()
+  else void show(element)
+}
+function pointerCancel() { tap = null; tapped = null; hide() }
+function scroll(event: Event) { if (!insideTip(event.target)) hide() }
 onMounted(() => {
   document.addEventListener('pointerover', over)
   document.addEventListener('focusin', focusIn)
   document.addEventListener('focusout', hide)
-  document.addEventListener('pointerdown', hide)
+  document.addEventListener('pointerdown', pointerDown)
+  document.addEventListener('pointerup', pointerUp)
+  document.addEventListener('pointercancel', pointerCancel)
+  document.addEventListener('click', click)
   document.addEventListener('keydown', hide)
-  document.addEventListener('scroll', hide, true)
+  document.addEventListener('scroll', scroll, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('pointerover', over)
   document.removeEventListener('focusin', focusIn)
   document.removeEventListener('focusout', hide)
-  document.removeEventListener('pointerdown', hide)
+  document.removeEventListener('pointerdown', pointerDown)
+  document.removeEventListener('pointerup', pointerUp)
+  document.removeEventListener('pointercancel', pointerCancel)
+  document.removeEventListener('click', click)
   document.removeEventListener('keydown', hide)
-  document.removeEventListener('scroll', hide, true)
+  document.removeEventListener('scroll', scroll, true)
   clearTimeout(timer)
 })
 </script>
 
 <template>
   <Teleport :to="layer ?? 'body'">
-    <div v-if="text" ref="tip" class="tooltip" :class="{ below }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
+    <div v-if="text" ref="tip" class="tooltip" :class="{ below, scrollable }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
   </Teleport>
 </template>
 
 <style scoped>
 .tooltip {
-  position: fixed; z-index: 80; top: 0; left: 0; max-width: 320px; padding: 5px 10px; border-radius: 8px; pointer-events: none;
-  background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; white-space: pre-line;
+  position: fixed; z-index: 80; top: 0; left: 0; box-sizing: border-box; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; overscroll-behavior: contain; padding: 5px 10px; border-radius: 8px; pointer-events: none;
+  background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere;
   box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px rgba(0, 0, 0, .5);
 }
+.tooltip.scrollable { pointer-events: auto; }
 </style>
