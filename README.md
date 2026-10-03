@@ -2980,8 +2980,18 @@ input and mandatory request ID; `ask_status` accepts `{question_id}`.
 
 The additive API is documented in `api/openapi.yaml`: project question create/list,
 question get/status/person decision and a permission-filtered `/decision-desk`
-question projection. `questions.ask` and `questions.read` are explicit agent key
-scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
+question projection. Answered lists accept `state=answered&order=desc` (AEON-611):
+newest current answer first, with question ID as the tie-breaker. Follow the
+bounded `next_cursor` using `cursor`, with the same tenant, principal and project;
+permissions are checked again per page. Descending reads require offset zero.
+The Decided view follows these cursors; “Load 100 more” resumes the saved cursor
+with one page request. Refresh rechecks its loaded pages from the newest decision,
+so a fresh answer stays available for correction. Continuation keeps questions
+before protected requests, hides action requests projected into questions, and
+preserves decisions recorded in the desk while that page is loading. Decisions
+committed during pagination may require a refresh from the first page. Default and
+Open reads keep oldest-first creation order. `questions.ask` and `questions.read`
+are explicit agent key scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
 three, viewer receives read, guest/customer receive none. Existing keys gain no
 new scopes. Agents read only questions they asked, with only their memberships.
 Generic node/knowledge CRUD cannot modify question/decision authority.
