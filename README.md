@@ -464,7 +464,10 @@ Usage requires `harness.read`. Its API list value is approximate, includes
 lifetime usage of sessions **started** in the window, and is not interval spend
 or an invoice. Recorded ticket totals reuse the planning columns' measured and
 estimated figures and Paid semantics; account budget windows describe current
-reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+reported usage. Permitted windows remain visible when account budget coverage is
+partial. The briefing explains privacy omissions and the independent window/account
+truncation limit; shared windows are counted once across project reads.
+Unknown usage stays unknown. Headline usage sums only projects with
 `harness.read`, using the workspace dashboard only for a workspace grant; source
 links appear only after successful reads. Merge facts use changes to a ticket’s
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
@@ -1980,6 +1983,10 @@ the node's current project and commits metadata and audit events together.
 Attachment writes use a shared tenant lock: access edits are fenced while
 other resource writers can finish their tenant foreign-key checks. Retained
 principal import/backfill paths take tree, tenant, then alias locks in that order.
+Pairing, readiness and residency mutations acquire pairing, tree, then the tenant
+access fence before account/resource rows, retaining final-transaction permission
+checks. Their tenant fence uses `FOR NO KEY UPDATE`; access-only writers may omit
+pairing/tree but must never acquire them after tenant. Event counters remain last.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty
