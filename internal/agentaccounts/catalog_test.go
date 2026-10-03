@@ -86,8 +86,10 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		t.Helper()
 		var a Account
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", fmt.Sprintf(`{"account_key":%q,"harness":"codex","daemon_id":%q,"label":"Initial"}`, key, daemon), 201, &a)
+		ownFixtureAccount(t, admin, &a)
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true,"host_label":"Studio"}`, daemon), 200, nil)
 		callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+a.ID+"/windows", windowBody(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
+		fixtureAlwaysOn(t, mod, admin, a.ID)
 		return a
 	}
 	a, b, c := register("local-a", "daemon-a"), register("local-b", "daemon-a"), register("local-c", "daemon-b")

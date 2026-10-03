@@ -351,6 +351,33 @@ paths:
         '400': {description: Invalid bounded request}
         '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unavailable proof/binding}
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the server-authored confirmation through the paired daemon
+      description: >-
+        AEON-580 implements this endpoint; AEON-581 consumes it. Requires the paired
+        runtime bearer and that computer's lifecycle proof. The computer must be
+        the workstation bound to the challenged key, with a pinned confirmation key.
+        Never return nonce, digest or summary through the agent's 428 response.
+        Refuse expired, consumed, revoked, foreign-computer and foreign-tenant challenges.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string}, description: 'Pairing lifecycle proof, daemon only; never log'}
+      responses:
+        '200':
+          description: Private daemon challenge; Cache-Control no-store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentdStepUpChallenge'}
+        '403': {description: Pairing or challenge refused}
+        '410': {description: Challenge expired or already consumed}
   /reviews/github:
     post:
       operationId: receiveReviewPullChange
@@ -7054,7 +7081,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity is revalidated against current admission; a resource-scoped recovery permit is required only while a recoverable stop remains. Manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7333,7 +7360,8 @@ paths:
   /agent-accounts:
     get:
       operationId: listAgentAccounts
-      description: Admin view of opaque local accounts and allowance windows; no credential material.
+      description: Opaque local accounts. Details require ownership or owner sharing; otherwise allowance windows are empty and quota fields are masked. include_checks is enrolling-daemon-only and adds pending revision/generation-bound checks and resource memberships. No credential material.
+      parameters: [{name: include_checks, in: query, schema: {type: boolean, default: false}}]
       security: [{session: []}]
       responses:
         '200': {description: Accounts, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentAccount'}}}}}
@@ -7345,6 +7373,57 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/readiness:
+    get:
+      operationId: listAgentAccountReadiness
+      summary: Availability and nullable measurements, never launch authority
+      description: Requires account.read. Unknown usage never throttles and carries usage_unknown_reserve_not_enforceable. Model/project admission remains authoritative. Owners and the enrolling daemon see details; teammates see availability only unless the owner shares. No administrator bypass. Keyset paginated, at most 100 accounts per page.
+      security: *auth
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Readiness page, content: {application/json: {schema: {$ref: '#/components/schemas/AccountReadinessPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/check:
+    post:
+      operationId: requestAgentAccountCheck
+      summary: Request one revision-bound refresh
+      description: Person owner plus account.manage only. Idempotency keys are persisted; changing a key while pending coalesces to the same check. A persisted 60-second minimum gap applies across callers and restarts. Check now may request one early recovery for an unnamed or provider-confirmed money stop, deduplicated with automatic recovery; this endpoint never grants launch authority or clears a stop. Revocation, relinking and daemon-generation changes invalidate pending checks. Audits contain actor, account/revision and check ID, never vendor diagnostics.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckWrite'}}}}
+      responses:
+        '202': {description: Accepted or idempotently reused check, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheck'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Binding/revision stale or conflicting idempotency key, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '410': {description: Enrollment revoked; outstanding checks are invalidated}
+        '429': {description: Minimum gap, headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckRetry'}}}}
+  /agent-accounts/{accountId}/sharing:
+    put:
+      operationId: setAgentAccountUsageSharing
+      summary: Owner opts quota details into workspace sharing
+      description: Person owner plus account.manage only, revision checked under the access fence and audited. Defaults to false. Relinking resets sharing. Owners retain sharing control after computer or ongoing-use revocation; sharing never grants execution authority. Sharing covers quota detail, credits, reset times and bounded check errors on accounts, capacity, history, advice and events/SSE. It does not delegate checks.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision, share_usage]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+                share_usage: {type: boolean}
+      responses:
+        '204': {description: Sharing saved}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /agent-accounts/capacity:
     get:
       operationId: listAccountCapacity
@@ -7795,6 +7874,13 @@ paths:
         '200': {description: Account availability, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: 'Stale readiness check or binding. On the first report after a daemon generation change, the heartbeat commits and the stale check and its facts are rejected; refresh pending work before retrying.'
+          headers:
+            X-Aeon-Write-Committed:
+              schema: {type: boolean}
+              description: 'True only when the heartbeat committed despite rejecting the old-generation readiness completion.'
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
@@ -9995,6 +10081,24 @@ components:
       properties:
         expected_revision: {$ref: '#/components/schemas/ChatPosition'}
         offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600}
+    StepUpRequired:
+      type: object
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+    AgentdStepUpChallenge:
+      type: object
+      additionalProperties: false
+      required: [summary, nonce, action_digest, expires_at, computer_id]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 256, description: Server-generated plain summary; bounded to 256 UTF-8 bytes without control or format characters}
+        nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+        action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        expires_at: {type: string, format: date-time, description: At most five minutes after issue}
+        computer_id: {type: string, format: uuid}
     QuestionOption:
       type: object
       additionalProperties: false
@@ -11536,7 +11640,7 @@ components:
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
-    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
     PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     ClassicBatchAliasResponse:
       type: object
@@ -11732,12 +11836,26 @@ components:
         usage_provisional_sessions: {type: integer, minimum: 0, description: Sessions with a provisional usage report; their figures may still change.}
     UsageAllowance:
       type: object
-      description: Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
+      description: Windows are withheld unless current account privacy permits quota detail; accounts retain labels and state only. At most 1024 active windows are considered; truncated marks omitted windows and their accounts. Partial means visible windows are incomplete because others were withheld or truncated. Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
       required: [state, windows]
       properties:
-        state: {type: string, enum: [visible, withheld, none]}
+        state: {type: string, enum: [visible, partial, withheld, none]}
+        truncated: {type: boolean, description: 'More than 1024 active windows exist; returned windows and account identities are bounded and incomplete. Independent of privacy withholding.'}
+        accounts:
+          type: array
+          maxItems: 1024
+          description: Availability-only account identities, including accounts whose windows are withheld.
+          items:
+            type: object
+            required: [account_id, label, harness, account_state]
+            properties:
+              account_id: {type: string, format: uuid}
+              label: {type: string}
+              harness: {type: string}
+              account_state: {type: string}
         windows:
           type: array
+          maxItems: 1024
           items:
             type: object
             required: [account_id, label, harness, account_state, window_id, unit, allowance, used, reserved, pace_model, burst_ratio, starts_at, ends_at, provisional, pace_cap, headroom, hard_remaining]
@@ -14661,8 +14779,8 @@ components:
           description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
           items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
-        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
-        limit_resets_at: {type: string, format: date-time}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
+        limit_resets_at: {type: string, format: date-time, description: Omitted unless current account owner sharing permits reset details.}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -15067,8 +15185,8 @@ components:
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at, finished]
       properties:
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
-        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
-        limit_resets_at: {type: string, format: date-time}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
+        limit_resets_at: {type: string, format: date-time, description: Omitted unless current account owner sharing permits reset details.}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -15808,6 +15926,7 @@ components:
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
         awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
+        details_redacted: {type: boolean, description: True when the owner has not shared quota detail; ignore the placeholder schedule.}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
         group_id: {type: string, format: uuid}
@@ -15924,6 +16043,10 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+            pending_check: {$ref: "#/components/schemas/AccountCheck"}
+            readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
+            share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}
+            details_redacted: {type: boolean}
             owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
             owner_person_name: {type: string}
             linked_at: {type: string, format: date-time}
@@ -15955,6 +16078,105 @@ components:
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
               items: {type: string, format: uuid}
             windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AccountReadinessPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountReadiness'}}
+        next_after: {type: [string, 'null'], format: uuid}
+    AccountReadiness:
+      type: object
+      required: [account_id, state, can_try, reason_codes, display_reason, checked_at, next_attempt_at, measured_usage, details_redacted]
+      properties:
+        account_id: {type: string, format: uuid}
+        state: {type: string, enum: [ready, unknown, blocked]}
+        can_try: {type: boolean, description: Advisory; reserve and claim recheck all model/project gates.}
+        reason_codes: {type: array, items: {type: string}, description: Stable ordered reasons; usage_unknown_reserve_not_enforceable never means Ready. Unshared peers receive only available/unavailable.}
+        display_reason: {type: string}
+        checked_at: {type: [string, 'null'], format: date-time}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        check_result: {allOf: [{$ref: "#/components/schemas/ReadinessCheckResult"}], description: The account owner and registering daemon may see their own capture result even when pooled quota measurements remain withheld.}
+        measured_usage: {type: [array, 'null'], maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFact'}}
+        details_redacted: {type: boolean}
+    AccountCheckWrite:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, idempotency_key]
+      properties:
+        binding_revision: {type: integer, minimum: 0}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+    AccountCheck:
+      type: object
+      required: [id, account_id, actor_principal_id, binding_revision, daemon_generation, state, requested_at, retry_at, early_recovery_requested]
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        actor_principal_id: {type: string, format: uuid}
+        binding_revision: {type: integer, minimum: 0}
+        daemon_generation: {type: [string, 'null'], maxLength: 128}
+        state: {type: string, enum: [pending, completed, invalidated]}
+        requested_at: {type: string, format: date-time}
+        retry_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time, description: Pending captures expire five minutes after requested_at; expired captures are not polled or accepted and a new idempotency key requests a fresh capture.}
+        early_recovery_requested: {type: boolean, description: Intent only; package B consumes a resource/wait permit atomically with automatic recovery.}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+    AccountCheckRetry:
+      type: object
+      required: [error, code, retry_at]
+      properties:
+        error: {type: string}
+        code: {type: string, const: check_gap}
+        retry_at: {type: string, format: date-time}
+    ReadinessCheckResult:
+      type: string
+      enum: [success, unsupported, timeout, protocol, launch_failed, identity_mismatch, authentication_failed]
+    ReadinessReport:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, result]
+      properties:
+        check_id: {type: string, format: uuid, description: Omitted for automatic captures including daemon restart; a supplied check ID remains fenced to its original generation and expiry.}
+        binding_revision: {type: integer, minimum: 0}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+        facts: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFactWrite'}}
+    ReadinessResource:
+      type: object
+      required: [id, kind, binding_revision]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [subscription_quota, key_cap, shared_balance, endpoint_concurrency]}
+        binding_revision: {type: integer, minimum: 0}
+    ReadinessFactWrite:
+      allOf: [{$ref: "#/components/schemas/ReadinessFactFields"}]
+      unevaluatedProperties: false
+    ReadinessFactFields:
+      type: object
+      required: [resource_id, window_key, source, observed_at, credit_state]
+      properties:
+        resource_id: {type: string, format: uuid, description: Must already be a current resource membership; daemon reports cannot invent shared identities.}
+        window_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+        source: {type: string, enum: [agentd, harness, provider]}
+        observed_at: {type: string, format: date-time}
+        resets_at: {type: [string, 'null'], format: date-time}
+        reading_at: {type: [string, 'null'], format: date-time}
+        used_percent: {type: [number, 'null'], minimum: 0, maximum: 100}
+        credit_state: {type: string, enum: [unknown, available, exhausted], default: unknown}
+        remaining: {type: [number, 'null'], minimum: 0}
+        stop_kind: {type: string, enum: [none, named_reset, unnamed, money_402], default: none}
+        denial_reason: {type: string, enum: ['', vendor_denied, quota_exhausted, key_cap_exhausted, money_exhausted]}
+    ReadinessFact:
+      allOf:
+        - {$ref: '#/components/schemas/ReadinessFactFields'}
+        - type: object
+          properties:
+            reading_error: {$ref: '#/components/schemas/ReadinessCheckResult'}
+            reading_age_seconds: {type: [integer, 'null'], minimum: 0}
+            backoff_step: {type: integer, minimum: 0, maximum: 3}
+            next_attempt_at: {type: [string, 'null'], format: date-time}
+            wait_id: {type: [string, 'null'], format: uuid}
+            early_recovery_used: {type: boolean}
+            failure_count: {type: integer, minimum: 0}
+            check_next_attempt_at: {type: [string, "null"], format: date-time}
     AccountSignals:
       type: object
       additionalProperties: false
@@ -16059,6 +16281,7 @@ components:
       type: object
       required: [daemon_id, daemon_generation, available]
       properties:
+        readiness: {$ref: "#/components/schemas/ReadinessReport"}
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
