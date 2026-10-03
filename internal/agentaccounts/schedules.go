@@ -69,56 +69,117 @@ func userSchedule(entries []scheduleEntry, fallback capacity.Schedule) capacity.
 	return fallback
 }
 
-// sameShape compares schedules apart from Sprint/Hold and the zone: a pool or
-// account entry with the same shape as the person's schedule only carries an override.
+// sameShape compares schedules apart from Sprint/Hold/Away, Keep for you and the
+// zone: a pool or account entry with the same shape as the person's schedule
+// only carries an override or its own reserve.
 func sameShape(a, b capacity.Schedule) bool {
 	norm := func(s capacity.Schedule) string {
-		s.Override, s.OverrideUntil, s.Timezone = "", nil, ""
+		s.Override, s.OverrideUntil, s.Timezone, s.Reserve, s.ReservePercent = "", nil, "", "", 0
 		raw, _ := json.Marshal(s)
 		return string(raw)
 	}
 	return norm(a) == norm(b)
 }
 
-func activeOverride(s capacity.Schedule, now time.Time) bool {
-	if s.Override == "" {
-		return false
-	}
-	return s.Override != "sprint" || s.OverrideUntil == nil || now.Before(*s.OverrideUntil)
-}
+func activeOverride(s capacity.Schedule, now time.Time) bool { return s.ActiveOverride(now) != "" }
 
 // carryDraft is the one inheritance rule for a new person schedule, used by the
 // preview and by saving with carry_overrides. An entry that only carries
-// Sprint/Hold on top of the previous person schedule follows the new schedule
-// and keeps its override (keep), or is removed when its override has ended
-// (!keep). Any other entry is the person's deliberate pool or account schedule
-// and stays as it is (carried false).
+// Sprint/Hold or its own Keep for you on top of the previous person schedule
+// follows the new schedule and keeps those (keep), or is removed when it has
+// nothing left to carry (!keep). Any other entry is the person's deliberate pool
+// or account schedule and stays as it is (carried false).
 func carryDraft(e scheduleEntry, previous, next capacity.Schedule, now time.Time) (s capacity.Schedule, keep, carried bool) {
 	if e.Scope == "user" || !sameShape(e.Schedule, previous) {
 		return e.Schedule, true, false
 	}
-	if !activeOverride(e.Schedule, now) {
+	active := activeOverride(e.Schedule, now)
+	if !active && e.Schedule.Reserve == "" {
 		return capacity.Schedule{}, false, true
 	}
 	s = next
-	s.Override, s.OverrideUntil = e.Schedule.Override, e.Schedule.OverrideUntil
+	s.Override, s.OverrideUntil = "", nil
+	if active {
+		s.Override, s.OverrideUntil = e.Schedule.Override, e.Schedule.OverrideUntil
+	}
+	s.Reserve, s.ReservePercent = e.Schedule.Reserve, e.Schedule.ReservePercent
 	return s, true, true
 }
 
+// poolReserve is a draft Keep for you for one pool; an empty mode inherits.
+type poolReserve struct {
+	Pool           string  `json:"pool"`
+	Reserve        string  `json:"reserve"`
+	ReservePercent float64 `json:"reserve_percent,omitempty"`
+}
+
 // scheduleWithDraft is the schedule an account would follow once next is saved
-// as the person's schedule: account entry, then pool entry, then next itself.
-func scheduleWithDraft(entries []scheduleEntry, a Account, previous, next capacity.Schedule, now time.Time) capacity.Schedule {
-	for _, want := range []scheduleEntry{{Scope: "account", Key: a.ID}, {Scope: "pool", Key: a.Harness}} {
-		for _, e := range entries {
-			if e.Scope != want.Scope || e.Key != want.Key {
-				continue
+// as the person's schedule (with carry_overrides) and pools' reserves as drafted.
+func scheduleWithDraft(entries []scheduleEntry, a Account, previous, next capacity.Schedule, pools []poolReserve, now time.Time) capacity.Schedule {
+	after := []scheduleEntry{}
+	for _, e := range entries {
+		if e.Scope == "user" {
+			continue
+		}
+		if s, keep, _ := carryDraft(e, previous, next, now); keep {
+			after = append(after, scheduleEntry{e.Scope, e.Key, s})
+		}
+	}
+	for _, r := range pools {
+		found := false
+		for i := range after {
+			if after[i].Scope == "pool" && after[i].Key == r.Pool {
+				after[i].Schedule.Reserve, after[i].Schedule.ReservePercent = r.Reserve, r.ReservePercent
+				found = true
 			}
-			if s, keep, _ := carryDraft(e, previous, next, now); keep {
-				return s
+		}
+		if !found && r.Reserve != "" {
+			s := next
+			s.Override, s.OverrideUntil, s.Reserve, s.ReservePercent = "", nil, r.Reserve, r.ReservePercent
+			after = append(after, scheduleEntry{"pool", r.Pool, s})
+		}
+	}
+	return resolveSchedule(append(after, scheduleEntry{Scope: "user", Schedule: next}), a, next, now)
+}
+
+// resolveSchedule is the schedule an account follows: the most specific entry
+// (account, group, pool, then the person's own), with the most specific
+// explicit Keep for you (Auto when none is set). Away on the person's
+// schedule reaches every pool that has no override of its own in force; a
+// pool's Hold or Sprint wins over it.
+func resolveSchedule(entries []scheduleEntry, a Account, fallback capacity.Schedule, now time.Time) capacity.Schedule {
+	chain := []capacity.Schedule{}
+	var user *capacity.Schedule
+	wants := []scheduleEntry{{Scope: "account", Key: a.ID}}
+	if a.GroupID != "" {
+		wants = append(wants, scheduleEntry{Scope: "group", Key: a.GroupID})
+	}
+	wants = append(wants, scheduleEntry{Scope: "pool", Key: a.Harness}, scheduleEntry{Scope: "user"})
+	for _, want := range wants {
+		for _, e := range entries {
+			if e.Scope == want.Scope && e.Key == want.Key {
+				chain = append(chain, e.Schedule)
+				if e.Scope == "user" {
+					user = &e.Schedule
+				}
 			}
 		}
 	}
-	return next
+	if user == nil {
+		chain = append(chain, fallback)
+	}
+	s := chain[0]
+	if user != nil && !activeOverride(s, now) && user.ActiveOverride(now) == "away" {
+		s.Override, s.OverrideUntil = user.Override, user.OverrideUntil
+	}
+	s.Reserve, s.ReservePercent = "", 0
+	for _, c := range chain {
+		if c.Reserve != "" {
+			s.Reserve, s.ReservePercent = c.Reserve, c.ReservePercent
+			break
+		}
+	}
+	return s
 }
 
 // saveCarried writes next as the person's schedule and carries every override
@@ -166,13 +227,14 @@ func saveCarried(ctx context.Context, tx pgx.Tx, tenantID, person string, next c
 // concurrency limit, a deadline and the aggregate integration work. The preview
 // is read-only but CPU-bound, so every editor keystroke must stay cheap.
 type previewGuard struct {
-	mu      sync.Mutex
-	hits    map[string][]time.Time
-	limit   int
-	window  time.Duration
-	slots   chan struct{}
-	budget  int
-	timeout time.Duration
+	mu          sync.Mutex
+	hits        map[string][]time.Time
+	limit       int
+	window      time.Duration
+	slots       chan struct{}
+	budget      int
+	timeout     time.Duration
+	withTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 const (
@@ -186,7 +248,7 @@ const (
 )
 
 func newPreviewGuard(limit int, window time.Duration, slots, budget int, timeout time.Duration) *previewGuard {
-	return &previewGuard{hits: map[string][]time.Time{}, limit: limit, window: window, slots: make(chan struct{}, slots), budget: budget, timeout: timeout}
+	return &previewGuard{hits: map[string][]time.Time{}, limit: limit, window: window, slots: make(chan struct{}, slots), budget: budget, timeout: timeout, withTimeout: context.WithTimeout}
 }
 
 var defaultPreviewGuard = newPreviewGuard(previewRate, previewWindow, previewSlots, previewBudget, previewTimeout)
@@ -247,8 +309,10 @@ func previewSteps(start, reset time.Time) int {
 // connection gets a read deadline where the server supports it, and the handler
 // stops waiting at the deadline either way (408), so a stalled upload costs
 // neither a preview slot nor the caller's time.
-func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]byte, error) {
-	_ = http.NewResponseController(w).SetReadDeadline(deadline)
+func readBodyBy(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = http.NewResponseController(w).SetReadDeadline(deadline)
+	}
 	body := http.MaxBytesReader(w, r.Body, 1<<20)
 	type result struct {
 		raw []byte
@@ -259,8 +323,6 @@ func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]b
 		raw, err := io.ReadAll(body)
 		done <- result{raw, err}
 	}()
-	timer := time.NewTimer(time.Until(deadline))
-	defer timer.Stop()
 	select {
 	case got := <-done:
 		if got.err != nil {
@@ -271,10 +333,11 @@ func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]b
 			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
 		}
 		return got.raw, nil
-	case <-timer.C:
+	case <-ctx.Done():
 		_ = r.Body.Close()
-		return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
-	case <-r.Context().Done():
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
+		}
 		return nil, fail(http.StatusRequestTimeout, "the preview request was cancelled")
 	}
 }

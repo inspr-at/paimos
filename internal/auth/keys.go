@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenantbrand"
 )
 
 var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -30,6 +31,8 @@ type tenantJSON struct {
 	ID   string `json:"id"`
 	Slug string `json:"slug"`
 	Name string `json:"name"`
+	// Brand is the workspace's own header brand (AEON-431); absent when unset.
+	Brand *tenantbrand.Public `json:"brand,omitempty"`
 }
 
 type identityJSON struct {
@@ -41,10 +44,11 @@ type identityJSON struct {
 }
 
 type meJSON struct {
-	DevMode   bool          `json:"dev_mode"`
-	Principal principalJSON `json:"principal"`
-	Tenant    tenantJSON    `json:"tenant"`
-	Identity  *identityJSON `json:"identity"`
+	DevMode         bool          `json:"dev_mode"`
+	OIDCDisplayName string        `json:"oidc_display_name"`
+	Principal       principalJSON `json:"principal"`
+	Tenant          tenantJSON    `json:"tenant"`
+	Identity        *identityJSON `json:"identity"`
 }
 
 type agentKeyJSON struct {
@@ -70,7 +74,8 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 		roles = []string{}
 	}
 	out := meJSON{
-		DevMode: m.cfg.Dev(),
+		DevMode:         m.cfg.Dev(),
+		OIDCDisplayName: m.cfg.OIDCDisplayName,
 		Principal: principalJSON{
 			ID:       v.Principal.ID,
 			TenantID: v.Principal.TenantID,
@@ -79,7 +84,7 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 			Email:    v.Email,
 			Roles:    roles,
 		},
-		Tenant: tenantJSON{ID: v.TenantID, Slug: v.Slug, Name: v.Name},
+		Tenant: tenantJSON{ID: v.TenantID, Slug: v.Slug, Name: v.Name, Brand: v.Brand},
 	}
 	if v.Identity != nil {
 		out.Identity = &identityJSON{
@@ -130,11 +135,12 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		RotateKeyID *string    `json:"rotate_key_id"`
-		Name        string     `json:"name"`
-		PrincipalID string     `json:"principal_id"`
-		Scopes      []string   `json:"scopes"`
-		ExpiresAt   *time.Time `json:"expires_at"`
+		RotateKeyID    *string    `json:"rotate_key_id"`
+		RotationScopes []string   `json:"rotation_scopes"`
+		Name           string     `json:"name"`
+		PrincipalID    string     `json:"principal_id"`
+		Scopes         []string   `json:"scopes"`
+		ExpiresAt      *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -145,11 +151,24 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.RotateKeyID != nil {
 		if !uuidRe.MatchString(*body.RotateKeyID) || body.Name != "" || body.PrincipalID != "" || body.Scopes != nil {
-			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at only")
+			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at or rotation_scopes only")
 			return
 		}
-		rec, err := m.rotateAgentKey(r.Context(), p, *body.RotateKeyID, body.ExpiresAt)
+		var scopes []string
+		if body.RotationScopes != nil {
+			var err error
+			scopes, err = cleanScopes(body.RotationScopes)
+			if err != nil {
+				writeBadRequest(w, "invalid rotation_scopes")
+				return
+			}
+		}
+		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes)
 		m.writeCreatedAgentKey(w, rec, err)
+		return
+	}
+	if body.RotationScopes != nil {
+		writeBadRequest(w, "rotation_scopes requires rotate_key_id")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
@@ -183,6 +202,10 @@ func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err 
 		}
 		if errors.Is(err, errNotAgent) {
 			writeBadRequest(w, "principal_id must be an agent")
+			return
+		}
+		if errors.Is(err, errAgentDeactivated) {
+			writeJSON(w, http.StatusConflict, errorJSON{Error: "agent is deactivated; reactivate it first"})
 			return
 		}
 		if errors.Is(err, errServicePrincipal) || errors.Is(err, authz.ErrForbidden) {

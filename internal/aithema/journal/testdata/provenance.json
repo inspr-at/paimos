@@ -1,0 +1,567 @@
+{
+  "repository": "https://github.com/inspr-at/aithema",
+  "revision": "b73faac0768e733bb6dafb46399baccfec2e0ec0",
+  "note": "Binding host contracts and Go test vectors copied read-only via gh api from Aithema main after AIT-89 (AEON-483).",
+  "files": [
+    {
+      "path": "contracts/common.schema.json",
+      "source": "contracts/common.schema.json",
+      "sha256": "0ba1a798212ff92222cabaac95cb868967f36751690273cfaffe12267a1660e9"
+    },
+    {
+      "path": "contracts/journal-record.schema.json",
+      "source": "contracts/journal-record.schema.json",
+      "sha256": "8f5183eb1ea24fddcfaf1ad5efa09ee015d6fddeeefc3412a7214b81bda36f61"
+    },
+    {
+      "path": "contracts/spec-snapshot.schema.json",
+      "source": "contracts/spec-snapshot.schema.json",
+      "sha256": "b5e2ccab3b1736231762d8252dc712f09c19689c4d7bb8589f91540c9a3a2954"
+    },
+    {
+      "path": "contracts/working-item.schema.json",
+      "source": "contracts/working-item.schema.json",
+      "sha256": "cb26695a40912203d778a4ba51cd27e7b2453012bd3507b5c9c9d9a84ffca7c7"
+    },
+    {
+      "path": "contracts/budget.schema.json",
+      "source": "contracts/budget.schema.json",
+      "sha256": "746f47486e28884dc6f86f08c442e0da992b9dcfbddae808ae4c2dbe706e04e7"
+    },
+    {
+      "path": "contracts/authz-record.schema.json",
+      "source": "contracts/authz-record.schema.json",
+      "sha256": "242d23f537a7f2b74ad571465c21b9510328e3a103eeecc107981be5cdd7770e"
+    },
+    {
+      "path": "contracts/extension.schema.json",
+      "source": "contracts/extension.schema.json",
+      "sha256": "7fd9814209c84c29991cf61beaae0d8cc09af56949f197b0e3b77bd109eb8fa2"
+    },
+    {
+      "path": "contracts/record-writers.json",
+      "source": "contracts/record-writers.json",
+      "sha256": "094a5f1d02a973438f95adc7a79fe6a35c7ad56ba3a4cea0adbb7b506f13b14d"
+    },
+    {
+      "path": "contracts/transitions.json",
+      "source": "contracts/transitions.json",
+      "sha256": "f21d26df527b3f4ec31e590db32e41f1a857f052c46a9e3a3820b302df0067c4"
+    },
+    {
+      "path": "testdata/valid/record.authz-epoch.json",
+      "source": "contracts/fixtures/valid/record.authz-epoch.json",
+      "sha256": "7c07ee5bde98c484b90b7afe43306322eaa38c4f0bcc67fca6e755b1af51ec5f"
+    },
+    {
+      "path": "testdata/valid/record.budget-settle-actual.json",
+      "source": "contracts/fixtures/valid/record.budget-settle-actual.json",
+      "sha256": "7c91acb35e8f4fecc8746dba5c532de293d8757733bc3d801e682e13777f9e4f"
+    },
+    {
+      "path": "testdata/valid/budget.admit-local-zero.json",
+      "source": "contracts/fixtures/valid/budget.admit-local-zero.json",
+      "sha256": "92f48928bf2f9cafe3f87be2263e39ad107bc7c64e54d4efc678d3e01ac93a07"
+    },
+    {
+      "path": "testdata/valid/budget.recover-request.json",
+      "source": "contracts/fixtures/valid/budget.recover-request.json",
+      "sha256": "d0a1d1bd88be858e4d7a9e82b9d6ea024cb6d80d12399fcdc5c478ed8f49532f"
+    },
+    {
+      "path": "testdata/valid/budget.claim-already-claimed.json",
+      "source": "contracts/fixtures/valid/budget.claim-already-claimed.json",
+      "sha256": "fd7969a610d22c17b56cd905fb2e255b6dad8ff070cb2792c62e174633d0e688"
+    },
+    {
+      "path": "testdata/valid/record.source.json",
+      "source": "contracts/fixtures/valid/record.source.json",
+      "sha256": "c7633ea4266febc635f4ce234d0375e245e46c78e7e649757ef7ff131021b898"
+    },
+    {
+      "path": "testdata/valid/record.session-purge.json",
+      "source": "contracts/fixtures/valid/record.session-purge.json",
+      "sha256": "6c6a3d7026b3eb642d57ac9d5e739f101b8c027931148baf420084f4836e6f1e"
+    },
+    {
+      "path": "testdata/valid/budget.deployment-report.json",
+      "source": "contracts/fixtures/valid/budget.deployment-report.json",
+      "sha256": "08c5f96ec2f4efae3e08963e7f5e329b77e40dae0196f9635eed1cb39f068484"
+    },
+    {
+      "path": "testdata/valid/record.budget-hold.json",
+      "source": "contracts/fixtures/valid/record.budget-hold.json",
+      "sha256": "c7ce0e67dd6ff4522b9cfd284b61bcfc6e4e1f607d5787f7396e3c95c43c2cb4"
+    },
+    {
+      "path": "testdata/valid/record.session-end-working-spec-only.json",
+      "source": "contracts/fixtures/valid/record.session-end-working-spec-only.json",
+      "sha256": "e83d511023931d230fd02aac99e17177451e528500965ef421111e4b312a1df1"
+    },
+    {
+      "path": "testdata/valid/budget.claim-after-void.json",
+      "source": "contracts/fixtures/valid/budget.claim-after-void.json",
+      "sha256": "3693a16c5d0ed1558bfffa4d205faaa95dbb586de1c3d0e46980b2d448ae7221"
+    },
+    {
+      "path": "testdata/valid/budget.recover-local-zero.json",
+      "source": "contracts/fixtures/valid/budget.recover-local-zero.json",
+      "sha256": "c838e780fc201ea03b3d22749256ed715042c4177c1c8b5dee4d0878c0456498"
+    },
+    {
+      "path": "testdata/valid/record.budget-claim.json",
+      "source": "contracts/fixtures/valid/record.budget-claim.json",
+      "sha256": "7877ff964860a40043064d924db37b8551d8321c7e696e3ffad607f9cc33cc5f"
+    },
+    {
+      "path": "testdata/valid/budget.admit-request.json",
+      "source": "contracts/fixtures/valid/budget.admit-request.json",
+      "sha256": "b9c81712f38d1ed8fd81d74bda575872e5999625e3175a67f2e4d0c6acae5a97"
+    },
+    {
+      "path": "testdata/valid/extension-descriptor.json",
+      "source": "contracts/fixtures/valid/extension-descriptor.json",
+      "sha256": "6c04ff7fb49bbce6b4d8f6e48b2ea792f578ed6f342c418d5dcf3509ae0ebcc9"
+    },
+    {
+      "path": "testdata/valid/budget.holds-list.json",
+      "source": "contracts/fixtures/valid/budget.holds-list.json",
+      "sha256": "9a4ad8652a5d1cd4aa02cfefa10ec2bf6a6d41ff7a994f3ca09f143add0e3525"
+    },
+    {
+      "path": "testdata/valid/budget.settle-actual.json",
+      "source": "contracts/fixtures/valid/budget.settle-actual.json",
+      "sha256": "8305e903c5050f0c65ec4d8de553b7541d10aa4aa72a9915150aaa7f0134f58b"
+    },
+    {
+      "path": "testdata/valid/record.budget-hold-local-zero.json",
+      "source": "contracts/fixtures/valid/record.budget-hold-local-zero.json",
+      "sha256": "c82779a4b91585eaf2b94c6de0064260a902e6cd754db59d7521be6fdcdf6fc1"
+    },
+    {
+      "path": "testdata/valid/snapshot.review.json",
+      "source": "contracts/fixtures/valid/snapshot.review.json",
+      "sha256": "72a81c15e889d6dda1b7a29bcbf804f0e1f30b54daa2b82b6b7301d08fe3ba05"
+    },
+    {
+      "path": "testdata/valid/budget.admit-denied.json",
+      "source": "contracts/fixtures/valid/budget.admit-denied.json",
+      "sha256": "b13baf6d3991067e9ea3e82507a8870963d3dd599614d594b965e03972832c81"
+    },
+    {
+      "path": "testdata/valid/record.budget-settle-void.json",
+      "source": "contracts/fixtures/valid/record.budget-settle-void.json",
+      "sha256": "13a95597afe5cea6530a30194e86d6a2e4150f1709afba7a438924eacf2077cc"
+    },
+    {
+      "path": "testdata/valid/authz.record.json",
+      "source": "contracts/fixtures/valid/authz.record.json",
+      "sha256": "f1a14562420d2a8d20433693b704ac93cddf9554da982763b2cf36bf385e358c"
+    },
+    {
+      "path": "testdata/valid/record.design-input.json",
+      "source": "contracts/fixtures/valid/record.design-input.json",
+      "sha256": "33bb3904d02bae31522b6206c0b14912ac50c5543a0f0b3e650c1be2f35561b2"
+    },
+    {
+      "path": "testdata/valid/snapshot.working-spec-only.json",
+      "source": "contracts/fixtures/valid/snapshot.working-spec-only.json",
+      "sha256": "7751611715d1611e491cb462400198df3775b5702b2ad36148eca6e675692305"
+    },
+    {
+      "path": "testdata/valid/record.audit-restart.json",
+      "source": "contracts/fixtures/valid/record.audit-restart.json",
+      "sha256": "8447c1dda58b8f0da1c763b850048c848fec56a147f5a643855eb387ff79f011"
+    },
+    {
+      "path": "testdata/valid/budget.recover-void.json",
+      "source": "contracts/fixtures/valid/budget.recover-void.json",
+      "sha256": "effe1e8bff2763b09a9d04e2e55e73fdaa568bf3cb8ea79dfc7d864813f9cec8"
+    },
+    {
+      "path": "testdata/valid/record.reaction-partial.json",
+      "source": "contracts/fixtures/valid/record.reaction-partial.json",
+      "sha256": "518eadb8bcacfe4af55cde1dd2185a9a0e834f0582d9e21f8e54700f366234ee"
+    },
+    {
+      "path": "testdata/valid/budget.claim-request.json",
+      "source": "contracts/fixtures/valid/budget.claim-request.json",
+      "sha256": "5005cf95b309e0ce14767a297e18bb714b0ddbeef8dd26cdb4f81c5b67600fb7"
+    },
+    {
+      "path": "testdata/valid/budget.admit-ok.json",
+      "source": "contracts/fixtures/valid/budget.admit-ok.json",
+      "sha256": "eb8c8d4650aba2b6da18774fe5cbee0c298ac27025e8cd432a8d6af1156a05d5"
+    },
+    {
+      "path": "testdata/valid/budget.recover-fenced.json",
+      "source": "contracts/fixtures/valid/budget.recover-fenced.json",
+      "sha256": "1f65549db25fef17bdfd931d4efb50adf88a70f6cfd8d23b2afad87b29bea407"
+    },
+    {
+      "path": "testdata/valid/budget.deployment-denied.json",
+      "source": "contracts/fixtures/valid/budget.deployment-denied.json",
+      "sha256": "e504c2a26afdca4e92fe35ae611a770cc2975e5aaf62f518be18fd0347dd2d91"
+    },
+    {
+      "path": "testdata/valid/budget.recover-unknown.json",
+      "source": "contracts/fixtures/valid/budget.recover-unknown.json",
+      "sha256": "9a354ad2f64ec6b68bf594f6fafa4d263a2a6d4f28ffd2f8ea6246c231180576"
+    },
+    {
+      "path": "testdata/valid/snapshot.persisted.json",
+      "source": "contracts/fixtures/valid/snapshot.persisted.json",
+      "sha256": "e64792e9af19682764038210d60b2ca5e27b3c94cc272e3117b071721dfeb24a"
+    },
+    {
+      "path": "testdata/valid/record.budget-settle-local-zero.json",
+      "source": "contracts/fixtures/valid/record.budget-settle-local-zero.json",
+      "sha256": "c6b1c270c482c81163e8dfca39c6ec722ded97ce60bcedbdbcfe5ab43f6f48a4"
+    },
+    {
+      "path": "testdata/valid/budget.admit-revoked.json",
+      "source": "contracts/fixtures/valid/budget.admit-revoked.json",
+      "sha256": "17e37cd5c765cb3a3292c49fc4c9e26b08428c61cc76555d25cf622faf8ee7fc"
+    },
+    {
+      "path": "testdata/valid/budget.admit-idempotency-conflict.json",
+      "source": "contracts/fixtures/valid/budget.admit-idempotency-conflict.json",
+      "sha256": "7fa498fbf24c4a4eaf8776c2277ce106c9e885fffce94efad20949b0d44db8a1"
+    },
+    {
+      "path": "testdata/valid/record.op-result.json",
+      "source": "contracts/fixtures/valid/record.op-result.json",
+      "sha256": "c17c94c48d88158a415c862574f7fd32c856dd0b9b4a7e412af73fd88af101bf"
+    },
+    {
+      "path": "testdata/valid/record.ui-confirm.json",
+      "source": "contracts/fixtures/valid/record.ui-confirm.json",
+      "sha256": "67c3439d0e6a7abf88d6416ef0fa70e57165e3ba6d7a3ae40f6f61abf098758c"
+    },
+    {
+      "path": "testdata/valid/record.session-end-export.json",
+      "source": "contracts/fixtures/valid/record.session-end-export.json",
+      "sha256": "4193ad6d3300322b6ae082383dda70bb097117f28341813685ea8cab51928fd7"
+    },
+    {
+      "path": "testdata/valid/budget.claim-ok.json",
+      "source": "contracts/fixtures/valid/budget.claim-ok.json",
+      "sha256": "e9e9c290b09c8452e28fe5c5d2805278e6df96d90b4507d2c69363f4fe0261e7"
+    },
+    {
+      "path": "testdata/valid/budget.recover-response.json",
+      "source": "contracts/fixtures/valid/budget.recover-response.json",
+      "sha256": "9a354ad2f64ec6b68bf594f6fafa4d263a2a6d4f28ffd2f8ea6246c231180576"
+    },
+    {
+      "path": "testdata/valid/budget.settle-unknown.json",
+      "source": "contracts/fixtures/valid/budget.settle-unknown.json",
+      "sha256": "862d798fd1b1af93fbf24db44d5d29a28251e21a03a76d876f5f55e33346c97e"
+    },
+    {
+      "path": "testdata/valid/record.turn.json",
+      "source": "contracts/fixtures/valid/record.turn.json",
+      "sha256": "70197971e0765d5f55c37a72531b4b56d71b813e3ca22bb951421ae14e3050bf"
+    },
+    {
+      "path": "testdata/valid/extension-snapshot.json",
+      "source": "contracts/fixtures/valid/extension-snapshot.json",
+      "sha256": "c3df756f3703bcd3f40cec4508d0d84351783b94a0b7e17c5c99aa521cf1bafc"
+    },
+    {
+      "path": "testdata/invalid/record.segment-duplicate-id.json",
+      "source": "contracts/fixtures/invalid/record.segment-duplicate-id.json",
+      "sha256": "eeac7fe8bd54bfdf0c92c7c4e04004b159799543d2278ed7dfb301f4bb0be5df"
+    },
+    {
+      "path": "testdata/invalid/snapshot.accepted-then-newer-version.json",
+      "source": "contracts/fixtures/invalid/snapshot.accepted-then-newer-version.json",
+      "sha256": "48ac14575e142394b6846ea738efff5967ee546ad47779a277be588ea9ef279a"
+    },
+    {
+      "path": "testdata/invalid/snapshot.rev-gap.json",
+      "source": "contracts/fixtures/invalid/snapshot.rev-gap.json",
+      "sha256": "45c13d1cce98b8016ec3f028dea2294d903e7c7084bdbad6a5012af2c983b25a"
+    },
+    {
+      "path": "testdata/invalid/snapshot.min-reader-above-minor.json",
+      "source": "contracts/fixtures/invalid/snapshot.min-reader-above-minor.json",
+      "sha256": "66c383785248177edd64f6254198dd7416fd47ef97d9a954c069a1c4a485e756"
+    },
+    {
+      "path": "testdata/invalid/snapshot.unknown-key.json",
+      "source": "contracts/fixtures/invalid/snapshot.unknown-key.json",
+      "sha256": "17e6f5a9095f0a33b83dea5d56798fb5f4671a9045ca9a75ebb50baaa60ec7ea"
+    },
+    {
+      "path": "testdata/invalid/snapshot.working-spec-only-proposed.json",
+      "source": "contracts/fixtures/invalid/snapshot.working-spec-only-proposed.json",
+      "sha256": "f53126dddce11269274c825aad67ddca316faebf45c80edaf263d16c0da289c8"
+    },
+    {
+      "path": "testdata/invalid/snapshot.two-live-versions.json",
+      "source": "contracts/fixtures/invalid/snapshot.two-live-versions.json",
+      "sha256": "9476540dac5829f186572bd23079e4d6956fd7bb65a2057c4485f73945bdd406"
+    },
+    {
+      "path": "testdata/invalid/budget.deployment-denied-wrong-period.json",
+      "source": "contracts/fixtures/invalid/budget.deployment-denied-wrong-period.json",
+      "sha256": "aafcd36fed4dbb00b36f43c233e03f92402318acdd88758db595471d9a80a01f"
+    },
+    {
+      "path": "testdata/invalid/snapshot.missing-predecessor.json",
+      "source": "contracts/fixtures/invalid/snapshot.missing-predecessor.json",
+      "sha256": "04c1b4384548ab6b84ab98871313379827d62da05966a43d80d7728e24d8185d"
+    },
+    {
+      "path": "testdata/invalid/record.turn-too-long.json",
+      "source": "contracts/fixtures/invalid/record.turn-too-long.json",
+      "sha256": "680e8698a082a9f10c44a8c42a551d91bfbd6d1483f0dd7f04ef9033eebec9a3"
+    },
+    {
+      "path": "testdata/invalid/budget.holds-list-without-cursor.json",
+      "source": "contracts/fixtures/invalid/budget.holds-list-without-cursor.json",
+      "sha256": "7d8be4add78ea1f89ca0ddcc185c162ac5e188b1f9093dcccee33308ff3d0846"
+    },
+    {
+      "path": "testdata/invalid/budget.recover-remote-zero.json",
+      "source": "contracts/fixtures/invalid/budget.recover-remote-zero.json",
+      "sha256": "4fe36e30473986880681ee31c2b2603e7e46d6f9804277849fae084573f6579f"
+    },
+    {
+      "path": "testdata/invalid/extension-key-version-mismatch.json",
+      "source": "contracts/fixtures/invalid/extension-key-version-mismatch.json",
+      "sha256": "3bfe8c9b52423d378dcb84f9ea69772a1805bd104e9c6fe589ed00c9b9f8020e"
+    },
+    {
+      "path": "testdata/invalid/record.working-spec-only-end-without-export.json",
+      "source": "contracts/fixtures/invalid/record.working-spec-only-end-without-export.json",
+      "sha256": "96ad8e335e03f765fd9f93680f0a05ca7a4d34ad49adae4f01e549d329573516"
+    },
+    {
+      "path": "testdata/invalid/record.unknown-kind.json",
+      "source": "contracts/fixtures/invalid/record.unknown-kind.json",
+      "sha256": "60f680796ba1f956837f21f6656a1ecff69d57b162603e505d34ef8fe3be4855"
+    },
+    {
+      "path": "testdata/invalid/budget.holds-list-foreign-attempt.json",
+      "source": "contracts/fixtures/invalid/budget.holds-list-foreign-attempt.json",
+      "sha256": "f2cff7b2c6c3af4047ab94681c867aa9a2d3f91476ef3df13e3cf8e3a20d14ad"
+    },
+    {
+      "path": "testdata/invalid/budget.attempt-id-mismatch.json",
+      "source": "contracts/fixtures/invalid/budget.attempt-id-mismatch.json",
+      "sha256": "a858ac4d9d4a73b8fc7eb6d701c0b108e7b5a7e0664cb8bb39c7a19b2f74fa47"
+    },
+    {
+      "path": "testdata/invalid/record.hold-foreign-session.json",
+      "source": "contracts/fixtures/invalid/record.hold-foreign-session.json",
+      "sha256": "5962c1334d8d98380e6dff3f8e839493ca7147a1bd027b1526280907622421e4"
+    },
+    {
+      "path": "testdata/invalid/snapshot.accepted-with-live-sibling.json",
+      "source": "contracts/fixtures/invalid/snapshot.accepted-with-live-sibling.json",
+      "sha256": "e013f716a1d39b7eac05e570a93a18fdb8559159b12e2363465f9c2d7169849e"
+    },
+    {
+      "path": "testdata/invalid/budget.malformed-attempt-id.json",
+      "source": "contracts/fixtures/invalid/budget.malformed-attempt-id.json",
+      "sha256": "670ab0388c7bef823e597148816e88cc4df00dbc0dbef12185f722bc0f882f8b"
+    },
+    {
+      "path": "testdata/invalid/record.budget-hold-remote-zero.json",
+      "source": "contracts/fixtures/invalid/record.budget-hold-remote-zero.json",
+      "sha256": "0b2cdb24fe1fda8235a9cc767398b52ae9d23339b02d4283b5b272e37238ced1"
+    },
+    {
+      "path": "testdata/invalid/budget.deployment-denied-without-detail.json",
+      "source": "contracts/fixtures/invalid/budget.deployment-denied-without-detail.json",
+      "sha256": "898cae77e11653b3b0c6bd700521c8decba687d63c8ba8465573c019a046aac9"
+    },
+    {
+      "path": "testdata/invalid/record.impossible-date.json",
+      "source": "contracts/fixtures/invalid/record.impossible-date.json",
+      "sha256": "01f1c4506a3c7d5f3fbc855a318d7d70a33dfd2c37987957051de342742066b6"
+    },
+    {
+      "path": "testdata/invalid/budget.admit-remote-zero.json",
+      "source": "contracts/fixtures/invalid/budget.admit-remote-zero.json",
+      "sha256": "ac5f45699d9256b540d363b2fdfc711431769953d41e081ed748a6b165f097dd"
+    },
+    {
+      "path": "testdata/invalid/snapshot.proposed-without-host.json",
+      "source": "contracts/fixtures/invalid/snapshot.proposed-without-host.json",
+      "sha256": "870c5a627687b283de8ec9d72156adc21a1ecba4b2c62e23849b664e17404288"
+    },
+    {
+      "path": "testdata/invalid/record.design-input-tampered.json",
+      "source": "contracts/fixtures/invalid/record.design-input-tampered.json",
+      "sha256": "bcd0ed9a910e2c5dbd806f7ebb821a1a802bbb8ab13a00dee3941e264eebf0d7"
+    },
+    {
+      "path": "testdata/invalid/snapshot.content-tampered.json",
+      "source": "contracts/fixtures/invalid/snapshot.content-tampered.json",
+      "sha256": "15b9618c15f3a90882a0149a96e11babaa20ddd414d44f7fc5ef0b0e4f5bc9ac"
+    },
+    {
+      "path": "testdata/invalid/budget.recover-void-charged.json",
+      "source": "contracts/fixtures/invalid/budget.recover-void-charged.json",
+      "sha256": "55dd1855779737fa22c1ca001b538295ae7c3fde8b9f1830025f31f659ebcebd"
+    },
+    {
+      "path": "testdata/invalid/record.session-control-by-browser.json",
+      "source": "contracts/fixtures/invalid/record.session-control-by-browser.json",
+      "sha256": "504cb3c7aaff1fedc9ca0b42504d058572ae8c97c27523cba414e9eaa8cbd640"
+    },
+    {
+      "path": "testdata/invalid/record.budget-settle-remote-zero.json",
+      "source": "contracts/fixtures/invalid/record.budget-settle-remote-zero.json",
+      "sha256": "71fe5c68a0a5697618d5bf392b7d183ecc7d7ff7ff18177700b94ac1e80213c2"
+    },
+    {
+      "path": "testdata/invalid/budget.deployment-report-negative.json",
+      "source": "contracts/fixtures/invalid/budget.deployment-report-negative.json",
+      "sha256": "a2f2297e7fa3e7fb730644d9232f8ec9e92f1be18685e04c2cd92dbb5cf5e992"
+    },
+    {
+      "path": "testdata/invalid/authz.no-participants.json",
+      "source": "contracts/fixtures/invalid/authz.no-participants.json",
+      "sha256": "42481dccf06e698a8acb2fe9693b94b0429bf5612f4f9eecae58152531814a47"
+    },
+    {
+      "path": "testdata/invalid/snapshot.payload-tampered.json",
+      "source": "contracts/fixtures/invalid/snapshot.payload-tampered.json",
+      "sha256": "cc9270bd8836b28a55ffbac29f46f6b95c2afd3e5398b2473be62e7b0c9cbf33"
+    },
+    {
+      "path": "testdata/invalid/budget.denied-with-authority-reason.json",
+      "source": "contracts/fixtures/invalid/budget.denied-with-authority-reason.json",
+      "sha256": "87c0bf301604c3d0bfa422e48a0f2facc108d660040d9f4fdf466dc8afdc8654"
+    },
+    {
+      "path": "testdata/invalid/record.settle-settled-without-claim.json",
+      "source": "contracts/fixtures/invalid/record.settle-settled-without-claim.json",
+      "sha256": "f64a669291480397239524c4e3886b5cc7b25f35aa3af6880a2c0755e5e582cf"
+    },
+    {
+      "path": "testdata/invalid/budget.recover-unknown-uncharged.json",
+      "source": "contracts/fixtures/invalid/budget.recover-unknown-uncharged.json",
+      "sha256": "c60784c03da9828b9d30d01ccc2ea51dfec5c68dc16382f34638806ba4ac7ec9"
+    },
+    {
+      "path": "testdata/invalid/record.settle-unknown-uncharged.json",
+      "source": "contracts/fixtures/invalid/record.settle-unknown-uncharged.json",
+      "sha256": "c5fa34a567ce039863a01b2d3f93f7caf6d56c5a60ea447c25cc208d579513b5"
+    },
+    {
+      "path": "testdata/invalid/budget.settle-unknown-with-actual.json",
+      "source": "contracts/fixtures/invalid/budget.settle-unknown-with-actual.json",
+      "sha256": "e294cf5538ae1bba7b02001e08cccb6f60f60e988ae3def266a4f49d43135599"
+    },
+    {
+      "path": "testdata/invalid/snapshot.supersedes-node-id.json",
+      "source": "contracts/fixtures/invalid/snapshot.supersedes-node-id.json",
+      "sha256": "a794ff14c365b8a3e595d8782f36effd6c9cc6fd526107b902b0caa7e15fd310"
+    },
+    {
+      "path": "testdata/invalid/snapshot.patch-tampered.json",
+      "source": "contracts/fixtures/invalid/snapshot.patch-tampered.json",
+      "sha256": "7b2d0e0f4e6a51301b47d1bdb55f91724e761dd198f1002887c70e56668ca604"
+    },
+    {
+      "path": "testdata/invalid/record.segment-inverted.json",
+      "source": "contracts/fixtures/invalid/record.segment-inverted.json",
+      "sha256": "94e722d77f7670900b02d7ca8cdd1eb6c3e28be3e4778439d1bbc5aa53992b44"
+    },
+    {
+      "path": "testdata/invalid/record.assistant-claims-person-trust.json",
+      "source": "contracts/fixtures/invalid/record.assistant-claims-person-trust.json",
+      "sha256": "73adf2dd6f641197862e29f0174b436b7a46708b67bf875a2b1762bd7882790f"
+    },
+    {
+      "path": "testdata/invalid/snapshot.working-spec-only-submit-op.json",
+      "source": "contracts/fixtures/invalid/snapshot.working-spec-only-submit-op.json",
+      "sha256": "e683a2d32a4e2948851ed036af2f71a035bbb8549769146ea39edfa0aae21a0a"
+    },
+    {
+      "path": "testdata/invalid/record.reaction-prefix-mismatch.json",
+      "source": "contracts/fixtures/invalid/record.reaction-prefix-mismatch.json",
+      "sha256": "3a098206971d0bb7209c434ee1cd02ab26ade86c7dc013ad241dfd01af86a67a"
+    },
+    {
+      "path": "testdata/invalid/snapshot.two-accepted-versions.json",
+      "source": "contracts/fixtures/invalid/snapshot.two-accepted-versions.json",
+      "sha256": "814f9f66f05e4e6f5ac02db1a592e4cba3a775c2ff44d7fce44c68df26bd1010"
+    },
+    {
+      "path": "testdata/invalid/budget.attempt-counter-too-long.json",
+      "source": "contracts/fixtures/invalid/budget.attempt-counter-too-long.json",
+      "sha256": "15330691226e6125cdafa5ce80a6e6f5ee356ed4dd4ea37f45b342815c16cd97"
+    },
+    {
+      "path": "testdata/invalid/budget.deployment-denied-wrong-scope.json",
+      "source": "contracts/fixtures/invalid/budget.deployment-denied-wrong-scope.json",
+      "sha256": "61551cda606a90edf4d972723118bbcee853cd43a82b85a1f907fa6ff0cbd93f"
+    },
+    {
+      "path": "testdata/invalid/extension-open-object.json",
+      "source": "contracts/fixtures/invalid/extension-open-object.json",
+      "sha256": "5a725a16cd2a0454ffdd8d9b2d731890509e099beae50905681ecefa72dbd7ad"
+    },
+    {
+      "path": "testdata/invalid/budget.holds-list-duplicate.json",
+      "source": "contracts/fixtures/invalid/budget.holds-list-duplicate.json",
+      "sha256": "ad15244d64ab97920e73eb2189d10e9881ad773634a3864fb4b835ae900db261"
+    },
+    {
+      "path": "testdata/invalid/record.unsafe-integer-seq.json",
+      "source": "contracts/fixtures/invalid/record.unsafe-integer-seq.json",
+      "sha256": "8dcf9318ac1dfd89383aecd612a693c11aa23b5d05959e5254a1d48d4602418b"
+    },
+    {
+      "path": "testdata/invalid/record.settle-void-with-claim.json",
+      "source": "contracts/fixtures/invalid/record.settle-void-with-claim.json",
+      "sha256": "24a063588a58764e60c5bdce51e615698a9990bf98bafcf5db5f2571ad637d13"
+    },
+    {
+      "path": "testdata/invalid/record.worker-without-generation.json",
+      "source": "contracts/fixtures/invalid/record.worker-without-generation.json",
+      "sha256": "265434e9070508bf35f1c285a60abb5ca4a36a3321ab5b2b0f6a02df39611662"
+    },
+    {
+      "path": "testdata/invalid/snapshot.working-spec-only-host-identity.json",
+      "source": "contracts/fixtures/invalid/snapshot.working-spec-only-host-identity.json",
+      "sha256": "b5cc6a3140b6481d1d7ca6d4c02c239352a7de668c0066da565132047a3cdcff"
+    },
+    {
+      "path": "testdata/invalid/snapshot.confirmed-with-host.json",
+      "source": "contracts/fixtures/invalid/snapshot.confirmed-with-host.json",
+      "sha256": "95b0e81fcac1a65999a22e02d5a816280cb1f88dbd2b3475a685c0f4cbae4103"
+    },
+    {
+      "path": "testdata/invalid/budget.deployment-report-unknown-key.json",
+      "source": "contracts/fixtures/invalid/budget.deployment-report-unknown-key.json",
+      "sha256": "0347058cd8466a5bf109a7e6757521303c17f9000bec802ecc939213a0e2ee21"
+    },
+    {
+      "path": "testdata/canonical/rfc8785-golden.json",
+      "source": "contracts/fixtures/canonical/rfc8785-golden.json",
+      "sha256": "d40f1ed836d9b286ee03b94c56fe410922fa92019aeaf018357f0d362337cb3a"
+    },
+    {
+      "path": "contracts/pending-op-content.schema.json",
+      "source": "contracts/pending-op-content.schema.json",
+      "sha256": "c1fa8c62de12ec78abace147698e0e459100d3053935defc7f19a98f1d7aebae"
+    },
+    {
+      "path": "contracts/index.json",
+      "source": "contracts/index.json",
+      "sha256": "1f2ad04b7212ba7ef1f1b638431a4af23bbe3e880be5bea6374b77d759e13a86"
+    },
+    {
+      "path": "testdata/valid/record.pending-content.json",
+      "source": "contracts/fixtures/valid/record.pending-content.json",
+      "sha256": "4cdcc31e485b1f0dbda2b50f06b40715c7935dfddb89f59d7397f96ecc4557f3"
+    }
+  ]
+}

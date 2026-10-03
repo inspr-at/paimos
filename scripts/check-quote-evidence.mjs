@@ -46,13 +46,13 @@ export function checkQuoteEvidence() {
   const qr = lock.packages?.['node_modules/qrcode-generator']
   if (qr?.version !== '1.5.2' || qr.license !== 'MIT') fail('qrcode-generator pin/license changed')
   if (!/chromium=152\.0\.7977\.82-r0/.test(docker) || !/tini=0\.19\.0-r3/.test(docker)) fail('runtime APK pins changed')
-  if (!/golang\.org\/x\/image v0\.36\.0/.test(gomod)) fail('x/image pin changed')
+  if (!/golang\.org\/x\/image v0\.45\.0/.test(gomod)) fail('x/image pin changed')
   if (!docker.includes('COPY NOTICE /usr/share/doc/aeon/NOTICE')) fail('runtime image omits NOTICE')
   for (const entry of [
     'Chromium 152.0.7977.82-r0', 'License: BSD-3-Clause', 'Copyright 2015 The Chromium Authors',
     'qrcode-generator 1.5.2', 'License: MIT', 'Copyright (c) 2009 Kazuhiko Arase',
     'tini 0.19.0-r3', 'Copyright (c) 2015 Thomas Orozco',
-    'golang.org/x/image v0.36.0', 'Copyright 2009 The Go Authors.',
+    'golang.org/x/image v0.45.0', 'Copyright 2009 The Go Authors.',
     'Permission is hereby granted', 'Redistribution and use in source and binary forms',
   ]) if (!notice.includes(entry)) fail(`NOTICE missing ${entry}`)
   return { features: matrix.features.length, criteria: matrix.backlog_criteria.length, counts }

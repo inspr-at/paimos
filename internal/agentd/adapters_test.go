@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/rules"
 )
 
 // TestFakeVendorProcess is invoked only through a private test wrapper. It
@@ -27,6 +29,7 @@ func TestFakeVendorProcess(t *testing.T) {
 		return
 	}
 	read := bufio.NewScanner(os.Stdin)
+	read.Buffer(make([]byte, 4096), 8<<20)
 	write := json.NewEncoder(os.Stdout)
 	for read.Scan() {
 		var frame struct {
@@ -59,7 +62,7 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			continue
 		}
-		if vendor == "pi" {
+		if vendor == "pi" || vendor == "pi_usage" {
 			data := any(map[string]any{})
 			if frame.Type == "get_state" {
 				data = map[string]any{"model": map[string]string{"provider": "anthropic", "id": "test-model"}, "thinkingLevel": "high"}
@@ -70,6 +73,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			if frame.Type == "clear_queue" {
 				data = map[string]any{"steering": []string{"held steer"}, "followUp": []string{"held follow"}}
 			}
+			if vendor == "pi_usage" && frame.Type == "prompt" {
+				_, _ = os.Stdout.Write(append(piUsageFixture(1, "test-model", 10, 4, 2, 3), '\n'))
+			}
 			_ = write.Encode(map[string]any{"id": id, "type": "response", "command": frame.Type, "success": true, "data": data})
 			continue
 		}
@@ -79,17 +85,50 @@ func TestFakeVendorProcess(t *testing.T) {
 		result := any(map[string]any{})
 		switch frame.Method {
 		case "account/rateLimits/read":
-			if vendor == "codex_capacity" {
-				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": true}
+			if vendor == "codex_capacity" || vendor == "codex_limited" || vendor == "codex_no_email" {
+				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": vendor != "codex_limited"}
 			}
 		case "account/read":
 			result = map[string]any{"account": map[string]string{"type": "chatgpt", "email": "agent@example.test"}}
+			if vendor == "codex_no_email" {
+				result = map[string]any{"account": map[string]string{"type": "chatgpt"}}
+			}
 		case "thread/start":
+			if strings.HasPrefix(vendor, "codex_rules_") {
+				var expectedSize, expectedMaximum int
+				if _, err := fmt.Sscanf(vendor, "codex_rules_%d_%d", &expectedSize, &expectedMaximum); err != nil {
+					os.Exit(2)
+				}
+				var request struct {
+					Params struct {
+						Config struct {
+							Maximum *int   `json:"project_doc_max_bytes"`
+							Rules   string `json:"developer_instructions"`
+						} `json:"config"`
+					} `json:"params"`
+				}
+				if json.Unmarshal(read.Bytes(), &request) != nil || request.Params.Config.Rules != strings.Repeat("<", expectedSize) {
+					os.Exit(2)
+				}
+				// Model Codex's default when no override is supplied and check
+				// the effective allowance independently of the rules' byte size.
+				effectiveMaximum := rules.CodexProjectDocMaxBytes
+				if request.Params.Config.Maximum != nil {
+					effectiveMaximum = *request.Params.Config.Maximum
+				}
+				if effectiveMaximum != expectedMaximum {
+					os.Exit(2)
+				}
+			}
 			result = map[string]any{"thread": map[string]string{"id": "thread-1"}}
 			if vendor == "codex_metadata" {
 				result = map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": "model-a", "reasoningEffort": "high"}
 			}
 		case "turn/start":
+			if vendor == "codex_limit_error" {
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32000, "data": map[string]string{"codexErrorInfo": "usageLimitExceeded"}}})
+				continue
+			}
 			if vendor == "codex_metadata" {
 				for _, settings := range []map[string]any{
 					{"model": "unrelated", "effort": "low", "threadId": "other-thread"},
@@ -117,6 +156,30 @@ func TestFakeVendorProcess(t *testing.T) {
 				return
 			}
 		case "turn/steer":
+			if strings.HasPrefix(vendor, "codex_midrun_") {
+				thread, turn := "thread-1", "turn-1"
+				if vendor == "codex_midrun_foreign_thread" {
+					thread = "other-thread"
+				}
+				if vendor == "codex_midrun_foreign_turn" {
+					turn = "other-turn"
+				}
+				// Codex 0.159 sends a mid-run error notification, not a
+				// turn/start RPC rejection. The error-info variant is a string.
+				errInfo := map[string]any{"message": "PRIVATE_LIMIT_FIXTURE", "codexErrorInfo": "usageLimitExceeded", "additionalDetails": nil}
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "error", "params": map[string]any{
+					"threadId": thread, "turnId": turn, "willRetry": false, "error": errInfo,
+				}})
+				terminal := map[string]any{"id": "turn-1", "status": "completed", "items": []any{}, "error": nil}
+				if vendor == "codex_midrun_limit" {
+					terminal["status"], terminal["error"] = "failed", errInfo
+				}
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "turn/completed", "params": map[string]any{
+					"threadId": "thread-1", "turn": terminal,
+				}})
+				result = map[string]string{"turnId": "turn-1"}
+				break
+			}
 			for _, total := range []int{20, 20, 19} {
 				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "thread/tokenUsage/updated", "params": map[string]any{
 					"threadId": "thread-1", "tokenUsage": map[string]any{"total": map[string]int{"inputTokens": total, "outputTokens": 4}}}})
@@ -132,6 +195,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			time.Sleep(500 * time.Millisecond)
 			result = map[string]string{"stopReason": "end_turn"}
+			if vendor == "cursor_usage" {
+				result = map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 10, "outputTokens": 4, "cacheReadTokens": 2, "cacheWriteTokens": 3, "reasoningTokens": 1}}
+			}
 		case "initialize":
 			if strings.HasPrefix(vendor, "cursor") {
 				result = map[string]int{"protocolVersion": 1}
@@ -219,6 +285,94 @@ func TestCodexAppServerProtocolAndSteer(t *testing.T) {
 	}
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexLaunchReceivesExactRulesAndProjectDocAllowance(t *testing.T) {
+	for _, tc := range []struct {
+		size, maximum int
+	}{
+		{0, rules.CodexProjectDocMaxBytes},
+		{1, rules.CodexProjectDocMaxBytes},
+		{3000, rules.CodexProjectDocMaxBytes},
+		{rules.CodexProjectDocMaxBytes - 1, rules.CodexProjectDocMaxBytes},
+		{rules.CodexProjectDocMaxBytes, rules.CodexProjectDocMaxBytes},
+		{rules.CodexProjectDocMaxBytes + 1, rules.CodexProjectDocMaxBytes + 1},
+		{rules.MaxBudgetBytes, rules.MaxBudgetBytes},
+		{rules.MaxBytes, rules.MaxBytes},
+	} {
+		t.Run(fmt.Sprint(tc.size), func(t *testing.T) {
+			r := adapterRequest(t)
+			r.Rules = strings.Repeat("<", tc.size) // sixfold JSON expansion at 500 KB
+			home, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Chmod(home, 0700); err != nil {
+				t.Fatal(err)
+			}
+			a := NewCodexAdapter(fakeVendorPath(t, fmt.Sprintf("codex_rules_%d_%d", tc.size, tc.maximum)), map[string]string{"account": home})
+			a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			p, err := a.Start(ctx, r, func(AdapterEvent) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = p.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{home, r.Workspace} {
+				entries, err := os.ReadDir(path)
+				if err != nil || len(entries) != 0 {
+					t.Fatal("launch wrote persistent rules/config", err)
+				}
+			}
+		})
+	}
+	r := adapterRequest(t)
+	r.Rules = strings.Repeat("x", rules.MaxBytes+1)
+	if _, err := NewCodexAdapter("/unused", nil).Start(t.Context(), r, func(AdapterEvent) {}); err == nil {
+		t.Fatal("oversized rules accepted")
+	}
+}
+
+func TestCodexUnnamedChatGPTAccountRemainsLaunchable(t *testing.T) {
+	for _, tc := range []struct {
+		name, vendor, identity string
+		ok                     bool
+	}{
+		{"unnamed login", "codex_no_email", agentsetup.CodexChatGPTLogin, true},
+		{"named pin cannot lose email", "codex_no_email", "agent@example.test", false},
+		{"unnamed pin cannot become named", "codex", agentsetup.CodexChatGPTLogin, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := adapterRequest(t)
+			home, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(home, 0700); err != nil {
+				t.Fatal(err)
+			}
+			a := NewCodexAdapter(fakeVendorPath(t, tc.vendor), map[string]string{"account": home})
+			a.SetExpectedEmails(map[string]string{"account": tc.identity})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			p, err := a.Start(ctx, r, func(AdapterEvent) {})
+			if (err == nil) != tc.ok {
+				t.Fatalf("start accepted=%v, want %v: %v", err == nil, tc.ok, err)
+			}
+			if p != nil {
+				if err := p.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			readings := a.CaptureCapacity(ctx, "account")
+			if (len(readings) == 1) != tc.ok {
+				t.Fatalf("quota identity check: %d readings", len(readings))
+			}
+		})
 	}
 }
 

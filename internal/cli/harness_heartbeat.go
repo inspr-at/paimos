@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,21 +20,26 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
 const (
-	heartbeatSchema       = "aeon.harness-heartbeat.v1"
-	heartbeatInterval     = 50
-	heartbeatMaxCommits   = 20
-	heartbeatMaxTokens    = 1_000_000_000_000
-	heartbeatIndexMax     = 65536
-	heartbeatTitleLineMax = 4096
-	heartbeatUsageLineMax = 1 << 20
-	heartbeatNoteMax      = 120
+	heartbeatSchema        = "aeon.harness-heartbeat.v1"
+	heartbeatInterval      = 50
+	heartbeatMaxCommits    = 20
+	heartbeatMaxTokens     = 1_000_000_000_000
+	heartbeatIndexMax      = 65536
+	heartbeatTitleLineMax  = 4096
+	heartbeatUsageLineMax  = 1 << 20
+	heartbeatNoteMax       = 120
+	heartbeatProgressStale = 30 * time.Minute
+	heartbeatRemainingMax  = 364 * 24 * 60
 )
 
 // heartbeatStopTimeout bounds one stop attempt. The final usage flush has its
@@ -67,13 +73,19 @@ var (
 
 // heartbeatDeps replaces clocks, liveness and name lookup in tests.
 type heartbeatDeps struct {
-	alive   func(pid int) bool
-	wait    func(ctx context.Context, pid int, interval time.Duration) error
-	commits func(worktree, since string) ([]heartbeatCommit, error)
-	label   func() (string, bool)
+	stopOwned func(context.Context, *harness.Pause, time.Time) error
+	alive     func(pid int) bool
+	wait      func(ctx context.Context, pid int, interval time.Duration) error
+	commits   func(worktree, since string) ([]heartbeatCommit, error)
+	label     func() (string, bool)
 }
 
 type heartbeatOptions struct {
+	OwnedStop         bool
+	LinkAccountID     string
+	LinkSetupRoot     string
+	LinkSocket        string
+	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int
 	Interval          int
@@ -81,14 +93,18 @@ type heartbeatOptions struct {
 	Project           string
 	Agent             string
 	Harness           string
+	Generator         string
+	CommandLabel      string
 	Host              string
 	Label             string
 	Model             string
 	Effort            string
 	AccountLabel      string
+	HarnessVersion    string
 	Brief             string
 	Worktree          string
 	Branch            string
+	Doing             string
 	Note              string
 	Phase             string
 	Activity          string
@@ -105,8 +121,10 @@ type heartbeatOptions struct {
 	UsageSource       string
 	UsageFile         string
 	UsageID           string
+	UsageStartedAt    time.Time // Registered generation start; never a CLI assertion.
 	CodexHome         string
 	GrokHome          string
+	AccountID         string
 	BillingMode       string
 	SubscriptionLabel string
 	PrintControls     bool
@@ -133,33 +151,39 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
-			fs.string(&o.Harness, "harness", 0, "adapter family")
+			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Host, "host", 0, "non-secret host label")
 			fs.string(&o.Label, "label", 0, "session display label used until a name source has one")
-			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
-			fs.string(&o.Effort, "effort", 0, "reasoning effort, or AEON_EFFORT when omitted")
+			fs.string(&o.Model, "model", 0, "initial model, or AEON_MODEL; session transcript updates it")
+			fs.string(&o.Effort, "effort", 0, "initial reasoning effort, or AEON_EFFORT; session transcript updates it")
 			fs.string(&o.AccountLabel, "account-label", 0, "subscription or account display name (never a credential)")
+			fs.string(&o.HarnessVersion, "harness-version", 0, "harness version (defaults to a bounded local --version probe)")
 			fs.string(&o.Brief, "brief", 0, "short prompt file name or ticket key")
 			fs.string(&o.Worktree, "worktree", 0, "worktree path")
+			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
 			fs.string(&o.Branch, "branch", 0, "branch name")
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
+			fs.string(&o.Doing, "doing", 0, "public activity summary, at most 60 characters; agent_summary mode only")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
-			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
+			fs.string(&o.Succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
-			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
+			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
-			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source")
+			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
-			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
-			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
+			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage, title and current model")
+			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, grok, gemini, or opencode")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
 			fs.string(&o.GrokHome, "grok-home", 0, "Grok home (default $GROK_HOME or ~/.grok)")
+			fs.string(&o.AccountID, "account-id", 0, "Aeon account UUID; saved billing used when billing-mode is unknown")
 			fs.string(&o.BillingMode, "billing-mode", 0, "unknown, api, or subscription (default unknown)")
 			fs.string(&o.SubscriptionLabel, "subscription-label", 0, "public subscription label; only with --billing-mode subscription")
 			fs.bool(&o.PrintControls, "print-controls", 0, "print request JSON records and pending control/message lines; --json emits NDJSON")
@@ -193,10 +217,10 @@ func (o *heartbeatOptions) normalize() {
 	if o.Activity == "" {
 		o.Activity = "busy"
 	}
-	if strings.TrimSpace(o.Model) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Model) == "" {
 		o.Model = os.Getenv("AEON_MODEL")
 	}
-	if strings.TrimSpace(o.Effort) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Effort) == "" {
 		o.Effort = os.Getenv("AEON_EFFORT")
 	}
 	if o.CodexIndex == "" {
@@ -235,6 +259,11 @@ func (o *heartbeatOptions) applyRuntimeDefaults() {
 }
 
 func (o *heartbeatOptions) prepare() error {
+	if o.Doing != "" {
+		if _, valid := agentactivity.CleanSummary(o.Doing); !valid {
+			return usagef("--doing must be a public summary of at most 60 characters")
+		}
+	}
 	o.normalize()
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
@@ -242,19 +271,36 @@ func (o *heartbeatOptions) prepare() error {
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" || !agentNameRE.MatchString(o.Agent) || !modelHarnesses[o.Harness] {
-		return usagef("--project, --agent and --harness are required")
+	if strings.TrimSpace(o.Project) == "" {
+		return usagef("--project is required")
+	}
+	if !agentNameRE.MatchString(o.Agent) {
+		return usagef("--agent must be a valid agent name")
+	}
+	if err := runkind.Validate(o.Harness, o.Generator, o.CommandLabel); err != nil {
+		return usagef("%s", err)
+	}
+	if runkind.Process(o.Harness) {
+		if o.Parent == "" || o.Ticket == "" {
+			return usagef("--harness %s requires --parent-session and --ticket", o.Harness)
+		}
+		if o.Role != "worker" {
+			return usagef("--role must be worker for media and terminal runs")
+		}
+		if o.Model != "" || o.Effort != "" {
+			return usagef("--model and --effort are for AI agents; use --generator for media or --command for terminal")
+		}
 	}
 	if o.Interval < 1 || o.Interval > 3600 {
 		return usagef("--interval must be 1-3600 seconds")
 	}
 	if !heartbeatPhases[o.Phase] {
-		return usagef("invalid --phase")
+		return usagef("--phase must be starting, working, yielded or stopping")
 	}
 	if heartbeatText(o.Activity, 40) == "" {
 		o.Activity = ""
 	} else if !heartbeatActs[o.Activity] {
-		return usagef("invalid --activity")
+		return usagef("--activity must be busy, idle or throttled")
 	}
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
@@ -266,7 +312,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("invalid parent session")
 	}
 	if o.Management != "managed" && o.Management != "unmanaged" || o.Role != "worker" && o.Role != "coordinator" {
-		return usagef("invalid management or role")
+		return usagef("--management must be managed or unmanaged; --role must be worker or coordinator")
 	}
 	if o.Host == "" {
 		host, err := os.Hostname()
@@ -281,6 +327,12 @@ func (o *heartbeatOptions) prepare() error {
 	if heartbeatText(o.Host, 200) == "" {
 		return usagef("--host is required")
 	}
+	if o.AccountID != "" && o.Capacity.Account != "" && o.AccountID != o.Capacity.Account {
+		return usagef("usage and capacity accounts must match")
+	}
+	if o.AccountID != "" && !validUUID(o.AccountID) {
+		return usagef("invalid --account-id")
+	}
 	switch o.BillingMode {
 	case "", "unknown", "api", "subscription":
 	default:
@@ -293,7 +345,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("--subscription-label requires subscription billing")
 	}
 	switch o.UsageSource {
-	case "", "claude", "codex", "cursor", "grok":
+	case "", "claude", "codex", "cursor", "grok", "gemini", "opencode":
 	default:
 		return usagef("invalid --usage-source")
 	}
@@ -322,10 +374,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if heartbeatSettling(&session) {
 		explainClosedHeartbeat(rt, &session)
 		rt.settleGeneration(o, &session)
+		releaseSessionIndex(&session)
 		return nil
 	}
 	if session.disk.Terminal {
 		explainClosedHeartbeat(rt, &session)
+		releaseSessionIndex(&session)
 		return nil
 	}
 	if created {
@@ -353,6 +407,11 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if !dep.alive(o.OwnerPID) {
 		return rt.rejectDeadOwner(o, &session)
 	}
+	if err := recordSessionIndex(rt, o, &session); err != nil {
+		return err
+	}
+	// Runs before hold.release, so every return after publish withdraws the binding.
+	defer releaseSessionIndex(&session)
 	return rt.heartbeatLoop(ctx, o, dep, &session)
 }
 
@@ -367,22 +426,32 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			return waitHeartbeat(ctx, pid, dep.alive, interval)
 		}
 	}
+	finish := func() error {
+		// An owned launcher observes the child's exit and settles its control
+		// before closing the session. A PID observer retains its old cleanup.
+		if dep.stopOwned != nil {
+			return nil
+		}
+		return rt.finishHeartbeat(o, session)
+	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
 		rt.noteHeartbeatSources(ctx, o, session)
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		}
 		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
 		case errors.Is(err, errHeartbeatTerminal):
 			rememberSettlement(session)
 			if serr := saveHeartbeatSession(session); serr != nil {
+				releaseSessionIndex(session)
 				return serr
 			}
+			releaseSessionIndex(session)
 			return nil
 		case err != nil && ctx.Err() != nil:
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
@@ -390,8 +459,18 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
 		}
-		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
-			return rt.finishHeartbeat(o, session)
+		wait := interval
+		if !session.pauseWakeAt.IsZero() {
+			until := time.Until(session.pauseWakeAt)
+			if until < time.Millisecond {
+				until = time.Millisecond
+			}
+			if until < wait {
+				wait = until
+			}
+		}
+		if err := dep.wait(ctx, o.OwnerPID, wait); err != nil {
+			return finish()
 		}
 	}
 }
@@ -473,6 +552,7 @@ func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession
 	}
 	if session.disk.Terminal {
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return nil
 	}
 	return rt.finishStop(o, session)
@@ -493,7 +573,7 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	if session.disk.Terminal && !owed && !session.disk.Closed {
 		return
 	}
-	target, targetErr := resolveHeartbeatUsage(o)
+	target, targetErr := resolveSessionHeartbeatUsage(o, session)
 	if targetErr != nil {
 		fmt.Fprintf(rt.stderr, "heartbeat: usage source rejected\n")
 		_ = saveHeartbeatSession(session)
@@ -551,11 +631,11 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 
 // heartbeatUsageDue is true when this beat can owe a usage post. A resolved
 // Grok, Codex, or Cursor log counts even when --transcript is empty.
-func heartbeatUsageDue(o heartbeatOptions) bool {
+func heartbeatUsageDue(o heartbeatOptions, session *heartbeatSession) bool {
 	if o.Transcript != "" {
 		return true
 	}
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	return err != nil || target.Path != ""
 }
 
@@ -601,6 +681,7 @@ func (rt *runtime) finishStop(o heartbeatOptions, session *heartbeatSession) err
 		rememberStopIntent(session, false, 1, heartbeatStatus(err))
 		rememberSettlement(session)
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return err
 	}
 	return persistStopSuccess(session)
@@ -621,6 +702,8 @@ func rememberStopIntent(session *heartbeatSession, strict bool, attempts, code i
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(&b, "%d\n%d\n", attempts, code)
+	// How the job ended survives with the intent, so a replayed stop still says so (AEON-437).
+	fmt.Fprintf(&b, "%s\n", persistedStopReason(session.stopReason))
 	_ = session.hold.writeFile("stop.intent", []byte(b.String()))
 }
 
@@ -689,7 +772,9 @@ func persistStopSuccess(session *heartbeatSession) error {
 	if session.hold.dir != nil {
 		_ = session.hold.remove("stop.intent")
 	}
-	return saveHeartbeatSession(session)
+	err := saveHeartbeatSession(session)
+	releaseSessionIndex(session)
+	return err
 }
 
 // abandonHeartbeat closes a generation whose state could not be saved, and
@@ -701,9 +786,11 @@ func (rt *runtime) abandonHeartbeat(o heartbeatOptions, session *heartbeatSessio
 		fmt.Fprintf(rt.stderr, "heartbeat: could not close the new session\n")
 		_ = session.hold.writeFile("session.id", []byte(session.id+"\n"))
 		rememberStopIntent(session, false, 1, heartbeatStatus(err))
+		releaseSessionIndex(session)
 		return cause
 	}
 	_ = clearHeartbeatIdentity(&session.hold)
+	releaseSessionIndex(session)
 	return cause
 }
 
@@ -721,6 +808,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	session.hold = hold
 	defer func() {
 		if err != nil {
+			// The state lock is already held. A busy lock returns above, before
+			// this defer, and leaves the other helper's binding in place.
+			// Use the local hold: a named return replaces session before defers run.
+			releaseSessionIndex(&heartbeatSession{hold: hold})
 			hold.release()
 		}
 	}()
@@ -736,6 +827,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 			existing.disk.StartRev, _ = gitHEAD(ctx, o.Worktree)
 		}
 		existing.hold = session.hold
+		// State written before BoundTicket has no local binding. A restart
+		// without --ticket would then omit progress and ETA. The server's
+		// session binding is copied in and persisted.
+		rt.backfillBoundTicket(ctx, o, &existing)
 		return existing, false, nil
 	}
 	// Prove the owner before registration. A dead owner must not create a
@@ -754,7 +849,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, err
 	}
 	if me.Principal.Name != o.Agent {
-		return heartbeatSession{}, false, usagef("--agent must name the authenticated agent")
+		return heartbeatSession{}, false, harnessAgentMismatch(me.Principal.Name)
 	}
 	lease, err := readOrCreateStateSecret(&session.hold, "lease.key", 32)
 	if err != nil {
@@ -780,10 +875,19 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	if o.PrintControls {
+		body["advertised_capabilities"] = []string{"status", "pause"}
+	}
+	if o.OwnedStop {
+		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
+	}
+	putText(body, "generator", o.Generator, true)
+	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
+	putText(body, "harness_version", harnessVersionOrProbe(ctx, o.Harness, o.HarnessVersion), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
@@ -793,7 +897,8 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.Parent != "" {
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
-	attachVendorSessionRef(body, o.Harness, ref, lease)
+	attachVendorSessionRef(body, o.Harness, ref, lease, o.Parent, o.SourceSession)
+	var boundTicket string
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
 		if err != nil {
@@ -807,13 +912,14 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		}
 		body["ticket_node_id"] = *ticketID
 		body["work_shape"] = o.Shape
+		boundTicket = strings.TrimSpace(o.Ticket)
 	}
 	var out struct {
 		ID string `json:"id"`
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -837,7 +943,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		// A crashed coordinator can still count as healthy until its last
 		// heartbeat expires. Retry only that registration conflict, keeping
 		// the same body and state lock until the server can adopt its children.
-		if o.Role != "coordinator" || o.SourceSession == "" || err.Error() != "api 409: active generation conflicts with registration" {
+		if o.Role != "coordinator" || o.SourceSession == "" || (err.Error() != "api 409: active generation conflicts with registration" && err.Error() != "api 409: "+harness.RegistrationLeaseConflict) {
 			return heartbeatSession{}, false, err
 		}
 		if err = ownerCtx.Err(); err != nil {
@@ -862,6 +968,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, errors.New("registration did not return a session id")
 	}
 	disk.SessionID = strings.ToLower(out.ID)
+	disk.ModelSent = true
+	disk.SentModel = heartbeatText(o.Model, 128)
+	disk.SentEffort = heartbeatText(o.Effort, 40)
 	bindHeartbeatWorktree(ctx, o, &disk)
 	if haveLabel {
 		disk.LabelSent = true
@@ -878,12 +987,12 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 	if err != nil {
 		return err
 	}
-	id, strict, attempts, code := heartbeatStopIntent(raw)
+	id, strict, attempts, code, reason := heartbeatStopIntent(raw)
 	lease, err := readStateSecret(&session.hold, "lease.key")
 	if err != nil || !validUUID(id) {
 		return errHeartbeatState
 	}
-	stopping := heartbeatSession{id: id, lease: lease}
+	stopping := heartbeatSession{id: id, lease: lease, stopReason: reason}
 	// A previous flush may have saved a report and then failed to stop.
 	// Post that work on the usage budget, then stop on a fresh one.
 	// The generation id and transcript cursor stay so the next start cannot
@@ -896,6 +1005,7 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 		rt.drainHeartbeatUsage(usageCtx, o, &existing)
 		cancel()
 		stopping.disk = existing.disk
+		existing.stopReason = reason
 		kept = &existing
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
@@ -918,13 +1028,14 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 		}
 		holder := kept
 		if holder == nil {
-			holder = &heartbeatSession{id: id, hold: session.hold}
+			holder = &heartbeatSession{id: id, hold: session.hold, stopReason: reason}
 		}
 		rememberStopIntent(holder, strict, attempts+1, heartbeatStatus(stopErr))
 		if kept != nil {
 			rememberSettlement(kept)
 			_ = saveHeartbeatSession(kept)
 		}
+		releaseSessionIndex(holder)
 		return stopErr
 	}
 	if kept != nil {
@@ -951,10 +1062,58 @@ func (rt *runtime) finishBoundedStop(ctx context.Context, o heartbeatOptions, st
 		if strict {
 			fmt.Fprintf(rt.stderr, "heartbeat: owner %d failed the start check\n", o.OwnerPID)
 		}
+		releaseSessionIndex(&heartbeatSession{hold: hold})
 		return errHeartbeatStopBound
 	}
 	fmt.Fprintf(rt.stderr, "heartbeat: stop will not be retried\n")
+	releaseSessionIndex(&heartbeatSession{hold: hold})
 	return errHeartbeatStopRejected
+}
+
+// backfillBoundTicket copies the server's ticket binding into state that
+// predates BoundTicket. A missing or unbound session is left unchanged so
+// resume still heartbeats. A closed generation is skipped: it does not
+// report estimates, and a status read would be a new request on every open.
+func (rt *runtime) backfillBoundTicket(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if session == nil || session.disk.Terminal || session.disk.Closed || strings.TrimSpace(session.disk.BoundTicket) != "" {
+		return
+	}
+	projectID := session.disk.ProjectID
+	if !validUUID(projectID) {
+		var err error
+		projectID, err = rt.harnessProjectCtx(ctx, o.Project)
+		if err != nil || !validUUID(projectID) {
+			return
+		}
+	}
+	var status struct {
+		ID           string  `json:"id"`
+		TicketNodeID *string `json:"ticket_node_id"`
+	}
+	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); err != nil {
+		return
+	}
+	if status.ID != "" && !strings.EqualFold(status.ID, session.id) {
+		return
+	}
+	if status.TicketNodeID == nil || !validUUID(*status.TicketNodeID) {
+		return
+	}
+	var node apiNode
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/nodes/"+url.PathEscape(*status.TicketNodeID), nil, &node); err != nil {
+		return
+	}
+	if !strings.EqualFold(node.ID, *status.TicketNodeID) {
+		return
+	}
+	key := heartbeatText(node.Key, 200)
+	if key == "" {
+		return
+	}
+	session.disk.BoundTicket = key
+	if err := saveHeartbeatSession(session); err != nil {
+		fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
+	}
 }
 
 func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartbeatDisk) {
@@ -962,7 +1121,8 @@ func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartb
 		return
 	}
 	disk.BoundWorktree = filepath.Clean(o.Worktree)
-	disk.StartedUnix = time.Now().Unix()
+	disk.RegisteredAt = time.Now().UTC()
+	disk.StartedUnix = disk.RegisteredAt.Unix()
 	if head, err := gitHEAD(ctx, o.Worktree); err == nil {
 		disk.StartRev = head
 		disk.CommitCursor = head
@@ -1012,26 +1172,63 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			delete(body, "display_label")
 		}
 	}
-	putText(body, "model", heartbeatText(o.Model, 128), true)
-	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
-	if session.disk.RequestedModel != "" && o.Model == session.disk.ModelFlagAtRequest && o.Effort == session.disk.EffortFlagAtRequest {
-		body["model"] = session.disk.RequestedModel
-		body["reasoning_effort"] = session.disk.RequestedEffort
-	} else {
-		session.disk.RequestedModel = ""
-		session.disk.RequestedEffort = ""
-	}
+	modelUpdate := putHeartbeatModel(ctx, o, session, body)
 
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
+	status, statusOK := readAgentStatus(o)
+	now := time.Now().UTC()
+	if !statusOK {
+		rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "status_file_unavailable", Hint: "Status file is missing, malformed or refused; keep pct (0–100) and remaining_min (0–524160) current in --status-file."}}, &session.disk.WarningAt, now)
+	}
+	if !status.ModifiedAt.IsZero() && now.Sub(status.ModifiedAt) > heartbeatProgressStale {
+		rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "stale_progress", Hint: "Status file has not been updated for over 30 minutes; refresh pct, remaining_min and note."}}, &session.disk.WarningAt, now)
+	}
+	// Registration persists the ticket. A restarted helper for that same
+	// generation often has an empty --ticket flag and would otherwise drop
+	// progress_pct and eta_ready_at, leaving the server on missing_progress
+	// and missing_eta. An explicit flag still wins.
+	ticket := strings.TrimSpace(o.Ticket)
+	if ticket == "" && session != nil {
+		ticket = strings.TrimSpace(session.disk.BoundTicket)
+	}
+	if o.Role == "worker" && ticket != "" {
+		if status.Progress != nil {
+			body["progress_pct"] = *status.Progress
+		}
+		if status.Remaining != nil {
+			ready := status.ModifiedAt.Add(time.Duration(*status.Remaining * float64(time.Minute)))
+			// Keep a margin inside the server window for client/server clock skew.
+			if !ready.Before(now.Add(-eta.MaxPast+eta.ClockSkew)) && !ready.After(now.Add(eta.MaxFuture-eta.ClockSkew)) {
+				body["eta_ready_at"] = ready.Format(time.RFC3339Nano)
+			}
+		}
+	}
 	note := heartbeatNote(o.Note)
 	if note == "" {
-		note = agentStatusNote(o.Worktree)
+		note = status.Note
 	}
-	if note != "" {
+	if note != "" && (session.disk.ActivityMode == "" || session.disk.ActivityMode == agentactivity.Summary) {
 		body["activity_note"] = note
+	}
+	if session.disk.ActivityMode != agentactivity.Off {
+		if raw, err := session.hold.readFile("activity.json", 512); err == nil {
+			var observed hookActivity
+			if json.Unmarshal(raw, &observed) == nil && observed.Session == session.id && observed.Activity.Source == "auto" && agentactivity.ValidAuto(observed.Activity.Text) && !observed.Activity.At.After(now) && now.Sub(observed.Activity.At) < agentactivity.Fresh {
+				body["tool_activity"] = observed.Activity
+			}
+		}
+	}
+	if session.disk.ActivityMode == agentactivity.Summary {
+		doing, at := status.Doing, status.ModifiedAt
+		if o.Doing != "" {
+			doing, at = o.Doing, session.disk.RegisteredAt
+		}
+		if doing != "" && !at.IsZero() && !at.After(now) && now.Sub(at) < agentactivity.Fresh {
+			body["doing"], body["doing_at"] = doing, at
+		}
 	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
@@ -1042,7 +1239,26 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		body["commits"] = items
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
-	err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, new(any))
+	var response struct {
+		Mode     string                    `json:"agent_activity_mode"`
+		Warnings []harness.EstimateWarning `json:"warnings"`
+		Pause    *harness.Pause            `json:"pause"`
+	}
+	postBeat := func() error {
+		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
+		// A ticket can be unbound while this helper retains its original flags.
+		// Optional status-file estimates must never prevent a liveness report.
+		if heartbeatStatus(err) == http.StatusBadRequest && (body["progress_pct"] != nil || body["eta_ready_at"] != nil) {
+			delete(body, "progress_pct")
+			delete(body, "eta_ready_at")
+			rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "status_file_unavailable", Hint: "Status-file progress or ETA was rejected; continuing the heartbeat without those fields."}}, &session.disk.WarningAt, time.Now())
+			response.Warnings = nil
+			err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
+		}
+		return err
+	}
+	beatStarted := time.Now()
+	err = postBeat()
 	if heartbeatTerminalStatus(err) {
 		session.disk.Sequence--
 		markHeartbeatTerminal(session, terminalReason(err))
@@ -1056,7 +1272,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
 			session.disk.Sequence = status.ActivitySequence + 1
 			body["activity_sequence"] = session.disk.Sequence
-			err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, new(any))
+			err = postBeat()
 		}
 	}
 	if heartbeatTerminalStatus(err) {
@@ -1069,14 +1285,31 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		session.disk.Sequence--
 		return err
 	}
+	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
+		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
+		if err := dep.stopOwned(ctx, response.Pause, deadline); err != nil {
+			return err
+		}
+	}
+	session.pauseWakeAt = time.Time{}
+	if response.Pause != nil && response.Pause.WakeInMS > 0 && response.Pause.WakeInMS <= 86400000 {
+		session.pauseWakeAt = beatStarted.Add(time.Duration(response.Pause.WakeInMS) * time.Millisecond)
+	}
+	if agentactivity.Mode(response.Mode) {
+		session.disk.ActivityMode = response.Mode
+		payload, _ := json.Marshal(map[string]string{"session_id": session.id, "mode": response.Mode})
+		_ = session.hold.writeFile("activity-mode.json", payload)
+	}
 	if label, ok := body["display_label"].(string); ok {
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
 	}
+	acceptHeartbeatModel(session, body, modelUpdate)
+	rt.printEstimateWarnings(response.Warnings, &session.disk.WarningAt, time.Now())
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
 	}
-	if heartbeatUsageDue(o) {
+	if heartbeatUsageDue(o, session) {
 		if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -1098,6 +1331,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	} else if reported {
 		session.disk.CapacityStarted = true
 	}
+	rt.printHeartbeatPause(session.id, response.Pause, o.PrintControls)
 	if o.PrintControls {
 		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
 	}
@@ -1126,14 +1360,15 @@ func explainClosedHeartbeat(rt *runtime, session *heartbeatSession) {
 	fmt.Fprintf(rt.stderr, "heartbeat: session %s is %s and will not resume\n", session.id, reason)
 }
 
-func heartbeatStopIntent(raw []byte) (id string, strict bool, attempts, code int) {
+func heartbeatStopIntent(raw []byte) (id string, strict bool, attempts, code int, reason string) {
 	line, rest, _ := strings.Cut(string(raw), "\n")
 	id = strings.ToLower(strings.TrimSpace(line))
 	next, rest, _ := strings.Cut(rest, "\n")
 	strict = strings.TrimSpace(next) == "strict"
 	attemptLine, rest, _ := strings.Cut(rest, "\n")
-	codeLine, _, _ := strings.Cut(rest, "\n")
-	return id, strict, heartbeatAttemptCount(attemptLine), heartbeatAttemptCount(codeLine)
+	codeLine, rest, _ := strings.Cut(rest, "\n")
+	reasonLine, _, _ := strings.Cut(rest, "\n")
+	return id, strict, heartbeatAttemptCount(attemptLine), heartbeatAttemptCount(codeLine), persistedStopReason(reasonLine)
 }
 
 func heartbeatAttemptCount(raw string) int {
@@ -1189,6 +1424,7 @@ func (rt *runtime) rejectDeadOwner(o heartbeatOptions, session *heartbeatSession
 	if err != nil {
 		rememberStopIntent(session, true, 1, heartbeatStatus(err))
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return err
 	}
 	if err := persistStopSuccess(session); err != nil {
@@ -1217,7 +1453,11 @@ func (rt *runtime) stopHeartbeatMode(ctx context.Context, project string, sessio
 			return err
 		}
 	}
-	err := rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": "stopped"}, new(any))
+	reason := session.stopReason
+	if reason == "" {
+		reason = "stopped"
+	}
+	err := rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": reason}, new(any))
 	if err == nil || heartbeatStatus(err) == http.StatusGone {
 		return nil
 	}
@@ -1335,6 +1575,7 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 			}
 			session.disk.RequestedModel, session.disk.RequestedEffort = model, effort
 			session.disk.ModelFlagAtRequest, session.disk.EffortFlagAtRequest = o.Model, o.Effort
+			session.disk.RequestedModelBaseline = captureHeartbeatModelBaseline(ctx, o, session)
 		}
 	}
 }
@@ -1510,7 +1751,7 @@ func heartbeatText(raw string, max int) string {
 
 func heartbeatNote(raw string) string {
 	clean := heartbeatText(raw, 1<<20)
-	if clean == "" {
+	if clean == "" || !agentactivity.SafeText(clean) {
 		return ""
 	}
 	if utf8.RuneCountInString(clean) <= heartbeatNoteMax {
@@ -1519,31 +1760,66 @@ func heartbeatNote(raw string) string {
 	return string([]rune(clean)[:heartbeatNoteMax])
 }
 
-func agentStatusNote(worktree string) string {
-	if strings.TrimSpace(worktree) == "" {
-		return ""
+type agentStatus struct {
+	Doing      string
+	Note       string
+	Progress   *int
+	Remaining  *float64
+	ModifiedAt time.Time
+}
+
+func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
+	path, kind := o.StatusFile, harnessExplicitStatus
+	if path == "" {
+		if o.Role != "worker" || strings.TrimSpace(o.Worktree) == "" {
+			return agentStatus{}, true
+		}
+		path, kind = filepath.Join(o.Worktree, ".agent-status.json"), harnessAgentStatus
 	}
-	path := filepath.Join(worktree, ".agent-status.json")
-	f, err := openHarnessFile(harnessAgentStatus, path)
+	f, err := openHarnessFile(kind, path)
 	if err != nil {
-		return ""
+		return agentStatus{}, false
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil || st.Size() > 65536 {
-		return ""
+		return agentStatus{}, false
 	}
 	raw := make([]byte, st.Size())
 	if _, err := io.ReadFull(f, raw); err != nil {
-		return ""
+		return agentStatus{}, false
 	}
 	var doc struct {
-		Note string `json:"note"`
+		Note      string          `json:"note"`
+		Doing     string          `json:"doing"`
+		Pct       json.RawMessage `json:"pct"`
+		Remaining json.RawMessage `json:"remaining_min"`
 	}
-	if json.Unmarshal(raw, &doc) != nil {
-		return ""
+	if json.Unmarshal(raw, &doc) != nil || string(bytesTrim(raw)) == "null" {
+		return agentStatus{}, false
 	}
-	return heartbeatNote(doc.Note)
+	status := agentStatus{Note: heartbeatNote(doc.Note), ModifiedAt: st.ModTime().UTC()}
+	if text, valid := agentactivity.CleanSummary(doc.Doing); valid {
+		status.Doing = text
+	}
+	valid := true
+	if len(doc.Pct) > 0 && string(doc.Pct) != "null" {
+		var n int
+		if json.Unmarshal(doc.Pct, &n) != nil || n < 0 || n > 100 {
+			valid = false
+		} else {
+			status.Progress = &n
+		}
+	}
+	if len(doc.Remaining) > 0 && string(doc.Remaining) != "null" {
+		var minutes float64
+		if json.Unmarshal(doc.Remaining, &minutes) != nil || math.IsNaN(minutes) || math.IsInf(minutes, 0) || minutes < 0 || minutes > heartbeatRemainingMax {
+			valid = false
+		} else {
+			status.Remaining = &minutes
+		}
+	}
+	return status, valid
 }
 
 func heartbeatStatus(err error) int {

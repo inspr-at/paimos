@@ -77,7 +77,7 @@ func (z *zitadel) find(ctx context.Context, email string) (string, error) {
 		return "", nil
 	}
 	user := out.Result[0]
-	if user.UserID == "" || user.Details.ResourceOwner != z.orgID || !strings.EqualFold(user.Human.Email.Email, email) {
+	if user.UserID == "" || user.Details.ResourceOwner != z.orgID || FoldEmailASCII(user.Human.Email.Email) != FoldEmailASCII(email) {
 		return "", errors.New("identity mismatch")
 	}
 	return user.UserID, nil

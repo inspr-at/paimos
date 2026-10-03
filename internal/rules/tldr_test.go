@@ -145,12 +145,12 @@ func isCode(err error, code string) bool {
 }
 
 func TestBudgetBoundsAndLayerCaps(t *testing.T) {
-	for _, b := range []Budget{{MaxBytes: 1999}, {MaxBytes: 64001}, {MaxBytes: 12000, Layers: LayerBytes{Company: 499}}, {MaxBytes: 12000, Layers: LayerBytes{Agent: 12001}}} {
+	for _, b := range []Budget{{MaxBytes: 1999}, {MaxBytes: MaxBudgetBytes + 1}, {MaxBytes: 12000, Layers: LayerBytes{Company: 499}}, {MaxBytes: 12000, Layers: LayerBytes{Agent: 12001}}} {
 		if err := b.Validate(); !isCode(err, "invalid_budget") {
 			t.Fatalf("%+v: %v", b, err)
 		}
 	}
-	for _, b := range []Budget{DefaultBudget(), {MaxBytes: 2000}, {MaxBytes: 12000, Layers: LayerBytes{Company: 500, Project: 12000}}} {
+	for _, b := range []Budget{DefaultBudget(), {MaxBytes: 2000}, {MaxBytes: MaxBudgetBytes}, {MaxBytes: 12000, Layers: LayerBytes{Company: 500, Project: 12000}}} {
 		if err := b.Validate(); err != nil {
 			t.Fatalf("%+v: %v", b, err)
 		}
@@ -179,7 +179,7 @@ func TestBudgetBoundsAndLayerCaps(t *testing.T) {
 	if !errors.As(err, &e) || e.Layer != "" || e.ActualBytes != m.ByteSize || e.MaxBytes != m.ByteSize-1 {
 		t.Fatalf("total: %v", err)
 	}
-	// The default stays 12,000 bytes while upgraded clients support 64,000.
+	// The default stays 12,000 bytes while upgraded clients accept 512,000.
 	big := []Snapshot{floorSnapshot(), testSnapshot("p", Scope{Layer: "project", ProjectID: testProject}, bulky("proj", 40)...)}
 	if _, err = Merge(testContext(), big, now); !isCode(err, "rules_budget_exceeded") {
 		t.Fatalf("default budget: %v", err)
@@ -358,7 +358,7 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	company := w.floor(admin)
 	var view BudgetView
 	json.Unmarshal(w.call(member, "GET", "/api/rules/budget", nil, 200), &view)
-	if view.MaxBytes != LegacyMaxBytes || view.DefaultBytes != LegacyMaxBytes || view.MinBytes != MinBudgetBytes || view.CeilingBytes != LegacyMaxBytes || view.Layers != (LayerBytes{}) {
+	if view.MaxBytes != LegacyMaxBytes || view.DefaultBytes != LegacyMaxBytes || view.MinBytes != MinBudgetBytes || view.CeilingBytes != MaxBudgetBytes || view.Layers != (LayerBytes{}) {
 		t.Fatalf("default: %+v", view)
 	}
 	w.call(member, "PUT", "/api/rules/budget", Budget{MaxBytes: 8000}, 403)
@@ -368,14 +368,14 @@ func TestWorkspaceBudgetSetting(t *testing.T) {
 	w.call(agent, "PUT", "/api/rules/budget", Budget{MaxBytes: 8000}, 403)
 	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 1000}, 400)
 	// The product ceiling remains bounded even after compatible clients report.
-	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBytes + 1}, 400)
+	w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: MaxBudgetBytes + 1}, 400)
 	w.call(admin, "PUT", "/api/rules/budget", map[string]any{"max_bytes": 12000, "layer_max_bytes": map[string]int{"robots": 600}}, 400)
 
 	// A smaller budget refuses a file the default would serve.
 	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
 	mid := w.set(admin, project, "Mid", bulky("mid", 12)...)
 	json.Unmarshal(w.call(admin, "PUT", "/api/rules/budget", Budget{MaxBytes: 5000}, 200), &view)
-	if view.MaxBytes != 5000 || view.CeilingBytes != LegacyMaxBytes {
+	if view.MaxBytes != 5000 || view.CeilingBytes != MaxBudgetBytes {
 		t.Fatalf("saved: %+v", view)
 	}
 	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(mid, "auto")), 422)

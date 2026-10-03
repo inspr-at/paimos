@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/hookcap"
@@ -67,7 +68,19 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if err = tx.QueryRow(ctx, `SELECT selected_account_keys FROM agent_pairing_requests WHERE id=$1`, rec.ID).Scan(&selected); err != nil {
 				return err
 			}
-			if rec.Mode == nil || *rec.Mode != in.Verification || !slices.Equal(selected, in.Selected) {
+			if rec.Mode != nil && *rec.Mode == "one_per_harness" && in.Verification == "connect_only" && slices.Equal(selected, in.Selected) {
+				// A person may withdraw pending verification, never replenish it.
+				if err = supersedeVerifications(ctx, tx, *rec.ComputerID, ""); err != nil {
+					return err
+				}
+				if _, err = tx.Exec(ctx, `UPDATE agent_pairing_requests SET verification='connect_only' WHERE id=$1`, rec.ID); err != nil {
+					return err
+				}
+				rec.Mode = &in.Verification
+				if err = audit(ctx, tx, p, "agent_pairing.verification_withdrawn", map[string]any{"request_id": rec.ID}); err != nil {
+					return err
+				}
+			} else if rec.Mode == nil || *rec.Mode != in.Verification || !slices.Equal(selected, in.Selected) {
 				return fail(409, "conflict", "approval is immutable")
 			}
 			out, err = view(ctx, tx, rec, false)
@@ -148,7 +161,15 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if err = tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`, p.TenantID, principal, rec.Details.ComputerName, prefix, rec.RuntimeHash, RuntimePermissions, p.ID).Scan(&key); err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,$2,$2,$3,$4,$5,$6)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$2,$3,$4,$5,$6,$7)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash, rec.Details.LocalAuthPublicKey); err != nil {
+				return err
+			}
+			if err = retireReplaced(ctx, tx, p, rec.Details, principal); err != nil {
+				return err
+			}
+		}
+		if rec.Details.ExistingComputerID != "" {
+			if err = supersedeVerifications(ctx, tx, computer, rec.ID); err != nil {
 				return err
 			}
 		}
@@ -165,6 +186,11 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			var account string
 			if err = tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,host_label,allowed_model_profile_ids) VALUES($1,$2,$3,$4,$5,$6,1,$7,ARRAY[$8::uuid]) RETURNING id::text`, p.TenantID, a.AccountKey, a.Harness, daemon, principal, a.Label, rec.Details.ComputerName, a.ProfileID).Scan(&account); err != nil {
 				return err
+			}
+			if a.Harness == "pi" {
+				if _, err = tx.Exec(ctx, `UPDATE agent_accounts a SET provider=split_part(p.model,'/',1), model=substring(p.model from position('/' in p.model)+1), model_data_note=(p.model LIKE 'openrouter/stealth/%' OR p.model LIKE '%:free') FROM model_profiles p WHERE a.id=$1 AND p.id=$2 AND p.tenant_id=a.tenant_id AND position('/' in p.model)>1`, account, a.ProfileID); err != nil {
+					return err
+				}
 			}
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, account, computer, rec.ID, a.ProfileID, rec.VerificationExpiresAt); err != nil {
 				return err
@@ -196,6 +222,47 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		return
 	}
 	reply(w, out)
+}
+
+// retireReplaced deactivates the runtime identities a fresh pairing replaces, so
+// re-pairing a laptop leaves one identity behind, not one more each time. A
+// computer counts as replaced only when the same person who approved it approves
+// its successor, the machine describes itself the same way (name, platform,
+// architecture), and no pinned local-auth key contradicts it; the old computer
+// must also be revoked and its identity still active. A name alone proves
+// nothing: two people may each call their laptop "Laptop". A computer that is
+// still connected is never touched.
+func retireReplaced(ctx context.Context, tx pgx.Tx, p tenant.Principal, d Details, replacedBy string) error {
+	rows, err := tx.Query(ctx, `SELECT pr.id::text FROM agent_pairing_computers c
+		JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+		JOIN principals pr ON pr.tenant_id=c.tenant_id AND pr.id=c.principal_id
+		WHERE c.tenant_id=$1 AND c.state='revoked' AND pr.kind='agent' AND pr.status='active' AND pr.name=$2 AND pr.id<>$3
+		  AND q.approved_by=$4 AND q.details->>'platform'=$5 AND q.details->>'arch'=$6
+		  AND (c.local_auth_public_key='' OR $7='' OR c.local_auth_public_key=$7)
+		ORDER BY c.created_at,c.id FOR UPDATE OF pr`, p.TenantID, d.ComputerName, replacedBy, p.ID, d.Platform, d.Arch, d.LocalAuthPublicKey)
+	if err != nil {
+		return err
+	}
+	var old []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		old = append(old, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range old {
+		if _, err = authz.RetireAgentTx(ctx, tx, p, id, map[string]any{"replaced_by": replacedBy}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func verificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer, principal, account string, a Choice, expires time.Time) error {
 	var project *string
@@ -294,7 +361,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	if err := ExpireUnclaimedVerifications(ctx, tx); err != nil {
 		return View{}, err
 	}
-	v := View{RequestID: rec.ID, TenantID: rec.TenantID, State: rec.State, Digest: rec.Digest, ExpiresAt: rec.ExpiresAt, ComputerName: rec.Details.ComputerName, Platform: rec.Details.Platform, Arch: rec.Details.Arch, Workspace: rec.Details.Workspace, Capabilities: rec.Details.Capabilities, Requested: rec.Details.Accounts, ComputerID: rec.ComputerID, Cleanup: "pending", Processes: "unconfirmed", Enrollments: []Enrollment{}, Verification: Verification{"read_only", rec.Mode, 1, 1, VerificationSeconds, 1, "requests", rec.VerificationExpiresAt, VerificationTask}}
+	v := View{AgentCompatibility: agentcompat.Result{Status: "unknown"}, RequestID: rec.ID, TenantID: rec.TenantID, State: rec.State, Digest: rec.Digest, ExpiresAt: rec.ExpiresAt, ComputerName: rec.Details.ComputerName, Platform: rec.Details.Platform, Arch: rec.Details.Arch, Workspace: rec.Details.Workspace, Capabilities: rec.Details.Capabilities, Requested: rec.Details.Accounts, ComputerID: rec.ComputerID, Cleanup: "pending", Processes: "unconfirmed", Enrollments: []Enrollment{}, Verification: Verification{"read_only", rec.Mode, 1, 1, VerificationSeconds, 1, "requests", rec.VerificationExpiresAt, VerificationTask}}
 	if err := tx.QueryRow(ctx, `SELECT name FROM tenants WHERE id=$1`, rec.TenantID).Scan(&v.TenantName); err != nil {
 		return v, err
 	}
@@ -317,11 +384,12 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 		v.HookCapabilities[i] = hookcap.Project(c)
 	}
 	var keyPrefix string
-	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.last_seen_at,
- CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.LastSeenAt, &v.Connectivity)
+	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at,c.agent_protocol,c.agent_version,c.agent_version_scheme,c.local_auth_public_key<>'' FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt, &v.AgentRelease.Protocol, &v.AgentRelease.Version, &v.AgentRelease.VersionScheme, &v.LocalAuthPinned)
 	if err != nil {
 		return v, err
 	}
+	v.AgentCompatibility = agentcompat.Supported().Check(v.AgentRelease)
 	if *v.ComputerState == "revoked" {
 		v.State = "revoked"
 	} else if prefix && *v.ComputerState == "connected" {
@@ -330,7 +398,8 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	rows, err := tx.Query(ctx, `SELECT e.account_id::text,a.account_key,a.harness,a.label,e.model_profile_id::text,e.state,e.local_cleanup,e.verification_run_id::text,
   ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting') ORDER BY r.id),
  CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expired_at IS NOT NULL THEN 'expired' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
- coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),'')
+ coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),''),
+ coalesce((SELECT verification_unavailable_reason FROM agent_runs WHERE id=e.verification_run_id),'')
   FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 ORDER BY a.created_at,a.id`, *rec.ComputerID)
 	if err != nil {
 		return v, err
@@ -338,8 +407,11 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	defer rows.Close()
 	for rows.Next() {
 		var e Enrollment
-		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError); err != nil {
+		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError, &e.VerificationReason); err != nil {
 			return v, err
+		}
+		if e.VerificationReason != "" {
+			e.VerificationError = "verification_unavailable"
 		}
 		if e.VerificationState == "queued" && !v.VerificationCapabilities[e.Harness].Supported {
 			e.VerificationState = "unavailable"
@@ -361,7 +433,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 func (m *Module) list(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	out := []View{}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers ORDER BY created_at DESC,id LIMIT 100`)
+		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers WHERE archived_at IS NULL ORDER BY created_at DESC,id LIMIT 100`)
 		if err != nil {
 			return err
 		}

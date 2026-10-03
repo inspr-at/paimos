@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
+import { useDeveloperSettings } from '../../lib/developerSettings'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 
 type Key = string | { icon: IconName; label: string }
+const { showFlowControls } = useDeveloperSettings()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // Symbol keys are drawn, never typed: Command and Option on a Mac, words elsewhere.
 const MOD: Key = mac ? { icon: 'command', label: 'Command' } : 'Ctrl'
@@ -17,6 +19,10 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['g'], ['a']], joiner: 'then', label: 'Go to Agents' },
     { keys: [['g'], ['b']], joiner: 'then', label: 'Go to Business' },
     { keys: [['?']], label: 'This sheet' },
+  ] },
+  { title: 'Work queue', rows: [
+    { keys: [['q']], label: 'Queue or remove the focused ticket; queue a selection' },
+    { keys: [[ALT, { icon: 'arrow-up', label: 'Up arrow' }], [ALT, { icon: 'arrow-down', label: 'Down arrow' }]], label: 'In the Queue view: move the ticket up or down' },
   ] },
   { title: 'Projects', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous project' },
@@ -56,7 +62,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the release' },
     { keys: [['c']], label: 'Compare two releases' },
     { keys: [['e']], label: 'Show or hide the evidence' },
-    { keys: [['/']], label: 'Search headlines, changes and ticket keys' },
+    { keys: [['/']], label: 'Search names, changes and ticket keys' },
   ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
@@ -64,6 +70,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[{ icon: 'enter', label: 'Enter' }], ['o']], label: 'Open the ticket in the side panel' },
     { keys: [['Esc']], label: 'Close the side panel' },
     { keys: [['/']], label: 'Search this list' },
+    { keys: [['u']], label: 'Show updates made elsewhere' },
     { keys: [[{ icon: 'shift', label: 'Shift' }, 'F']], label: 'Filter by labels, epic, cost unit, release or date' },
     { keys: [['-']], label: 'In a filter menu: exclude the value' },
   ] },
@@ -114,6 +121,7 @@ const dialog = ref<HTMLDialogElement>()
 const closeButton = ref<HTMLButtonElement>()
 let opener: HTMLElement | null = null
 async function open() {
+  if (dialog.value?.open) return
   opener = document.activeElement as HTMLElement
   dialog.value?.showModal()
   await nextTick()
@@ -131,7 +139,7 @@ defineExpose({ open, close })
         <h2 id="shortcuts-title">Keyboard shortcuts</h2>
         <button ref="closeButton" type="button" class="icon-btn sm" aria-label="Close shortcuts" @click="close"><AppIcon name="close" :size="14" /></button>
       </header>
-      <section v-for="section in sections" :key="section.title">
+      <section v-for="section in sections.filter(section => section.title !== 'Journey' || showFlowControls)" :key="section.title">
         <p class="eyebrow">{{ section.title }}</p>
         <dl>
           <div v-for="row in section.rows" :key="row.label" class="row">

@@ -3,21 +3,24 @@
 // Package dbtest gives each test a private Postgres database.
 //
 // AEON_TEST_DATABASE_URL is a maintenance database on a server where that user
-// can CREATE DATABASE (the CI service user is a superuser). Open bootstraps
-// pgvector as that user, applies migrations as a NOSUPERUSER NOBYPASSRLS app
-// role, and returns both pools. It drops the database and role on cleanup. Tests
-// run in parallel against one Postgres without sharing tables.
+// can CREATE DATABASE (the CI service user is a superuser). Open clones a
+// connection-free template migrated once per test binary as a NOSUPERUSER
+// NOBYPASSRLS role, then transfers its schema to a fresh restricted app role.
+// It drops the database and role on cleanup; the template is dropped when the
+// binary exits. Tests run in parallel without sharing tables or app roles.
 package dbtest
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,7 +52,10 @@ type DB struct {
 	err   error
 }
 
-// Open creates a database for t and drops it when t finishes.
+var cleanupFailures atomic.Uint64
+
+// Open creates a database for t and drops it when t finishes. Cleanup failures
+// fail local tests; CI logs and counts them because its Postgres is disposable.
 func Open(t testing.TB) *DB {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -59,11 +65,24 @@ func Open(t testing.TB) *DB {
 		t.Fatalf("dbtest: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := opened.Close(); err != nil {
-			t.Errorf("dbtest cleanup: %v", err)
-		}
+		reportCleanup(t, opened.Close())
 	})
 	return opened
+}
+
+func reportCleanup(t interface {
+	Logf(string, ...any)
+	Errorf(string, ...any)
+}, err error) {
+	if err == nil {
+		return
+	}
+	n := cleanupFailures.Add(1)
+	if os.Getenv("CI") != "" {
+		t.Logf("dbtest cleanup (failure %d): %v", n, err)
+	} else {
+		t.Errorf("dbtest cleanup (failure %d): %v", n, err)
+	}
 }
 
 // Seed marks ctx as a test fixture writer. Project row-level security shows a
@@ -138,6 +157,13 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
+	var template *DB
+	if migrate {
+		template, err = migratedTemplate(ctx, maint)
+		if err != nil {
+			return nil, err
+		}
+	}
 	d := &DB{maint: maint}
 	defer func() {
 		if err != nil {
@@ -153,7 +179,11 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect maintenance database: %w", err)
 	}
-	if _, err = conn.Exec(ctx, `CREATE DATABASE `+quoteIdent(d.Name)); err != nil {
+	stmt := `CREATE DATABASE ` + quoteIdent(d.Name)
+	if template != nil {
+		stmt += ` TEMPLATE ` + quoteIdent(template.Name)
+	}
+	if _, err = conn.Exec(ctx, stmt); err != nil {
 		_ = conn.Close(ctx)
 		return nil, fmt.Errorf("create database %s: %w", d.Name, err)
 	}
@@ -169,8 +199,10 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err = d.Admin.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("ping maintenance role: %w", err)
 	}
-	if _, err = d.Admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
-		return nil, fmt.Errorf("bootstrap vector extension: %w", err)
+	if template == nil {
+		if _, err = d.Admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+			return nil, fmt.Errorf("bootstrap vector extension: %w", err)
+		}
 	}
 
 	password := randomIdent("")
@@ -180,15 +212,21 @@ func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	if err = grantApp(ctx, d.Admin, d.Name, d.Role); err != nil {
 		return nil, err
 	}
+	if template != nil {
+		// Transfer tables, sequences, types and SECURITY DEFINER functions,
+		// including their owner ACLs. Extension objects keep their bootstrap
+		// owner. REASSIGN leaves the template role's explicit schema grant,
+		// so revoke that copied grant without touching the template itself.
+		if _, err = d.Admin.Exec(ctx, `REASSIGN OWNED BY `+quoteIdent(template.Role)+` TO `+quoteIdent(d.Role)+
+			`; REVOKE ALL ON SCHEMA public FROM `+quoteIdent(template.Role)); err != nil {
+			return nil, fmt.Errorf("assign cloned schema to %s: %w", d.Role, err)
+		}
+	}
 	app := *base
 	app.Path = "/" + d.Name
 	app.User = url.UserPassword(d.Role, password)
 	d.AppURL = app.String()
-	if migrate {
-		d.App, err = db.Open(ctx, d.AppURL)
-	} else {
-		d.App, err = openApp(ctx, base, d.Name, d.Role, password)
-	}
+	d.App, err = openApp(ctx, base, d.Name, d.Role, password, migrate)
 	if err != nil {
 		return nil, err
 	}
@@ -217,37 +255,49 @@ func (d *DB) close() error {
 	if d.maint == "" || d.Name == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	conn, err := pgx.Connect(ctx, d.maint)
-	if err != nil {
-		return fmt.Errorf("reconnect to drop %s: %w", d.Name, err)
-	}
-	defer conn.Close(ctx)
+	return d.dropResources(ctx, 10*time.Second, pgx.Connect)
+}
 
-	var dropDB error
-	for attempt := 0; attempt < 8; attempt++ {
-		_, _ = conn.Exec(ctx, `
-			SELECT pg_terminate_backend(pid)
-			FROM pg_stat_activity
-			WHERE datname = $1 AND pid <> pg_backend_pid()`, d.Name)
-		_, dropDB = conn.Exec(ctx, `DROP DATABASE IF EXISTS `+quoteIdent(d.Name))
-		if dropDB == nil {
-			break
+// Use a new maintenance connection on every attempt: pgx may close it when a
+// command times out. IF EXISTS also handles a drop that completed on the server
+// just as its client deadline expired. Retry both resources, in dependency order,
+// within an overall budget shared by normal cleanup and the template watcher.
+func (d *DB) dropResources(ctx context.Context, attemptTimeout time.Duration,
+	connect func(context.Context, string) (*pgx.Conn, error),
+) error {
+	var last error
+	for ctx.Err() == nil {
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		last = func() error {
+			conn, err := connect(attemptCtx, d.maint)
+			if err != nil {
+				return fmt.Errorf("reconnect to drop %s: %w", d.Name, err)
+			}
+			defer conn.Close(attemptCtx)
+			if _, err := conn.Exec(attemptCtx, `DROP DATABASE IF EXISTS `+quoteIdent(d.Name)+` WITH (FORCE)`); err != nil {
+				return fmt.Errorf("drop database %s: %w", d.Name, err)
+			}
+			if d.Role != "" {
+				if _, err := conn.Exec(attemptCtx, `DROP ROLE IF EXISTS `+quoteIdent(d.Role)); err != nil {
+					return fmt.Errorf("drop role %s: %w", d.Role, err)
+				}
+			}
+			return nil
+		}()
+		cancel()
+		if last == nil {
+			return nil
 		}
-		time.Sleep(time.Duration(attempt+1) * 40 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
-	var dropRole error
-	if d.Role != "" {
-		_, dropRole = conn.Exec(ctx, `DROP ROLE IF EXISTS `+quoteIdent(d.Role))
-	}
-	if dropDB != nil {
-		return fmt.Errorf("drop database %s: %w", d.Name, dropDB)
-	}
-	if dropRole != nil {
-		return fmt.Errorf("drop role %s: %w", d.Role, dropRole)
-	}
-	return nil
+	return fmt.Errorf("cleanup %s exhausted budget: %w", d.Name, errors.Join(ctx.Err(), last))
 }
 
 func maintenanceURL() (*url.URL, string, error) {
@@ -275,7 +325,7 @@ func adminURL(base *url.URL, dbName string) string {
 	return u.String()
 }
 
-func openApp(ctx context.Context, base *url.URL, dbName, role, password string) (*pgxpool.Pool, error) {
+func openApp(ctx context.Context, base *url.URL, dbName, role, password string, migrated bool) (*pgxpool.Pool, error) {
 	u := *base
 	u.Path = "/" + dbName
 	u.User = url.UserPassword(role, password)
@@ -288,7 +338,9 @@ func openApp(ctx context.Context, base *url.URL, dbName, role, password string) 
 	if _, set := cfg.ConnConfig.RuntimeParams["jit"]; !set && !strings.Contains(cfg.ConnConfig.RuntimeParams["options"], "jit") {
 		cfg.ConnConfig.RuntimeParams["jit"] = "off"
 	}
-	cfg.MaxConns = 4
+	if !migrated {
+		cfg.MaxConns = 4
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect app role: %w", err)

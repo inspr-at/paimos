@@ -4,6 +4,7 @@ package agentaccounts
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -13,13 +14,15 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Module serves /api/agent-accounts.
 type Module struct {
-	pool    *pgxpool.Pool
-	preview *previewGuard
+	pool       *pgxpool.Pool
+	preview    *previewGuard
+	openRouter openrouter.Catalog
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -33,26 +36,63 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers account, allowance and routing routes.
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/agent-accounts", m.list)
-	mux.HandleFunc("GET /api/agent-accounts/catalog", m.catalog)
-	mux.HandleFunc("GET /api/agent-accounts/capacity", m.capacityList)
-	mux.HandleFunc("POST /api/agent-accounts/{accountId}/capacity/approve", m.approveCapacity)
-	mux.HandleFunc("POST /api/agent-accounts/capacity/preview", m.capacityPreview)
-	mux.HandleFunc("GET /api/agent-accounts/capacity/schedule", m.capacitySchedule)
-	mux.HandleFunc("PUT /api/agent-accounts/capacity/schedule", m.capacitySchedule)
-	mux.HandleFunc("POST /api/agent-accounts/{accountId}/readings", m.ingestReadings)
-	mux.HandleFunc("GET /api/agent-accounts/{accountId}/readings", m.capacityHistory)
-	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/metadata", m.metadata)
-	mux.HandleFunc("POST /api/agent-accounts", m.register)
-	mux.HandleFunc("POST /api/agent-accounts/route", m.route)
-	mux.HandleFunc("POST /api/agent-accounts/{accountId}/windows", m.createWindow)
-	mux.HandleFunc("PATCH /api/agent-accounts/{accountId}", m.patch)
-	mux.HandleFunc("POST /api/agent-accounts/{accountId}/probe", m.probe)
+	handle := func(pattern string, fn http.HandlerFunc) { mux.HandleFunc(pattern, m.privateResponse(fn)) }
+	handle("GET /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
+	handle("PUT /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
+	handle("GET /api/agent-accounts/readiness", m.readinessList)
+	handle("POST /api/agent-accounts/{accountId}/check", m.check)
+	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
+	handle("PUT /api/agent-accounts/quota-pool", m.quotaPool)
+	handle("PUT /api/agent-accounts/{accountId}/signals", m.signals)
+	handle("GET /api/agent-accounts/{accountId}/statusline", m.statusline)
+	handle("PUT /api/agent-accounts/{accountId}/statusline", m.statusline)
+	handle("POST /api/agent-accounts/{accountId}/quota-key", m.quotaKey)
+	handle("GET /api/agent-accounts", m.list)
+	handle("GET /api/agent-accounts/catalog", m.catalog)
+	handle("GET /api/agent-accounts/groups", m.groups)
+	handle("POST /api/agent-accounts/groups", m.groups)
+	handle("PATCH /api/agent-accounts/groups/{id}", m.group)
+	handle("DELETE /api/agent-accounts/groups/{id}", m.group)
+	handle("GET /api/agent-accounts/pins", m.pins)
+	handle("PUT /api/agent-accounts/pins", m.pins)
+	handle("DELETE /api/agent-accounts/pins", m.pins)
+	handle("GET /api/agent-accounts/use", m.use)
+	handle("POST /api/agent-accounts/runs/{runId}/target", m.runTarget)
+	handle("GET /api/agent-accounts/capacity", m.capacityList)
+	handle("GET /api/agent-accounts/capacity/next", m.capacityNext)
+	handle("POST /api/agent-accounts/{accountId}/capacity/approve", m.approveCapacity)
+	handle("POST /api/agent-accounts/capacity/preview", m.capacityPreview)
+	handle("GET /api/agent-accounts/capacity/schedule", m.capacitySchedule)
+	handle("PUT /api/agent-accounts/capacity/schedule", m.capacitySchedule)
+	handle("POST /api/agent-accounts/{accountId}/readings", m.ingestReadings)
+	handle("GET /api/agent-accounts/{accountId}/readings", m.capacityHistory)
+	handle("PUT /api/agent-accounts/{accountId}/metadata", m.metadata)
+	handle("PUT /api/agent-accounts/{accountId}/label", m.rename)
+	handle("PUT /api/agent-accounts/{accountId}/model", m.piModel)
+	handle("POST /api/agent-accounts", m.register)
+	handle("POST /api/agent-accounts/route", m.route)
+	handle("POST /api/agent-accounts/{accountId}/windows", m.createWindow)
+	handle("DELETE /api/agent-accounts/{accountId}/windows/{windowId}", m.removeWindow)
+	handle("POST /api/agent-accounts/{accountId}/windows/{windowId}/repeat", m.repeatWindow)
+	handle("PUT /api/agent-accounts/{accountId}/limit", m.putLimit)
+	// A literal /limit here crosses groups/{id} at groups/limit, which Go's
+	// ServeMux rejects. Keep the public URLs; the group route is more specific
+	// than this fallback, whose only supported account resource is limit.
+	handle("DELETE /api/agent-accounts/{accountId}/{resource}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("resource") != "limit" {
+			http.NotFound(w, r)
+			return
+		}
+		m.deleteLimit(w, r)
+	})
+	handle("PATCH /api/agent-accounts/{accountId}", m.patch)
+	handle("POST /api/agent-accounts/{accountId}/archive", m.archive)
+	handle("POST /api/agent-accounts/{accountId}/probe", m.probe)
 }
 
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := agentpairing.Lock(ctx, tx); err != nil {
+		if err := agentpairing.LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -71,7 +111,10 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	var items []Account
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		items, err = listAccounts(r.Context(), tx)
+		items, err = queryAccounts(r.Context(), tx, p.Kind == tenant.Agent)
+		if err == nil && p.Kind == tenant.Person {
+			err = annotateStatuslineOptIn(r.Context(), tx, p, items)
+		}
 		if p.Kind == tenant.Agent {
 			own := []Account{}
 			for _, a := range items {
@@ -80,6 +123,36 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			items = own
+			if r.URL.Query().Get("include_checks") == "true" {
+				if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
+					return err
+				}
+				for i := range items {
+					a := &items[i]
+					if err := agentpairing.AccountFence(r.Context(), tx, a.ID, false); err != nil {
+						var fence *agentpairing.Error
+						if errors.As(err, &fence) {
+							continue
+						}
+						return err
+					}
+					now, err := dbNow(r.Context(), tx)
+					if err != nil {
+						return err
+					}
+					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3 AND daemon_generation IS NOT DISTINCT FROM $4`, a.ID, a.LinkRevision, now.Add(-CheckTTL), a.daemonGeneration))
+					if err != nil && !isNoRows(err) {
+						return err
+					}
+					if err == nil {
+						a.PendingCheck = &c
+					}
+					a.ReadinessResources, err = ReadinessResources(r.Context(), tx, *a)
+					if err != nil {
+						return err
+					}
+				}
+			}
 		}
 		return err
 	})
@@ -174,6 +247,29 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, out)
 }
 
+// archive is Remove on an account row in /agents: person-only.
+func (m *Module) archive(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = archiveAccount(r.Context(), tx, p, r.PathValue("accountId"))
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
 func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permission string) error {
 	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), permission, authz.Scope{}) != nil {
 		return fail(http.StatusForbidden, "permission denied")
@@ -196,13 +292,41 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
-		return err
+	var committed error
+	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
+		scopes, err := keyScopes(r.Context(), tx, r, p)
+		if err != nil {
+			return err
+		}
+		reader := p
+		reader.Scopes = scopes
+		if !hasScope(scopes, "account.probe") && (in.Readiness != nil || !hasScope(scopes, "account.manage")) {
+			return fail(403, "account probe scope required")
+		}
+		// Existing opaque enrollments historically authorize probes by their
+		// live key scope and registering principal. Preserve that protocol;
+		// the additive readiness report also requires current role authority.
+		if in.Readiness != nil {
+			if err := authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}); err != nil {
+				return fail(403, "account probe permission required")
+			}
+		}
+		var reportErr error
+		out, reportErr = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
+		var partial *probeHeartbeatCommitted
+		if errors.As(reportErr, &partial) {
+			committed = partial.error
+			return nil
+		}
+		return reportErr
 	})
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if committed != nil {
+		w.Header().Set("X-Aeon-Write-Committed", "true")
+		writeErr(w, committed)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
@@ -224,13 +348,23 @@ func (m *Module) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out RouteResult
+	var routeErr error
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = reserve(r.Context(), tx, r, p, body.RunID, body.DaemonID, body.AccountIDs, body.EstimatedUnits)
+		var released *routeCommitError
+		if errors.As(err, &released) {
+			routeErr = released.err
+			return nil
+		}
 		return err
 	})
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if routeErr != nil {
+		writeErr(w, routeErr)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)

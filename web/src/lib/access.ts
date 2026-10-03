@@ -2,6 +2,9 @@
 // Access: people, invites, roles, project access, agents and the access audit
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
+import permissionWords from '../../../internal/authz/permission_labels.json' with { type: 'json' }
+import projectSelfPermissions from '../../../internal/authz/project_self_permissions.json' with { type: 'json' }
+import builtinAgentExclusions from '../../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'
@@ -25,7 +28,30 @@ export interface Person {
 export type AgentPreviewReason = 'not_key_creator' | 'key_revoked' | 'key_expired' | 'agent_inactive'
 // Whether this caller may preview the agent's session file. creator_name is sent only to workspace owners and admins.
 export interface AgentPreview { allowed: boolean; reason?: AgentPreviewReason; creator_name?: string }
-export interface Agent { description?: string; project_roles?: ProjectRole[]; principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean; preview?: AgentPreview }
+// status is absent on older servers, which only know active agents; connected_computer marks the
+// runtime identity of a computer that is still paired (it is retired by disconnecting the computer);
+// paired_computer marks any computer's identity, retired ones too: it never takes a key, a computer
+// is connected by pairing it afresh.
+export interface Agent { description?: string; project_roles?: ProjectRole[]; principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean; status?: Status; connected_computer?: boolean; paired_computer?: boolean; preview?: AgentPreview }
+// What deactivating an agent does: the keys go with it, the history stays. A computer's identity takes
+// no key, so reactivating it is followed by pairing the computer afresh.
+export function agentDeactivatePoints(keys: number, pairedComputer = false): string[] {
+  return [
+    keys ? (keys === 1 ? 'Its active key is revoked now; anything using it is refused.' : `Its ${keys} active keys are revoked now; anything using them is refused.`) : 'It has no active key to revoke.',
+    'Its role, project access and history stay.',
+    pairedComputer
+      ? 'You can reactivate it later; a computer takes no key, so you connect it afresh by pairing it.'
+      : 'You can reactivate it later; revoked keys stay revoked, so it needs a new one.',
+  ]
+}
+export const CONNECTED_COMPUTER_REASON = 'A connected computer. Disconnect it on the Agents page first.'
+// Internal service identities always run; everyone else is working or deactivated. A server that
+// predates the status only knows working agents.
+export function splitAgents(agents: Agent[]): { working: Agent[]; deactivated: Agent[]; service: Agent[] } {
+  const service = agents.filter(a => a.service)
+  const rest = agents.filter(a => !a.service)
+  return { working: rest.filter(a => a.status !== 'deactivated'), deactivated: rest.filter(a => a.status === 'deactivated'), service }
+}
 export type InviteStatus = 'pending' | 'expired' | 'revoked' | 'accepted'
 export interface Invite {
   id: string; email: string; workspace_role: RoleRef | null; project_roles: ProjectRole[]; status: InviteStatus
@@ -104,10 +130,11 @@ export const createAgent = (body: { name: string; description?: string; workspac
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
 export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
-export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
-export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[]) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove })
+export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[]; agent_role?: Role | null; role_grantable_scopes?: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
+export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
+export const keyExpiryAfter = (days: number, now = Date.now()) => days === 0 ? null : new Date(Math.floor(now / 1000) * 1000 + days * 86_400_000).toISOString()
 // One confirmed request commits the replacement and revocation together.
-export const rotateAgentKey = (keyId: string, expiresAt: string | null) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt })
+export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
 
 export function keyExpiry(key: Pick<AgentKey, 'expires_at' | 'revoked_at'>, now = Date.now()): { label: string; soon: boolean } {
   if (!key.expires_at) return { label: 'Never', soon: false }
@@ -125,39 +152,70 @@ export const MAX_KEY_SCOPES = 256
 export const keyScopes = (registry: Permission[]) => registry.filter(p => p.agent_grantable)
 // What the coordinating agent uses end to end (internal/cli compat test).
 export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write']
+export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
+export type PresetScopes = string[] | 'all'
+export const KEY_SCOPE_PRESETS: { id: string; label: string; description: string; scopes: PresetScopes }[] = [
+  { id: 'full-access', label: 'Full access', description: 'Every agent-grantable scope allowed by this agent’s role and your permissions.', scopes: 'all' },
+  { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read their history, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
+  { id: 'coordinator', label: 'Coordinator', description: 'Coordinate work, messages, accounts, views and history.', scopes: COORDINATOR_SCOPES },
+]
+// Presets are suggestions only. The registry and live creator/role ceiling are
+// authoritative, including when a permission stops being agent-grantable.
+export const presetScopes = (wanted: PresetScopes, registry: Permission[]) => wanted === 'all' ? keyScopes(registry).map(p => p.key) : wanted
+export const grantablePresetScopes = (wanted: PresetScopes, held: Set<string>, registry: Permission[]) =>
+  presetScopes(wanted, registry).filter(key => held.has(key) && registry.some(p => p.key === key && p.agent_grantable))
+// Bulk selection never expands a role. None removes only the displayed group,
+// including unavailable old scopes; All adds only within the live ceiling.
+export function selectScopeGroup(selected: Set<string>, keys: string[], all: boolean, held: Set<string>, registry: Permission[]): Set<string> {
+  const next = new Set(selected)
+  for (const key of all ? grantablePresetScopes(keys, held, registry) : keys) {
+    if (all) next.add(key)
+    else next.delete(key)
+  }
+  return next
+}
+export const PERSON_ONLY_KEY_NOTE = 'Person-only: managing members, roles, keys and settings; reading keys; the access audit log; approval decisions; rule publishing; conversation watching; harness force-stop and recovery; ownership transfer; the customer portal.'
+export function matchesScope(permission: Permission, term: string): boolean {
+  const needle = term.trim().toLowerCase()
+  return !needle || `${permissionLabel(permission.key)} ${permission.key} ${permission.group} ${permission.description}`.toLowerCase().includes(needle)
+}
 export const scopeLabel = (key: string) => permissionLabel(key)
 // How a key is named on screen. Real prefixes start with the workspace id, the
 // same for every key, so a long one shows its distinguishing tail.
 export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefix.slice(-8)}_…` : `aeon_${prefix}_…`
 // The most a new key for this agent may carry besides my own permissions: an
-// agent on a shared role (built-in or custom) is capped by that role; an agent
-// with no role, or with the role the server keeps for it alone, is not
-// (internal/auth ensureAgentBinding). null means no cap from the role.
-export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = []): Set<string> | null {
+// agent on a shared role (built-in or custom) is capped by its live grants; an agent
+// with no role, or with the role the server keeps for it alone, may configure
+// that role during creation. Codes and edits respect existing grants. Rotation
+// also caps a generated private role at its configured workspace permissions.
+// null means creation may configure a role; it never applies to rotation.
+export const agentRolePermissions = (role: Pick<Role, 'builtin' | 'permissions'>): string[] =>
+  role.permissions.filter(key => !role.builtin || !builtinAgentExclusions.permissions.includes(key))
+export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], mode: 'create' | 'existing' | 'rotate' = 'create'): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
-  if (!role && agent.project_roles?.length) {
-    const projectKeys = new Set(registry.filter(p => p.grantable_at.includes('project')).map(p => p.key))
-    return new Set(agent.project_roles.flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k)))
-  }
-  if (!role) return agent.workspace_role ? new Set() : null
-  if (!role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
-  return new Set(role.permissions)
+  const grantable = new Set(keyScopes(registry).map(p => p.key))
+  const projectKeys = new Set(keyScopes(registry).filter(p => p.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(p.key)).map(p => p.key))
+  const projectPermissions = (agent.project_roles ?? []).flatMap(pr => {
+    const projectRole = roles.find(r => r.id === pr.role.id)
+    return projectRole ? agentRolePermissions(projectRole) : []
+  }).filter(k => projectKeys.has(k))
+  if (!role && agent.project_roles?.length) return new Set(projectPermissions)
+  if (!role) return agent.workspace_role || mode !== 'create' ? new Set() : null
+  const privateRole = !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`
+  if (privateRole && mode === 'create') return null
+  if (privateRole && mode === 'rotate') return new Set(role.permissions.filter(key => grantable.has(key)))
+  // Like AgentKeyCeilingTx: project permissions may be key scopes too. Actual
+  // requests still check the project's binding; this grants no workspace access.
+  return new Set([...agentRolePermissions(role), ...projectPermissions].filter(key => grantable.has(key)))
 }
 
 // ---------- Permissions in words ----------
-const RESOURCE: Record<string, string> = {
-  nodes: 'work', comments: 'comments', knowledge: 'knowledge', kinds: 'ticket types', settings: 'workspace settings', members: 'members',
-  roles: 'roles', audit: 'the access log', keys: 'agent keys', approvals: 'agent approvals', agents: 'agents', quotes: 'quotes',
-  hours: 'hours', customers: 'customers', portal: 'the customer portal', workspace: 'the workspace', releases: 'releases', journey: 'the journey',
-  authz: 'their own access', account: 'agent accounts', harness: 'harness sessions', run: 'runs', runs: 'runs', work_orders: 'work orders',
-  stage: 'stages', stage_handoffs: 'stage handoffs', inbox: 'messages', models: 'models', plugins: 'plugins', imports: 'imports', intake: 'intake',
-  requirements: 'requirements', project_groups: 'project groups', profile: 'document profiles', crm: 'CRM', cost_units: 'cost units',
-  tags: 'tags', relations: 'links between tickets', attachments: 'attachments', views: 'saved views', events: 'history', search: 'search', ownership: 'ownership',
-}
-const ACTION: Record<string, string> = { read: 'See', write: 'Edit', manage: 'Manage', delete: 'Delete', issue: 'Issue', approve: 'Approve', decide: 'Decide on', log: 'Log', run: 'Run', create: 'Create' }
+const RESOURCE: Record<string, string> = permissionWords.resources
+const ACTION: Record<string, string> = permissionWords.actions
+
 // "members.manage" -> "Manage members"; "nodes.read" -> "See work".
 export function permissionLabel(key: string): string {
-  if (key === 'harness.watch') return 'View live conversations'
+  if (key in permissionWords.special) return (permissionWords.special as Record<string, string>)[key]!
   const [resource, ...rest] = key.split('.')
   const action = rest.join('.')
   const noun = RESOURCE[resource!] ?? resource!.replace(/_/g, ' ')
@@ -219,6 +277,20 @@ export const OWNER_TRANSFER_REASON = 'Changing an owner’s role needs Transfer 
 // project only those grantable on a project, against what I hold there.
 export const neededToGive = (role: Pick<Role, 'permissions'>, scope: Scope, registry: Permission[]) =>
   scope === 'workspace' ? role.permissions : role.permissions.filter(key => registry.find(p => p.key === key)?.grantable_at.includes('project'))
+// Agent creation requires the creator to hold the full role even on projects
+// (internal/authz/agent_creation.go). Never suggest Admin or Owner automatically.
+export function suggestAgentRole(roles: Role[], wanted: string[], scope: Scope, registry: Permission[], mine: Set<string>): Role | undefined {
+  if (!wanted.length || wanted.some(key => !registry.some(p => p.key === key && p.agent_grantable && p.grantable_at.includes(scope)))) return undefined
+  const candidates = (scope === 'project' ? projectRolesOf(roles, registry) : workspaceRolesOf(roles)).filter(role =>
+    !(role.builtin && ['owner', 'admin', 'customer'].includes(role.key)) && !beyond(role.permissions, mine).length
+    && wanted.every(key => neededToGive(role, scope, registry).includes(key)))
+  const grants = (role: Role) => neededToGive(role, scope, registry)
+  const risk = (role: Role) => grants(role).filter(key => registry.find(p => p.key === key)?.risk === 'high').length
+  return candidates.sort((a, b) => grants(a).length - grants(b).length || risk(a) - risk(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0]
+}
+export function agentDescription(presetLabel: string, scope: 'workspace' | 'projects', projectKeys: string[]): string {
+  return `${presetLabel || 'CLI or script agent'} for ${scope === 'workspace' ? 'the workspace' : projectKeys.length ? projectKeys.join(', ') : 'selected projects'}`.slice(0, 1000)
+}
 export const lostPermission = (permission: string) => `You no longer have ${permissionLabel(permission)}, so this cannot be saved. What you chose stays here.`
 export const LAST_OWNER_REASON = 'The last active owner keeps Owner, so the workspace always has someone who can manage it. Make another person an owner first.'
 export function projectSummary(roles: ProjectRole[]): string {
@@ -303,7 +375,17 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
       return { actor, subject: personName, text: aliasName ? `${linked ? 'linked' : 'unlinked'} ${aliasName} ${linked ? 'to' : 'from'} ${personName}` : `${linked ? 'linked a classic identity to' : 'unlinked a classic identity from'} ${personName}` }
     }
     case 'agent_key.created': return { actor, subject: who, text: `created the key ${str(either.name) || 'for an agent'}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}` }
-    case 'agent_key.scopes_changed': return { actor, subject: who, text: `changed scopes for the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.trim() }
+    case 'agent_key.scopes_changed': {
+      const role = obj(after.role), priorRole = obj(before.role)
+      const roleDelta = diff((priorRole.permissions as string[] | undefined) ?? [], (role.permissions as string[] | undefined) ?? [])
+      const pruned = Array.isArray(after.pruned_scopes) ? after.pruned_scopes.filter((s): s is string => typeof s === 'string') : []
+      const changes = [roleDelta.added.length ? `added ${roleDelta.added.join(', ')} to the role ${str(role.name)}` : '', pruned.length ? `pruned unknown scopes ${pruned.join(', ')}` : ''].filter(Boolean)
+      const expiryChanged = before.expires_at !== after.expires_at
+      const scopesChanged = (before.scopes as string[] | undefined)?.join(',') !== (after.scopes as string[] | undefined)?.join(',')
+      const what = expiryChanged ? (scopesChanged ? 'scopes and expiry' : 'expiry') : 'scopes'
+      if (expiryChanged) changes.push(after.expires_at === null ? 'expiry set to Never' : `expires ${str(after.expires_at)}`)
+      return { actor, subject: who, text: [`changed ${what} for the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.trim(), ...changes].join('; ') }
+    }
     case 'agent_key.revoked': return { actor, subject: who, text: `revoked the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.replace(/ +/g, ' ').trim() }
     default: return { actor, subject: '', text: event.type.replace(/[._]/g, ' ') }
   }

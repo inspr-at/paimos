@@ -12,10 +12,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -173,7 +175,8 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	}
 	other.TenantID = a.TenantID
 	other.Kind = tenant.Person
-	h := mux(d, attachments.Store{FilesDir: t.TempDir()})
+	store := attachments.Store{FilesDir: t.TempDir()}
+	h := mux(d, store)
 	patch := func(p tenant.Principal, s string) *httptest.ResponseRecorder {
 		return req(t, h, p, "PATCH", "/api/me/profile", "application/json", bytes.NewBufferString(s))
 	}
@@ -192,6 +195,32 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	if len(withAvatar.AvatarHashes) != 4 {
 		t.Fatalf("hashes %+v", withAvatar.AvatarHashes)
 	}
+	// Current avatar bytes, including independently addressed size variants,
+	// survive cleanup at an age that would qualify a true orphan.
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	if err := filepath.WalkDir(store.FilesDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		return os.Chtimes(path, old, old)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertAvatarInventory := func() {
+		t.Helper()
+		gc, err := attachments.GC(t.Context(), d.App, store, a.TenantID, true)
+		if err != nil || gc.Candidates != 0 || gc.Removed != 0 {
+			t.Fatalf("avatar GC %+v: %v", gc, err)
+		}
+		verified, err := attachments.Verify(t.Context(), d.App, store, a.TenantID)
+		if err != nil || verified.Checked < 4 || len(verified.Issues) != 0 {
+			t.Fatalf("avatar inventory %+v: %v", verified, err)
+		}
+	}
+	assertAvatarInventory()
 	hash := withAvatar.AvatarHashes["64"]
 	path := "/api/people/" + a.ID + "/avatar/64?v=" + hash
 	got := req(t, h, b, "GET", path, "", nil)
@@ -217,6 +246,8 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	if len(deleted.AvatarHashes) != 0 || deleted.Initials != "AB" {
 		t.Fatalf("delete %+v", deleted)
 	}
+	// The avatar is now referenced only by history; undo must still work.
+	assertAvatarInventory()
 	var eventID int64
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE tenant_id=$1 AND type='profile.updated' AND after->>'avatar_original_hash'='' ORDER BY id DESC LIMIT 1`, a.TenantID).Scan(&eventID)
@@ -298,6 +329,64 @@ func TestClassicProfileImportIdempotent(t *testing.T) {
 	})
 	if err != nil || count != 1 {
 		t.Fatalf("events %d %v", count, err)
+	}
+}
+
+func TestClassicProfileImportRequiresASCIIMailboxMatch(t *testing.T) {
+	for _, tc := range []struct {
+		stored, imported string
+		match            bool
+	}{
+		{"admin@example.test", "admİn@example.test", false},
+		{"mark@example.test", "marK@example.test", false},
+		{"sam@example.test", "ſam@example.test", false},
+		{"mark@example.test", "MARK@EXAMPLE.TEST", true},
+		{"admİn@example.test", "ADMİN@EXAMPLE.TEST", true},
+	} {
+		t.Run(tc.imported, func(t *testing.T) {
+			d := dbtest.Open(t)
+			p := person(t, d, "profile_email", tc.stored)
+			if _, err := d.Admin.Exec(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Classic Paimos importer')`, p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/users" {
+					t.Errorf("unexpected classic request: %s %s", r.Method, r.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode([]map[string]string{{"email": tc.imported, "first_name": "Imported"}})
+			}))
+			defer server.Close()
+			base, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			job := ProfileImporter{Pool: d.App, Source: &ClassicSource{base: base, client: server.Client()}}
+			for _, apply := range []bool{false, true} {
+				report, err := job.Run(t.Context(), "profile_email", apply)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.match {
+					if report.Matched != 1 || (!apply && report.WouldWrite != 1) || (apply && report.Written != 1) {
+						t.Fatalf("matching profile not imported (apply=%v): %+v", apply, report)
+					}
+				} else if report.Matched != 0 || report.Skipped != 1 || report.Written != 0 || report.WouldWrite != 0 {
+					t.Fatalf("different mailbox matched (apply=%v): %+v", apply, report)
+				}
+			}
+			got := decodeProfile(t, req(t, mux(d, attachments.Store{}), p, "GET", "/api/me/profile", "", nil))
+			var count int
+			if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='profile.updated'`, p.TenantID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if tc.match {
+				if got.FirstName != "Imported" || count != 1 {
+					t.Fatalf("matching profile not written/audited: first=%s events=%d", got.FirstName, count)
+				}
+			} else if got.FirstName != "" || count != 0 {
+				t.Fatalf("different person's profile overwritten: first=%s events=%d", got.FirstName, count)
+			}
+		})
 	}
 }
 

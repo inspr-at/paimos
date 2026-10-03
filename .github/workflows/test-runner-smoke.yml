@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Test runner smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-route:
+    uses: ./.github/workflows/test-runner-route.yml
+
+  smoke:
+    needs: smoke-route
+    # Event/ref/attempt guards are independent of the router's runner selection.
+    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.smoke-route.outputs.run_attempt == github.run_attempt && needs.smoke-route.outputs.runs_on || '["ubuntu-latest"]') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Routing and guard smoke
+        run: |
+          node --test scripts/ci-runner-route.test.mjs
+          test_args=()
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            test_args=(-count=1)
+          fi
+          go test "${test_args[@]}" ./scripts/ci-runner-guard
+          go run ./scripts/ci-runner-guard
+          go test "${test_args[@]}" ./internal/version
+      - name: Record successful test evidence
+        run: |
+          case "$RUNNER_ENVIRONMENT" in
+            github-hosted) runner_class=hosted ;;
+            self-hosted) runner_class=mbp2606 ;;
+            *) exit 1 ;;
+          esac
+          printf 'Green test result: runner_class=%s commit=%s event=%s\n' "$runner_class" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" >> "$GITHUB_STEP_SUMMARY"

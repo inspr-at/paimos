@@ -68,7 +68,7 @@ for (const regenerated of [false, true]) {
     await mockReleases(page, history)
     await page.goto(`/releases/${current.version}`)
     const detail = page.locator('article.detail')
-    const options = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+    const options = page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
     // AEON-305: the tag message is evidence, never a labelled title.
     await expect(options.first()).not.toContainText('Time entry editing')
     await expect(options.first()).toContainText('AEON-75')
@@ -120,7 +120,7 @@ test('release notes use benefit text and do not fall back to the Git headline', 
   await expect(detail.locator('.headline')).toHaveCount(0)
   await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
   // AEON-305: the captured ticket is a block like any other, with its commits folded.
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()).toContainText('Clear release notes')
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').first()).toContainText('Clear release notes')
   const block = notes.getByRole('region', { name: 'Features, 1' }).getByRole('article', { name: 'Clear release notes' })
   await expect(notes.getByRole('article')).toHaveCount(1)
   await expect(block.locator('.benefit')).toHaveText('Tickets explain what you gain.')
@@ -197,7 +197,7 @@ for (const width of [1600, 390]) {
     })
     expect(detailStyle).toEqual({ size: '12.5px', transform: 'none' })
     // AEON-305: the list row stays version, date and theme; the hint lives in the detail.
-    if (width === 1600) await expect(page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first().getByText('Notes written after release', { exact: true })).toHaveCount(0)
+    if (width === 1600) await expect(page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').first().getByText('Notes written after release', { exact: true })).toHaveCount(0)
     const overflow = await sheet.evaluate(el => el.scrollWidth > el.clientWidth + 1)
     expect(overflow).toBeFalsy()
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
@@ -215,17 +215,18 @@ for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     // Cover both a hidden-only capture and an empty internal capture.
     for (const hidden of [2, 0]) {
-      await openNotedRelease(page, { ...benefitNotes(), hidden, items: [], gaps: [] })
+      const { current } = await openNotedRelease(page, { ...benefitNotes(), hidden, items: [], gaps: [] })
       const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-      const row = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()
+      const row = page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').first()
       const notes = page.getByRole('region', { name: 'Release notes' })
       await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()
       await expect(notes.getByRole('article')).toHaveCount(0)
       await expect(sheet).not.toContainText('No public release notes')
       await expect(notes).not.toContainText('is required')
       if (width === 390) await sheet.getByRole('button', { name: 'All releases' }).click()
-      // An empty capture names no benefits, so the row keeps version, date and counts.
+      // An empty capture names no benefits, so the row carries no headline line at all: the codename is the row title (AEON-430), never the Git headline.
       await expect(row.locator('.headline')).toHaveCount(0)
+      await expect(row.locator('.row-name .rn-name')).toHaveText(current.codename!)
       await expect(row.getByText('Historical tag headline')).toHaveCount(0)
       if (process.env.SHOTS && hidden && width === 390) {
         for (const theme of ['light', 'dark']) {

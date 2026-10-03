@@ -10,6 +10,7 @@ import type { Harness, NodeSummary } from './agents.ts'
 import { DEFAULT_AGENT_STATE, STATE_LABEL, STATE_PRIORITY, deriveAgentState, waitingLabel, type AttentionReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 export type LiveBotState = AgentState
 export interface LiveAgent {
+  vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   project_id: string
   // Present only when the caller may open the session / know the agent (AEON-171).
   session_id?: string; principal_id?: string; name?: string
@@ -19,7 +20,7 @@ export interface LiveAgent {
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
-  eta_stale?: boolean
+  eta_stale?: boolean; progress_pct?: number | null; finished: boolean
   // The bound ticket and the project it lives in now (it may have moved on).
   ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string | null
   // The last persisted activity entry, withheld with the note when harness.read
@@ -36,6 +37,10 @@ export interface LivePage { items: LiveAgent[]; at: string; fresh_seconds: numbe
 // honest without asking often.
 export const LIVE_POLL_MS = 20_000
 export const LIVE_FRESH_MS = 120_000
+
+// Session snapshots that can change a ticket's workers, ETA or completion.
+// The stream carries the old and new bindings; clients re-read authorized views.
+export const TICKET_SESSION_EVENTS = ['registered', 'bound', 'heartbeat', 'yielded', 'stopped', 'stop_confirmed', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over'].map(kind => `harness.${kind}`)
 
 // The server's clock is the one that counts: skew is how far this browser is ahead.
 export const skewOf = (page: Pick<LivePage, 'at'>, receivedAt: number) => {
@@ -68,7 +73,7 @@ export function leadWorkerKey(agent: Pick<LiveAgent, 'session_id' | 'harness' | 
   return ['v', agent.harness, since].join('\u0001')
 }
 
-const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok'])
+const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok', 'gemini', 'opencode'])
 
 // Assignee cell order: the server's lead first, then the other live workers.
 // A lead the feed has not listed yet still shows, under its projected name.
@@ -97,6 +102,7 @@ export function withServerLead(workers: readonly LiveAgent[], lead?: { name: str
     since: parts[0] === 'v' ? (parts[2] ?? '') : '',
     heartbeat_at: null,
     name: lead.name,
+    finished: false, // a stand-in for a worker still on the ticket; nothing has stopped
   }
   return [placeholder, ...workers]
 }
@@ -120,7 +126,7 @@ export function groupLive(items: LiveAgent[], serverNow: number, preferences: Ag
 
 // Two readings that show the same thing, including event evidence, so a poll that
 // changes nothing re-renders nothing.
-const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.display_label, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem, a.eta_stale, JSON.stringify(a.attention_reasons)].join('\u0000')
+const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.display_label, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem, a.eta_stale, a.progress_pct, a.finished, JSON.stringify(a.attention_reasons)].join('\u0000')
 export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]>) {
   if (a.size !== b.size) return false
   for (const [id, list] of a) {

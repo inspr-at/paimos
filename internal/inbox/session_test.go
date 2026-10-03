@@ -224,6 +224,95 @@ func TestDirectSessionSendBindingAndLegacyShape(t *testing.T) {
 	}
 }
 
+// AEON-369: a session-bound send needs no registered target and is not given
+// a principal-wide one, even when that target exists. The other generation of
+// the same principal does not receive it. An unbound send still needs a target.
+func TestSessionBoundSendNeedsNoTarget(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	stored, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "codex:worker", Adapter: "codex", Kind: "codex_thread", Ref: "fixture-private-thread", Role: "primary", MaximumLevel: "simple"})
+	if err != nil || !stored.Enabled || stored.PrincipalID != w.agent.ID {
+		t.Fatalf("target: %+v %v", stored, err)
+	}
+	first := messageTestSession(t, w, project, w.agent, "First worker")
+	second := messageTestSession(t, w, project, w.agent, "Second worker")
+	path := "/api/projects/" + project + "/messages"
+	byPrincipal := compatInput(w.agent.ID, "bound-principal")
+	byPrincipal.RecipientSessionID = &first
+	status, body := compatPost(t, srv, w.sender, path, byPrincipal)
+	if status != 201 {
+		t.Fatalf("principal send %d %s", status, body)
+	}
+	bound := mustJSON[CompatMessage](t, body)
+	if bound.RecipientPrincipalID != w.agent.ID || bound.RecipientSessionID == nil || *bound.RecipientSessionID != first || bound.DeliveryTarget != nil {
+		t.Fatalf("principal binding: %+v", bound)
+	}
+	assertDelivery(t, w, bound.ID, nil, "pending", "")
+	byAddress := compatInput("codex:worker", "bound-address")
+	byAddress.RecipientSessionID = &first
+	status, body = compatPost(t, srv, w.sender, path, byAddress)
+	if status != 201 {
+		t.Fatalf("address send %d %s", status, body)
+	}
+	addressed := mustJSON[CompatMessage](t, body)
+	if addressed.DeliveryTarget != nil || addressed.RecipientSessionID == nil || *addressed.RecipientSessionID != first {
+		t.Fatalf("address binding used a target: %+v", addressed)
+	}
+	assertDelivery(t, w, addressed.ID, nil, "pending", "")
+	work, err := m.claim(t.Context(), w.agent, project, claimInput{To: "codex:worker", Adapter: "codex"})
+	if err != nil || work != nil {
+		t.Fatalf("session-bound claim %v %v", work, err)
+	}
+	status, body = do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+first, "", nil)
+	if status != 200 || !containsMessage(t, body, bound.ID) || !containsMessage(t, body, addressed.ID) {
+		t.Fatalf("first session %d %s", status, body)
+	}
+	status, body = do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+second, "", nil)
+	if status != 200 || containsMessage(t, body, bound.ID) || containsMessage(t, body, addressed.ID) {
+		t.Fatalf("second session received it: %d %s", status, body)
+	}
+	unbound := compatInput(w.agent.ID, "unbound-principal")
+	status, body = compatPost(t, srv, w.sender, path, unbound)
+	if status != 201 || bytes.Contains(body, []byte("recipient_session_id")) {
+		t.Fatalf("unbound send %d %s", status, body)
+	}
+	missing := mustJSON[CompatMessage](t, body)
+	if missing.RecipientSessionID != nil || missing.DeliveryTarget != nil {
+		t.Fatalf("unbound binding: %+v", missing)
+	}
+	assertDelivery(t, w, missing.ID, nil, "blocked", "target_missing")
+	status, body = do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+first, "", nil)
+	if status != 200 || containsMessage(t, body, missing.ID) {
+		t.Fatalf("unbound message became session-bound: %d %s", status, body)
+	}
+}
+
+func assertDelivery(t *testing.T, w *world, messageID string, targetID *string, state, reason string) {
+	t.Helper()
+	var gotTarget *string
+	var gotState, gotReason string
+	var gotSession *string
+	guaranteeRow(t, w, `SELECT d.target_id::text,d.state,d.reason,c.recipient_session_id::text FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.id=d.message_id WHERE d.message_id=$1::uuid`, []any{messageID}, &gotTarget, &gotState, &gotReason, &gotSession)
+	if (gotTarget == nil) != (targetID == nil) || (gotTarget != nil && targetID != nil && *gotTarget != *targetID) || gotState != state || gotReason != reason {
+		t.Fatalf("delivery %s: target=%v state=%s reason=%s", messageID, gotTarget, gotState, gotReason)
+	}
+	if state == "pending" && gotSession == nil {
+		t.Fatal("session-bound delivery lost its session")
+	}
+	if state == "blocked" && gotSession != nil {
+		t.Fatalf("unbound delivery gained session %s", *gotSession)
+	}
+}
+
+func containsMessage(t *testing.T, body []byte, id string) bool {
+	t.Helper()
+	for _, item := range mustJSON[Page](t, body).Items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEndedSessionCannotAcknowledge(t *testing.T) {
 	for _, ending := range []string{"stop", "archive"} {
 		t.Run(ending, func(t *testing.T) {

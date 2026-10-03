@@ -11,17 +11,21 @@ export interface ReleaseChange { commit: string; subject: string; type: 'feat' |
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
-  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
+  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; pending?: string[]; unavailable: string[]
 }
-export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
-export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number; written_after_release?: boolean }
+export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
+export interface ReleaseNoteCorrection { version: string; key: string; snapshot_sha256: string; reason: string; group?: string; pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string }
+export interface ReleaseNotes { corrections?: ReleaseNoteCorrection[]; source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; public_items?: Omit<ReleaseNoteItem, 'id'>[]; gaps: string[]; hidden: number; written_after_release?: boolean }
 // How a release introduces itself (AEON-305): the theme is the kicker, the
 // headline one sentence, the intro two or three. German may be empty.
 export interface ReleasePresentation { theme_en: string; theme_de: string; headline_en: string; headline_de: string; intro_en: string; intro_de: string; revision: number; updated_at: string }
 export interface Release {
   notes?: ReleaseNotes
   presentation?: ReleasePresentation
-  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
+  // The release's sci-fi codename from its sequence (AEON-430), English in
+  // both languages. Absent on a reservation whose sequence another release took.
+  codename?: string
+  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'candidate'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
 }
@@ -38,14 +42,21 @@ export async function getReleases(): Promise<ReleaseHistory> {
   }
   const body = await response.json() as ReleaseHistory
   if (body.schema !== 'inspr.release-history.v1' || !Array.isArray(body.releases)) throw new Error('The server sent an unknown release history format.')
-  return body
+  return { ...body, releases: body.releases.map(withPublicNoteItems) }
+}
+
+// Product notes are portable: the wire shape never invents tenant ticket UUIDs.
+// Adapt them once to the sheet's existing snapshot renderer.
+export function withPublicNoteItems(release: Release): Release {
+  if (!release.notes?.public_items) return release
+  return { ...release, notes: { ...release.notes, items: release.notes.public_items.map(item => ({ ...item, id: '' })) } }
 }
 
 // One release from the server's history; null when it has none for that version.
 export async function getRelease(version: string): Promise<Release | null> {
   try {
     const response = await api(`/releases/${encodeURIComponent(version)}`)
-    return response.ok ? await response.json() as Release : null
+    return response.ok ? withPublicNoteItems(await response.json() as Release) : null
   } catch { return null }
 }
 
@@ -108,6 +119,7 @@ function toldTickets(changes: ReleaseChange[], locale?: string | null, items?: T
   const seen = new Set<string>()
   const linked = () => changes.filter(c => { const g = changeGroup(c); return g === 'features' || g === 'fixes' }).flatMap(c => c.linked_tickets ?? [])
   for (const note of items ?? linked()) {
+    if (note.group === 'other') continue
     const key = note.key?.trim()
     if (!key || seen.has(key)) continue
     const text = localizedNote(note, locale)
@@ -143,6 +155,8 @@ function ticketGroup(key: string, commits: ReleaseChange[], note?: { group?: str
 // Features or Fixes, with the pill and benefit in the viewer's language and
 // every commit that names the ticket. A told ticket without commits still gets
 // its block. Commits no told ticket claims are Other; the version bump is left out.
+// Highlights needs that told text. Compare does not: presentCompare follows
+// changes[].group even when the note is empty.
 export function presentChanges(changes: ReleaseChange[], locale?: string | null, items?: TicketText[] | null): PresentedChanges {
   const seen = new Set<string>()
   const commits = changes.filter(c => {
@@ -165,6 +179,54 @@ export function presentChanges(changes: ReleaseChange[], locale?: string | null,
 // told and their text; without one, the linked tickets do.
 export function presentRelease(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): PresentedChanges {
   return presentChanges(r.changes, locale, hasUsableNotes(r) ? r.notes.items : null)
+}
+// Compare follows the group the server already put on each change. A commit
+// is a feature or a fix without any pill or benefit. A shared commit stays in
+// that one group, so a frozen feature note does not pull a fixes commit into
+// Features. Frozen text the response already carries still labels its ticket.
+// An older manifest with no group keeps the told-ticket reading.
+export function presentCompare(changes: ReleaseChange[], locale?: string | null): PresentedChanges {
+  const seen = new Set<string>()
+  const commits = changes.filter(c => {
+    if (!changeGroup(c) || seen.has(c.commit)) return false
+    seen.add(c.commit)
+    return true
+  })
+  const implicit = commits.filter(c => c.group !== 'features' && c.group !== 'fixes' && c.group !== 'other')
+  const told = presentChanges(implicit, locale)
+  const out: PresentedChanges = { features: [...told.features], fixes: [...told.fixes], other: [] }
+  const implicitOther = new Set(told.other.map(c => c.commit))
+  const lang = noteLocale(locale)
+  const lineFor = (group: 'features' | 'fixes', key: string) => {
+    const found = out[group].find(line => line.key === key)
+    if (found) return found
+    const line: TicketChangeLine = { key, pill: '', benefit: '', pillLang: lang, benefitLang: lang, commits: [] }
+    out[group].push(line)
+    return line
+  }
+  for (const c of commits) {
+    if (c.group !== 'features' && c.group !== 'fixes') {
+      if (c.group ? true : implicitOther.has(c.commit)) out.other.push(c)
+      continue
+    }
+    const keys = [...new Set(c.tickets.map(key => key.trim()).filter(Boolean))]
+    // A grouped commit with no ticket has no block to head, so it stays listed.
+    if (!keys.length) { out.other.push(c); continue }
+    for (const key of keys) {
+      const line = lineFor(c.group, key)
+      if (!line.commits.some(item => item.commit === c.commit)) line.commits.push(c)
+      if (line.pill.trim() || line.benefit.trim()) continue
+      const note = c.linked_tickets?.find(ticket => ticket.key === key)
+      if (!note) continue
+      const text = localizedNote(note, locale)
+      if (!text.pill.trim() && !text.benefit.trim()) continue
+      line.pill = text.pill
+      line.benefit = text.benefit
+      line.pillLang = text.pillLang
+      line.benefitLang = text.benefitLang
+    }
+  }
+  return out
 }
 // ---------- Display ----------
 // Headlines and subjects as people read them, next to their ticket chips: the keys
@@ -384,30 +446,7 @@ export function plainSubject(subject: string, tickets: string[] = []) {
   return displayText(text, tickets)
 }
 
-// ---------- Stats ----------
-export interface ReleaseStats { today: number; week: number; last: number | null; median: number | null; cadence: number[] }
-export function stats(releases: Release[], now: number, days = 14): ReleaseStats {
-  const published = releases.filter(r => r.state === 'published' && time(r)).sort((a, b) => time(a) - time(b))
-  const todayKey = dayKey(now)
-  const d = new Date(now)
-  // Calendar arithmetic, not multiples of 24 h, so daylight saving changes do not shift days.
-  const midnight = (back: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime()
-  const monday = midnight((d.getDay() + 6) % 7)
-  const gaps: number[] = []
-  for (let i = 1; i < published.length; i++) gaps.push(time(published[i]) - time(published[i - 1]))
-  gaps.sort((a, b) => a - b)
-  const median = gaps.length ? (gaps.length % 2 ? gaps[(gaps.length - 1) / 2] : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2) : null
-  const cadence = Array.from({ length: days }, (_, i) => {
-    const key = dayKey(midnight(days - 1 - i))
-    return published.filter(r => dayKey(time(r)) === key).length
-  })
-  return {
-    today: published.filter(r => dayKey(time(r)) === todayKey).length,
-    week: published.filter(r => time(r) >= monday).length,
-    last: published.length ? time(published[published.length - 1]) : null,
-    median, cadence,
-  }
-}
+// ---------- Spans ----------
 // "3 h 12 min", "2 days", "45 min".
 export function span(ms: number) {
   const minutes = Math.round(ms / 60_000)
@@ -436,9 +475,9 @@ export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; t
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
-// show the name, pills, ticket keys, commit subjects and SHAs (Highlights opens
-// a folded list on a hit); Highlights adds the benefits, Details the evidence
-// it shows open.
+// show the codename (AEON-430), the name, pills, ticket keys, commit subjects
+// and SHAs (Highlights opens a folded list on a hit); Highlights adds the
+// benefits, Details the evidence it shows open.
 export function matches(r: Release, f: ReleaseFilter, locale?: string | null, view: ReleaseView = 'highlights') {
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
@@ -450,7 +489,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const named = localizedPresentation(r, locale)
   const commits = [...lines.flatMap(line => line.commits), ...presented.other]
   const texts = [
-    r.version, ...ticketsOf(r), ...r.tickets,
+    r.version, r.codename ?? '', ...ticketsOf(r), ...r.tickets,
     ...(named ? [named.theme, named.headline, named.intro] : []),
     ...lines.map(line => line.pill || line.benefit),
     ...(view === 'highlights' ? lines.map(line => line.benefit) : evidenceSearch(r).texts),
@@ -474,16 +513,20 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
   const ev = r.evidence
   const runs = [ev?.ci, ev?.release_run].flatMap(run => run ? [run.name, runWord(run)] : [])
   return {
-    texts: [r.headline, r.tag, r.notes?.source ?? '', ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
+    texts: [r.headline, r.tag, r.notes?.source ?? '', ...(r.notes?.corrections ?? []).flatMap(c => [c.key, c.reason]), ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
     ids: [r.notes?.snapshot_sha256 ?? '', ev?.source_commit ?? '', ev?.image?.digest ?? ''].filter(Boolean),
   }
 }
 
 // ---------- New since the last visit ----------
-// Releases newer than the one the person last saw; nothing on a first visit.
-export function newSince(releases: Release[], lastSeen: string | null) {
+// Visibility never changes the source history used by statistics or deep links.
+export function visibleReleases(releases: Release[], showReservedVersions = false): Release[] {
+  return releases.filter(r => showReservedVersions || r.state !== 'reserved')
+}
+// Visible releases newer than the one the person last saw; nothing on a first visit.
+export function newSince(releases: Release[], lastSeen: string | null, showReservedVersions = false) {
   if (!lastSeen) return new Set<string>()
-  return new Set(releases.filter(r => r.state === 'published' && r.version > lastSeen).map(r => r.version))
+  return new Set(visibleReleases(releases, showReservedVersions).filter(r => r.version > lastSeen).map(r => r.version))
 }
 export const shortCommit = (sha: string) => sha.slice(0, 7)
 

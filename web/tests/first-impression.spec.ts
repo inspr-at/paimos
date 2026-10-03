@@ -5,7 +5,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
 const person = { principal: { id: 'person-1', name: 'mba', roles: ['member'] }, tenant: { id: 'tenant-1', name: 'INSPR Studio' }, identity: { email: 'markus@barta.com', display_name: 'Markus Barta' } }
 
-interface SignInOptions { devMode?: boolean | null; loginStatus?: number; meStatus?: number }
+interface SignInOptions { providerName?: string; devMode?: boolean | null; loginStatus?: number; meStatus?: number }
 async function mockSignIn(page: Page, options: SignInOptions = {}) {
   const state = { signedIn: false, meStatus: options.meStatus ?? 0 }
   const calls: { path: string; body: string | null }[] = []
@@ -17,7 +17,7 @@ async function mockSignIn(page: Page, options: SignInOptions = {}) {
       if (state.meStatus) return route.fulfill({ status: state.meStatus, json: { error: 'unavailable' } })
       if (state.signedIn) return route.fulfill({ json: person })
       const devMode = options.devMode === undefined ? false : options.devMode
-      return route.fulfill({ status: 401, json: { error: 'unauthorized', ...(devMode === null ? {} : { dev_mode: devMode }) } })
+      return route.fulfill({ status: 401, json: { error: 'unauthorized', ...(devMode === null ? {} : { dev_mode: devMode }), ...(options.providerName === undefined ? {} : { oidc_display_name: options.providerName }) } })
     }
     if (path === '/api/auth/dev-login') {
       if (options.loginStatus === -1) return route.abort('failed')
@@ -33,13 +33,15 @@ async function mockSignIn(page: Page, options: SignInOptions = {}) {
 }
 
 test.describe('sign-in', () => {
-  test('one way in: the INSPR ID button on a bare, calm page', async ({ page }) => {
+  test('one way in: a neutral sign-in button on a bare, calm page', async ({ page }) => {
     const errors = watchErrors(page)
     const { calls } = await mockSignIn(page)
     await page.goto('/p/PHAROS')
     await expect(page).toHaveURL('/signin')
     await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Sign in with INSPR ID' })).toHaveAttribute('href', '/api/auth/login')
+    await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/api/auth/login')
+    await expect(page.locator('.signin-page')).not.toContainText('INSPR')
+    await expect(page.locator('.fine')).toHaveText('You are sent to your identity provider and back.')
     await expect(page.locator('.app-header')).toHaveCount(0)
     await expect(page.getByRole('alert')).toHaveCount(0)
     await expect(page.getByLabel('Email address')).toHaveCount(0)
@@ -48,6 +50,70 @@ test.describe('sign-in', () => {
     await expect(page.locator('.card-foot')).toContainText('PAIMOS AEON')
     expect(errors).toEqual([])
   })
+
+  for (const providerName of ['Acme SSO', 'INSPR ID']) {
+    test(`names the configured provider ${providerName}`, async ({ page }) => {
+      await mockSignIn(page, { providerName })
+      await page.goto('/signin')
+      await expect(page.getByRole('link', { name: `Sign in with ${providerName}`, exact: true })).toHaveAttribute('href', '/api/auth/login')
+      await expect(page.locator('.fine')).toHaveText(`You are sent to ${providerName} and back.`)
+      if (providerName !== 'INSPR ID') await expect(page.locator('.signin-page')).not.toContainText('INSPR')
+    })
+  }
+
+  test('a whitespace-only provider name uses neutral copy', async ({ page }) => {
+    await mockSignIn(page, { providerName: ' \t ' })
+    await page.goto('/signin')
+    await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
+    await expect(page.locator('.fine')).toHaveText('You are sent to your identity provider and back.')
+  })
+
+  test('the configured provider name is rendered as text', async ({ page }) => {
+    await mockSignIn(page, { providerName: '<b>Acme SSO</b>' })
+    await page.goto('/signin?error=failed')
+    await expect(page.getByRole('link', { name: 'Sign in with <b>Acme SSO</b>', exact: true })).toBeVisible()
+    await expect(page.getByRole('alert')).toContainText('<b>Acme SSO</b> answered')
+    await expect(page.locator('.login-button b, .notice b, .fine b')).toHaveCount(0)
+  })
+
+  for (const [name, providerName] of [
+    ['Microsoft Entra ID', 'Microsoft Entra ID'],
+    ['the maximum configured name', 'W'.repeat(48)],
+    ['an oversized server name', 'W'.repeat(4096)],
+  ]) {
+    for (const error of ['failed', 'denied', 'not_member']) {
+      test(`${name} stays inside a narrow sign-in card with ${error}`, async ({ page }) => {
+        await page.setViewportSize({ width: 320, height: 900 })
+        await mockSignIn(page, { providerName })
+        await page.goto(`/signin?error=${error}`)
+        const button = page.getByRole('link', { name: `Sign in with ${providerName}`, exact: true })
+        await expect(button).toBeVisible()
+        await expect(page.getByRole('alert')).toContainText(providerName)
+        await expect(page.locator('.fine')).toHaveText(`You are sent to ${providerName} and back.`)
+        await page.evaluate(() => document.fonts.ready)
+        const overflow = await page.locator('.signin-card').evaluate(card => {
+          const outside: string[] = []
+          const cardRect = card.getBoundingClientRect()
+          const buttonRect = card.querySelector('.login-button')!.getBoundingClientRect()
+          for (const selector of ['.login-button', '.login-button > svg', '.login-label', '.fine', '.notice p']) {
+            for (const element of card.querySelectorAll(selector)) {
+              const rect = element.getBoundingClientRect()
+              if (rect.left < cardRect.left || rect.right > cardRect.right) outside.push(selector)
+              if (selector === '.login-button > svg' && (rect.left < buttonRect.left || rect.right > buttonRect.right)) outside.push('button icon')
+              if ((selector === '.fine' || selector === '.notice p') && element.scrollWidth > element.clientWidth) outside.push(`${selector} text`)
+            }
+          }
+          if (document.documentElement.scrollWidth > window.innerWidth) outside.push('viewport')
+          return outside
+        })
+        expect(overflow).toEqual([])
+        // The visible text may shorten, but the accessible link name stays complete.
+        const label = page.locator('.login-label')
+        await expect(label).toHaveCSS('text-overflow', 'ellipsis')
+        if (providerName.length >= 48) expect(await label.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+      })
+    }
+  }
 
   test('the email form follows dev_mode and never probes the development route', async ({ page }) => {
     const { calls } = await mockSignIn(page, { devMode: true })
@@ -61,13 +127,13 @@ test.describe('sign-in', () => {
   test('a server that does not report dev_mode shows no email form', async ({ page }) => {
     const { calls } = await mockSignIn(page, { devMode: null })
     await page.goto('/signin')
-    await expect(page.getByRole('link', { name: 'Sign in with INSPR ID' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
     await expect(page.getByLabel('Email address')).toHaveCount(0)
     expect(calls.filter(call => call.path === '/api/auth/dev-login')).toEqual([])
   })
 
   const flows: [string, string, string][] = [
-    ['denied', 'Sign-in was cancelled', 'Access was declined at INSPR ID'],
+    ['denied', 'Sign-in was cancelled', 'Access was declined'],
     ['expired', 'Your session ended', 'For your security'],
     ['not_member', 'Not a member of this workspace yet', 'Ask its owner for an invitation'],
     ['unavailable', 'Sign-in is not available right now', 'try again in a moment'],
@@ -81,10 +147,30 @@ test.describe('sign-in', () => {
       const alert = page.getByRole('alert')
       await expect(alert).toContainText(title)
       await expect(alert).toContainText(body)
+      await expect(page.locator('.signin-page')).not.toContainText('INSPR')
       await expect(alert.getByRole('link', { name: 'Try again' })).toHaveAttribute('href', '/api/auth/login')
       await alert.getByRole('button', { name: 'Dismiss' }).click()
       await expect(page).toHaveURL('/signin')
       await expect(page.getByRole('alert')).toHaveCount(0)
+    })
+  }
+
+  for (const [code, body] of [
+    ['failed', 'Acme SSO answered, but the sign-in could not be completed.'],
+    ['denied', 'Access was declined at Acme SSO.'],
+    ['not_member', 'Your Acme SSO account works, but this workspace has not added you.'],
+    ['something-new', 'Acme SSO answered, but the sign-in could not be completed.'],
+  ]) {
+    test(`?error=${code} names the configured provider`, async ({ page }) => {
+      await mockSignIn(page, { providerName: 'Acme SSO' })
+      await page.goto(`/signin?error=${code}`)
+      await expect(page.getByRole('alert')).toContainText(body)
+      await expect(page.locator('.signin-page')).not.toContainText('INSPR')
+      await expect(page.getByRole('link', { name: 'Sign in with Acme SSO', exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'Dismiss' }).click()
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      // Dismissing an error causes a navigation and another session refresh.
+      await expect(page.getByRole('link', { name: 'Sign in with Acme SSO', exact: true })).toBeVisible()
     })
   }
 
@@ -107,7 +193,7 @@ test.describe('sign-in', () => {
     state.meStatus = 0
     await alert.getByRole('button', { name: 'Try again' }).click()
     await expect(page.getByRole('alert')).toHaveCount(0)
-    await expect(page.getByRole('link', { name: 'Sign in with INSPR ID' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
   })
 
   const devErrors: [number, string][] = [

@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -26,18 +27,20 @@ type Criterion struct {
 	CheckedBy   *string    `json:"checked_by_principal_id"`
 }
 type Order struct {
-	NodeID      string      `json:"node_id"`
-	Status      string      `json:"status"`
-	Revision    int64       `json:"revision"`
-	RequestedBy string      `json:"requested_by_principal_id"`
-	Assignee    *string     `json:"assignee_principal_id"`
-	MaxCost     *int64      `json:"max_cost_micros"`
-	MaxDuration *int64      `json:"max_duration_seconds"`
-	Criteria    []Criterion `json:"criteria"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	Kind        string              `json:"kind"`
+	Review      *reviewgate.Binding `json:"review,omitempty"`
+	NodeID      string              `json:"node_id"`
+	Status      string              `json:"status"`
+	Revision    int64               `json:"revision"`
+	RequestedBy string              `json:"requested_by_principal_id"`
+	Assignee    *string             `json:"assignee_principal_id"`
+	MaxCost     *int64              `json:"max_cost_micros"`
+	MaxDuration *int64              `json:"max_duration_seconds"`
+	Criteria    []Criterion         `json:"criteria"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
-type create struct {
+type CreateInput struct {
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
 	Parent      *string  `json:"parent_id"`
@@ -88,16 +91,22 @@ func (m *module) Mount(mux *http.ServeMux) {
 // Load reads a live order in the caller's db.InTenant transaction. Mutators
 // request a row lock; all run mutations lock the order before locking a run.
 func Load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Order, error) {
-	q := `SELECT w.node_id::text,w.status,w.revision,w.requested_by_principal_id::text,w.assignee_principal_id::text,
+	q := `SELECT w.kind,w.node_id::text,w.status,w.revision,w.requested_by_principal_id::text,w.assignee_principal_id::text,
 	 w.max_cost_micros,w.max_duration_seconds,w.created_at,w.updated_at FROM work_orders w
 	 JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id WHERE w.node_id=$1 AND n.deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE OF w`
 	}
 	var o Order
-	err := tx.QueryRow(ctx, q, id).Scan(&o.NodeID, &o.Status, &o.Revision, &o.RequestedBy, &o.Assignee, &o.MaxCost, &o.MaxDuration, &o.CreatedAt, &o.UpdatedAt)
+	err := tx.QueryRow(ctx, q, id).Scan(&o.Kind, &o.NodeID, &o.Status, &o.Revision, &o.RequestedBy, &o.Assignee, &o.MaxCost, &o.MaxDuration, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		return o, err
+	}
+	if o.Kind == "review" {
+		o.Review, err = reviewgate.Load(ctx, tx, id)
+		if err != nil {
+			return o, err
+		}
 	}
 	o.Criteria = []Criterion{}
 	rows, err := tx.Query(ctx, `SELECT id::text,position,description,checked_at,checked_by_principal_id::text FROM work_criteria WHERE work_order_id=$1 ORDER BY position`, id)
@@ -214,21 +223,43 @@ func validBudget(cost, duration *int64) bool {
 func validID(id *string) bool { return id == nil || UUID(*id) }
 
 func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in create
+	var in CreateInput
 	if err := Decode(r, &in); err != nil {
 		return nil, err
 	}
+	return Create(r.Context(), tx, p, in)
+}
+
+// Create preserves the ordinary node, criteria and event path for typed orders.
+// The caller owns authorization and the tenant transaction.
+func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) (Order, error) {
+	o, changes, err := CreateDeferred(ctx, tx, p, in)
+	if err != nil {
+		return Order{}, err
+	}
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return Order{}, err
+		}
+	}
+	return o, nil
+}
+
+// CreateDeferred prepares the ordinary order and node snapshots without taking
+// the event counter. Composite writers append the returned changes only after
+// all node, queue and run locks have been acquired. The caller owns the tenant
+// transaction, authorization and tree lock; rollback discards the entire unit.
+func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) (Order, []events.Change, error) {
 	if strings.TrimSpace(in.Title) == "" || len(in.Criteria) == 0 || !validBudget(in.MaxCost, in.MaxDuration) || !validID(in.Parent) || !validID(in.Assignee) {
-		return nil, Fail(400, "title, criteria, valid budget and IDs required")
+		return Order{}, nil, Fail(400, "title, criteria, valid budget and IDs required")
 	}
 	for _, c := range in.Criteria {
 		if strings.TrimSpace(c) == "" {
-			return nil, Fail(400, "empty criterion")
+			return Order{}, nil, Fail(400, "empty criterion")
 		}
 	}
-	ctx := r.Context()
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
-		return nil, err
+		return Order{}, nil, err
 	}
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
@@ -236,29 +267,29 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	 (SELECT coalesce(max(position),0)+1024 FROM nodes WHERE parent_id IS NOT DISTINCT FROM $4::uuid AND deleted_at IS NULL)
 	 FROM node_kinds k WHERE k.slug='work_order' RETURNING id::text`, p.TenantID, in.Title, in.Body, in.Parent).Scan(&id)
 	if err != nil {
-		return nil, err
+		return Order{}, nil, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,max_cost_micros,max_duration_seconds) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, id, p.ID, in.Assignee, in.MaxCost, in.MaxDuration); err != nil {
-		return nil, err
+		return Order{}, nil, err
 	}
 	for i, c := range in.Criteria {
 		if _, err = tx.Exec(ctx, `INSERT INTO work_criteria(tenant_id,work_order_id,position,description) VALUES($1,$2,$3,$4)`, p.TenantID, id, i, c); err != nil {
-			return nil, err
+			return Order{}, nil, err
 		}
 	}
 	o, err := Load(ctx, tx, id, false)
 	if err != nil {
-		return nil, err
+		return Order{}, nil, err
 	}
 	// Preserve the created node snapshot as well as its typed work-order detail.
 	var node json.RawMessage
 	if err = tx.QueryRow(ctx, `SELECT to_jsonb(n)-'tenant_id' FROM nodes n WHERE id=$1`, id).Scan(&node); err != nil {
-		return nil, err
+		return Order{}, nil, err
 	}
-	if err = Record(ctx, tx, p, id, "node.created", nil, node); err != nil {
-		return nil, err
-	}
-	return o, Record(ctx, tx, p, id, "work_order.created", nil, o)
+	return o, []events.Change{
+		{NodeID: &id, Type: "node.created", After: node},
+		{NodeID: &id, Type: "work_order.created", After: o},
+	}, nil
 }
 
 func (m *module) patch(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -281,6 +312,9 @@ func (m *module) patch(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, Fail(409, "revision conflict")
 	}
 	before := o
+	if o.Kind == "review" && len(in.Assignee) > 0 {
+		return nil, Fail(409, "review assignment is pinned; request a new review")
+	}
 	if in.Status != nil {
 		switch *in.Status {
 		case "draft", "ready", "running", "blocked", "done", "cancelled":
@@ -422,9 +456,26 @@ func (m *module) evidence(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return nil, Fail(400, "invalid evidence kind")
 	}
 	e := Evidence{OrderID: o.NodeID, SubmittedBy: p.ID, Kind: in.Kind, Reference: in.Reference, CriterionID: in.CriterionID, RunID: in.RunID}
+	if o.Kind == "review" && (len(in.Reference) > reviewgate.MaxOutput || reviewgate.SensitiveText(in.Reference)) {
+		return nil, Fail(400, "review evidence exceeds its bound or contains credential material")
+	}
 	err = tx.QueryRow(ctx, `INSERT INTO work_evidence(tenant_id,work_order_id,submitted_by_principal_id,kind,reference,criterion_id,run_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text,created_at`, p.TenantID, o.NodeID, p.ID, in.Kind, in.Reference, in.CriterionID, in.RunID).Scan(&e.ID, &e.CreatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if o.Kind == "review" {
+		if in.RunID == nil {
+			return nil, Fail(403, "assigned reviewer run required")
+		}
+		if err = reviewgate.RecordEvidence(ctx, tx, o.NodeID, e.ID, p.ID, *in.RunID, in.Kind, in.Reference, r.Header.Get("X-Aeon-Daemon-ID"), r.Header.Get("X-Aeon-Daemon-Generation")); err != nil {
+			if err == reviewgate.ErrEvidence {
+				return nil, Fail(403, err.Error())
+			}
+			return nil, err
+		}
+		if err = Record(ctx, tx, p, o.Review.TicketID, "review.result_recorded", nil, map[string]any{"work_order_id": o.NodeID, "run_id": *in.RunID, "repository": o.Review.Repository, "base_sha": o.Review.BaseSHA, "head_sha": o.Review.HeadSHA, "result": reviewgate.Parse(in.Reference)}); err != nil {
+			return nil, err
+		}
 	}
 	if err = bump(ctx, tx, o.NodeID); err != nil {
 		return nil, err

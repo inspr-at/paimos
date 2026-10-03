@@ -18,18 +18,24 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 type grokSpec struct{ name, digest string }
 
-func (*GrokAdapter) probeNative(ctx context.Context, b GrokBinding) bool {
+func (a *GrokAdapter) probeNative(ctx context.Context, b GrokBinding) bool {
 	if _, _, err := verifyGrokBinding(b, ""); err != nil {
 		return false
 	}
 	_, bearer, subject, err := readGrokAuth(b.AuthPath, b.PrincipalSHA256)
-	return err == nil && verifyGrokUserInfo(ctx, bearer, subject) == nil
+	if err != nil || verifyGrokUserInfo(ctx, bearer, subject) != nil {
+		return false
+	}
+	for key, binding := range a.Bindings {
+		if binding.PrincipalSHA256 == b.PrincipalSHA256 {
+			a.quotaIDs.Store(key, subject)
+		}
+	}
+	return true
 }
 
 func grokVariant(variant string) (grokSpec, error) {
@@ -57,6 +63,7 @@ type grokProcess struct {
 	sessionID   string
 	model       string
 	observe     func(AdapterEvent)
+	usage       grokUsageTracker
 	violation   atomic.Bool
 	cleanOnce   sync.Once
 }
@@ -165,6 +172,7 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Grok
 	gp := &grokProcess{wireProcess: p, proxy: proxy, scratch: scratch, scratchInfo: info, binding: b, authBefore: before, promptDone: make(chan error, 1), model: grokModel, observe: observe}
 	p.setOnEvent(gp.onEvent)
 	fail := func(e error) (Process, error) {
@@ -301,8 +309,8 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 				}
 			case "usage_update":
 				if p.observe != nil {
-					if report, ok := grokNativeUsage(frame.Params, p.model); ok {
-						p.observe(AdapterEvent{SessionUsage: &report})
+					if ev, ok := p.usage.event(frame.Params, p.model); ok {
+						p.observe(ev)
 					}
 				}
 				return
@@ -319,41 +327,6 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 			_ = p.Stop(ctx)
 		}()
 	}
-}
-
-func grokNativeUsage(raw json.RawMessage, model string) (sessionusage.UsageReport, bool) {
-	var params struct {
-		Update struct {
-			Input     *int64 `json:"inputTokens"`
-			Output    *int64 `json:"outputTokens"`
-			Cached    *int64 `json:"cachedReadTokens"`
-			Reasoning *int64 `json:"reasoningTokens"`
-			Model     string `json:"model"`
-		} `json:"update"`
-	}
-	if json.Unmarshal(raw, &params) != nil || params.Update.Input == nil || params.Update.Output == nil || *params.Update.Input < 0 || *params.Update.Output < 0 {
-		return sessionusage.UsageReport{}, false
-	}
-	name := params.Update.Model
-	if name == "" {
-		name = model
-	}
-	cached, known := int64(0), false
-	if params.Update.Cached != nil && *params.Update.Cached >= 0 && *params.Update.Cached <= *params.Update.Input {
-		cached, known = *params.Update.Cached, true
-	}
-	report, ok := sessionusage.CountReport(name, *params.Update.Input, *params.Update.Output, cached, known)
-	if !ok {
-		return sessionusage.UsageReport{}, false
-	}
-	if params.Update.Reasoning != nil {
-		if *params.Update.Reasoning < 0 || *params.Update.Reasoning > *params.Update.Output {
-			return sessionusage.UsageReport{}, false
-		}
-		reasoning := *params.Update.Reasoning
-		report.ReasoningTokens = &reasoning
-	}
-	return report, true
 }
 
 func safeGrokPath(path string) bool {

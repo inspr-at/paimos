@@ -12,7 +12,7 @@ export const PUBLISH_NOTE_MAX = 500
 export const MAX_RULES = 100
 export const LAYERS = ['company', 'project', 'person', 'agent'] as const
 export const ROLES = ['coordinator', 'builder', 'reviewer', 'operator'] as const
-export const HARNESSES = ['claude-code', 'codex', 'grok', 'pi', 'cursor'] as const
+export const HARNESSES = ['claude-code', 'codex', 'grok', 'pi', 'cursor', 'gemini', 'opencode'] as const
 export type LayerName = typeof LAYERS[number]
 export type RoleName = typeof ROLES[number]
 export type HarnessName = typeof HARNESSES[number]
@@ -21,7 +21,7 @@ export type CheckState = 'on' | 'off' | 'mixed'
 
 export const LAYER_LABEL: Record<LayerName, string> = { company: 'Company', project: 'Project', person: 'Person', agent: 'Agent' }
 export const ROLE_LABEL: Record<RoleName, string> = { coordinator: 'Coordinator', builder: 'Builder', reviewer: 'Reviewer', operator: 'Operator' }
-export const HARNESS_LABEL: Record<HarnessName, string> = { 'claude-code': 'Claude', codex: 'Codex', grok: 'Grok', pi: 'Pi', cursor: 'Cursor' }
+export const HARNESS_LABEL: Record<HarnessName, string> = { 'claude-code': 'Claude', codex: 'Codex', grok: 'Grok', pi: 'Pi', cursor: 'Cursor', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const IDENTITY = /^[a-z][a-z0-9._-]{0,95}$/
@@ -740,9 +740,9 @@ export const listComparisons = (projectId: string) => send<{ comparisons: RulesC
 // ---------- Budget and the explained file (AEON-314) ----------
 export type LayerBytes = Partial<Record<LayerName, number>>
 export interface RuleBudget { max_bytes: number; layer_max_bytes: LayerBytes }
-export interface RuleBudgetBlocker { host: string; harness: string; version?: string; max_session_file_bytes: number }
+export interface RuleBudgetBlocker { host: string; harness: string; version?: string; max_session_file_bytes: number; delivered_max_bytes?: number; truncated?: boolean }
 export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number; blocking_clients?: RuleBudgetBlocker[]; blocking_clients_more?: number }
-export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 }
+export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 500000, min_layer_bytes: 500 }
 export const getBudget = () => send<RuleBudgetView>('/rules/budget').then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
 export const putBudget = (budget: RuleBudget) => send<RuleBudgetView>('/rules/budget', 'PUT', budget).then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
 

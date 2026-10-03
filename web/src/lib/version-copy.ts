@@ -12,3 +12,24 @@ export const VERSION_COPY_TEXT = {
 // inspr-calendar-v2 (one grammar), so a display that only knows the coordinate
 // uses the current scheme.
 export const CALENDAR_DISPLAY_SCHEME = 'inspr-calver-3'
+
+// Puts `text` on the clipboard; the Clipboard API first, then a hidden field
+// copied with execCommand. Reports whether it worked.
+export async function copyToClipboard(text: string, view: Window = window): Promise<boolean> {
+  try { await view.navigator.clipboard.writeText(text); return true } catch { /* fall through */ }
+  const doc = view.document
+  const area = doc.createElement('textarea')
+  try {
+    Object.assign(area, { value: text, readOnly: true })
+    area.setAttribute('aria-hidden', 'true')
+    Object.assign(area.style, { position: 'fixed', top: '0', left: '0', width: '1px', height: '1px', opacity: '0', pointerEvents: 'none' })
+    doc.body.append(area)
+    area.select()
+    return doc.execCommand('copy') === true
+  } catch { return false } finally { area.remove() }
+}
+
+// Copy the renderer's canonical value, never its visible Pretty text.
+export function copyRenderedVersion(host: HTMLElement, view: Window = window): Promise<boolean> {
+  return host.dataset.canonical ? copyToClipboard(host.dataset.canonical, view) : Promise.resolve(false)
+}

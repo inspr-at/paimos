@@ -30,13 +30,7 @@ func (m *Module) addTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out turnView
-	err := m.tx(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if _, err := authorize(r.Context(), r, tx, p, true); err != nil {
-			return err
-		}
-		if err := lockProject(r.Context(), tx, projectID); err != nil {
-			return err
-		}
+	err := m.intakeTx(r, p, projectID, true, func(tx pgx.Tx, _ []string) error {
 		var err error
 		out, err = insertTurn(r.Context(), tx, p, projectID, in)
 		return err
@@ -51,7 +45,7 @@ func insertTurn(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID st
 	}
 	if found {
 		if !sameTurn(existing, in) {
-			return turnView{}, fail(http.StatusConflict, "idempotency key was used for different content")
+			return turnView{}, refusal(http.StatusConflict, "idempotency_conflict", "idempotency key was used for different content")
 		}
 		return existing, nil
 	}
@@ -92,7 +86,7 @@ func insertTurn(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID st
 			return turnView{}, err
 		}
 		if !found || !sameTurn(existing, in) {
-			return turnView{}, fail(http.StatusConflict, "idempotency key was used for different content")
+			return turnView{}, refusal(http.StatusConflict, "idempotency_conflict", "idempotency key was used for different content")
 		}
 		return existing, nil
 	}

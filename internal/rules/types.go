@@ -21,7 +21,11 @@ import (
 
 // MaxBytes is the supported client ceiling; LegacyMaxBytes remains the default
 // and the delivery limit for clients that have not reported a capability.
-const MaxBytes = 64000
+const MaxBytes = 512000
+
+// MaxBudgetBytes is the product ceiling for a workspace's always-on budget.
+// Client transport capacity is separate so a 500 KB file has headroom.
+const MaxBudgetBytes = 500000
 const LegacyMaxBytes = 12000
 const MinBudgetBytes = 2000
 
@@ -32,7 +36,7 @@ const CodexProjectDocMaxBytes = 32 * 1024
 
 // SessionFileLimit is the session file a harness reads by default. Codex is
 // bound by project_doc_max_bytes. Claude Code, Cursor, Grok and Pi have no
-// documented cap below MaxBytes, so they report the product ceiling.
+// documented cap below MaxBytes, so they report the client ceiling.
 func SessionFileLimit(harness string) int {
 	if harness == "codex" {
 		return CodexProjectDocMaxBytes
@@ -47,7 +51,7 @@ const MaxTLDRBytes = 300
 
 var identityPattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,95}$`)
 var Roles = []string{"coordinator", "builder", "reviewer", "operator"}
-var Harnesses = []string{"claude-code", "codex", "grok", "pi", "cursor"}
+var Harnesses = []string{"claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"}
 
 type Scope struct {
 	Layer     string `json:"layer"`
@@ -346,22 +350,35 @@ func normalizeNote(s string) (string, error) {
 	}
 	return s, nil
 }
+
+// Delivery priorities are also the merge precedence. Compatibility cuts keep
+// all locked rules first, then whole normal rules in this order, with identity
+// ascending within a priority. Never change this order implicitly (AEON-432).
+const (
+	priorityCompany = iota
+	priorityProject
+	priorityPerson
+	priorityAgentRole
+	priorityNamedAgent
+	priorityTask
+)
+
 func (s Scope) rank() int {
 	switch s.Layer {
 	case "company":
-		return 0
+		return priorityCompany
 	case "project":
-		return 1
+		return priorityProject
 	case "person":
-		return 2
+		return priorityPerson
 	default:
 		if s.Role != "" {
-			return 3
+			return priorityAgentRole
 		}
 		if s.TaskID == "" {
-			return 4
+			return priorityNamedAgent
 		}
-		return 5
+		return priorityTask
 	}
 }
 func (s Scope) matches(c Context) bool {

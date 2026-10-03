@@ -7,7 +7,7 @@ import { accountPlan, gauge, pct, when, whenFull, type AccountRow, type Gauge, t
 import { reworkDetail, reworkPercent } from './deliveryRating.ts'
 import { compactCount, formatCount, formatUSD, type TokenParts, type UsageDashboard, type UsageWork, type WasteItem, type WorkGroup } from './usageFormat.ts'
 
-export const HARNESS: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
+export const HARNESS: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 export const harnessName = (h: string) => HARNESS[h] ?? (h ? h[0].toUpperCase() + h.slice(1) : h)
 export const plural = (n: number, one: string, many = `${one}s`) => `${formatCount(n)} ${n === 1 ? one : many}`
 
@@ -183,7 +183,7 @@ export function bandRows(pools: PoolView[], now: number): BandRow[] {
     const gauges = plans.map(({ r, plan }) => gauge(r, plan))
     const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
     const g: Gauge | null = gauges.length ? {
-      later: mean(gauges.map(x => x.later)), today: mean(gauges.map(x => x.today)), spent: mean(gauges.map(x => x.spent)),
+      yours: mean(gauges.map(x => x.yours)), later: mean(gauges.map(x => x.later)), today: mean(gauges.map(x => x.today)), spent: mean(gauges.map(x => x.spent)),
       tick: gauges.every(x => x.tick !== null) ? mean(gauges.map(x => x.tick!)) : null, frozen: gauges.every(x => x.frozen),
     } : null
     const live = plans.filter(({ r, plan }) => r.state === 'live' && plan && !plan.override && !(plan.dayOff && !plan.expiring))

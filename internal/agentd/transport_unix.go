@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -24,9 +25,10 @@ type LocalServer struct {
 	Listener  net.Listener
 	Socket    string
 	TokenFile string
-	info      os.FileInfo
-	tokenInfo os.FileInfo
+	cleanup   func() error
 	release   func()
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
@@ -37,7 +39,27 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
-	defer dir.Close()
+	lock, err := dir.LockSocket(filepath.Base(socket))
+	if err != nil {
+		dir.Close()
+		return nil, err
+	}
+	complete := false
+	var info, tokenInfo os.FileInfo
+	var listener net.Listener
+	cleanup := func() error {
+		return dir.CleanupSocket(filepath.Base(socket), lock, info, tokenInfo)
+	}
+	defer func() {
+		if !complete {
+			if listener != nil {
+				_ = listener.Close()
+			}
+			_ = cleanup()
+			lock.Close()
+			dir.Close()
+		}
+	}()
 	if _, err := os.Lstat(socket); err == nil {
 		return nil, errors.New("local socket already exists")
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -52,12 +74,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
-	complete := false
-	defer func() {
-		if !complete {
-			_ = os.Remove(tokenFile)
-		}
-	}()
+	tokenInfo, err = f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	if _, err = f.WriteString(token); err != nil {
 		_ = f.Close()
 		return nil, err
@@ -69,28 +90,83 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	tokenInfo, err := os.Lstat(tokenFile)
+	listener, err = net.Listen("unix", socket)
 	if err != nil {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		return nil, err
-	}
-	if err = os.Chmod(socket, 0600); err != nil {
-		_ = listener.Close()
-		return nil, err
-	}
-	info, err := os.Lstat(socket)
-	if err != nil {
-		_ = listener.Close()
 		return nil, err
 	}
 	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err = os.Chmod(socket, 0600); err != nil {
+		return nil, err
+	}
+	info, err = os.Lstat(socket)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
+	if s.stepUps != nil {
+		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+	}
+	mux.HandleFunc("POST /v1/account-link", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var req AccountLinkRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid account link", 400)
+			return
+		}
+		out, err := s.AccountLink(r.Context(), req)
+		if err != nil {
+			http.Error(w, "account linking unavailable", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	mux.HandleFunc("POST /v1/statusline", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var req StatuslineRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid statusline", 400)
+			return
+		}
+		out, err := s.ReportStatusline(r.Context(), req, time.Now().UTC())
+		if err != nil {
+			http.Error(w, "statusline unavailable", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	})
 	if len(attachments) == 1 && attachments[0] != nil {
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
 	}
+	mux.HandleFunc("GET /v1/account-environment", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		q := r.URL.Query()
+		value, err := s.AccountEnvironment(q.Get("account_id"), q.Get("daemon_id"), q.Get("harness"))
+		if err != nil {
+			http.Error(w, "local account unavailable", http.StatusConflict)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(value)
+	})
 	mux.HandleFunc("GET /v1/lifecycle", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -98,6 +174,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		}
 		w.Header().Set("Content-Type", "application/json")
 		status := s.Lifecycle(r.URL.Query().Get("account_id"))
+		if r.URL.Query().Get("include_readiness") != "1" {
+			status.AccountStatuses, status.VerificationReasons = nil, nil
+		}
 		if r.URL.Query().Get("include_capacity") == "1" {
 			status.CapacityAccounts = s.CapacityAccounts(r.URL.Query().Get("account_id"))
 		}
@@ -117,6 +196,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			return
 		}
 		status, err := s.Drain(req)
+		status.AccountStatuses, status.VerificationReasons = nil, nil
 		if err != nil {
 			http.Error(w, "drain rejected", http.StatusConflict)
 			return
@@ -154,7 +234,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: attachConnContext}
-	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, info: info, tokenInfo: tokenInfo}
+	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup}
+	local.release = func() {
+		_ = lock.Close()
+		_ = dir.Close()
+	}
 	go func() { _ = server.Serve(listener) }()
 	complete = true
 	return local, nil
@@ -172,15 +256,17 @@ func (l *LocalServer) Close() error {
 	if l == nil {
 		return nil
 	}
-	if l.release != nil {
-		defer l.release()
-	}
-	err := l.Server.Close()
-	if info, e := os.Lstat(l.Socket); e == nil && os.SameFile(info, l.info) {
-		_ = os.Remove(l.Socket)
-	}
-	if info, e := os.Lstat(l.TokenFile); e == nil && os.SameFile(info, l.tokenInfo) {
-		_ = os.Remove(l.TokenFile)
-	}
-	return err
+	l.closeOnce.Do(func() {
+		if l.release != nil {
+			defer l.release()
+		}
+		l.closeErr = l.Server.Close()
+		// Serve runs in a goroutine and may not have registered the listener
+		// with http.Server yet when startup is immediately followed by Close.
+		_ = l.Listener.Close()
+		if l.cleanup != nil {
+			l.closeErr = errors.Join(l.closeErr, l.cleanup())
+		}
+	})
+	return l.closeErr
 }

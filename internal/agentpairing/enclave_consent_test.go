@@ -1,0 +1,384 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentpairing_test
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/attachwatch"
+)
+
+func upgradedWatchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest, *ecdsa.PrivateKey) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := base64.StdEncoding.EncodeToString(elliptic.Marshal(key.Curve, key.X, key.Y))
+	f, bearer, in := watchFixtureWithKey(t, public)
+	return f, bearer, in, key
+}
+func signWatchConsent(t *testing.T, key *ecdsa.PrivateKey, digest, nonce string, snap attachwatch.Snapshot) string {
+	t.Helper()
+	raw, err := ecdsa.SignASN1(rand.Reader, key, attachwatch.LocalConsentHash(digest, nonce, attachwatch.LocalConsentReason(snap)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1(t *testing.T) {
+	for _, mode := range []string{"", attachwatch.ModeLease} {
+		t.Run(fmt.Sprintf("mode=%s", mode), func(t *testing.T) {
+			f, bearer, in, signer := upgradedWatchFixture(t)
+			in.Snapshot.Platform = "darwin"
+			in.Snapshot.Mode = mode
+			if mode == attachwatch.ModeLease {
+				in.Snapshot.Transcript, in.Snapshot.FileID = "", ""
+			}
+			in.Digest = in.Snapshot.Digest()
+			public := base64.StdEncoding.EncodeToString(elliptic.Marshal(signer.Curve, signer.X, signer.Y))
+			registration := attachwatch.DeviceRequest{Operation: "register", AttachProtocol: attachwatch.Protocol, ComputerID: in.ComputerID, DeviceProof: in.DeviceProof}
+			for _, version := range []int{0, 1, 3} {
+				registration.PollKey = nonce()
+				registration.LocalConsentProofVersion = version
+				var refusal struct{ Code, Error string }
+				decodeResult(t, f.call("POST", "/api/agent-pairing/attach", registration, false, bearer, 409), &refusal)
+				if refusal.Code != "update_agentd" || !strings.Contains(refusal.Error, "upgrade paimos-agentd") {
+					t.Fatal("unsupported proof lacks actionable upgrade guidance")
+				}
+				old := in
+				old.PollKey = registration.PollKey
+				old.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
+				f.call("POST", "/api/agent-pairing/attach", old, false, bearer, 403)
+			}
+			var count int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM harness_attach_requests)+(SELECT count(*) FROM harness_sessions)`).Scan(&count); err != nil || count != 0 {
+				t.Fatal("unsupported client created attach authority", err)
+			}
+			f.call("GET", "/api/me", nil, false, bearer, 200)
+			registration.PollKey = nonce()
+			registration.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
+			var registered attachwatch.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", registration, false, bearer, 200), &registered)
+			if registered.State != "registered" || registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+				t.Fatal("v2 registration did not advertise proof version")
+			}
+			var pinned string
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT local_auth_public_key FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&pinned); err != nil || pinned != public {
+				t.Fatal("proof upgrade changed the pairing key", err)
+			}
+			in.PollKey = registration.PollKey
+			v := requestWatch(t, f, bearer, in)
+			if v.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion || v.ConsentMode != attachwatch.ConsentLocalAuth {
+				t.Fatal("v2 request lost strict consent")
+			}
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
+			in.Operation, in.Sequence, in.ConsentDigest, in.LocalAuthNonce = "poll", 1, v.ConsentDigest, v.LocalAuthNonce
+			oldHash := sha256.Sum256([]byte("aeon.attach.local-consent.v1\x00" + in.ConsentDigest + "\x00" + in.LocalAuthNonce))
+			oldProof, err := ecdsa.SignASN1(rand.Reader, signer, oldHash[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.LocalAuthSignature = base64.StdEncoding.EncodeToString(oldProof)
+			f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+			in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+			var active attachwatch.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
+			if active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
+				t.Fatal("v2 proof with existing pairing key did not activate")
+			}
+		})
+	}
+}
+
+func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T) {
+	f, bearer, in, signer := upgradedWatchFixture(t)
+	setWatchMode(f, attachwatch.ConsentLocalAuth)
+	in.Snapshot.Platform = "darwin"
+	in.Digest = in.Snapshot.Digest()
+	v := requestWatch(t, f, bearer, in)
+	var approved attachwatch.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &approved)
+	if !attachwatch.LocalAuthNonceValid(approved.LocalAuthNonce) {
+		t.Fatal("server challenge missing")
+	}
+	in.Operation = "poll"
+	in.Sequence = 1
+	in.ConsentDigest = approved.ConsentDigest
+	in.LocalAuthNonce = approved.LocalAuthNonce
+	wrong, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	in.LocalAuthSignature = signWatchConsent(t, wrong, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	var sessions int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, in.ComputerID).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatal("forged signature created session")
+	}
+	in.LocalAuthNonce = strings.Repeat("f", 64)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	in.LocalAuthNonce = approved.LocalAuthNonce
+	lied := in.Snapshot
+	lied.Host = "other host"
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, lied)
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+	var active attachwatch.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
+	if active.State != "active" || active.LocalAuthNonce != "" || active.SessionID == nil {
+		t.Fatal("valid signature did not consume challenge and activate")
+	}
+	in.Sequence++
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	// The same signature cannot transfer to another request with the same process.
+	in.Operation = "request"
+	in.RequestID = uuid(t, f.db)
+	in.LocalAuthSignature = ""
+	in.LocalAuthNonce = ""
+	in.ConsentDigest = ""
+	in.Sequence = 0
+	v = requestWatch(t, f, bearer, in)
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &approved)
+	in.Operation = "poll"
+	in.Sequence = 1
+	in.ConsentDigest = approved.ConsentDigest
+	in.LocalAuthNonce = approved.LocalAuthNonce
+	in.LocalAuthSignature = signWatchConsent(t, signer, active.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 403)
+	in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, in.RequestID); err != nil {
+		t.Fatal(err)
+	}
+	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 410)
+}
+
+func TestEnclaveConsentConcurrentReplayActivatesExactlyOnce(t *testing.T) {
+	for _, mode := range []string{"", attachwatch.ModeLease} {
+		t.Run(fmt.Sprintf("mode=%s", mode), func(t *testing.T) {
+			f, bearer, in, signer := upgradedWatchFixture(t)
+			in.Snapshot.Platform, in.Snapshot.Mode = "darwin", mode
+			if mode == attachwatch.ModeLease {
+				in.Snapshot.Transcript, in.Snapshot.FileID = "", ""
+			}
+			in.Digest = in.Snapshot.Digest()
+			v := requestWatch(t, f, bearer, in)
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
+			in.Operation, in.Sequence = "poll", 1
+			in.ConsentDigest, in.LocalAuthNonce = v.ConsentDigest, v.LocalAuthNonce
+			in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+
+			// Both callers possess the same valid proof. Only the transaction that
+			// consumes the challenge may acquire a session, even under contention.
+			start := make(chan struct{})
+			responses := make(chan *httptest.ResponseRecorder, 2)
+			for range 2 {
+				r := f.request("POST", "/api/agent-pairing/attach", in, false, bearer).WithContext(t.Context())
+				go func() {
+					<-start
+					w := httptest.NewRecorder()
+					f.h.ServeHTTP(w, r)
+					responses <- w
+				}()
+			}
+			close(start)
+			var active attachwatch.View
+			accepted, refused := 0, 0
+			for range 2 {
+				w := <-responses
+				switch w.Code {
+				case http.StatusOK:
+					accepted++
+					decodeResult(t, w, &active)
+				case http.StatusForbidden:
+					refused++
+					var failure struct{ Code string }
+					decodeResult(t, w, &failure)
+					if failure.Code != "local_auth_proof_rejected" {
+						t.Errorf("concurrent replay refusal code %q", failure.Code)
+					}
+				default:
+					t.Errorf("concurrent activation status %d", w.Code)
+				}
+			}
+			if accepted != 1 || refused != 1 || active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
+				t.Fatal("one consent proof did not yield exactly one active session and one refusal")
+			}
+			var count int
+			var consumed, bound bool
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT local_auth_nonce IS NULL, state='active' AND session_id=$2 AND lease_until IS NOT NULL,
+ (SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$3))
+ FROM harness_attach_requests WHERE id=$1`, in.RequestID, *active.SessionID, in.ComputerID).Scan(&consumed, &bound, &count); err != nil || !consumed || !bound || count != 1 {
+				t.Fatal("concurrent activation did not consume the challenge with exactly one bound session", err)
+			}
+		})
+	}
+}
+
+func TestEnclaveConsentIncompleteProofAndFailedActivationPreserveChallenge(t *testing.T) {
+	f, bearer, in, signer := upgradedWatchFixture(t)
+	in.Snapshot.Platform = "darwin"
+	in.Digest = in.Snapshot.Digest()
+	v := requestWatch(t, f, bearer, in)
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
+	in.Operation, in.Sequence, in.ConsentDigest = "poll", 1, v.ConsentDigest
+	proof := signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
+	for _, tc := range []struct {
+		name, nonce, signature string
+		sequence               int64
+		status                 int
+	}{
+		{"no proof", "", "", 1, 200},
+		{"nonce without signature", v.LocalAuthNonce, "", 1, 403},
+		{"signature without nonce", "", proof, 1, 403},
+		{"invalid signature encoding", v.LocalAuthNonce, base64.StdEncoding.EncodeToString([]byte("invalid DER")), 1, 403},
+		// Sequence validation occurs after proof consumption and session insert.
+		// A failed transaction must restore the nonce and remove that session.
+		{"invalid activation sequence", v.LocalAuthNonce, proof, 0, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempt := in
+			attempt.LocalAuthNonce, attempt.LocalAuthSignature, attempt.Sequence = tc.nonce, tc.signature, tc.sequence
+			w := f.call("POST", "/api/agent-pairing/attach", attempt, false, bearer, tc.status)
+			if tc.status == 200 {
+				var waiting attachwatch.View
+				decodeResult(t, w, &waiting)
+				if waiting.State != "approved" || waiting.SessionID != nil || waiting.LeaseUntil != nil || waiting.LocalAuthNonce != v.LocalAuthNonce {
+					t.Fatal("missing proof acquired authority or changed the challenge")
+				}
+			}
+			var pending bool
+			var challenge string
+			var sessions int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT state='approved' AND session_id IS NULL AND lease_until IS NULL, coalesce(local_auth_nonce,''),
+ (SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$2))
+ FROM harness_attach_requests WHERE id=$1`, in.RequestID, in.ComputerID).Scan(&pending, &challenge, &sessions); err != nil || !pending || challenge != v.LocalAuthNonce || sessions != 0 {
+				t.Fatal("incomplete or failed activation consumed consent or left session authority", err)
+			}
+		})
+	}
+	in.LocalAuthNonce, in.LocalAuthSignature = v.LocalAuthNonce, proof
+	var active attachwatch.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
+	if active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
+		t.Fatal("valid retry could not consume the preserved consent challenge")
+	}
+}
+
+func TestLegacyPairingUsesAeonApprovalDespiteCapabilityReport(t *testing.T) {
+	for _, saved := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unsaved default", true: "saved local_auth"}[saved], func(t *testing.T) {
+			f, bearer, in := watchFixture(t)
+			if saved {
+				setWatchMode(f, attachwatch.ConsentLocalAuth)
+			}
+			registerCapability(t, f, bearer, &in, attachwatch.LocalAuthAvailable)
+			in.Snapshot.Platform = "darwin"
+			v := activateWatch(t, f, bearer, &in)
+			if v.ConsentMode != attachwatch.ConsentAeon {
+				t.Fatal("legacy computer gained local confirmation authority")
+			}
+			setting := readWatchSetting(t, f)
+			if setting.ConsentSaved != saved || setting.Computers[0].PairingUpgraded || !saved && setting.ConsentMode != attachwatch.ConsentAeon {
+				t.Fatalf("legacy pairing setting %+v", setting)
+			}
+			// Registration cannot add or replace a pairing key, even with lifecycle proof.
+			f.call("POST", "/api/agent-pairing/attach", map[string]any{"operation": "register", "computer_id": in.ComputerID, "device_proof": in.DeviceProof, "poll_key": in.PollKey, "local_auth_public_key": "pretend"}, false, bearer, 400)
+		})
+	}
+}
+
+func TestPairingKeyRejectsMalformedKeysLinuxAndChangesAfterReview(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("codex")
+	p.request["local_auth_public_key"] = "not-a-P256-key"
+	f.call("POST", "/api/agent-pairing/device", p.request, false, "", 400)
+	signer, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	public := base64.StdEncoding.EncodeToString(elliptic.Marshal(signer.Curve, signer.X, signer.Y))
+	p.request["local_auth_public_key"] = public
+	f.call("POST", "/api/agent-pairing/device", p.request, false, "", 409)
+	p.request["platform"] = "linux"
+	f.call("POST", "/api/agent-pairing/device", p.request, false, "", 400)
+}
+
+func TestAddHarnessPreservesPairingKeyAndCannotReplaceIt(t *testing.T) {
+	f := newFixture(t)
+	signer, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	public := base64.StdEncoding.EncodeToString(elliptic.Marshal(signer.Curve, signer.X, signer.Y))
+	p := f.proposePlatformKey("darwin", "arm64", public, "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	q := &proposal{id: uuid(t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle}
+	q.request = map[string]any{}
+	for field, value := range p.request {
+		q.request[field] = value
+	}
+	q.request["request_id"] = q.id
+	q.request["device_hash"] = hash(q.device)
+	q.request["existing_computer_id"] = *v.ComputerID
+	q.request["existing_lifecycle_secret"] = p.lifecycle
+	q.request["accounts"] = []map[string]string{{"account_key": "claude-add", "harness": "claude", "label": "Chosen Claude account", "model_profile_id": f.profiles["claude"]}}
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	q.request["local_auth_public_key"] = base64.StdEncoding.EncodeToString(elliptic.Marshal(other.Curve, other.X, other.Y))
+	f.call("POST", "/api/agent-pairing/device", q.request, false, "", 409)
+	q.request["local_auth_public_key"] = public
+	f.submit(q)
+	f.approve(q, "connect_only")
+	added := f.redeem(q)
+	var pinned string
+	if *added.ComputerID != *v.ComputerID || f.db.Admin.QueryRow(t.Context(), `SELECT local_auth_public_key FROM agent_pairing_computers WHERE id=$1`, *v.ComputerID).Scan(&pinned) != nil || pinned != public {
+		t.Fatal("Add harness replaced the browser-pinned key")
+	}
+}
+
+// Reapply the upgrade to populated old-schema fixtures as the non-bypass app
+// owner. This catches a migration silently updating zero rows under FORCE RLS.
+func TestEnclaveMigrationEndsLegacyStrictWatchesUnderForcedRLS(t *testing.T) {
+	f, bearer, in := watchFixture(t)
+	strict := activateWatch(t, f, bearer, &in)
+	preserved := in
+	preserved.RequestID = uuid(t, f.db)
+	preserved.Snapshot.Process.PID++
+	preserved.Digest = preserved.Snapshot.Digest()
+	preserved.Operation = "request"
+	preserved.Sequence = 0
+	preserved.ConsentDigest = ""
+	aeon := activateWatch(t, f, bearer, &preserved)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET consent_mode='local_auth' WHERE id=$1`, strict.RequestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `ALTER TABLE agent_pairing_computers DROP COLUMN local_auth_public_key; ALTER TABLE harness_attach_requests DROP COLUMN local_auth_nonce`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../db/migrations/1047_enclave_consent.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.db.App.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var state, phase string
+	var stopped bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT a.state,s.phase,s.stopped_at IS NOT NULL FROM harness_attach_requests a JOIN harness_sessions s ON s.tenant_id=a.tenant_id AND s.id=a.session_id WHERE a.id=$1`, strict.RequestID).Scan(&state, &phase, &stopped); err != nil || state != "detached" || phase != "stopped" || !stopped {
+		t.Fatal("old strict watch survived migration")
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state FROM harness_attach_requests WHERE id=$1`, aeon.RequestID).Scan(&state); err != nil || state != "active" {
+		t.Fatal("migration ended an Aeon watch")
+	}
+}

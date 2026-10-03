@@ -1,23 +1,29 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch, type Directive } from 'vue'
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { groupByDay, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, stats as statsOf, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { codenameOf } from '../../lib/codenames'
+import { useDeveloperSettings } from '../../lib/developerSettings'
+import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, technicalLine, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
 import { normalKey } from '../../lib/ticketLinks'
-import { relativeTime } from '../../lib/work'
+import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
+import ReleaseCodename from './ReleaseCodename.vue'
 import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
 import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
+import ReleaseVersionCopy from './ReleaseVersionCopy.vue'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
@@ -28,6 +34,7 @@ import { TICKET_PEEK } from '../../lib/ticketPeek'
 const props = defineProps<{ target: string | null }>()
 const emit = defineEmits<{ select: [version: string]; query: [key: 'release_lang' | 'release_view', value: string]; close: []; home: []; navigate: [path: string] }>()
 const store = useReleases()
+const { showReservedVersions } = useDeveloperSettings()
 const version = useVersion()
 const profile = useProfile()
 const session = useSession()
@@ -95,13 +102,48 @@ const showDetail = ref(window.matchMedia('(max-width: 760px)').matches && !!prop
 const help = ref(false)
 const evidence = ref(false)
 const missing = ref('')
+// Keys stay inert until the open-time refetch has chosen a row. The dialog is
+// focused while that request is in flight, and a key then would hit an empty
+// list or a history that is about to be replaced.
+const keysReady = ref(false)
+// The latest version this sheet has asked the address to show and not yet seen
+// come back. The navigation waits on the session, so the address lands after
+// the cursor has moved — often into Compare, which never writes the address.
+// Only that echo is ignored. A newer request replaces it. A navigation that
+// settles on a failure, or any other address, drops it: Back, Forward and an
+// in-app link then select that release, and Compare closes.
+let pendingEcho = ''
+function targetVersion(target: string | null) {
+  return target && target !== 'all' && target !== 'current' ? target.replace(/^v/, '') : ''
+}
+function publishSelection(version: string) {
+  // A request that already matches the address will not change it, so it is not
+  // an echo — and it supersedes one that was still in flight.
+  pendingEcho = version === targetVersion(props.target) ? '' : version
+  emit('select', version)
+}
+// The address did not adopt this version: the replace was cancelled, duplicated
+// or rejected. A later visit to it is someone opening that release.
+function navigationSettled(version: string | undefined, failure: unknown) {
+  if (!failure || !version || version !== pendingEcho) return
+  pendingEcho = ''
+}
+defineExpose({ navigationSettled })
 const phoneQuery = window.matchMedia('(max-width: 760px)')
 const phone = ref(phoneQuery.matches)
 const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
+// Once the overview stacks, both cards belong in the scrolling list, including
+// tablet landscape widths where the list and detail still sit side by side.
+const scrollStatsQuery = window.matchMedia('(max-width: 900px)')
+const scrollStats = ref(scrollStatsQuery.matches)
+const onScrollStats = (event: MediaQueryListEvent) => { scrollStats.value = event.matches }
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
-const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const eligible = computed(() => visibleReleases(releases.value, showReservedVersions.value))
+// Result counts and statistics describe the full history, even when rows are hidden.
+const matching = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const visible = computed(() => visibleReleases(matching.value, showReservedVersions.value))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
 const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])))
@@ -109,6 +151,7 @@ const byVersion = computed(() => new Map(releases.value.map(r => [r.version, r])
 // Each row's name in the chosen language, with the language it fell back to.
 const rails = computed(() => new Map(visible.value.map(r => [r.version, railLine(r, locale.value)])))
 const selected = computed(() => cursor.value ? byVersion.value.get(cursor.value) ?? null : null)
+const hiddenReserved = computed(() => selected.value?.state === 'reserved' && !showReservedVersions.value)
 const current = computed(() => history.value?.current ?? '')
 // The version this page loaded with. The history's current is the server, which
 // can already be newer while this page is still the old build.
@@ -119,16 +162,70 @@ const runningSince = computed(() => runningHere.value === current.value ? histor
 const currentKnown = computed(() => byVersion.value.has(current.value))
 // The published release before the one the server runs: where a rollback would go.
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
-const stats = computed(() => statsOf(releases.value, now.value))
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
+const candidateCount = computed(() => releases.value.filter(r => r.state === 'candidate').length)
+const publishedCount = computed(() => releases.value.filter(r => r.state === 'published').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
 // One notice. An outdated page says a newer version is live; it does not also
 // warn that this build's history lacks that version. The server is chosen once:
 // the newer of the cached history and the version the update poll already saw.
 const server = computed(() => liveServer(current.value, store.available))
 const notice = computed(() => releaseNotice(pageRuns.value, server.value, missing.value))
+// The title (AEON-488) is the release live on the server, by its codename: the
+// newer of what the server and this page know. The eyebrow names the product;
+// Details adds the generation and the counts.
+const hero = computed(() => { const v = liveServer(server.value, pageRuns.value); return isCalendarVersion(v) ? v : '' })
+const heroName = computed(() => byVersion.value.get(hero.value)?.codename)
+const eyebrow = computed(() => view.value === 'details'
+  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${publishedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : []), ...(candidateCount.value ? [`${candidateCount.value} candidate`] : [])].join(' · ')
+  : `${brand.value.wordmark} · Release`)
+// One status line under it: since when it runs here, or that this page is older.
+const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
+const liveLine = computed(() => Number.isNaN(liveAt.value) ? 'Live here' : `Live here since ${clockSince(liveAt.value, now.value)} · ${span(Math.max(60_000, now.value - liveAt.value))}`)
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+
+// Fit each badge's own text, keeping state labels ahead of the New hint.
+// Measure in the real font so a wider version or a narrow rail changes only
+// the labels that cannot fit beside the name's ellipsis and the other badges.
+const badgeFits = new WeakMap<HTMLElement, { fit: () => void; stop: () => void }>()
+const vFitBadges: Directive<HTMLElement> = {
+  mounted(identity) {
+    const fit = () => {
+      if (!identity.isConnected || !identity.getBoundingClientRect().width) return
+      const tags = [...identity.querySelectorAll<HTMLElement>('.tag')]
+      if (!tags.length) return
+      tags.forEach(tag => tag.classList.remove('compact'))
+      const widths = tags.map(tag => tag.getBoundingClientRect().width)
+      const name = identity.querySelector<HTMLElement>('.rn-name')!
+      const ellipsis = document.createElement('span')
+      ellipsis.textContent = '…'
+      ellipsis.style.cssText = 'position:absolute;white-space:nowrap'
+      name.append(ellipsis)
+      const minimumName = ellipsis.getBoundingClientRect().width
+      ellipsis.remove()
+      const style = getComputedStyle(identity)
+      const dotWidth = parseFloat(style.getPropertyValue('--compact-badge-width'))
+      let available = identity.getBoundingClientRect().width - minimumName - parseFloat(style.columnGap) * tags.length - dotWidth * tags.length
+      // Reserve a dot for every sibling before admitting a full label.
+      const priority = tags.map((tag, index) => ({ tag, index })).sort((a, b) => Number(a.tag.classList.contains('new-tag')) - Number(b.tag.classList.contains('new-tag')))
+      for (const { tag, index } of priority) {
+        const extra = widths[index]! - dotWidth
+        const fits = extra <= available
+        tag.classList.toggle('compact', !fits)
+        if (fits) available -= extra
+      }
+    }
+    const observer = new ResizeObserver(fit)
+    observer.observe(identity)
+    document.fonts.addEventListener('loadingdone', fit)
+    void document.fonts.ready.then(fit)
+    badgeFits.set(identity, { fit, stop: () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', fit) } })
+    fit()
+  },
+  updated(identity) { badgeFits.get(identity)?.fit() },
+  beforeUnmount(identity) { badgeFits.get(identity)?.stop(); badgeFits.delete(identity) },
+}
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -157,25 +254,40 @@ function initialSelection() {
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
-  if (target === 'current') { initialSelection(); return }
-  const wanted = target && target !== 'all' ? target.replace(/^v/, '') : ''
-  if (wanted && wanted !== cursor.value && byVersion.value.has(wanted)) { mode.value = 'browse'; cursor.value = wanted }
+  // `current` is the footer before the running version is known. It resolves
+  // to that release when the history arrives; it is not a version to echo.
+  if (target === 'current') { pendingEcho = ''; initialSelection(); return }
+  const wanted = targetVersion(target)
+  const echo = !!wanted && wanted === pendingEcho
+  // Any other address ends the echo, including one this build cannot show.
+  if (!echo) pendingEcho = ''
+  if (!wanted || !byVersion.value.has(wanted)) return
+  if (echo) { pendingEcho = ''; return }
+  if (wanted === cursor.value) return
+  mode.value = 'browse'
+  cursor.value = wanted
 })
 watch(history, () => { if (props.target === 'current') initialSelection() })
 watch(cursor, async (value, old) => {
   if (!value) return
-  if (mode.value === 'browse') emit('select', value)
+  if (mode.value === 'browse') publishSelection(value)
   await nextTick()
   document.getElementById(optionId(value))?.scrollIntoView({ block: 'nearest' })
   if (detailPane.value && old) detailPane.value.scrollTop = 0
 })
 // A filter that hides the selection moves it to the first match.
-watch(order, list => { if (list.length && cursor.value && !indexOf.value.has(cursor.value) && mode.value === 'browse') cursor.value = list[0].version })
+watch(order, list => { if (list.length && cursor.value && !indexOf.value.has(cursor.value) && mode.value === 'browse' && !hiddenReserved.value) cursor.value = list[0].version })
 
 function step(delta: number) {
   const list = order.value
   if (!list.length) return
-  const at = cursor.value ? indexOf.value.get(cursor.value) ?? -1 : -1
+  const currentVersion = cursor.value
+  const at = currentVersion ? indexOf.value.get(currentVersion) ?? -1 : -1
+  if (at === -1 && currentVersion) {
+    const neighbor = delta > 0 ? list.find(r => r.version < currentVersion) : [...list].reverse().find(r => r.version > currentVersion)
+    if (neighbor) cursor.value = neighbor.version
+    return
+  }
   cursor.value = list[Math.max(0, Math.min(list.length - 1, at === -1 ? 0 : at + delta))].version
 }
 function choose(v: string) {
@@ -190,7 +302,15 @@ async function open() {
 }
 
 // ---------- Compare ----------
+watch(eligible, list => {
+  if (mode.value !== 'compare') return
+  const versions = new Set(list.map(r => r.version))
+  if (compareFrom.value && !versions.has(compareFrom.value)) compareFrom.value = list[0]?.version ?? null
+  if (cursor.value && !versions.has(cursor.value)) cursor.value = list.find(r => r.version !== compareFrom.value)?.version ?? compareFrom.value
+})
 function startCompare() {
+  // A hidden reservation may be open by URL, but it cannot be a picker endpoint.
+  if (!cursor.value || !indexOf.value.has(cursor.value)) cursor.value = order.value[0]?.version ?? null
   if (!cursor.value) return
   mode.value = 'compare'
   compareFrom.value = cursor.value
@@ -205,7 +325,7 @@ function startCompare() {
 function exitCompare() {
   mode.value = 'browse'
   compareFrom.value = null
-  if (cursor.value) emit('select', cursor.value)
+  if (cursor.value) publishSelection(cursor.value)
   listbox.value?.focus({ preventScroll: true })
 }
 function swap() { if (compareTo.value && compareFrom.value) { const a = compareFrom.value; compareFrom.value = compareTo.value; cursor.value = a } }
@@ -277,6 +397,7 @@ function keydown(event: KeyboardEvent) {
     else emit('close')
     return
   }
+  if (!keysReady.value) return
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
   if (inPeek(event.target)) { peekKeys(event); return }
   if (event.target instanceof Element && event.target.closest('.switches') && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -304,19 +425,23 @@ onMounted(async () => {
   opener = document.activeElement as HTMLElement | null
   setOverlayTitle('Releases')
   phoneQuery.addEventListener('change', onPhone)
+  scrollStatsQuery.addEventListener('change', onScrollStats)
   clock = setInterval(() => { now.value = Date.now() }, 30_000)
   dialog.value?.showModal()
   dialog.value?.focus()
-  if (store.history) { initialSelection(); await nextTick(); listbox.value?.focus({ preventScroll: true }) }
   // Always refetch: the server may run a newer build than when the page loaded.
+  // Keys wait until that history is the one on screen, so a press during the
+  // refetch cannot move a row the replacement then drops.
   await store.load(true)
   await store.markSeen()
   initialSelection()
+  keysReady.value = true
   await nextTick()
-  if (document.activeElement === dialog.value) listbox.value?.focus({ preventScroll: true })
+  if (document.activeElement === dialog.value || !dialog.value?.contains(document.activeElement)) listbox.value?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
   phoneQuery.removeEventListener('change', onPhone)
+  scrollStatsQuery.removeEventListener('change', onScrollStats)
   clearInterval(clock)
   setOverlayTitle('')
   // Leave the top layer first: the page is inert while the modal is open.
@@ -344,15 +469,29 @@ const KINDS = [
 </script>
 
 <template>
-  <dialog ref="dialog" class="releases" aria-labelledby="releases-title" tabindex="-1" @cancel.prevent @keydown="keydown">
+  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" tabindex="-1" @cancel.prevent @keydown="keydown">
     <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare', peeking: !!peekKey }">
       <header class="head" :inert="covered">
         <div class="title-row">
           <!-- The mark leaves the release history for the home page, like the app header's mark. -->
-          <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="24" height="24" alt="" /></a>
+          <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="26" height="26" alt="" /></a>
           <div class="titles">
-            <p class="eyebrow">{{ generationLabel }} · Release history</p>
-            <h1 id="releases-title">{{ brand.wordmark }} releases</h1>
+            <p class="eyebrow">{{ eyebrow }}</p>
+            <h1 id="releases-title" class="hero" :class="{ named: !!hero }">
+              <ReleaseCodename v-if="hero" :version="hero" :name="heroName" plain />
+              <template v-else>{{ brand.wordmark }} releases</template>
+            </h1>
+            <div v-if="hero" class="status-dock">
+              <p v-if="notice === 'update'" class="status-line outdated" role="status">
+                <span class="status-dot" aria-hidden="true" />
+                <span>Live on the server · this page still runs <ReleaseName v-if="pageRuns" :version="pageRuns" :name="byVersion.get(pageRuns)?.codename" class="status-version" /></span>
+                <button type="button" class="reload" @click="reload"><AppIcon name="refresh" :size="13" />Reload</button>
+              </p>
+              <p v-else class="status-line" :data-tip="runningSince ? `Live on this server since ${absoluteTime(runningSince)}` : undefined">
+                <span class="status-dot live" aria-hidden="true" /><span>{{ liveLine }}</span>
+              </p>
+              <ReleaseVersionCopy :value="hero" class="dock-version" />
+            </div>
           </div>
           <span class="spacer" />
           <div class="switches">
@@ -367,33 +506,28 @@ const KINDS = [
           </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
-            <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search headlines, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
+            <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search names, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
             <kbd v-if="!filter.q" class="keycap slash" aria-hidden="true">/</kbd>
           </label>
-          <button type="button" class="btn compare-btn" aria-label="Compare" :aria-pressed="mode === 'compare'" aria-keyshortcuts="c" :disabled="!releases.length" @click="mode === 'compare' ? exitCompare() : startCompare()">
+          <button type="button" class="btn compare-btn" aria-label="Compare" :aria-pressed="mode === 'compare'" aria-keyshortcuts="c" :disabled="mode !== 'compare' && !visible.length" @click="mode === 'compare' ? exitCompare() : startCompare()">
             <AppIcon name="compare" :size="14" /><span class="btn-text">Compare</span><kbd class="keycap" aria-hidden="true">C</kbd>
           </button>
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
           <button type="button" class="icon-btn close-btn" aria-label="Close release history" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
         </div>
-        <p v-if="notice === 'update'" class="notice" role="status">
-          <AppIcon name="info" :size="14" />
-          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" />.</span>
-          <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
-        </p>
-        <p v-else-if="notice === 'missing'" class="notice" role="status">
+        <p v-if="notice === 'missing'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
           <span><CalendarVersion :value="missing" class="notice-version" /> is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
-        <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 6" :key="i" class="skeleton" /></div>
+        <ReleaseStats v-if="releases.length && !scrollStats" class="stats" :releases="releases" :now="now" />
+        <div v-else-if="!scrollStats && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 2" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases" :inert="covered">
-          <!-- Phones: the stats scroll away with the list, inside the gutter. -->
-          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
+          <!-- Stacked cards scroll away with the list, inside its gutter. -->
+          <ReleaseStats v-if="releases.length && scrollStats" compact class="stats" :releases="releases" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
@@ -401,13 +535,13 @@ const KINDS = [
               <button type="button" class="toggle" :aria-pressed="filter.tickets" @click="filter.tickets = !filter.tickets"><AppIcon name="ticket" :size="12" />Tickets</button>
             </div>
             <p class="result-count" aria-live="polite">
-              <template v-if="filtering">{{ visible.length }} of {{ releases.length }}</template>
-              <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
+              <template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template>
+              <template v-else-if="releases.length">{{ publishedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template><template v-if="candidateCount"> · {{ candidateCount }} candidate</template></template>
             </p>
           </div>
 
           <p v-if="mode === 'compare'" class="compare-hint" role="status">
-            <span :lang="lang">{{ copyText.comparingFrom }}</span><CalendarVersion v-if="compareFrom" :value="compareFrom" class="hint-version" />
+            <span :lang="lang">{{ copyText.comparingFrom }}</span><ReleaseName v-if="compareFrom" :version="compareFrom" :name="byVersion.get(compareFrom)?.codename" class="hint-version" />
             <span v-if="phone" :lang="lang">{{ copyText.compareTap }}</span>
             <span v-else :lang="lang">{{ copyText.compareOther[0] }} <kbd class="keycap">j</kbd> <kbd class="keycap">k</kbd> {{ copyText.compareOther[1] }}</span>
           </p>
@@ -425,6 +559,7 @@ const KINDS = [
             <h2>{{ copyText.noHistory }}</h2>
             <p>{{ copyText.noHistoryText(current === 'dev') }}</p>
           </div>
+          <p v-else-if="history && matching.length && !visible.length" class="empty hidden-history">Hidden in the history. Show reserved versions in Developer settings.</p>
           <div v-else-if="history && !visible.length" class="empty" :lang="lang">
             <h2>{{ copyText.noMatch }}</h2>
             <p>{{ copyText.noMatchText(releases.length, filter.q.trim()) }}</p>
@@ -432,44 +567,47 @@ const KINDS = [
           </div>
 
           <div
-            v-show="visible.length" ref="listbox" class="listbox" role="listbox" tabindex="0" aria-label="Releases, newest first"
+            v-show="visible.length" ref="listbox" class="listbox" role="grid" tabindex="0" aria-label="Releases, newest first"
             :aria-activedescendant="cursor && indexOf.has(cursor) ? optionId(cursor) : undefined"
           >
-            <div v-for="day in days" :key="day.key" class="day" role="group" :aria-labelledby="`day-${day.key}`">
+            <div v-for="day in days" :key="day.key" class="day" role="rowgroup" :aria-labelledby="`day-${day.key}`">
               <p :id="`day-${day.key}`" class="day-h"><span>{{ day.label }}</span><span class="day-count">{{ day.releases.length }}</span></p>
               <div
-                v-for="r in day.releases" :id="optionId(r.version)" :key="r.version" role="option" class="row"
+                v-for="r in day.releases" :id="optionId(r.version)" :key="r.version" role="row" class="row"
                 :aria-selected="cursor === r.version"
                 :class="{ reserved: r.state === 'reserved', current: r.version === current, fresh: store.highlight.has(r.version), from: mode === 'compare' && r.version === compareFrom, to: r.version === compareTo }"
                 :style="{ '--i': Math.min(indexOf.get(r.version) ?? 0, 16) }"
                 @click="choose(r.version)"
               >
-                <span class="time">
+                <span class="time" role="gridcell">
                   <span class="mono clock">{{ timeOf(r) }}</span>
                   <span class="age">{{ ageOf(r) }}</span>
                 </span>
-                <span class="main">
+                <span class="main" role="gridcell">
                   <span class="line1">
-                    <CalendarVersion :value="r.version" class="row-version" />
-                    <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
-                    <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
-                    <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
-                    <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag">From</span>
-                    <span v-if="r.version === compareTo" class="tag end-tag">To</span>
+                    <span v-fit-badges class="row-identity">
+                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name" :title="r.codename || codenameOf(r.version) || r.version"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
+                      <span v-if="r.version === current" class="tag current-tag" title="Current"><span class="live-dot" aria-hidden="true" /><span class="tag-label">Current</span></span>
+                      <span v-if="store.highlight.has(r.version)" class="tag new-tag" title="New"><span class="tag-label">New</span></span>
+                      <span v-if="r.version === rollbackTarget" class="tag" title="Rollback target"><span class="tag-label">Rollback target</span></span>
+                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag" title="From"><span class="tag-label">From</span></span>
+                      <span v-if="r.version === compareTo" class="tag end-tag" title="To"><span class="tag-label">To</span></span>
+                    </span>
+                    <ReleaseVersionCopy :value="r.version" class="row-version" @click.stop />
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
                     <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
                     <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
-                  <span v-if="r.state === 'published'" class="counts">
+                  <span v-if="r.state !== 'reserved'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
                       <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>
                     </template>
                     <span v-if="countsOf(r).tickets.length" class="count keys mono">{{ countsOf(r).tickets.slice(0, 2).join(' ') }}<template v-if="countsOf(r).tickets.length > 2"> +{{ countsOf(r).tickets.length - 2 }}</template></span>
                   </span>
                 </span>
-                <AppIcon name="chevron-right" :size="14" class="row-chev" />
+                <span role="gridcell" class="row-chev"><AppIcon name="chevron-right" :size="14" /></span>
               </div>
             </div>
           </div>
@@ -478,12 +616,13 @@ const KINDS = [
         <section ref="detailPane" class="detail-pane" :aria-label="mode === 'compare' ? 'Comparison' : 'Release'" :inert="covered">
           <button v-if="phone" type="button" class="btn sm ghost back" @click="showDetail = false"><AppIcon name="arrow-left" :size="13" />All releases</button>
           <ReleaseCompare
-            v-if="mode === 'compare' && compareFrom" key="compare" :releases="releases" :from="compareFrom" :to="compareTo"
+            v-if="mode === 'compare' && compareFrom" key="compare" :releases="eligible" :from="compareFrom" :to="compareTo"
             :repository="history?.repository ?? ''" :query="filter.q" :lang="lang" :view="view" @swap="swap" @exit="exitCompare"
           />
           <ReleaseDetail
             v-else-if="selected" ref="detail" :key="selected.version" :release="selected" :repository="history?.repository ?? ''"
             :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
+            :hidden-in-history="hiddenReserved"
             :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :lang="lang" :view="view" @evidence="value => evidence = value"
           />
           <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
@@ -500,7 +639,7 @@ const KINDS = [
           <dl>
             <div><dt><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd></dt><dd>Next and previous release</dd></div>
             <div><dt><kbd class="keycap">Enter</kbd></dt><dd>Open the release</dd></div>
-            <div><dt><kbd class="keycap">/</kbd></dt><dd>Search headlines, changes and ticket keys</dd></div>
+            <div><dt><kbd class="keycap">/</kbd></dt><dd>Search names, changes and ticket keys</dd></div>
             <div><dt><kbd class="keycap">c</kbd></dt><dd>Compare two releases, then pick the other end with j and k</dd></div>
             <div><dt><kbd class="keycap">e</kbd></dt><dd>Show or hide the evidence</dd></div>
             <div><dt><kbd class="keycap">?</kbd></dt><dd>These keys</dd></div>
@@ -523,22 +662,50 @@ const KINDS = [
 }
 .releases[open] { display: block; }
 .releases::backdrop { background: var(--scrim); }
-.shell { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; max-width: 1640px; margin: 0 auto; padding: 0 var(--gutter); }
+.shell {
+  position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; max-width: 1640px; margin: 0 auto; padding: 0 var(--gutter);
+  /* A soft aurora behind the title (AEON-488): aqua, teal and gold lights. */
+  --aurora-1: rgba(127, 216, 207, .55); --aurora-2: rgba(14, 111, 108, .22); --aurora-3: rgba(232, 192, 122, .32);
+  background:
+    radial-gradient(220px 160px at 130px 30px, var(--aurora-1), transparent) no-repeat,
+    radial-gradient(190px 130px at 440px 30px, var(--aurora-2), transparent) no-repeat,
+    radial-gradient(160px 110px at 670px 40px, var(--aurora-3), transparent) no-repeat;
+}
+:root[data-theme="dark"] .shell { --aurora-1: rgba(127, 216, 207, .2); --aurora-2: rgba(164, 229, 223, .08); --aurora-3: rgba(232, 192, 122, .12); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .shell { --aurora-1: rgba(127, 216, 207, .2); --aurora-2: rgba(164, 229, 223, .08); --aurora-3: rgba(232, 192, 122, .12); } }
 
 /* ---------- Head ---------- */
 .head { display: grid; gap: 14px; padding: 18px 0 16px; }
-.title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-row { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 /* The two switches sit with search and Compare, at the header controls' 36 px. */
 .switches { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .switches .seg button { height: 30px; padding: 0 12px; }
-.mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
+.mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 52px; height: 52px; border-radius: 15px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
 .mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
-.titles { min-width: 0; }
-.titles .eyebrow { margin: 0; }
-.titles h1 { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The light display title sits above one frosted glass status dock. */
+.titles {
+  /* The codename keeps its line; the search field gives way first. */
+  flex: 0 0 auto; max-width: 46%;
+  display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; padding: 4px 0;
+}
+.titles .eyebrow { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; font: 600 10.5px/1.4 var(--font); letter-spacing: .18em; overflow-wrap: anywhere; text-align: center; }
+.titles .eyebrow::before, .titles .eyebrow::after { content: ''; flex: 1; min-width: 16px; height: 1px; background: var(--line-2); }
+.hero { max-width: 100%; margin: 0; font: 300 clamp(28px, 3.4vw, 48px)/1.1 var(--serif); color: var(--ink); text-align: center; overflow-wrap: anywhere; }
+.hero:not(.named) { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; }
+.status-dock { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 14px; max-width: 100%; min-height: 48px; padding: 6px 16px; border-radius: 24px; background: linear-gradient(135deg, var(--glass), var(--glass-2)); -webkit-backdrop-filter: blur(22px) saturate(1.4); backdrop-filter: blur(22px) saturate(1.4); box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 1px var(--glass-rim), 0 12px 28px -18px var(--line-2); }
+.dock-version { padding-left: 14px; border-left: 1px solid var(--line-2); }
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
+.status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 3px rgba(214, 155, 49, .18); }
+.status-dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); }
+.status-version { font-weight: 600; color: var(--ink); vertical-align: baseline; }
+.reload { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--teal-ink); font: 600 13px/1 var(--font); cursor: pointer; }
+@media (hover: hover) { .reload:hover { background: var(--row-hover); } }
+.reload:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (prefers-reduced-motion: no-preference) { .status-dot.live { animation: breathe 2.4s ease-in-out infinite; } }
+@keyframes breathe { 0%, 100% { box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); } 50% { box-shadow: 0 0 0 6px rgba(47, 143, 91, .06); } }
 .spacer { flex: 1 1 0; }
-.search { width: min(360px, 32vw); }
+.search { flex: 0 1 360px; min-width: 180px; }
 .search .field { height: 36px; border-radius: 999px; padding-right: 34px; }
 .search .field::-webkit-search-cancel-button { display: none; }
 .slash { position: absolute; right: 10px; }
@@ -547,12 +714,11 @@ const KINDS = [
 .icon-btn { width: 36px; height: 36px; }
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
 .notice > span { flex: 1; min-width: 0; line-height: 1.45; }
-.notice-version { font-size: inherit; vertical-align: baseline; }
+.notice-version { font-size: inherit; font-weight: 600; vertical-align: baseline; }
 .notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
-.stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
-.stats-placeholder .skeleton { border-radius: 14px; }
-@media (max-width: 1100px) { .stats-placeholder { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 275px; } }
+.stats-placeholder { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 14px; height: 300px; }
+.stats-placeholder .skeleton { border-radius: 20px; }
 
 /* ---------- Body ---------- */
 .body { display: grid; grid-template-columns: minmax(360px, 460px) minmax(0, 1fr); gap: 28px; min-height: 0; }
@@ -572,7 +738,7 @@ const KINDS = [
 .toggle:focus-visible { box-shadow: var(--focus-ring); }
 .result-count { font: 500 11px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .compare-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); color: var(--ink); font-size: 12.5px; }
-.hint-version { font-size: 12px; }
+.hint-version { font-size: 12px; font-weight: 600; }
 
 .listbox { display: grid; gap: 14px; border-radius: 14px; outline: none; }
 .listbox:focus-visible { box-shadow: none; }
@@ -593,16 +759,36 @@ const KINDS = [
 /* Reserved, never published: a dashed hairline in the row's shape, not faded text. */
 .row.reserved { outline: 1px dashed var(--line-2); }
 .row.reserved .clock { color: var(--ink-2); font-weight: 500; }
-.row.reserved .row-version { color: var(--ink-2); }
+.row.reserved .row-name { color: var(--ink-2); }
 /* Selected (and both ends of a comparison): an outline ring in the row's shape; focus makes it the focus ring. */
 .row[aria-selected="true"], .row.from { outline: 2px solid var(--chip-teal-line); }
 .listbox:focus-visible .row[aria-selected="true"] { outline-color: var(--teal); }
 .time { display: grid; gap: 1px; padding-top: 1px; }
 .clock { font-size: 13px; font-weight: 600; color: var(--ink); }
 .age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-.main { display: grid; gap: 3px; min-width: 0; }
-.line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.row-version { font-size: 12.5px; color: var(--ink); }
+.main { display: grid; gap: 3px; min-width: 0; container: release-row / inline-size; }
+/* The version owns its slot, including the canonical reveal and copy icon.
+   Only the name gives way; the 44 px copy target keeps the same position. */
+.line1 { --row-text-size: 14px; --row-line-height: 20px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px; min-width: 0; }
+.row-identity { --compact-badge-width: 8px; display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
+.row-name { flex: 1; min-height: 44px; font-size: var(--row-text-size); line-height: var(--row-line-height); font-weight: 600; letter-spacing: .005em; color: var(--ink); }
+.row-name :deep(.rn-name) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.row-identity .tag { flex: none; align-items: baseline; padding-block: 4.5px; }
+.row-identity .live-dot { align-self: center; }
+.row-version { min-width: max-content; justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: var(--row-line-height); }
+/* The name and Pretty version use the same system-font line box. Align the
+   canonical reveal to that baseline instead of centering different metrics. */
+.row-version :deep(.version-pretty) { font-size: var(--row-text-size); }
+.row-version :deep(.version-layers) { justify-items: end; align-items: baseline; grid-template-rows: var(--row-line-height); }
+/* Only measured overflow compacts a badge; its text remains accessible. */
+.row-identity .tag.compact { position: relative; align-self: center; align-items: center; justify-content: center; width: var(--compact-badge-width); height: 12px; padding: 0; }
+.row-identity .tag.compact:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.row-identity .tag.compact .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@container release-row (max-width: 310px) {
+  .row-identity { gap: 1.5px; }
+  .row-identity .tag:not(.compact) { padding-inline: 5px; }
+}
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .new-tag { background: var(--gold-2); color: #3a2804; }
@@ -630,6 +816,7 @@ const KINDS = [
 .empty { display: grid; justify-items: start; gap: 8px; padding: 28px 12px; }
 .empty h2 { font-size: 17px; }
 .empty p { font-size: 13.5px; }
+.hidden-history { font-size: 13px; color: var(--ink-3); }
 .empty-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); }
 
 /* ---------- A ticket beside the history ---------- */
@@ -664,12 +851,12 @@ const KINDS = [
 /* ---------- Narrower screens ---------- */
 @media (max-width: 1100px) {
   .body { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: 20px; }
-  .search { width: min(280px, 30vw); }
+  .search { flex-basis: 280px; }
 }
 /* Too narrow for the title, switches and search in one line: the switches take the next one. */
 @media (max-width: 1180px) and (min-width: 761px) {
   .title-row { flex-wrap: wrap; row-gap: 10px; }
-  .switches { order: 10; flex-basis: 100%; padding-left: 52px; }
+  .switches { order: 10; flex-basis: 100%; padding-left: 64px; }
 }
 /* Too narrow for three columns: the release and its ticket side by side. */
 @media (max-width: 1279px) and (min-width: 761px) {
@@ -682,11 +869,15 @@ const KINDS = [
   .switches { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
   .switches .seg button { height: 38px; padding: 0 14px; }
   .title-row { flex-wrap: wrap; gap: 10px; }
-  .mark-backing { width: 34px; height: 34px; border-radius: 10px; }
-  .mark-backing img { width: 20px; height: 20px; }
-  .titles { flex: 1; }
-  .titles .eyebrow { display: none; }
-  .titles h1 { font-size: 21px; }
+  /* The codename takes the row beside Close; the mark waits on wider screens. */
+  .mark-backing { display: none; }
+  .titles { flex: 1; max-width: none; padding: 4px 0; gap: 10px; }
+  .hero { font-size: clamp(26px, 7.4vw, 34px); }
+  .hero:not(.named) { font-size: 21px; }
+  .titles .eyebrow { letter-spacing: .12em; gap: 8px; font-size: 10px; }
+  .status-dock { gap: 2px 10px; padding: 4px 12px; border-radius: 18px; }
+  .dock-version { padding-left: 0; border-left: 0; }
+  .reload { height: 44px; padding: 0 16px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }
   .notice .btn, .notice .icon-btn { height: 44px; }
@@ -711,5 +902,9 @@ const KINDS = [
 
   .row-chev { opacity: 1; }
   .day-h { top: 74px; padding: 4px 8px 6px; }
+}
+@media (max-width: 350px) {
+  .row { grid-template-columns: 40px minmax(0, 1fr) 14px; column-gap: 6px; }
+  .age { overflow: hidden; text-overflow: ellipsis; }
 }
 </style>

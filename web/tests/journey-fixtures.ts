@@ -169,7 +169,7 @@ const PLUGINS = [
 ]
 
 // Registered after mockWork, so its routes win; anything else falls through.
-export async function mockJourney(page: Page, world: JourneyWorld, options: { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
+export async function mockJourney(page: Page, world: JourneyWorld, options: { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean; flowControls?: boolean } = {}) {
   const calls: Call[] = []
   const bump = () => { world.journey.revision++ }
   await page.route('**/api/**', async route => {
@@ -177,6 +177,9 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     let body: Record<string, unknown> = {}
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
     const record = () => calls.push({ path, method, query, body, headers: request.headers() })
+    // Existing journey specs explicitly exercise the opt-in experience. Default
+    // and persistence specs pass false to use mockWork's per-person preferences.
+    if (path === '/api/preferences/developer-ui' && options.flowControls !== false && method === 'GET') return route.fulfill({ json: { key: 'developer-ui', value: { show_flow_controls: true } } })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.kind ?? 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions('admin', query.get('project_id') ?? undefined) })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project', 'release'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
@@ -187,7 +190,7 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     // The agent asking for the gates: one Claude session, so it has a name.
     if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [{
       id: '5e000000-0000-4000-8000-000000000001', project_id: PROJECT, agent_principal_id: AGENT, run_id: null, ticket_node_id: 'n-1', harness: 'claude', host: 'camy',
-      parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'coordinator', advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1,
+      parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'coordinator', advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, finished: false,
       work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.2), created_at: ago(60), stopped_at: null, stop_reason: null,
       project: { id: PROJECT, key: 'PRJ-17', title: 'Pharos' }, ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' },
     }], next_cursor: null } })

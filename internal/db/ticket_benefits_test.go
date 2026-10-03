@@ -71,6 +71,10 @@ func TestTicketBenefitMigrationPreservesHistoryAndCustomSchema(t *testing.T) {
 				"pill_en", "pill_de", "benefit_en", "benefit_de", "hide_from_release_notes",
 				"route_role", "route_role_source", "route_role_by", "route_role_at",
 				"area", "area_source", "area_by", "area_at",
+				"route_role_confirmed", "area_confirmed",
+				"complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed",
+				"roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at",
+				"human_check_completed",
 			}
 			if len(parsed.Properties) != len(want) || parsed.Additional || custom["type"] != "string" {
 				t.Fatalf("custom schema lost: %s", schema)

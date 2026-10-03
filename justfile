@@ -18,11 +18,16 @@ test:
 
 # Web typecheck and build
 web-check:
-    cd web && npm run typecheck && npm run build
+    cd web && npm run typecheck && npm run lint && npm run build
 
 # Playwright smoke against a running server (BASE_URL defaults to http://127.0.0.1:8080)
 e2e:
-    cd web && npx playwright install chromium && npm run e2e
+    cd web && npm run e2e
+
+# Full browser suites: committed HEAD on the approved remote lane; no local fallback.
+# Set AEON_REMOTE_CONTROL_DIR to the coordinator's remote-test.sh directory.
+ui-remote *args:
+    cd web && npm run test:remote -- {{args}}
 
 # Build the web app and the binary
 build: web-check
@@ -40,9 +45,18 @@ release-check:
 rules-check:
     go run ./scripts/rules-bootstrap check
 
+# Offline audit toolkit contracts, renderer smoke tests and tracked-file ownership
+audit-check:
+    python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
+    python3 -B scripts/audit/covcheck.py --summary
+
 # Release history manifest (inspr.release-history.v1) embedded in the server; reads the local tags.
 release-history:
     go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon -offline
+
+# Write the reserved release's codename into version.json (AEON-430); idempotent.
+release-codename:
+    go run ./internal/releasehistory/codename/stamp -repo .
 
 # Pack the neutral INSPR quote document profile (AEON-155) into the reproducible
 # tar that `aeon quote-profile apply --bundle -` reads; prints its SHA-256.

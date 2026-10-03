@@ -211,6 +211,12 @@ func compileObject(obj map[string]any) (*jsSchema, error) {
 			if err := compileStateCatalog(val); err != nil {
 				return nil, err
 			}
+		case "issue_family":
+			// Marks a tenant kind as an issue kind. Absent means the seeded
+			// issue kinds, and kinds that use their icons, are the family.
+			if _, ok := val.(bool); !ok {
+				return nil, fmt.Errorf("issue_family must be a boolean")
+			}
 		default:
 			return nil, fmt.Errorf("unsupported field_schema keyword %q", key)
 		}

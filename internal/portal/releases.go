@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,9 +26,12 @@ type publicNote struct {
 	BenefitDE string `json:"benefit_de"`
 }
 
+// publicRelease carries Codename, the marketing name of a release this build's
+// history knows (AEON-430); the portal shows it in front of the date.
 type publicRelease struct {
 	ReleasedAt string       `json:"released_at"`
 	Version    string       `json:"version,omitempty"`
+	Codename   string       `json:"codename,omitempty"`
 	Notes      []publicNote `json:"notes"`
 }
 
@@ -58,7 +62,13 @@ func portalPublishesReleases(ctx context.Context, tx pgx.Tx) (bool, error) {
 // selected. A missing link, a link that has not opted in, or a deleted project
 // yields an empty list. Planning and unpublished releases are not queried.
 // A release with no public note is omitted.
-func loadPublicReleases(ctx context.Context, tx pgx.Tx) ([]publicRelease, error) {
+type frozenSnapshot struct {
+	version *string
+	at      time.Time
+	raw     []byte
+}
+
+func listFrozenSnapshots(ctx context.Context, tx pgx.Tx) ([]frozenSnapshot, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.version, r.released_at, s.snapshot
 		FROM portal_pace p
@@ -81,21 +91,31 @@ func loadPublicReleases(ctx context.Context, tx pgx.Tx) ([]publicRelease, error)
 		return nil, err
 	}
 	defer rows.Close()
-	out := []publicRelease{}
+	out := []frozenSnapshot{}
 	for rows.Next() {
-		var version *string
-		var at time.Time
-		var raw []byte
-		if err := rows.Scan(&version, &at, &raw); err != nil {
+		var snap frozenSnapshot
+		if err := rows.Scan(&snap.version, &snap.at, &snap.raw); err != nil {
 			return nil, err
 		}
-		rel, ok := projectPublicRelease(version, at, raw)
+		out = append(out, snap)
+	}
+	return out, rows.Err()
+}
+
+func loadPublicReleases(ctx context.Context, tx pgx.Tx) ([]publicRelease, error) {
+	snaps, err := listFrozenSnapshots(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	out := []publicRelease{}
+	for _, snap := range snaps {
+		rel, ok := projectPublicRelease(snap.version, snap.at, snap.raw)
 		if !ok {
 			continue
 		}
 		out = append(out, rel)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 type releaseSnapshot struct {
@@ -106,6 +126,7 @@ type releaseSnapshot struct {
 }
 
 type snapshotNote struct {
+	ID          string          `json:"id"`
 	Fields      json.RawMessage `json:"fields"`
 	Unavailable string          `json:"unavailable"`
 }
@@ -139,30 +160,12 @@ func projectPublicRelease(version *string, at time.Time, raw []byte) (publicRele
 	} else if rowVersion == "" && releasehistory.ValidVersion(snapVersion) {
 		rel.Version = snapVersion
 	}
+	if rel.Version != "" {
+		rel.Codename = publicCodename(rel.Version)
+	}
 	for _, ticket := range snap.Tickets {
-		if strings.TrimSpace(ticket.Unavailable) != "" {
-			continue
-		}
-		if len(ticketbenefits.Issues(ticket.Fields)) > 0 {
-			continue
-		}
-		var fields struct {
-			PillEN    string `json:"pill_en"`
-			PillDE    string `json:"pill_de"`
-			BenefitEN string `json:"benefit_en"`
-			BenefitDE string `json:"benefit_de"`
-			Hidden    bool   `json:"hide_from_release_notes"`
-		}
-		if json.Unmarshal(ticket.Fields, &fields) != nil || fields.Hidden {
-			continue
-		}
-		note := publicNote{
-			PillEN:    publicLine(fields.PillEN, 80),
-			PillDE:    publicLine(fields.PillDE, 80),
-			BenefitEN: publicLine(fields.BenefitEN, 600),
-			BenefitDE: publicLine(fields.BenefitDE, 600),
-		}
-		if note.PillEN == "" && note.PillDE == "" && note.BenefitEN == "" && note.BenefitDE == "" {
+		note, ok := visiblePublicNote(ticket)
+		if !ok {
 			continue
 		}
 		rel.Notes = append(rel.Notes, note)
@@ -171,4 +174,54 @@ func projectPublicRelease(version *string, at time.Time, raw []byte) (publicRele
 		return publicRelease{}, false
 	}
 	return rel, true
+}
+
+var (
+	historyOnce sync.Once
+	history     releasehistory.History
+)
+
+// publicCodename names a version for the portal. Tests replace it.
+var publicCodename = historyCodename
+
+// historyCodename is the marketing name this build's release history gives a
+// version, or "" for a version it does not know (another product's release).
+func historyCodename(version string) string {
+	historyOnce.Do(func() {
+		if h, err := releasehistory.Embedded(); err == nil {
+			history = h
+		}
+	})
+	return releasehistory.CodenameOf(history, version)
+}
+
+// visiblePublicNote is the release-history rule: any non-empty public line
+// after the completion check. One blank pill does not drop the benefit.
+func visiblePublicNote(ticket snapshotNote) (publicNote, bool) {
+	if strings.TrimSpace(ticket.Unavailable) != "" {
+		return publicNote{}, false
+	}
+	if len(ticketbenefits.Issues(ticket.Fields)) > 0 {
+		return publicNote{}, false
+	}
+	var fields struct {
+		PillEN    string `json:"pill_en"`
+		PillDE    string `json:"pill_de"`
+		BenefitEN string `json:"benefit_en"`
+		BenefitDE string `json:"benefit_de"`
+		Hidden    bool   `json:"hide_from_release_notes"`
+	}
+	if json.Unmarshal(ticket.Fields, &fields) != nil || fields.Hidden {
+		return publicNote{}, false
+	}
+	note := publicNote{
+		PillEN:    publicLine(fields.PillEN, 80),
+		PillDE:    publicLine(fields.PillDE, 80),
+		BenefitEN: publicLine(fields.BenefitEN, 600),
+		BenefitDE: publicLine(fields.BenefitDE, 600),
+	}
+	if note.PillEN == "" && note.PillDE == "" && note.BenefitEN == "" && note.BenefitDE == "" {
+		return publicNote{}, false
+	}
+	return note, true
 }

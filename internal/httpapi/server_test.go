@@ -45,6 +45,23 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if err := json.Unmarshal(get(t, (&Server{Brand: &custom}).Handler(), "/api/version", "").Body.Bytes(), &branded); err != nil || branded.Brand != custom {
 			t.Fatalf("custom brand %+v %v", branded, err)
 		}
+		// AEON-430: the running release's marketing name rides along, additively.
+		if body.Codename != "" {
+			t.Fatalf("no namer, no codename: %+v", body)
+		}
+		named := &Server{Codename: func(v string) string {
+			if v == version.Version {
+				return "Hinged Hangar"
+			}
+			return ""
+		}}
+		var withName versionBody
+		if err := json.Unmarshal(get(t, named.Handler(), "/api/version", "").Body.Bytes(), &withName); err != nil || withName.Codename != "Hinged Hangar" || withName.Version != version.Version {
+			t.Fatalf("codename %+v %v", withName, err)
+		}
+		if raw := get(t, (&Server{}).Handler(), "/api/version", "").Body.String(); strings.Contains(raw, "codename") {
+			t.Fatalf("an unnamed build must omit the field: %s", raw)
+		}
 		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" {
 			t.Fatalf("csp %q", rec.Header().Get("Content-Security-Policy"))
 		}
@@ -594,13 +611,20 @@ func TestRequestLogRoutes(t *testing.T) {
 // AEON-175: classic API paths proxied to /from-classic/api/* are gone for
 // every method, without auth, and never reach the SPA or a module.
 func TestClassicAPIPathsAreGone(t *testing.T) {
-	srv := (&Server{}).Handler()
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(method, "/from-classic/api/issues/12?x=1", strings.NewReader(`{}`)))
-		if rec.Code != http.StatusGone || rec.Header().Get("Cache-Control") != "no-store" ||
-			strings.TrimSpace(rec.Body.String()) != `{"error":"moved","location":"https://aeon.barta.cm"}` {
-			t.Fatalf("%s: %d %q", method, rec.Code, rec.Body.String())
+	for _, origin := range []string{"", "https://work.example.org/", "https://work.example.org/path?value=\"quoted\""} {
+		srv := (&Server{PublicURL: origin}).Handler()
+		location := strings.TrimRight(origin, "/")
+		if location == "" {
+			location = "/"
+		}
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(method, "/from-classic/api/issues/12?x=1", strings.NewReader(`{}`)))
+			var body map[string]string
+			if rec.Code != http.StatusGone || rec.Header().Get("Cache-Control") != "no-store" ||
+				json.Unmarshal(rec.Body.Bytes(), &body) != nil || len(body) != 2 || body["error"] != "moved" || body["location"] != location {
+				t.Fatalf("%s: %d %q", method, rec.Code, rec.Body.String())
+			}
 		}
 	}
 }

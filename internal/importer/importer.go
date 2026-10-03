@@ -27,9 +27,11 @@ type Report struct {
 }
 
 type ImportConflict struct {
-	ClassicID int64  `json:"classic_id"`
-	Key       string `json:"key"`
-	Reason    string `json:"reason"`
+	ClassicID     int64  `json:"classic_id"`
+	Key           string `json:"key"`
+	Reason        string `json:"reason"`
+	CurrentKind   string `json:"current_kind,omitempty"`
+	RequestedKind string `json:"requested_kind,omitempty"`
 }
 
 type Writer interface {

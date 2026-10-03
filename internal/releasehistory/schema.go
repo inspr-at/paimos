@@ -35,13 +35,16 @@ type Release struct {
 	Tag             string        `json:"tag"`
 	ReleaseChannel  string        `json:"release_channel"`
 	ReleaseSequence int           `json:"release_sequence"`
-	State           string        `json:"state"`
-	ReservedAt      *time.Time    `json:"reserved_at"`
-	TaggedAt        *time.Time    `json:"tagged_at"`
-	PublishedAt     *time.Time    `json:"published_at"`
-	Headline        string        `json:"headline"`
-	Tickets         []string      `json:"tickets"`
-	Changes         []Change      `json:"changes"`
+	// Codename is the release's sci-fi name from its sequence (AEON-430),
+	// presentation only. See WithCodenames.
+	Codename    string     `json:"codename,omitempty"`
+	State       string     `json:"state"`
+	ReservedAt  *time.Time `json:"reserved_at"`
+	TaggedAt    *time.Time `json:"tagged_at"`
+	PublishedAt *time.Time `json:"published_at"`
+	Headline    string     `json:"headline"`
+	Tickets     []string   `json:"tickets"`
+	Changes     []Change   `json:"changes"`
 	// ChangesOmitted counts changes beyond MaxChanges that are not listed.
 	ChangesOmitted int      `json:"changes_omitted"`
 	Evidence       Evidence `json:"evidence"`
@@ -51,6 +54,7 @@ type Release struct {
 const (
 	StatePublished = "published"
 	StateReserved  = "reserved"
+	StateCandidate = "candidate"
 )
 
 // Change is one commit of a release.
@@ -64,7 +68,8 @@ type Change struct {
 	// Group is the display group (features, fixes, other), set when the
 	// history is served. Empty on the version bump and on an unannotated manifest.
 	Group string `json:"group,omitempty"`
-	// Linked is the current pill and benefit of each visible linked ticket.
+	// Linked is the frozen pill and benefit of each visible linked ticket for
+	// Aeon; other products may opt into the legacy live TicketSource.
 	// Hidden tickets are omitted. Empty on other changes, the version bump,
 	// and when ticket lookup is off or failed.
 	Linked []TicketNote `json:"linked_tickets,omitempty"`
@@ -78,6 +83,9 @@ type Evidence struct {
 	CI           *Run   `json:"ci"`
 	ReleaseRun   *Run   `json:"release_run"`
 	ReleaseURL   string `json:"release_url"`
+	// Pending names candidate evidence that a later tagged build can establish.
+	// Corresponding values remain empty or nil, never fabricated.
+	Pending []string `json:"pending,omitempty"`
 	// Unavailable lists, in plain words, what could not be established.
 	Unavailable []string `json:"unavailable"`
 }

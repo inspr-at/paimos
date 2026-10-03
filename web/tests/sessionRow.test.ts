@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { SessionView } from '../src/stores/agents.ts'
-import { explicitOutcome, intendedResult, modelProvider, sessionContext, sessionExecution } from '../src/components/agents/sessionRow.ts'
+import { explicitOutcome, intendedResult, modelProvider, sessionContext, sessionExecution, sessionEtaEligible } from '../src/components/agents/sessionRow.ts'
 
 function view(partial: Partial<SessionView> & { session?: Partial<SessionView['session']> } = {}): SessionView {
   const session = {
@@ -16,6 +16,19 @@ function view(partial: Partial<SessionView> & { session?: Partial<SessionView['s
     ...partial, session,
   }
 }
+
+test('ETA guidance is limited to running sessions with a bound ticket in rows and panels', () => {
+  const ticket = { id: 'n', key: 'AEON-443', title: 'Estimates and ETAs', href: '/p/AEON/AEON-443' }
+  for (const role of ['worker', 'coordinator'] as const) {
+    assert.equal(sessionEtaEligible(view({ session: { role } })), false)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role } })), true)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role, stopped_at: '2026-09-30T12:00:00Z' } })), false)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role, archived_at: '2026-09-30T12:00:00Z' } })), false)
+    assert.equal(sessionEtaEligible(view({ ticket, session: { role, phase: 'stopped' } })), false)
+  }
+  assert.equal(sessionEtaEligible(view({ session: { eta_ready_at: '2026-09-30T12:25:00Z', progress_pct: 0 } })), false)
+  assert.equal(sessionEtaEligible(view({ ticket, session: { progress_pct: 0 } })), true)
+})
 
 test('intended result prefers an explicit phrase, then the bound ticket title, then the existing label', () => {
   const titled = view({ ticket: { id: 'n', key: 'AEON-211', title: 'Deploy approvals show the target server', href: '/p/AEON/AEON-211' }, session: { brief: 'AEON-211' } })
@@ -55,4 +68,26 @@ test('execution names the reported model and effort, and omits what is not repor
   assert.equal(empty.modelLine, '')
   assert.equal(empty.accountLine, 'Grok')
   assert.equal(empty.provider, 'unknown')
+})
+
+
+test('media and terminal use their execution label and never infer an AI vendor', () => {
+  for (const [harness, label] of [['media', 'higgsfield/kling3_0'], ['terminal', 'ffmpeg']] as const) {
+    const exec = sessionExecution(view({ model: 'claude-fable', account: 'Claude Max', session: { harness, generator: harness === 'media' ? label : null, command: harness === 'terminal' ? label : null, model: 'gpt-fixture', reasoning_effort: 'high' } }))
+    assert.equal(exec.kind, harness)
+    assert.equal(exec.modelLine, label)
+    assert.equal(exec.provider, 'unknown')
+    assert.equal(exec.effort, '')
+    assert.equal(exec.account, '')
+  }
+})
+
+test('heartbeat model changes refresh the same session row over a stale launch model', () => {
+  const row = view({ harness: 'Claude', model: 'claude-sonnet', session: { harness: 'claude', model: 'claude-sonnet', reasoning_effort: 'low' } })
+  assert.equal(sessionExecution(row).modelLine, 'claude-sonnet · low')
+  const sessionID = row.session.id
+  row.session = { ...row.session, model: 'claude-opus', reasoning_effort: 'high' }
+  assert.equal(row.session.id, sessionID)
+  assert.equal(sessionExecution(row).modelLine, 'claude-opus · high')
+  assert.equal(sessionExecution(row).provider, 'anthropic')
 })

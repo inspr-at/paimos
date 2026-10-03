@@ -33,19 +33,21 @@ func (r *Remote) ReportSessionUsage(ctx context.Context, s HarnessSession, repor
 // coalesce behind it. No stream, source identity, lease or payload is journaled.
 // A new daemon never resumes a previous generation's capture.
 type sessionUsageReporter struct {
-	mu       sync.Mutex
-	api      sessionUsageAPI
-	session  HarnessSession
-	latest   map[string]sessionusage.UsageReport
-	pending  *sessionusage.UsageReport
-	acked    map[string]int64
-	wake     chan struct{}
-	done     chan struct{}
-	cancel   context.CancelFunc
-	closed   bool
-	terminal error
-	fenced   func() bool
-	archive  func()
+	billing, accountID, plan string
+	flushMu                  sync.Mutex
+	mu                       sync.Mutex
+	api                      sessionUsageAPI
+	session                  HarnessSession
+	latest                   map[string]sessionusage.UsageReport
+	pending                  *sessionusage.UsageReport
+	acked                    map[string]int64
+	wake                     chan struct{}
+	done                     chan struct{}
+	cancel                   context.CancelFunc
+	closed                   bool
+	terminal                 error
+	fenced                   func() bool
+	archive                  func()
 }
 
 func newSessionUsageReporter(api sessionUsageAPI, session HarnessSession, fenced func() bool, archive func()) *sessionUsageReporter {
@@ -95,10 +97,21 @@ func (r *sessionUsageReporter) submit(report sessionusage.UsageReport) {
 		return
 	}
 	// The parser supplies only counters/model/finality. Never forward arbitrary
-	// adapter billing metadata, costs or vendor/source identifiers.
-	report = sessionusage.UsageReport{Model: report.Model, InputTokens: cloneCount(report.InputTokens),
+	// adapter billing metadata, costs or vendor/source identifiers. Billing comes
+	// only from the verified account probe or server-selected account settings.
+	report = sessionusage.UsageReport{ServiceTier: report.ServiceTier, Model: report.Model, InputTokens: cloneCount(report.InputTokens),
 		OutputTokens: cloneCount(report.OutputTokens), CachedInputTokens: cloneCount(report.CachedInputTokens),
-		ReasoningTokens: cloneCount(report.ReasoningTokens), Provisional: report.Provisional, BillingMode: "unknown"}
+		ReasoningTokens: cloneCount(report.ReasoningTokens), Provisional: report.Provisional, BillingMode: sessionusage.BillingMode(r.billing)}
+	if r.accountID != "" {
+		id := r.accountID
+		report.AccountID = &id
+	}
+	if report.BillingMode == "subscription" && r.plan != "" {
+		label := r.plan
+		if len(label) <= 120 {
+			report.SubscriptionLabel = &label
+		}
+	}
 	before := old
 	before.ReportID, before.Sequence = "", 0
 	b, _ := json.Marshal(before)
@@ -132,6 +145,8 @@ func cloneCount(n *int64) *int64 {
 
 // flush has one owner: the background loop, then finish after joining it.
 func (r *sessionUsageReporter) flush(ctx context.Context) error {
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

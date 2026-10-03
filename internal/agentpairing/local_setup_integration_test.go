@@ -44,9 +44,10 @@ func (x localSetupExecutor) Run(_ context.Context, c agentsetup.Command) ([]byte
 }
 
 type localSetupDaemon struct {
-	root   string
-	active map[string]bool
-	fenced map[string]bool
+	root     string
+	active   map[string]bool
+	fenced   map[string]bool
+	statuses map[string]string
 }
 
 func (d *localSetupDaemon) daemonID() (string, error) {
@@ -81,7 +82,7 @@ func (d *localSetupDaemon) Status(_ context.Context, account string) (agentsetup
 	} else if d.active[account] {
 		state = "running"
 	}
-	return agentsetup.LocalStatus{Ready: true, DaemonID: id, State: state}, nil
+	return agentsetup.LocalStatus{Ready: true, DaemonID: id, State: state, HarnessStatuses: d.statuses}, nil
 }
 
 func physicalSetupTemp(t *testing.T) string {
@@ -229,12 +230,12 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		t.Fatal("active local work was cleaned before drain completed")
 	}
 	local.active[first] = false
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "draining" {
 		t.Fatalf("server active run was cleaned before settlement: stage=%s err=%v", p.Stage, err)
 	}
 	f.telemetry(initial, initial.Enrollments[0], string(key), 200)
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "connected" {
 		t.Fatalf("selective cleanup reconciliation: stage=%s err=%v", p.Stage, err)
 	}
@@ -243,6 +244,11 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		t.Fatal("selective cleanup removed shared authority or other account")
 	}
 	assertNoRuntimeKey(t, string(key), p)
+	local.statuses = map[string]string{"pi": "future_state", "codex": "future_state", "cursor": "ready"}
+	delete(local.fenced, first)
+	if err := e.SyncFences(t.Context()); err != nil || !local.fenced[first] || local.fenced[second] {
+		t.Fatal("unknown telemetry prevented HTTP fence synchronization", err)
+	}
 	local.active[second] = true
 	p, err = e.Disconnect(t.Context(), "")
 	if err != nil || p.Stage != "draining" || !local.fenced[""] {
@@ -252,7 +258,7 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		t.Fatal("whole-computer drain removed runtime before local work exited")
 	}
 	local.active[second] = false
-	p, err = e.Status(t.Context())
+	p, err = e.Step(t.Context())
 	if err != nil || p.Stage != "disconnected" || p.ServerRevocation != "confirmed" {
 		t.Fatalf("whole-computer cleanup: stage=%s revocation=%s err=%v", p.Stage, p.ServerRevocation, err)
 	}

@@ -10,10 +10,12 @@ import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
+import { planningPresent } from '../lib/planning'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
-import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
+import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
+import { useDeveloperSettings } from '../lib/developerSettings'
 import { toast } from '../lib/toast'
 import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
@@ -21,10 +23,21 @@ import { remember } from '../lib/recents'
 import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
+import { useLiveList } from '../lib/useLiveList'
+import { rowStore } from '../lib/rowStore'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
+import { useLiveAgents } from '../stores/liveAgents'
 import { useSession } from '../stores/session'
+import { useWorkQueue } from '../stores/workQueue'
+import { useReleases } from '../stores/releases'
+import { usePoller } from '../lib/usePolledData'
+import { queueable, queueHours } from '../lib/workQueue'
+import { queueFilteredNodes } from '../lib/queueFilter'
+import type { ListQuery } from '../lib/api'
+import AssigneeMenu from '../components/work/AssigneeMenu.vue'
+import QueueView from '../components/work/QueueView.vue'
 import AppIcon from '../components/AppIcon.vue'
 import PanelSplitter from '../components/PanelSplitter.vue'
 import FilterSheet from '../components/work/FilterSheet.vue'
@@ -38,6 +51,8 @@ import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
+import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
+import ListFreshness from '../components/work/ListFreshness.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
@@ -63,12 +78,53 @@ const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
 const session = useSession()
+const { showFlowControls } = useDeveloperSettings()
+const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'journey' || showFlowControls.value))
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
+const queue = useWorkQueue(), releases = useReleases()
+const queueAnchor = ref<HTMLElement | null>(null)
+const assigneeMenu = ref<{ row: ListItem; anchor: HTMLElement } | null>(null)
+const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
+const queueError = computed(() => projectId.value ? queue.errors[projectId.value] : undefined)
+const mayQueue = computed(() => session.identity?.principal.kind === 'person' && can('run.create', projectId.value ?? undefined))
+const queuePoller = usePoller(() => projectId.value ? queue.load(projectId.value) : undefined, 20_000)
+watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if (id) { void queue.load(id); void releases.load() } }, { immediate: true })
+onMounted(() => queuePoller.start())
+onBeforeUnmount(() => queuePoller.stop())
+function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
+function openAssignee(row: ListItem, anchor: HTMLElement) { assigneeMenu.value = { row, anchor } }
+function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
+async function assignPerson(value: string) {
+  const row = assigneeMenu.value?.row
+  closeAssignee(true)
+  if (!row || !can('nodes.write', projectId.value ?? undefined)) return
+  await list.applyBulk({ ids: [row.id], assignee: value || null }).catch(e => toast(e.message, { tone: 'error' }))
+}
+async function bulkQueue() {
+  const id = projectId.value
+  if (!id || !mayQueue.value || bulkBusy.value || queue.busy) return
+  bulkBusy.value = true
+  let added = 0
+  const skipped: string[] = []
+  try {
+    for (const row of selectedRows.value) {
+      if (queue.entry(id, row.id)) continue
+      if (!queueable(row)) { skipped.push(row.key); continue }
+      try {
+        if (!(await queue.checkReadiness(row)).ready) { skipped.push(row.key); continue }
+        await queue.add(id, row.id); added++
+      }
+      catch (e) { toast(`${row.key}: ${e instanceof Error ? e.message : 'queue failed'}`, { tone: 'error' }); break }
+    }
+    toast(`${added} queued${skipped.length ? `; not ready or not queueable: ${skipped.join(', ')}` : ''}`)
+  } finally { bulkBusy.value = false }
+}
+
 
 // ---------- Columns: the person's order, visibility and widths for this project ----------
 const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list:${projectId.value}`) : null)
@@ -87,7 +143,14 @@ const tablePrefs = computed<ListPrefs | null>(() => {
   return { ...(listPrefs.value ?? {}), order: [...PINNED, ...cols, ...rest], visible: cols }
 })
 const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
-const toolbarColumns = computed(() => ({ order: orderOf(tablePrefs.value), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
+// Cost is offered only to people who may see usage (harness.read).
+const usageVisible = computed(() => can('harness.read', projectId.value ?? undefined))
+const toolbarColumns = computed(() => {
+  const columns = pickerColumns(tablePrefs.value, tableLayout.value.visible, usageVisible.value)
+  const notes = columns.visible.includes('list_cost') && !planningPresent([...rowsById.value.values()]).list_cost
+    ? { list_cost: 'Nothing reported in this list yet; cells show —' } : {}
+  return { ...columns, notes }
+})
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
@@ -103,7 +166,16 @@ function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?
 const { density, set: setDensity } = useDensity()
 const { headerGraph, ready: headerGraphReady, set: setHeaderGraph } = useHeaderGraph()
 const glimpseActive = ref(false)
-const list = useTicketList(projectId, filters)
+// A status change that met someone else's newer version opens the ticket to review it.
+async function fetchWorkList(query: ListQuery) {
+  if (!query.state?.some(state => state === 'queued' || state === '!queued') || !projectId.value) return listNodes(query)
+  const id = projectId.value
+  await queue.load(id)
+  const snapshot = queue.snapshots[id]
+  if (!snapshot || queue.errors[id]) throw new Error(queue.errors[id] || 'The work queue could not be loaded.')
+  return queueFilteredNodes(query, snapshot)
+}
+const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
 type ViewMode = TicketView | 'journey' | 'knowledge'
@@ -185,7 +257,64 @@ const graphActive = computed(() => viewMode.value === 'graph')
 const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
 const ticketGraphView = ref<{ focus: () => void }>()
 const outlineActive = computed(() => viewMode.value === 'outline')
-const outline = useOutline(projectId, filters, outlineActive, list)
+const outline = useOutline(projectId, filters, outlineActive, list, {
+  fetchList: fetchWorkList,
+  me: () => session.identity?.principal.id ?? null,
+  quiet: id => !!ticketKey.value && panelItem.value?.id === id,
+  holds: id => ticketKey.value && panelItem.value?.id === id
+    ? !!panel.value?.busy() || !!panel.value?.isDirty()
+    : selected.value.has(id) || statusMenu.value?.row.id === id,
+  blockers: () => ({
+    selected: selected.value.size + (phonePicking.value ? 1 : 0),
+    editing: creating.value || !!outline.createUnder.value || !!panel.value?.busy() || !!panel.value?.isDirty() || !!table.value?.createDirty(),
+    menuOpen: !!statusMenu.value || !!bulkMenu.value || !!savePanel.value || !!document.querySelector('.floating'),
+    dialogOpen: !!document.querySelector('dialog[open]'), dragging: !!document.querySelector('.dragging'),
+  }),
+  around: aroundLiveApply, applied: liveApplied,
+})
+// Changes by others, live (AEON-326): the list patches rows in place and holds
+// structural updates behind the "N updates · Show" pill until it is safe.
+const listActive = computed(() => section.value === 'tickets' && viewMode.value === 'list')
+const liveList = useLiveList({
+  projectId, filters, rows: list.rows, loading: list.loading, reads: list.reads, loadedOnce: list.loadedOnce,
+  more: () => !!list.cursor.value, edge: () => list.edge.value, active: listActive, me: () => session.identity?.principal.id ?? null,
+  quiet: id => !!ticketKey.value && panelItem.value?.id === id,
+  // Rows the person works with keep the version they see, so an edit, a bulk
+  // change or a status choice still meets a newer one as a conflict. The open
+  // ticket holds changes itself while its editor is open, and shows them otherwise.
+  holds: id => ticketKey.value && panelItem.value?.id === id
+    ? !!panel.value?.busy() || !!panel.value?.isDirty()
+    : selected.value.has(id) || statusMenu.value?.row.id === id,
+  blockers: () => ({
+    selected: selected.value.size + (phonePicking.value ? 1 : 0),
+    editing: creating.value || !!outline.createUnder.value || !!panel.value?.busy() || !!panel.value?.isDirty() || !!table.value?.createDirty(),
+    menuOpen: !!statusMenu.value || !!bulkMenu.value || !!savePanel.value || !!document.querySelector('.floating'),
+    dialogOpen: !!document.querySelector('dialog[open]'),
+    dragging: false,
+  }),
+  around: aroundLiveApply, applied: liveApplied, reload: () => void list.load(), fetchList: fetchWorkList,
+})
+
+const activeLive = computed(() => outlineActive.value ? outline.live : liveList)
+const liveActive = computed(() => listActive.value || outlineActive.value)
+const liveAgents = useLiveAgents()
+watch(() => liveAgents.updatedAt, () => { if (projectId.value) void queue.load(projectId.value, true) })
+const liveDataStale = computed(() => activeLive.value.dataStale.value || liveAgents.dataStale)
+const liveUpdatedAt = computed(() => {
+  const listAt = activeLive.value.updatedAt.value, agentsAt = liveAgents.updatedAt
+  return listAt === null || agentsAt === null ? null : Math.min(listAt, agentsAt)
+})
+const bulkBar = ref<InstanceType<typeof BulkBar>>()
+const bulkHeight = ref(0)
+let bulkResize: ResizeObserver | undefined
+watch(bulkBar, bar => {
+  bulkResize?.disconnect()
+  bulkHeight.value = 0
+  const element = bar?.$el.querySelector('.bulk-bar') as HTMLElement | undefined
+  if (!element) return
+  bulkResize = new ResizeObserver(() => { bulkHeight.value = element.offsetHeight })
+  bulkResize.observe(element)
+}, { flush: 'post' })
 
 const toolbarWrap = ref<HTMLElement>()
 const stickMark = ref<HTMLElement>()
@@ -216,13 +345,17 @@ const knowledgeDeletable = computed(() => can('knowledge.delete', projectId.valu
 
 // ---------- Rows, groups and keyboard order ----------
 const displayRows = computed(() => {
+  if (filters.value.status.length === 1 && filters.value.status[0] === 'queued' && !filters.value.sort.length) {
+    const positions = new Map(queueSnapshot.value?.items.map((item, i) => [item.ticket_id, i]) ?? [])
+    return [...list.rows.value].sort((a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0))
+  }
   const primary = effectiveSort(filters.value)[0]
-  return primary?.field === 'state' ? orderByStatus(list.rows.value, primary.desc) : list.rows.value
+  return primary?.field === 'state' ? orderByStatus(list.rows.value, primary.desc, liveList.layout) : list.rows.value
 })
 const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
 const groups = computed(() => {
   const facet = groupFacet(filters.value.group)
-  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id })
+  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout })
 })
 // Keyboard order: every visible row once (a ticket under two labels is visited once).
 const sequence = computed(() => {
@@ -266,7 +399,8 @@ function options(dimension: Dimension) {
     }
     return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
   }
-  return facetOptions(dimension, list.counts(dimension), filters.value[dimension], list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
   return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value })
@@ -276,14 +410,14 @@ const facetLoading = ref(false)
 function needOptions(dimension: Dimension) {
   if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
   if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
-  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : null
+  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check' : null
   if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
 }
 function sheetOpened() {
   if (graphActive.value) return
   void list.resolveNames(options('assignee').map(o => o.value))
   void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release']) void list.requestFacet(facet)
+  for (const facet of ['tag', 'cost_unit', 'release', 'human_check']) void list.requestFacet(facet)
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -461,10 +595,12 @@ async function resolvePanel() {
   const request = ++panelGeneration
   panelLoading.value = true
   try {
+    const sent = rowStore.mark()
     const result = await listNodes({ within, q: key, sort: 'key', limit: 50 })
     if (request !== panelGeneration) return
     const hit = result.items.find(item => item.key.toLowerCase() === key.toLowerCase())
-    if (hit) fetched.value = hit
+    // The row store's display object for it; one it knows deleted opens as gone.
+    if (hit) fetched.value = rowStore.adopt(hit, sent) ?? hit
     else if (!list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase())) panelError.value = `${key.toUpperCase()} is not part of ${project.value?.title ?? 'this project'}.`
   } catch (e) {
     if (request === panelGeneration) panelError.value = e instanceof Error ? e.message : 'The ticket could not be loaded.'
@@ -473,10 +609,12 @@ async function resolvePanel() {
   }
 }
 watch([ticketKey, projectId], resolvePanel, { immediate: true })
-watch(panelItem, item => {
+// A lookup can find the store row before its list page lands. Object identity
+// then stays the same, so also observe when that row joins the visible view.
+watch([panelItem, () => sequence.value.some(row => row.id === panelItem.value?.id)], ([item, shown], [before]) => {
   if (!item) return
-  if (outlineActive.value) outline.reveal(item.id)
-  if (sequence.value.some(row => row.id === item.id)) {
+  if (item !== before && outlineActive.value) outline.reveal(item.id)
+  if (shown) {
     cursorId.value = item.id
     if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
   }
@@ -511,6 +649,54 @@ async function refreshMemberships() {
   nativeReleases.value = views
 }
 watch(membershipIds, () => { void refreshMemberships() }, { immediate: true })
+
+// ---------- Live updates: applying keeps the panel, cursor, scroll anchor and focus ----------
+// The first row still in view that stays, and where it is on screen.
+function scrollAnchor(removing: Set<string>) {
+  const root = scrollRoot.value, grid = table.value?.el
+  // At the very top nothing is out of view: new rows show where they belong.
+  if (!root || !grid || root.scrollTop <= 0) return null
+  const top = toolbarWrap.value?.getBoundingClientRect().bottom ?? 0
+  for (const tr of grid.querySelectorAll<HTMLElement>('tr.ticket-row[id^="row-"]')) {
+    const id = tr.id.slice(4)
+    if (removing.has(id)) continue
+    const rect = tr.getBoundingClientRect()
+    if (rect.bottom > top) return { id, top: rect.top }
+  }
+  return null
+}
+function aroundLiveApply(removing: Set<string>, apply: () => void) {
+  // The panel keeps its ticket when the row leaves the list.
+  const open = panelItem.value
+  if (open && removing.has(open.id)) fetched.value = open
+  if (cursorId.value && removing.has(cursorId.value)) {
+    const order = sequence.value
+    const at = order.findIndex(row => row.id === cursorId.value)
+    const next = order.slice(at + 1).find(row => !removing.has(row.id)) ?? order.slice(0, Math.max(0, at)).reverse().find(row => !removing.has(row.id))
+    cursorId.value = next?.id ?? null
+  }
+  const active = document.activeElement
+  const focusLeaves = !!active?.closest?.('tr.ticket-row') && removing.has(active.closest('tr.ticket-row')!.id.slice(4))
+  const anchor = scrollAnchor(removing)
+  apply()
+  void nextTick(() => {
+    const root = scrollRoot.value
+    const row = anchor && document.getElementById(`row-${anchor.id}`)
+    if (root && row) root.scrollTop += row.getBoundingClientRect().top - anchor!.top
+    if (focusLeaves) table.value?.focusGrid()
+  })
+}
+// Counts in the toolbar and the header follow, once a burst has settled.
+let liveCounts: ReturnType<typeof setTimeout> | undefined
+function liveApplied() {
+  clearTimeout(liveCounts)
+  liveCounts = setTimeout(() => { void list.refreshCounts(); void projects.load(true) }, 300)
+}
+onBeforeUnmount(() => clearTimeout(liveCounts))
+function showUpdates() {
+  activeLive.value.apply()
+  if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
+}
 
 // People who can be assigned: everyone assigned somewhere in this project, and you.
 const projectPeople = ref<string[]>([])
@@ -606,7 +792,7 @@ watch(ticketKey, key => { if (!key) openedFromList = false })
 
 // ---------- Actions ----------
 function copyKey(key: string) {
-  navigator.clipboard.writeText(key).then(() => toast(`Copied ${key}`), () => toast(`${key} could not be copied`, { tone: 'error' }))
+  navigator.clipboard.writeText(key).then(() => toast(`${key} copied`), () => toast(`${key} could not be copied`, { tone: 'error' }))
 }
 function newTab(key: string) {
   const project = projects.projects.find(p => key.startsWith(`${p.routeKey}-`))
@@ -928,14 +1114,18 @@ async function selectAllMatching() {
   selectAll(true)
 }
 // Rows that left the list leave the selection.
-watch(() => list.rows.value, rows => {
+const selectionRows = computed(() => outlineActive.value ? outline.loadedRows.value : list.rows.value)
+watch(selectionRows, rows => {
   if (!selected.value.size) return
   const ids = new Set(rows.map(row => row.id))
   const kept = [...selected.value].filter(id => ids.has(id))
   if (kept.length !== selected.value.size) selected.value = new Set(kept)
 })
 watch(selectable, on => { if (!on) clearSelection() })
-const selectedRows = computed(() => list.rows.value.filter(row => selected.value.has(row.id)))
+const selectedRows = computed(() => selectionRows.value.filter(row => selected.value.has(row.id)))
+// Selected tickets someone deleted meanwhile: the bulk bar says so, and changes leave them out.
+const selectedDeleted = computed(() => activeLive.value.deletedAmong(selected.value))
+const liveSelection = () => { const gone = new Set(selectedDeleted.value); return [...selected.value].filter(id => !gone.has(id)) }
 // Where the list is, so the bulk bar centres over it (a docked panel takes the right).
 const listFrame = ref<{ left: number; width: number } | null>(null)
 let frameObserver: ResizeObserver | undefined
@@ -961,7 +1151,7 @@ const releaseIds = ref<string[]>([])
 function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
-  if (kind === 'release') { openRelease(at, [...selected.value]); return }
+  if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
@@ -986,13 +1176,33 @@ const bulkLabels = computed<LabelChoice[]>(() => {
   for (const choice of byName.values()) choice.on = selectedRows.value.filter(row => rowTags(row).some(tag => tag.name.toLowerCase() === choice.name.toLowerCase())).length
   return [...byName.values()].sort((a, b) => b.on - a.on || a.name.localeCompare(b.name))
 })
+// Review: the tickets that changed meanwhile become the selection, with their newer values.
+function reviewConflicts(ids: string[]) {
+  const shown = ids.filter(id => (outlineActive.value ? outline.rows.value : list.rows.value).some(row => row.id === id))
+  if (!shown.length) return
+  selected.value = new Set(shown)
+  selectAnchor = shown[0]
+  if (phone.value) phonePicking.value = true
+  cursorId.value = shown[0]
+  void nextTick(() => { table.value?.scrollToRow(shown[0]); table.value?.focusGrid() })
+}
 async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) => string, ids = [...selected.value]) {
+  const gone = new Set(selectedDeleted.value)
+  ids = ids.filter(id => !gone.has(id))
   if (!ids.length || bulkBusy.value) return
   bulkMenu.value = null
   bulkBusy.value = true
   try {
-    const result = await list.applyBulk({ ids, ...change })
-    const reported = result.skipped.filter(item => !benefitSkip(item))
+    const bulkRows = selectionRows.value
+    const placements = new Map(bulkRows.map(row => [row.id, { parent: row.parent_id, epic: outline.epicOf(row.id) }]))
+    const result = await list.applyBulk({ ids, ...change }, bulkRows)
+    for (const answer of result.items) {
+      const from = placements.get(answer.id), row = rowStore.visibleRow(answer.id)
+      if (from && row && row.parent_id !== from.parent) outline.relocate(row, from.parent, from.epic)
+    }
+    // Changed meanwhile: nothing was overwritten; Review shows those tickets.
+    const conflicts = result.skipped.filter(item => item.code === 'conflict')
+    const reported = result.skipped.filter(item => !benefitSkip(item) && item.code !== 'conflict')
     const held = result.skipped.filter(item => benefitSkip(item))
     const changed = result.items.length
     const skipped = reported.length
@@ -1001,12 +1211,17 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
       toast(`${done(changed)}${skipped ? ` · ${plural(skipped, 'ticket')} skipped` : ''}`, {
         timeout: 8000, action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
       })
-    } else if (!skipped && !held.length) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
+    } else if (!skipped && !held.length && !conflicts.length) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
+    if (conflicts.length) {
+      const ids = conflicts.map(item => item.id)
+      const which = conflicts.length === 1 ? `${conflicts[0].key ?? 'A ticket'} was` : `${plural(conflicts.length, 'ticket')} were`
+      toast(`${which} changed elsewhere meanwhile and kept ${conflicts.length === 1 ? 'its' : 'their'} newer version.`, { tone: 'error', timeout: 10000, action: { label: 'Review', run: () => reviewConflicts(ids) } })
+    }
     if (skipped) {
       const first = reported[0]
       toast(`${first.key ?? 'A ticket'} was skipped: ${first.reason}${skipped > 1 ? ` (and ${skipped - 1} more)` : ''}`, { tone: 'error' })
     }
-    if (changed) { void list.load(); void projects.load(true); for (const node of result.items) outline.refreshStatsFor(node.id) }
+    if (changed || conflicts.length) { void list.load(); void projects.load(true); for (const node of result.items) outline.refreshStatsFor(node.id) }
     if (change.state && held.length) await offerBenefitSkips(held, change.state)
   } catch (e) {
     toast(`Nothing was changed: ${problem(e)}`, { tone: 'error' })
@@ -1054,7 +1269,7 @@ async function undoBulk(eventId: number) {
   try {
     await list.undoBulk(eventId)
     toast('Undone: the tickets are as they were')
-    void list.load(); void projects.load(true); void refreshMemberships()
+    void list.load(); if (outlineActive.value) outline.reload(); void projects.load(true); void refreshMemberships()
   } catch (e) {
     toast(e instanceof APIError && e.status === 409 ? 'Some of them changed since, so nothing was undone.' : `Undo did not work: ${problem(e)}`, { tone: 'error' })
   }
@@ -1179,6 +1394,7 @@ function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.v
 
 // ---------- Keyboard ----------
 function typing(target: EventTarget | null) {
+  if (target instanceof HTMLInputElement && ['checkbox', 'radio'].includes(target.type)) return false
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 async function move(step: number) {
@@ -1253,6 +1469,13 @@ function keydown(event: KeyboardEvent) {
     }
   }
   if (outlineActive.value && !fullView.value && outlineKey(event, row)) return
+  if (event.key === 'q') {
+    event.preventDefault()
+    if (ticketKey.value) panel.value?.toggleQueue()
+    else if (selected.value.size) void bulkQueue()
+    else if (row) document.querySelector<HTMLButtonElement>(`#row-${CSS.escape(row.id)} .q-btn`)?.click()
+    return
+  }
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); void move(1); break
     case 'k': case 'ArrowUp': event.preventDefault(); void move(-1); break
@@ -1266,13 +1489,14 @@ function keydown(event: KeyboardEvent) {
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
     case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
+    case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
     case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
       if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
       else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${row.id} .status-btn`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
       break
     case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
-    case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } break
+    case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .assignee-btn`); if (anchor) { event.preventDefault(); openAssignee(row, anchor) } } break
     case 'r': if (ticketKey.value) { event.preventDefault(); panel.value?.openLink() } break
     case 'g': if (ticketKey.value) { event.preventDefault(); panel.value?.openRelease() } break
     case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
@@ -1334,6 +1558,7 @@ onBeforeUnmount(() => {
   clearInterval(clock)
   resize?.disconnect()
   stick?.disconnect()
+  bulkResize?.disconnect()
   list.invalidate()
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
@@ -1353,7 +1578,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 <template>
   <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
-      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
+      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
       <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
         <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
         <div class="head-main">
@@ -1371,7 +1596,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('open')!.tip"><StatusIcon state="open" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('doing')!.tip"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('done')!.tip"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
+            <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
           </div>
+          <p v-if="queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
           <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
             <span class="mono pct">{{ counts.percent }}%</span>
@@ -1382,7 +1609,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
         </div>
-        <ProjectTabs :items="PROJECT_SECTIONS" :selected="section" label="Project sections" sections @select="setSection" />
+        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections @select="setSection" />
       </header>
 
       <ViewBar
@@ -1406,6 +1633,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
             <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
+            <template v-if="selectedDeleted.length"><span class="dot" aria-hidden="true">·</span><span class="gone">{{ selectedDeleted.length.toLocaleString('en-GB') }} deleted</span></template>
             <span class="dot" aria-hidden="true">·</span>
             <button type="button" @click="clearSelection">Cancel</button>
           </p>
@@ -1414,38 +1642,51 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <JourneyView
-        v-if="journeyActive" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
+        v-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
         :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
+      <section v-else-if="journeyActive" class="glass-card flow-disabled" aria-labelledby="flow-disabled-title">
+        <h2 id="flow-disabled-title">Flow controls are a developer feature</h2>
+        <p>They are off by default and have not yet been tested end to end. In the Developer section of Settings, turn on “Show the flow controls (not yet tested end to end)” to open this journey.</p>
+        <RouterLink class="btn" to="/settings/developer#flow-controls">Developer settings</RouterLink>
+      </section>
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
       />
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
+      <template v-else>
+      <ListFreshness v-if="liveActive" class="ticket-freshness" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" />
+      <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
+      <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
-        v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
+        ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
         :loading="outlineActive ? outline.loading.value : list.loading.value" :loading-more="outlineActive ? outline.loadingMoreRoot.value : list.loadingMore.value"
         :error="outlineActive ? outline.error.value || list.error.value : list.error.value" :more-error="list.moreError.value"
         :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
-        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
+        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
         :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
-        @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
+        @assignee="openAssignee" @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
+        :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
+        :live-stale="liveDataStale"
+        :live-pill="liveActive && activeLive.pill.value ? { text: activeLive.pill.value, overflow: activeLive.pending.overflow } : null" @show-updates="showUpdates"
       />
+      </template>
 
-      <BulkBar
-        v-if="selectable && selected.size" :count="selected.size" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
+      <BulkBar ref="bulkBar"
+        v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy || queue.busy" :can-queue="mayQueue" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
-        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, [...selected])" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
+        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
       <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
@@ -1468,7 +1709,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
@@ -1479,7 +1720,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"
         :busy="saveBusy" :error="saveError" @submit="submitSave" @close="closeSave"
       />
-      <StatusMenu v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
+      <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" :filtered="filters.status.includes('queued')" @close="closeQueue" @open="key => { closeQueue(false); openKey(key) }" @filter="toggleValue('status', 'queued')" />
+      <AssigneeMenu v-if="assigneeMenu" :row="assigneeMenu.row" :project-id="project.id" :anchor="assigneeMenu.anchor" :people="bulkPeople" :can-assign="writable" @choose="assignPerson" @close="closeAssignee" @changed="list.load()" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
       <OptionMenu
         v-else-if="bulkMenu?.kind === 'assignee'" :anchor="bulkMenu.anchor" title="Assignee" :subject="plural(selected.size, 'ticket')" kind="assignee" :options="bulkPeople" current="-" :searchable="bulkPeople.length > 8"
         @choose="bulkAssign" @close="closeBulk"
@@ -1530,6 +1773,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .stat-placeholder { width: 100%; height: 19px; }
 .progress-placeholder { width: 100%; height: 12px; }
 .activity-placeholder { width: 42%; height: 18px; }
+.q-stat { height: 22px; margin: -2px -6px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: inherit; }
+.q-stat:hover { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.q-warn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.q-warn.on { color: var(--queue-wait-ink); }
 .stat-line { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
 .stat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .stat b { font: 600 13px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
@@ -1541,13 +1788,19 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
 .list-view.selecting { padding-bottom: 76px; }
-@media (max-width: 720px) { .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); } }
+@media (max-width: 720px) {
+  .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); }
+  /* The fixed chip never moves rows when it arrives; the last row can scroll
+     above both it and the measured selection sheet. Desktop stays in the header. */
+  .list-view.has-live-updates { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }
+}
 .phone-pick { display: none; }
 @media (max-width: 720px) {
   .phone-pick { display: flex; align-items: center; justify-content: flex-start; min-height: 44px; margin-top: -2px; }
   .phone-pick-status { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0; font-size: 15px; color: var(--ink-2); }
   .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   .phone-pick .dot { color: var(--ink-3); }
+  .phone-pick .gone { color: var(--ink-2); }
   .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
   .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
   .phone-pick.on button { margin-left: -12px; color: var(--teal-ink); }
@@ -1555,7 +1808,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 /* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
 .project-head.glimpse-room { padding-bottom: 56px; }
+.flow-disabled { display: grid; justify-items: start; gap: 12px; padding: 24px; }
+.flow-disabled h2 { font-size: 18px; }
+.flow-disabled p { max-width: 65ch; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
+.ticket-freshness { margin: 0 0 8px 4px; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
 /* The hint waits for the rows, like the footer, so it never jumps while they load. */

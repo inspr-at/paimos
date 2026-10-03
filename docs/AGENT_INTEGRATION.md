@@ -22,7 +22,142 @@ The supervisor's `serve` command takes `--url`, `--agent-key-file` (an absolute 
 
 Its `control` command sends a fenced local control. Vendor session ids stay on the daemon. Aeon stores the run id and the agent principal.
 
-The daemon adapts Codex, Claude, Pi, Cursor, and Grok locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+The daemon adapts Codex, Claude, Pi, Cursor, Grok, Gemini CLI, and OpenCode locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+
+### Gemini CLI and OpenCode
+
+Setup accepts `--harness gemini` and `--harness opencode`. Standalone serve accepts
+`--gemini-path` and `--opencode-path`; paired serve uses the approved physical
+installation and interpreter pins. Discovery checks only `--version` and labels
+these candidates as **local profiles**, not authenticated person identities.
+Their explicitly selected HOME must be private and owned. Vendor login remains
+local: run `gemini` or `opencode auth login` normally. Session creation must succeed
+before Aeon sends a prompt; provider authentication can still fail on that prompt.
+Version probes leave discovery **unverified** and daemon accounts blocked with
+`sign_in_unverified`; they never establish sign-in or readiness. Setup cannot
+enroll these candidates as ready until a qualified sign-in probe is available.
+
+Both adapters use ACP version 1 over the existing owned stdio transport, with
+fresh sessions and run-scoped Aeon HTTP MCP tools. Idle inbox delivery starts a
+new turn in the same owned session; a busy turn rejects steer/inbox for retry.
+Interrupt waits for a terminal cancellation receipt. An unapproved permission
+request ends the run; Aeon never chooses a vendor permission option for a person.
+These adapters have no qualified no-tools execution boundary, so pairing
+verification and managed reviews remain unavailable before vendor startup.
+Existing enrollments retain their local profile, but a successful version probe
+does not make them launchable or request another login as if sign-out were proven.
+
+ACP launcher checks retain bounded local failure reasons: `timeout`, `protocol`
+and `launch_failed`. A future qualified sign-in check can distinguish confirmed
+sign-out (`auth_failed`) from `identity_mismatch`; both block dispatch, while only
+confirmed sign-out asks for another login. A fresh qualified success clears prior
+failures and allows dispatch. The historical account-probe request keeps only
+`auth_failed` and `unavailable`: only confirmed sign-out maps to `auth_failed`;
+identity mismatch, measurement failures and unqualified checks map to `unavailable`.
+The bounded lifecycle reason remains `identity_mismatch`. Raw vendor output and
+identity are never uploaded. These classifications do **not** qualify a sign-in
+command.
+
+#### AEON-543 qualification attempt (2026-10-02)
+
+**Blocked; neither harness has a qualified sign-in probe.** No real-account
+sign-in, identity-mismatch, startup-hook or quota-neutral termination qualification
+was completed. Fixture outcomes exercise readiness/dispatch consumers, not vendor
+authentication. Release-note enablement remains with the coordinator after actual
+qualification.
+
+Read-only commands run against the approved offload host (no credential contents
+or resolved environments were read or printed):
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'hostname; command -v gemini; command -v opencode; command -v node; command -v go'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'ls /Users/mba/.local/bin /Users/mba/.nix-profile/bin /opt/homebrew/bin /usr/local/bin 2>/dev/null | rg "^(gemini|opencode|node|npm|go|aeon.*)$"; test -d /Users/mba/.gemini && echo gemini-profile-present; test -d /Users/mba/.local/share/opencode && echo opencode-profile-present; test -d /Users/mba/.config/opencode && echo opencode-config-present; sysctl -n vm.loadavg'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local bash -s <<'REMOTE'
+for vendor_root in /Users/* /Users/mba/.local/share /Users/mba/.config /Users/mba/.nix-profile/lib/node_modules /opt/homebrew/lib/node_modules /usr/local/lib/node_modules /Users/mba/.opencode/bin; do
+  test -d "$vendor_root" && printf 'directory %s\n' "$vendor_root"
+done
+for vendor_profile in /Users/mba/.gemini /Users/mba/.config/opencode /Users/mba/.local/share/opencode /Users/ci/.gemini /Users/ci/.config/opencode /Users/ci/.local/share/opencode; do
+  test -d "$vendor_profile" && printf 'vendor profile directory %s\n' "$vendor_profile"
+done
+for vendor_binary in /Users/mba/.nix-profile/bin/gemini /Users/mba/.nix-profile/bin/opencode /opt/homebrew/bin/gemini /opt/homebrew/bin/opencode /usr/local/bin/gemini /usr/local/bin/opencode /Users/mba/.opencode/bin/opencode; do
+  test -x "$vendor_binary" && printf 'vendor executable %s\n' "$vendor_binary"
+done
+exit 0
+REMOTE
+```
+
+Observed: `mbp2606` answered; Node exists at `/Users/mba/.nix-profile/bin/node`.
+Neither vendor was found on that SSH session's PATH or at the enumerated executable
+paths; none of the enumerated vendor profile directories existed. These checks do
+not inventory every installation or another person's account. No install or login
+was attempted. Qualification needs approved physical vendor/interpreter pins and
+explicitly paired profiles on this host.
+
+Source inspection explains why guessed commands are unsafe. At Gemini commit
+[`fb972b2f`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/config/config.ts),
+the registered commands do not include `auth status`; positional arguments enter
+the prompt path. Its
+[`initialize`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/acp/acpRpcDispatcher.ts)
+calls configuration initialization, and `authenticate` may initiate authentication
+or clear cached credentials when switching methods. Neither was run as a probe.
+OpenCode v1.14.48, commit
+[`4d8ac17c`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/cli/cmd/providers.ts),
+implements `auth list` as stored provider names and credential types, without
+identity/revocation verification. Its
+[`ACP initialize`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/acp/agent.ts)
+returns capabilities; `authenticate` is unimplemented, and session creation provides
+no authenticated identity receipt. Such responses are insufficient to qualify
+dispatch. Keep `sign_in_unverified` until exact-build, real-account evidence proves
+a quota-neutral identity check and bounded cleanup with inherited hooks/config.
+
+Gemini profiles pin the exact model and numeric thinking budget. The qualified
+2.5 Flash range is 0–24576; 2.5 Pro is 128–32768. The registry exposes
+`effort_level` on the common 0–5 scale: off/0, up to 1024, up to 4096, up to 16384,
+up to 32768, then more; dynamic or named budgets stay unknown. A fresh private
+system settings file applies the pin without rewriting vendor or workspace
+configuration. OpenCode profiles require `provider/model`; efforts are actual
+provider variants, with `default` where no variant is selected. ACP startup
+checks the vendor's returned model and effort selections before prompting.
+`paimos harness invoke --harness gemini|opencode --model MODEL --effort EFFORT
+[--review] -- PROMPT` renders the registry's terminal run/review command.
+Its review flag selects vendor plan mode; it does not qualify managed no-tools
+review or override person controls.
+
+Gemini ACP completed-turn counters include cache reads in input and expose
+reasoning separately; the normalized output includes reasoning. Mixed-model
+Gemini turns remain unattributed. OpenCode's pinned ACP implementation returns
+only its last assistant step: tool turns therefore omit throughput instead of
+claiming complete totals. Cumulative USD updates remain available; context
+occupancy (`used`/`size`) is never counted as throughput. Native metadata captures
+can use `session-usage-parse --source gemini|opencode` with the existing complete
+capture/checkpoint contract. Gemini JSON telemetry requires one fixed model;
+OpenCode `step_finish` parts deduplicate by stable part ID and count every step.
+Heartbeat captures are explicitly named `gemini.jsonl` or `opencode.jsonl` in the
+worker state directory; vendor credentials and databases are never read. No
+quota-neutral capacity API has been qualified; missing capacity stays unknown.
+Qualification tests use local protocol fixtures, not paid vendor calls. Real CLI
+installation, login and no-tools qualification remain separate evidence gates.
+Attach recognizes recorded vendor installation roots and native executable pins.
+A generic Node interpreter does not prove a Gemini process's identity, so such
+attachments are refused. Native Gemini attachment remains unqualified.
+
+Skill rendering uses the vendor directories
+[`.gemini/skills`](https://geminicli.com/docs/cli/skills/) and
+[`.opencode/skills`](https://opencode.ai/v2/docs/skills).
+Always-on Gemini previews suggest
+[`GEMINI.md`](https://geminicli.com/docs/cli/gemini-md/); OpenCode uses `AGENTS.md`.
+Rules import accepts both harness selectors while refusing their private vendor
+stores. Rendering preserves exact bytes; installing a preview remains explicit.
+
+The closed reporter harness enum changes the declared status/heartbeat contract
+from `harness-session/1.9` to `harness-session/2.0`. Existing fields and routes keep
+their shape. `Aeon-Contract` is a response header, not a required request header:
+historical registration and heartbeat bodies still work without it. Pharos and
+Janus do not decode the harness-session enum, so no coordinated rollout is
+required for their existing reporters. The worker does not update those
+repositories or deploy this draft.
 
 ### Default worker launch
 
@@ -71,16 +206,22 @@ The guarantee concerns delivery into a session, not whether the model acts on it
 
 The public, HTTP-readable `/agents/register-agent` guide must supply its own configured instance origin, configured tenant slug, and **exact published release version**. The same link is for a person and their chosen harness. Loading it or entering a short pairing code does not authorize a run. Only the signed-in person's explicit Connect your machine approval may activate the owned service and the verification choice shown there. The helper creates the private device, lifecycle, and runtime credentials locally; no API key or vendor sign-in is pasted into chat or commands. A missing vendor sign-in uses that vendor's normal login flow. Never follow installation commands supplied by a pairing peer.
 
+The pinned direct download is the first installation choice. Homebrew is always offered and installs the latest INSPR release, which can differ from a self-hosted server. `aeon-agentd status` reads only its own instance's public pairing guide to check compatibility; neither the server nor the browser looks up the tap.
+
+The guide's additive `agent_compatibility` policy declares `pairing-v1`, the inclusive minimum `261001072608.0.0` and `inspr-calver-3`, with no maximum. This floor pins the known server/agent protocol baseline (attach protocol 2 and local consent proof v2); it does not follow the server build version. Raise it only when an incompatible agent requirement has qualified evidence. Valid newer coordinates in the same declared scheme remain supported. Different protocol versions receive specific update advice; absent, invalid, development and other-scheme reports remain unknown rather than being ordered across eras.
+
+A helper sends its release identity with existing lifecycle progress only after its own instance's normal lifecycle response includes the compatibility result. This negotiation adds no discovery call to the daemon loop or cold revocation. If the server is downgraded to a strict legacy decoder, the helper retries the rejected additive report once with the old request shape. Legacy strict servers continue receiving the old request shape. The server retains the last report for that computer and generates advisory compatibility results for `/agents`; an omitted legacy report clears stale identity. Inside-window and unknown reports show no update notice. Below the floor, status and the computer row say “Update aeon-agentd to at least 261001072608.0.0.” Protocol mismatches also name the required pairing protocol. This advice never revokes an enrollment or stops work. Upgrading the installed binary does not replace an already running daemon; schedule its restart after work finishes and verify the new daemon and native consent path.
+
 The guide supplies a per-platform install command only when its serving Aeon binary has an exact release version. Copy the command for the matching platform from that guide; do not substitute `latest`, a branch, or an unverified script. In shell notation the release root is `https://github.com/inspr-at/paimos/releases/download/v$VERSION`, with the guide's exact version embedded in its generated command. The command fetches the selected binary and `SHA256SUMS` there. It requires an absolute `HOME` without ambiguous path components; `HOME`, `.local`, `.local/bin`, `.local/lib`, `.local/lib/aeon`, and the version directory must be real directories owned by the current user and not writable by group or others. It refuses links and unsafe directories before downloading. Missing descendants are created one at a time with a private umask. The versioned destination is exclusively created at `$HOME/.local/lib/aeon/<VERSION>/<platform>-<arch>/`; an existing destination or partial installation is a conflict to inspect, never an overwrite. It selects exactly one checksum entry with the asset's full filename and a 64-digit lowercase SHA256 hash into `selected.SHA256SUMS`, then runs `sha256sum -c selected.SHA256SUMS` on Linux or `shasum -a 256 -c selected.SHA256SUMS` on macOS. Only after that succeeds does it copy the verified bytes to `paimos-agentd` with mode `0700` and link `$HOME/.local/bin/aeon-agentd` to that file. An existing `$HOME/.local/bin/aeon-agentd` that is not a symlink into `$HOME/.local/lib/aeon/` (or whose link text contains `..`) is left untouched and the command stops before downloading. A symlink that already points inside that tree is retargeted at the new verified file. A failed download or checksum leaves no executable `paimos-agentd` and creates no `aeon-agentd` link. On success the command's only stdout line is the pair command with the instance origin shell-quoted. When `~/.local/bin` is on PATH that line is `aeon-agentd pair --url '<origin>'`. Otherwise it is the shell-quoted absolute path of `$HOME/.local/bin/aeon-agentd` with HOME expanded, and stderr has one line telling the operator to add that directory to PATH. The checksum protects the downloaded bytes relative to the manifest; use the official HTTPS release and the version displayed by the trusted instance.
 
 The exact binary names are `paimos-agentd-darwin-arm64`, `paimos-agentd-darwin-amd64`, `paimos-agentd-linux-arm64`, and `paimos-agentd-linux-amd64`.
 These are the targets of the next release workflow. The already published stable86 coordinate lacks `paimos-agentd-linux-arm64`; a guide bound to that coordinate must report Linux arm64 unavailable, never offer a missing asset or change the historical release.
 
-Run the guide’s complete instance-bound command from the intended project folder. On macOS, Homebrew is shown only when this server has read the tap formula on inspr-at/homebrew-tap’s main branch and its version matches; the pair line then runs `env "$(brew --prefix)/bin/aeon-agentd" pair --url '…'`. Otherwise the guide shows the direct download and the browser does not call GitHub. The checksum installer instead selects the instance’s exact release and links `~/.local/bin/aeon-agentd`; add `~/.local/bin` to PATH before running the copied pair command. The installer’s own only stdout line is already executable: `aeon-agentd pair --url '<origin>'` when that directory is on PATH, otherwise the shell-quoted absolute path of the link with HOME expanded, plus a one-line stderr hint to add the directory to PATH. No binary or address substitution is needed. `aeon-agentd status` reports a helper/instance version mismatch when the instance guide is reachable and both versions are published; `--json` exposes `version_status` as `matching`, `mismatch`, or `unavailable`. This compares the invoked helper with the instance, not the already running daemon.
+Run the guide’s complete instance-bound command from the intended project folder. The checksum-verified direct download pinned to this server’s version is first. On macOS, Homebrew is always offered and installs the latest INSPR release; its pair line runs `env "$(brew --prefix)/bin/aeon-agentd" pair --url '…'`. Neither the server nor the browser reads the tap formula. The checksum installer selects the instance’s exact release and links `~/.local/bin/aeon-agentd`; add `~/.local/bin` to PATH before running the copied pair command. The installer’s own only stdout line is already executable: `aeon-agentd pair --url '<origin>'` when that directory is on PATH, otherwise the shell-quoted absolute path of the link with HOME expanded, plus a one-line stderr hint to add the directory to PATH. No binary or address substitution is needed. `aeon-agentd status` tells you if this server needs a different version by checking the invoked helper against the server’s declared compatibility window; exact release equality is unnecessary. `--json` exposes `version_status` as `compatible`, `update_required`, `protocol_mismatch`, `unknown`, or `unavailable`. An unreachable guide or one without a usable compatibility policy is `unavailable`. This checks the invoked helper, not the already running daemon.
 
 `pair` runs setup, displays the code and waits for browser approval and daemon connectivity. It offers the current physical folder for explicit confirmation and installed, signed-in harness accounts for selection. Bare `pair` asks for the instance origin on first use; a resumed pairing keeps its saved origin and folder. The guide supplies the default tenant. No credentials are requested or printed. JSON automation must supply `--workspace` and `--harness` explicitly instead of answering prompts.
 
-Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs a read-only sign-in check for every supported vendor tool found on PATH before offering choices; explicit `--harness` flags probe only those selections.
+Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs read-only sign-in checks for vendor tools that expose one; Gemini CLI and OpenCode offer an explicitly selected local profile with unverified sign-in. Explicit `--harness` flags probe only those selections.
 
 `--state-root` is optional for `pair`, `setup`, `status`, `disconnect` and `add-harness`. The defaults are `~/Library/Application Support/aeon/paired` on macOS and `$XDG_STATE_HOME/aeon/paired` on Linux (or `~/.local/state/aeon/paired` when unset). Missing directories, including parents, are created with mode `0700`; existing unsafe permissions, symlinks, repository paths and paths inside the working folder are rejected without repair. No manual `mkdir` is needed. Advanced `--workspace`, repeated `--harness`, `--tenant`/`--tenant-id`, and `--state-root` overrides remain available. To maintain multiple pairings, use a distinct private state root for each.
 
@@ -92,7 +233,7 @@ Homebrew-owned services use `$(brew --prefix)/opt/aeon-agentd/bin/aeon-agentd`, 
 
 Before qualifying an upgraded macOS release, verify the new daemon’s executable identity and native Touch ID attach behavior on that daemon: cancel must refuse attachment, a fresh successful Touch ID approval must attach, and stale approval must not transfer from the old process. A matching CLI version, signing check, old-daemon approval or fixture test is not native Touch ID evidence. This fix does not supply that hardware-backed release qualification.
 
-Rerun `pair` to resume setup; use `status` to inspect the pairing, `add-harness` to offer newly available harnesses (or supply `--harness NAME`), and `disconnect --account-id UUID` to remove one enrollment; omit `--account-id` for the whole computer. When an older agentd is earlier on PATH, add a harness with the same binary: `env "$(brew --prefix)/bin/aeon-agentd" add-harness` or `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness`. Add `--state-root ROOT` when using a nondefault pairing. New harnesses still need fresh person approval. A drain waits for owned work; offline revocation may leave local cleanup or run accounting unconfirmed. These commands never remove vendor login stores or project files.
+Rerun `pair` to resume setup; use `status` to inspect the pairing, `add-harness` to offer newly available harnesses (or supply `--harness NAME`), and `disconnect --account-id UUID` to remove one enrollment; omit `--account-id` for the whole computer. When an older agentd is earlier on PATH, add a harness with the same binary: `env "$(brew --prefix)/bin/aeon-agentd" add-harness` or `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness`. Add `--state-root ROOT` when using a nondefault pairing. New harnesses still need fresh person approval. `status` prints the reason code and fix command for each harness that is not ready and each blocked account; the computer stays ready while any harness works. For an already connected Codex, Cursor or pi account whose interpreter pin is blocked, `add-harness --harness NAME` renews only that pin, without a new request; Claude pins use `repin --harness claude`. A drain waits for owned work; offline revocation may leave local cleanup or run accounting unconfirmed. These commands never remove vendor login stores or project files.
 
 After revocation, denial or expiry, keep the old state for status and cleanup. Pair again using `pair --url 'INSTANCE_ORIGIN_FROM_GUIDE' --state-root /absolute/new/private-folder`, with a new empty folder outside the working folder and repositories; approve its new code in the browser. Nothing clears, reuses or renews the previous authority automatically. For Nix/Home Manager, the configuration owner must review the service's new state root and finish the old pairing's drain/cleanup before activation.
 
@@ -163,7 +304,7 @@ Bind each launched harness to its **Aeon generation**, using exactly one of:
 - `AEON_SESSION_FILE`: an owned, regular, non-symlink file containing that UUID and an optional newline.
 - `AEON_SESSION_STATE_DIR`: the existing `harness run-heartbeat --state-dir` directory; the hook reads only its `session.id`, never the lease. This lets a hook observe a newly registered generation without changing the environment.
 
-The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook posts the harness input `session_id` to `POST /api/inbox/session-binding` and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
+The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook reads `session_id` from the hook JSON and resolves a UUID through `~/.aeon/sessions/index/<session-uuid>`. That file is mode 0600, owner-only, and not a symlink. Its text is three lines: the absolute `harness run-heartbeat --state-dir`, the owner pid, and that process's start time. Publish and removal take a lock file in the index directory. The helper writes the entry when it starts with `--source-session` and refuses startup, naming that source UUID, when another live state directory already holds it. It removes the entry on every shutdown path, including owner exit, SIGTERM, and a failed `/stop`, and only when the entry still names its own state directory. The hook uses the directory's `session.id` only while `state.json` is that same live generation and the recorded owner is still that process. A stopped generation, a dead or reused owner pid, a symlink, or any other unreadable index entry is a quiet no-op and does not fall through. A UUID `session_id` with no live index entry is a quiet no-op: no `POST /api/inbox/session-binding` and no stderr. A non-UUID harness session id still posts to that endpoint and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. For Claude registrations with `--parent-session`, the ambient value is ignored because it may belong to the coordinator. `harness run-heartbeat --parent-session ... --source-session CHILD_UUID` records the explicitly selected child native ID instead; manual registration can use the child native ID as its private session ref. Codex, Grok and Cursor child registration keep their existing source behavior. Vendor references are unique among active generations per tenant and agent across all harnesses. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
 
 Install from the operator's shell with the released binary and the intended instance/configuration:
 
@@ -172,7 +313,7 @@ aeon --instance ppm hook install --harness claude --scope user --dry-run
 aeon --instance ppm hook install --harness claude --scope user
 ```
 
-Use `--scope project` from the project root to edit the personal `.claude/settings.local.json` (never the shared `.claude/settings.json`); user scope edits `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR/settings.json`). Review the changes in Claude's `/hooks` and restart the session as required by the harness. The installer prints only its owned hook additions/removals, preserves unrelated settings and hooks, shell-quotes the executable/configuration paths, writes atomically, and is idempotent.
+Use `--scope project` from the project root to edit the personal `.claude/settings.local.json` (never the shared `.claude/settings.json`); user scope edits `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR/settings.json`). Review the changes in Claude's `/hooks` and restart the session as required by the harness. The installer prints its owned hook additions/removals and the hook's own binding precedence. An explicit `AEON_SESSION_ID`, `AEON_SESSION_FILE`, or `AEON_SESSION_STATE_DIR` wins over the index. A live match prints `bound: <label>`. With none set, the label is the live generation for `CLAUDE_CODE_SESSION_ID` (or the Codex session id), or `not bound: run harness run-heartbeat with --source-session`. An invalid explicit binding prints `not bound: explicit session binding is invalid`; an unavailable one prints `not bound: explicit session binding is unavailable`. Neither falls through to the index. When the explicit generation and the index disagree, the status stays `bound:` to the explicit generation and the next line is `conflict: session index binds a different generation`. It preserves unrelated settings and hooks, shell-quotes the executable/configuration paths, writes atomically, and is idempotent.
 
 Before replacing existing settings, install and uninstall save the exact previous bytes to a private (0600) timestamped sibling `settings.json.backup-<UTC timestamp>-<unique suffix>` (using the actual settings filename). No-op and dry-run commands create no backup. Unrelated values retain their JSON string spelling where possible, including literal `&`, `<`, and `>`; indentation/key order may change. Invalid JSON, symlinks, and detected concurrent edits are refused. `--dry-run` writes nothing.
 
@@ -203,7 +344,149 @@ The same session ref and lease register again without a second row. A different 
 
 For an unmanaged Claude Code or Codex session, keep `aeon harness run-heartbeat` running with its existing `--owner-pid`, `--state-dir`, `--project`, `--agent`, and `--harness` flags, plus `--print-controls`. In `/agents`, a person with `harness.control` can ask that exact session to rename itself or change model/effort using an account catalog profile. This does not switch accounts or grant the session additional permissions.
 
-Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
+Account billing is explicit (AEON-511). A person with `account.manage` can include
+`billing_mode: "subscription"`, `"api"` or `"unknown"` in
+`PUT /api/agent-accounts/{accountId}/metadata`, alongside its existing required
+label, plan, host label and model-profile array. New accounts default to unknown;
+omitting billing preserves the person's setting, including when agentd republishes
+metadata. Agents cannot change this setting. Account and plan names never imply
+billing. Managed usage carries the actual routed account automatically. Agentd
+uses a successful harness auth-kind probe when exposed (Codex ChatGPT login,
+Claude `claude.ai`), then the routed account declaration, then unknown.
+An email-fenced Claude `api_key` login fails authentication and reports no billing;
+its billing can come only from the person-set account declaration, never that probe.
+No credential file is opened to discover billing. Existing identity fences still
+apply. Unknown or subscription usage has no API charge estimate; subscription
+usage may name the saved plan. This remains list-price accounting, never invoices.
+
+For an unmanaged heartbeat, `--account-id ACCOUNT_UUID` binds usage to its known
+Aeon account. An existing `--capacity-account` is reused automatically when
+`--account-id` is omitted. With `--billing-mode unknown` (the default), the server applies that
+account's saved declaration; `--billing-mode api|subscription` supplies an explicit
+known billing mode. A missing account binding remains unknown. Retries replay the
+same request even if account settings change later.
+
+Planning stores a stable `estimate_snapshot` at work start: the first harness
+session binding or entry into the in-progress work bucket, whichever happens first.
+Kind state categories win, then the same fixed spellings as project work counts
+(`in_progress`, `inprogress`, `active` and `qa`). Concurrent starts share one row,
+captured in the same transaction. QA, blocked and open transitions keep that episode
+open. Only done, cancelled or archived work buckets close it, including custom
+states and session-first episodes; the next start adds history. Edits to hours, routes, prices
+or calibration after start update live planning but preserve the baseline, including
+nulls when the original estimate or route was unknown. No historical start is
+backfilled from today's values. The snapshot records hours, estimated tokens and
+API list cost, the planned profile/model/effort and registry revision, and calibration
+and price/mix rates. Cost calibration excludes other projects' private costs.
+The baseline is stored separately from editable ticket fields; closing an episode
+changes only its lifecycle metadata, never the captured estimate.
+The latest snapshot accompanies live planning; its cost and cost-rate fields are
+omitted without `harness.read` on both the ticket's current project and its saved
+source project, including after project moves (AEON-370).
+
+The ticket list uses that snapshot for Tokens/Cost comparison hovers, preserving
+unknown baselines. Estimates carry `~`; running cells show measured / estimate;
+measured cells show one value with a muted check. Cost is list value, never an
+invoice; only subscription-only usage carries a `plan` marker. Mixed billing
+totals remain unmarked, and their hovers identify the subscription portion. The former Paid
+column maps to Cost in saved preferences and views. Saved ticks always draw,
+including empty cells with hover reasons; only Automatic hides empty planning
+columns. Phones retain their existing card layout.
+
+Planning also returns `models` from visible sessions, including work descendants.
+Profile identity takes precedence over normalized model, raw metadata and usage
+fallbacks. Models are ordered by measured session tokens, with deterministic ties;
+each includes session identity, effort, role, running state and reported tokens.
+The Model cell shows the leading used model plus a count of other models, with
+planned versus used details grouped by model in its hover: effort, session count,
+running state and token totals, without session IDs. The planned comparison uses
+the work-start route, comparing base model keys with embedded effort removed.
+Only a single used model adds “as used” when its harness and base model match
+and every session effort equals the planned effort. A different harness or base
+model adds “a different model ran”; an effort-only mismatch or mixed models
+leave the planned label alone. Usage without a planned route says
+“No model planned: no role set”. Session roles identify workers or coordinators,
+so they do not imply that a run was a review. Running Tokens/Cost hovers put
+measured usage before the snapshot estimate and its percentage. A running token
+session line reads “1 session running”; the Model line retains “1 session, running”.
+Before usage is reported, Tokens names the running session count and the display
+model when a single model ran, without a second unreported-usage warning. The
+running count excludes finished sessions, while measured totals include their
+usage. A session without a usage row counts as unreported tokens, without adding
+an unknown billing mode or setting `list_unpriced`/`paid_unknown`. Its standalone
+Cost hover stays “Billing not reported yet”; beside priced API usage the Cost
+hover stays “API-billed · at list prices”, including a measured zero. Subscription
+usage keeps its plan marker beside an unreported session. Actual usage without
+a list price or known billing still contributes lower-bound and billing warnings
+when a list value was measured. The shared
+`web/tests/fixtures/planning-list.json` is a complete server list response;
+`TestPlanningListHoverFixture` checks its planning fields against the endpoint,
+and unit/browser regressions consume it directly. Calibration appears only on the pre-session
+estimate and names the short model without effort. Column fitting
+measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
+modes still require `harness.read` on both the row and usage source projects.
+
+The Display panel saves Effort meter On/Off (default On), Model names Full/Short
+(default Short) and Version Show/Hide (default Show) per person in `list:display`.
+The Model column defaults to 176px. Registry `display_name`, `short_name` and
+`model_version` are separate from the profile's revision `version`; alias versions
+stay unknown unless a new immutable profile explicitly supplies that metadata.
+Hovers, accessible names and model sorting retain the full name and model version.
+Registered aliases with different declared model versions remain separate used
+models. The planned/used comparison requires equal model versions when either
+side declares one; two omitted or empty versions retain legacy identity matching.
+The hover says “as used” only when every session’s effort also matches the plan.
+Sorting follows the leading actual model, then the work-start route or
+live route when no actual model is known.
+Migration 1074 stores model display metadata and effort levels in the immutable,
+tenant-isolated `model_profile_display` table without rewriting profile pins.
+Existing profiles are backfilled under each tenant’s RLS in the migration
+transaction; an insert trigger covers both current and previous-binary writers.
+The registry’s presentation `provider` is separate from its routing `family`: Pi
+profiles with explicit registered Gemini IDs retain family `unknown` and carry
+Google presentation metadata. Effort is one 0–5 scale: Codex minimal 0 through xhigh 4,
+Claude low 1 through max 5, Grok low 1 through xhigh 4; Gemini budgets use off/0,
+1024, 4096, 16384, 32768 and larger token buckets. A session meter uses its
+registered profile only when reported effort matches; unregistered, missing or
+unsupported effort stays null, hides the meter, and says “Effort not reported” in
+the hover and accessible name, including when the meter setting is Off. Raw
+effort words never imply a level. The largest measured session supplies the leading
+model's meter (session ID breaks ties); the hover describes every session.
+
+Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. Without a vendor id, Codex discovery reads only the first `session_meta` line of allowed rollouts, matches its `payload.cwd` to the registered worktree exactly, and selects the newest `payload.timestamp` after registration. Grok matches the encoded worktree directory and selects the newest session whose fenced `summary.json` has `created_at` after registration; `usage.json.updatedAt` alone cannot prove that a session is new. Both searches are bounded at 4,000 entries and pin the first match in private heartbeat state, retaining the same log and cursor after a helper restart. Sessions missing creation metadata, a bound worktree, or a recorded start remain undiscovered; use an explicit id or file for them and for resumed sessions. Keep one discoverable new vendor session per registered worktree; pass an id/file when concurrent sessions share it. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
+
+Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.
+
+Codex cached-input growth is accumulated before preparing each per-model report, even when it exceeds the new input in one record. The prepared cached total is limited to that model's inclusive input and, after an accepted report, to the value that preserves its last accepted uncached input. A first scan of input/cache 10000/0 followed by 12000/10000 therefore reports cache 10000. If 10000/0 was already reported on a prior beat, the next report can carry only cache 2000 because the server keeps accepted uncached input monotonic; cache growth beyond that floor is not reported.
+
+Codex reasoning reports sum safely attributable observed increases. A missing counter makes the session baseline unknown; the next known total re-establishes it without assigning unknown growth to a model or lowering the previous high-water mark. Later known increases above that mark count in the same scan or later beats, and earlier observed reasoning is retained. A downward revision carries no known reasoning delta, so a model with no observed reasoning stays unknown. Reasoning during the unknown stretch remains unattributed.
+
+### Coordinator recipe for usage (AEON-503)
+
+Start the heartbeat registration before launching a new vendor session in its worktree, then keep the helper alive until that process exits. The CLI command is `run-heartbeat` (`heartbeat` sends a single manual beat):
+
+```sh
+aeon harness run-heartbeat --project AEON --agent "$AGENT_NAME" \
+  --harness codex --owner-pid "$OWNER_PID" --state-dir "$STATE_DIR" \
+  --worktree "$WORKTREE" --ticket "$TICKET" --work-shape ship \
+  --model "$MODEL" --effort "$EFFORT" --usage-source codex \
+  --billing-mode subscription --subscription-label 'ChatGPT'
+```
+
+For Grok use `--harness grok --usage-source grok` and the appropriate billing label. For Cursor, the launcher must capture its stream-json output from the beginning into `$STATE_DIR/cursor.jsonl`; retain that capture through the final usage flush. Claude uses `--transcript`. When the launcher knows the vendor id or log, prefer `--usage-id` or `--usage-file`; this also supports resumed sessions whose creation precedes registration. The helper persists aggregate reports before posting and retries unacknowledged reports on restart. Only counters and model attribution reach Aeon; session metadata, transcripts and prompts stay local.
+
+`harness register` and `harness run-heartbeat` report `harness_version` from a local `--version` probe bounded to one second and 4 KiB of stdout. Missing binaries, failures, unrecognised output and timeouts leave it empty. `--harness-version` explicitly supplies the launcher-known version and avoids the probe. Probed and supplied versions longer than the registration limit of 80 characters are omitted. A restart reuses the registered generation; it does not rewrite its version.
+
+| Source | Input / output | Cached input | Reasoning | Cost |
+| --- | --- | --- | --- | --- |
+| Claude managed / JSONL | Vendor usage; inclusive input | Cache reads; cache creation stays ordinary input | No separate counter in the managed bridge | Managed vendor USD total when present; unmanaged API pricing only with explicit API billing |
+| Codex managed / rollout | Cumulative totals, attributed by model | Vendor cached-input counter | Vendor counter when present | No measured dollar amount; unmanaged API pricing only with explicit API billing |
+| Grok unmanaged | `usage.json` session or per-model totals; input includes `inputTokens + cachedReadTokens + cacheCreationTokens` | Cache reads | `reasoningTokens` when present | `costUsdTicks` is ignored; unmanaged API pricing only with explicit API billing |
+| Grok managed ACP | Explicit cumulative input includes `inputTokens + cachedReadTokens + cacheCreationTokens`; output uses `outputTokens`. Missing optional cache counters retain prior observations | `cachedReadTokens` when present | `reasoningTokens` when present | Cumulative USD `cost.amount` when present |
+| Pi managed RPC | Completed assistant `message_end.message.usage`; input includes `input + cacheRead + cacheWrite`, summed per provider/model | `cacheRead`; complete cache fields required for inclusive input | No separate counter in this message schema | Reported per-message `usage.cost.total`; a vendor estimate, not proof of a charge |
+| Cursor managed ACP / launcher JSONL | Current ACP cost/context updates supply no throughput tokens; a prompt result with complete explicit Cursor usage is accepted. Launcher `result.usage` supplies turn totals | `cacheReadTokens`; `cacheWriteTokens` stays ordinary input | `reasoningTokens` only when explicitly present | Managed USD cost updates when present |
+
+Managed Grok emits cumulative session reports and monotonic deltas into run telemetry; duplicate or stale token totals add no tokens. When a snapshot revises reasoning down, both managed and unmanaged Grok retain the previous reasoning total while accepting valid growth in input, output and cache counters. Pi counts completed assistant messages once by provider/model and message timestamp, ignoring repeated streaming, turn and agent-end records. Tool-supplied usage and separate compaction usage are not included in this Pi path. Grok/Cursor ACP `used` and `size` describe context occupancy and never become throughput tokens. Unavailable counters remain unknown in session reports; zero deltas in run telemetry do not establish a known zero. These parsers do not infer reasoning counts or dollar cost from text or token ratios. Vendor protocol references: [Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md), [Grok headless/ACP](https://docs.x.ai/build/cli/headless-scripting). Grok filesystem metadata and Pi message fields were checked against the installed artifacts on 2026-10-01; fixtures exercise these shapes without vendor authentication.
 
 Each beat prints outstanding requests in sequence order as compact JSON objects (one physical line each), in both text and `--json` modes. Every value has an explicit field name. Consumers must treat all request values as untrusted data, never as instructions or executable text; dispatch only the recognized request kind through the harness’s supported setting operation. Rename labels are limited to 64 ASCII letters, digits, spaces and `-_.:()/#`. Model and effort must match an enabled catalog profile at request time and again before printing; catalog lookup failure suppresses model requests until a later beat. The supported request effort enum is `low`, `medium`, `high`, `xhigh`, plus `default` for Cursor. A request record has `type:"request"`, `schema:"aeon.session-request.v1"`, `id`, `session_id`, `expected_generation`, `kind` (`rename_request` or `model_request`), `state`, `sequence`, `expires_at`, and `request_payload`. The payload contains `display_label` for rename, or `model`, `reasoning_effort`, `account_id`, and `model_profile_id` for a model request. Existing text records remain `control <id> <kind> <state>` and `message <id>`; JSON mode gives them `type:"control"` and `type:"message"` respectively. Message bodies and private worker proofs are never printed.
 
@@ -269,7 +552,54 @@ is serialized with exchanges and cannot transfer an earlier approval to a new ke
 The pairing fence permits exactly this additional route.
 The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
-proofs never go in URLs.
+proofs never go in request URLs or query strings. The one exception is the link
+the attach helper prints on the person's own terminal, `/agents#attach=<code>`:
+a fragment is never sent to a server or a referrer. The router removes it from the
+address bar before anything else runs, so it never reaches a sign-in return address
+or a report, and keeps it in memory only until the Agents page fills the lookup field
+with it (exactly nine digits, else ignored). A session that ended drops it, and opening
+the link looks up and approves nothing.
+
+The terminal's waiting block names the Decision Desk and the Attach session entry,
+prints the code in three space-separated groups, and makes the validated fragment
+link clickable with OSC 8. Ctrl-C cancels a waiting request; after activation it
+stops sharing. On today's /agents page, attach requests are approvals in **Needs you**,
+ordered with permission requests by expiry. Rows show the ticket, sharing mode and
+waiting terminal, never the code, and offer **Review…** only. Review opens a memo
+with unselected Allow/Decline choices; **Decide** submits the choice. The code entry
+step performs no lookup until **Find request**. Controls stay above the growing
+memo on desktop and in a pinned bottom bar in a full-height phone sheet.
+Single keys work outside text fields; from the code field use Command+Enter on
+macOS or Ctrl+Enter elsewhere. Escape leaves the field before closing the review.
+Allowed, expired and cancelled outcomes stay in place. Because the server combines
+cancellation and decline as detached, only the deciding tab says Declined.
+
+Attach reads and decisions stay with the tenant, person and authentication
+generation that started them. Each continuation checks that scope in the same
+synchronous turn as applying its answer. Starting sign-in or sign-out also
+invalidates other tabs through a random authentication-change marker (no code,
+cookie or identity in browser storage). Those tabs drop attach codes, reviews,
+permissions and outstanding answers while retaining drafts; sign in explicitly
+to resume there, even when the same person signs out and back in elsewhere.
+Closing a review leaves its submitted decision bound to that identity: an accepted
+response finishes decoding and refreshes both the pending requests and canonical
+session lists even after the dialog closes. A changed identity still aborts and
+drops the old response; it cannot update the next person's lists or review.
+
+`GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
+their requests that are not a session yet, waiting ones first: every pending or
+approved request until it expires, however many newer ones ended after it, then up to four ended in the last fifteen minutes, detached (declined or
+cancelled) and unreachable (expired; an unpolled request past its expiry is reported
+so without changing the row). Each item is the immutable snapshot and digests lookup returns,
+so the owner can review and approve it without typing a code, with every
+existing approval check. It never returns the code, the Touch ID challenge or a
+session, changes no row and needs no origin header; /agents polls it while visible.
+Nothing that waits is ever cut off: a person may have at most 32 requests waiting or
+approved at once, and a new request beyond that is refused with HTTP 429, error code
+`attach_live_limit`, which the helper prints in plain words. Declining, approving into a
+session or letting one expire frees a slot; a retry of an existing request is still
+answered. This bound is about what the person has to review, apart from the ten-minute
+creation windows per tenant and per computer.
 
 The person's **Settings → Personal → Security → Session watching** setting is
 stored server-side in `person_watch_security`, scoped to that person and tenant.
@@ -277,53 +607,123 @@ stored server-side in `person_watch_security`, scoped to that person and tenant.
 writes require the instance’s origin. The server, never a device request, selects
 one of two modes at approval:
 
-- **Approve in Aeon** (`aeon`, default): same-origin, digest-bound person approval
+- **Approve in Aeon** (`aeon`): same-origin, digest-bound person approval
   is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
   a same-user process can emulate its PTY. The approval warns who requested it
-  and shows process, cwd and transcript before the Allow action.
-- **Also confirm on the Mac** (`local_auth`): after browser approval the daemon
-  must also complete LocalAuthentication in its own process. No helper, CLI
-  flag, local socket field or environment value can assert this result. Until
-  confirmation succeeds there is no session, lease or shared text. Cancel,
-  timeout, unavailable authentication, loss of the peer, or revocation fails
-  closed. Linux and older daemons cannot approve this mode.
+  and shows process, cwd and transcript before the Allow action. Saving this
+  mode opts out of Mac confirmation. A program running as that user can open
+  another terminal and request the review.
+- **Also confirm on the Mac** (`local_auth`): on an upgraded pairing, browser
+  approval issues a random, one-use `local_auth_nonce`. The daemon signs
+  with the pairing's P-256 Secure Enclave key. The wire signature is base64
+  ASN.1 DER ECDSA over
+  `SHA-256("aeon.attach.local-consent.v2\0" + consent_digest + "\0" + nonce + "\0" + reason)`.
+  The reason is the canonical Touch ID prompt:
+  `Allow watching the conversation <harness> session PID <pid> on <host>`,
+  or `Allow status only (no conversation text) for ...` for a metadata-only attach.
+  A signature over any other reason is rejected. The server verifies it against
+  the immutable public key pinned by browser-approved pairing, then consumes the
+  nonce in the session/lease transaction. A bare `local_confirmed: true`, wrong
+  key, nonce, reason, stale digest, expired approval or replay is refused. No
+  text is accepted before activation. Changing biometric enrollment invalidates
+  the key; re-pair to restore Touch ID. The prompt a different local process
+  displays is not inside the Secure Enclave signature. Enclave keys use
+  biometry access control, which cannot also pin the daemon's designated
+  requirement; generic-password items are pinned to that requirement.
 
-The separate `consent_digest` binds the request ID, snapshot digest and mode,
-using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;
-a stale review is rejected after a setting change. The daemon validates it,
-then echoes it with its authenticated confirmation for strict activation.
-Only the memory-key-authenticated exchange can carry that assertion; it is a
-trusted-daemon assertion, not remote OS attestation. A replacement daemon that
-registers using stolen pairing credentials still needs fresh browser approval,
-but the server cannot verify its executable or LocalAuthentication result.
-Preventing that same-user replacement requires the separately tracked protected
-device identity/installer boundary; this mode does not claim that protection.
-Pending requests read the current setting; approved and active requests retain the
-pinned mode. Changing settings neither upgrades nor downgrades existing watches.
-Mode A retains the original snapshot digest and accepts legacy A approvals.
+Until the person saves a choice, a pending attach on a computer whose
+browser-approved pairing pinned a public key uses `local_auth` and requires
+that key's signature. The daemon's capability report cannot select Aeon
+approval. The snapshot platform must match the platform stored at pairing; a
+mismatch is rejected. Linux and pairings without a pinned key stay on Aeon
+approval. SSH to a Mac that can sign shows the Touch ID prompt on that Mac's
+screen, not in the SSH terminal. Settings shows `local_auth` with
+`consent_saved: false` when any connected computer has a browser-pinned key,
+including when another computer would still approve in Aeon and when the
+upgraded computer reports that Touch ID cannot run. Saving `local_auth`
+applies it to every upgraded computer and fails closed where confirmation
+cannot run; pairings without a key retain Aeon approval until re-paired.
+Saving `aeon` keeps Aeon approval where the snapshot platform matches the
+paired platform. Touch ID needs a person at the Mac. Ancestry and session
+checks are defence in depth, not a guarantee that same-user code cannot
+request its own attach.
 
-Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
-LocalAuthentication and Security frameworks, and an installed executable named
-`paimos-agentd` (the pairing installer) or `aeon-agentd` (the Nix package) with
-a valid Developer ID signature by the team the build expects, hardened runtime and no
-get-task-allow, library-validation or DYLD-environment exceptions. It validates
-the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
-a graphical login, and evaluates a fresh `LAContext` with
-[`deviceOwnerAuthentication`](https://developer.apple.com/documentation/localauthentication/lapolicy/deviceownerauthentication).
-The OS supplies Touch ID/device-password authentication (and other OS-supported
-owner factors); the reason names the harness session PID and host. Contexts
-are never reused. The prompt is asynchronous, remains revocable during polling,
-and times out after 90 seconds. These checks do not replace installer provenance
-or same-user OS isolation. Release darwin `paimos-agentd` is built with
-`CGO_ENABLED=1` and links LocalAuthentication. Linux `paimos-agentd`, `aeon-cli`,
-and the server image stay `CGO_ENABLED=0`. The Nix `aeon-agentd` package uses
-the same split. At watch registration the daemon reports a non-interactive
-capability: `available`, `unsupported`, `unsigned`, `no_gui`, or `policy`.
-An omitted report is stored as `unreported`. Settings lists that report for
-the signed-in person's connected computers and does not offer Mac confirmation
-unless one reports `available`. Unsigned, ad-hoc, and headless builds still
-fail closed. A signed interactive Touch ID acceptance check remains release
-qualification.
+The `consent_digest` binds request ID, snapshot digest and mode with the
+`aeon.attach.consent.v1` domain. Settings changes affect pending requests;
+approved and active watches retain their pin. Existing pairings without a key
+use Aeon approval until re-paired, even if they report Touch ID availability.
+Settings says “upgrade this computer’s pairing to enable Touch ID”. Migration
+1047 ends in-flight watches approved under the old boolean protocol, requiring
+fresh consent. Daemon registration cannot install or replace a public key, and
+Add harness preserves both the public key and the original local key identity.
+
+AEON-467 rollout: attach transport remains protocol 2; startup registration also
+declares `local_consent_proof_version: 2`, and the server advertises that required
+version in registration and attach responses. An omitted version means v1.
+Protocol-2 registrations with v1 or an unknown version fail closed with HTTP 409
+`update_agentd` and an actionable “upgrade paimos-agentd” error, before browser
+approval or Touch ID. Protocol-1 registrations still allow ordinary daemon work
+while attachment remains disabled. The version is bound to the memory-only poll
+key at registration; a later claim cannot upgrade it. V1 signatures never verify.
+
+Roll out the server and updated signed `paimos-agentd` together, then restart
+the daemon and request fresh attach approval. Deploying the server first disables
+attachment for AEON-460 daemons until that upgrade; ordinary work continues.
+Upgrading the daemon first against a server with strict older request decoding
+also leaves attachment disabled until the server is upgraded. The updated daemon
+requires the server's v2 acknowledgement. Existing pairing capabilities, pinned
+public keys and local Enclave key identities remain valid; this proof-format
+upgrade does not require re-pairing or key rotation. Pairings without a pinned
+key still require their separate pairing upgrade to enable Touch ID.
+
+Release Darwin builds enable `-tags aeon_enclave` with `CGO_ENABLED=1` and link
+Apple's Security, Foundation and LocalAuthentication frameworks. The native
+boundary validates the running hardened Developer ID daemon, team `P66J39QV6V`,
+identifier `paimos-agentd`, and refuses debugging, DYLD environment or disabled
+library validation. At pairing it creates a non-exportable P-256 key using
+`kSecAttrTokenIDSecureEnclave`, `biometryCurrentSet` and `privateKeyUsage`.
+Every signature uses a fresh cancellable `LAContext`, without authentication
+reuse or a password fallback. Cancellation, expiry, revocation and changed
+process identity fail closed. Unsigned/Nix development builds do not enable
+this path. Linux remains CGO-free and uses Aeon approval.
+
+In the same release build, private pairing state (including device, runtime and
+lifecycle capabilities) and the runtime bearer live in Keychain generic-password
+items in the device-local legacy file Keychain, which is not iCloud-synced.
+New items explicitly request `kSecAttrSynchronizable=false` and retain
+`kSecAttrAccess` for the signed-daemon ACL. The legacy backend strips
+accessibility and synchronization attributes from stored items; it provides no
+accessibility-class or device-bound backup guarantee. Their ACL trusts the
+validated daemon's designated requirement, with root as ACL owner rather than
+the user's UID. Existing items must have the same code signing requirement and
+restrictive ACL; permissive pre-created items are
+refused. Requirement introspection is weak-linked and fails closed if macOS
+cannot provide it. Reads suppress authorization prompts and an ACL denial never
+falls back to disk. First access imports existing
+`pairing.json` and `runtime.key`, verifies the persisted item, overwrites the
+exact private source inode, and unlinks it. Interrupted cleanup resumes safely;
+symlinks, hardlinks and conflicting state are refused. Overwriting does not
+promise physical erasure of APFS snapshots or backups. Public `runtime.json`
+remains on disk; it contains no bearer or private key. Its server address,
+computer/tenant/principal identities, approved folder and local key identity
+must match the protected pairing before cold-start lifecycle or bearer requests;
+changing that disk file cannot redirect credentials.
+
+The server verifies possession of the browser-pinned key; this is not remote
+hardware attestation. A new pairing still needs the person to trust the installed
+daemon and review the requested computer. Automated tests use an injectable
+signer and cover server proof verification, migration and unsigned native denial.
+Concurrent submissions of one valid proof must activate exactly one session;
+incomplete proofs and a failed activation transaction must preserve the challenge
+without creating a session or lease. Native tests also check that a cancelled
+context stops key creation and signing before OS access.
+A memory-only SecItem fixture mirrors legacy attribute pruning and checks stored
+item readback, including preservation of the supplied ACL identity; it never
+accesses a real Keychain and does not qualify the native ACL.
+A signed interactive Mac qualification must additionally prove actual enclave
+creation, Touch ID success/cancel, changed-biometry invalidation and Keychain ACL
+refusal to a separate unsigned process before release. Local unsigned checks do
+not supply that hardware or ACL qualification.
 
 ### Signed release daemon (AEON-285)
 
@@ -338,10 +738,11 @@ see them. Signing happens before `SHA256SUMS` is computed.
 
 `scripts/build-release-binaries.sh` embeds the expected team through
 `-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=P66J39QV6V`
-(`AEON_DEVELOPER_ID_TEAM` overrides it). The daemon compares the team of its own
-valid signature with that value. An empty value (development and Nix builds),
-an ad-hoc signature or another team reports `unsigned` and refuses Mac
-confirmation with an explicit message.
+for the existing signing diagnostics (`AEON_DEVELOPER_ID_TEAM` overrides that
+value). The enclave and Keychain boundary additionally requires the fixed team
+`P66J39QV6V`, identifier `paimos-agentd` and hardened runtime; changing a build
+variable cannot relax it. Development/Nix builds without `aeon_enclave`, ad-hoc
+signatures and other teams report `unsigned` and refuse Mac confirmation.
 
 Bare binaries cannot be stapled, so Gatekeeper looks the notarization ticket up
 online on first run. To verify a downloaded daemon:
@@ -389,9 +790,16 @@ aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex 
 The local helper reads consent from its controlling terminal, never stdin or a
 flag. It must belong to an existing live terminal session, cannot itself be a
 session leader, and neither its ancestry nor its session leader's ancestry may
-include the target harness. These checks repeat at confirmation and on every
-poll, including immediately before upload. Type `WATCH`, then open the paired
-instance's Agents page and choose
+include the target harness. These checks are defence in depth: they repeat at
+confirmation and on every poll, including immediately before upload, and
+same-user code can still open an independent terminal and request the review.
+Ancestors are identified from kernel metadata only. On Linux that is
+`/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
+ancestor stays acceptable; the target still needs its executable and cwd. On a
+Mac with a browser-pinned local confirmation key, the unsaved default requires
+an enclave-signed confirmation before a session exists, regardless of the daemon's
+capability report. If Touch ID cannot run, activation fails closed. Type `WATCH`,
+then open the paired instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
 identity changes, replaced/truncated transcripts, network errors or revocation
@@ -436,6 +844,8 @@ Claude in-run stream readings remain the source paths from AEON-297.
 | Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
+| Gemini CLI | Approved local profile `home` → `HOME` / `GEMINI_CLI_HOME` | Not available: quota-neutral API unqualified |
+| OpenCode | Approved local profile `home` → `HOME` and private XDG directories | Not available: provider capacity unqualified |
 
 Homes come from each approved local registry/runtime account, not from directory
 crawling or credential extraction. Cursor uses the same explicit home for its
@@ -468,3 +878,11 @@ aeon outcome record --ticket AEON-286 --kind review_verdict \
 ```
 
 `--kind` is `review_verdict`, `fix_round`, `ci_result` or `revert`. A review verdict is `--verdict ok` or `--verdict changes`, and may name `--author-family` and `--blocking-count`. A fix round needs `--round`. A CI result needs `--result pass` or `--result fail`, `--repo` and `--pr`, and may name the check with `--name`. A revert needs `--summary`. `--session` is the harness session UUID when the work had one. `--rules-version` may be omitted; it stays empty until a rules version is recorded. Marking a ticket done, accepted or delivered, and publishing a release, are recorded automatically. Completion records the time from the first worker marker, or from the first move to in progress, and the harness session when one is known. A published release records the same session. Do not post those two kinds.
+
+## Outcome proposals (AEON-378)
+
+The server's daily deterministic analysis runs for the configured doctrine App tenant. Defaults are a 14-day window, three affected tickets, more than two fix rounds, five open draft reservations and five draft attempts per UTC day. `doctrine.Options.Analysis` bounds these host settings. There is no LLM client or summarizer setting: token use is zero. Runs are claimed durably once per UTC day; an uncertain GitHub write retains its slot and request UUID for the next day's retry. Each tenant/rule has at most one active analysis reservation, including unfinished writes. Analysis never approves, merges, releases, changes a pin or reverts a rule.
+
+Outcomes, exception votes and the current learnings inbox are grouped by the server-recorded merged instruction version at the observation time, harness and ticket kind. Missing provenance is left unattributed. Fixed vocabulary classes (validation, security, scope), high fix rounds, CI failures, reverts and exception votes map to one matching indexed rule. Ambiguous or absent targets become internal notes. The proposed clarification uses the AEON-319 path, creates a GitHub draft with `aeon-proposal`, and passes the same main-file and private-quotation guards. Private-text refusals become internal notes; an unavailable private guard retains its reservation for the next daily retry. Private evidence text and workspace URLs never enter the public PR; its fixed explanation includes the recurrence count, baseline and intended direction. Ticket/event references remain in Settings → Agent rules → Proposals, available only to people with workspace `rules.read`, `outcome.read` and `knowledge.read`.
+
+After an observed merge, comparison requires a later rules version with instruction provenance matching the complete changed file hash, in the same harness and ticket kind, and at least three eligible observations. A repository pin alone never proves use. If the harness does not report those bytes, the comparison stays pending. Baseline context includes review rounds, fix rounds, CI failures, reverts, exception votes and time to done. Rates include successful observations; review and fix rounds use each ticket's highest recorded round. Exception and revert rates describe observed tickets, not silent/unobserved work. A completed comparison adds one System-authored ticket comment with sample sizes and the delta; it is descriptive, not causal. Findings persist references, aggregate numbers and hashes, never proposed rule prose. Scans are bounded at 5,000 samples and 500 projects and refuse a truncated learnings page rather than propose from an incomplete scan. Tests inject a fake forge and must never contact real GitHub.

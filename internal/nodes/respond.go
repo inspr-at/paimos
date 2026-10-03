@@ -15,10 +15,12 @@ import (
 )
 
 type httpError struct {
-	status int
-	msg    string
-	code   string
-	node   *nodeJSON
+	status   int
+	msg      string
+	code     string
+	node     *nodeJSON
+	children []kindOffender
+	fields   []string
 }
 
 func (e *httpError) Error() string { return e.msg }
@@ -36,12 +38,18 @@ func unprocessableCoded(msg, code string) *httpError {
 	return &httpError{status: http.StatusUnprocessableEntity, msg: msg, code: code}
 }
 
+func conflictCoded(msg, code string) *httpError {
+	return &httpError{status: http.StatusConflict, msg: msg, code: code}
+}
+
 // errorBody adds an optional code without changing errors that only have a sentence.
 // A set node and an empty code stay {"error","node"}, as before.
 type errorBody struct {
-	Error string    `json:"error"`
-	Code  string    `json:"code,omitempty"`
-	Node  *nodeJSON `json:"node,omitempty"`
+	Error    string         `json:"error"`
+	Code     string         `json:"code,omitempty"`
+	Node     *nodeJSON      `json:"node,omitempty"`
+	Children []kindOffender `json:"children,omitempty"`
+	Fields   []string       `json:"fields,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -57,8 +65,8 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func writeErr(w http.ResponseWriter, err error) {
 	var he *httpError
 	if errors.As(err, &he) {
-		if he.code != "" || he.node != nil {
-			writeJSON(w, he.status, errorBody{Error: he.msg, Code: he.code, Node: he.node})
+		if he.code != "" || he.node != nil || len(he.children) > 0 || len(he.fields) > 0 {
+			writeJSON(w, he.status, errorBody{Error: he.msg, Code: he.code, Node: he.node, Children: he.children, Fields: he.fields})
 			return
 		}
 		writeError(w, he.status, he.msg)

@@ -1,0 +1,247 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Release rehearsal
+
+# Rehearse every release job without signing secrets, registry writes, tags,
+# publication or tap writes. Only a successful exact-SHA main run is a receipt.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - version.json
+      - .github/workflows/release*.yml
+      - scripts/**
+      - Dockerfile
+      - internal/releasehistory/**
+      - web/src/vendor/calendar-version-display/**
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-image-check.yml
+      - scripts/smoke-image.sh
+      - scripts/releaseworkflow/**
+      - scripts/release-image-index*.mjs
+      - scripts/release-pin-pr*.mjs
+      - Dockerfile
+      - version.json
+      - scripts/release-rehearsal*.mjs
+      - scripts/check-release-rehearsal*.mjs
+      - scripts/rehearsal-step.go
+      - internal/releasehistory/**
+      - scripts/build-release-binaries.sh
+      - scripts/**
+      - scripts/calendar-version-bundle-pin.json
+      - web/src/vendor/calendar-version-display/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-image-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-dry-run:
+    name: image-dry-run (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            cache: buildcache
+            runner: ubuntu-24.04
+          - arch: arm64
+            cache: buildcache-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - name: Check release workflow invariants
+        run: |
+          go test ./scripts/releaseworkflow
+          node --test scripts/release-image-index.test.mjs
+          node --test scripts/release-pin-pr.test.mjs scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
+          node scripts/check-own-release-notes.mjs
+      - name: Validate version and presentation bundle
+        id: version
+        run: |
+          set -euo pipefail
+          metadata="$(node scripts/verify-release.mjs --release)"
+          node --input-type=module -e 'import { appendFileSync } from "node:fs"; appendFileSync(process.env.GITHUB_OUTPUT, "version=" + JSON.parse(process.argv[1]).version + "\n");' "$metadata"
+      - name: Release history fixture
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline -candidate "$VERSION"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Require native platform
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in amd64:x86_64|arm64:aarch64) ;; *) echo 'Native runner architecture mismatch' >&2; exit 1 ;; esac
+      - name: Build cached smoke image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          load: true
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+      - name: Resolve loaded smoke image
+        id: smoke-image
+        env:
+          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          image="$(docker image ls --quiet --no-trunc "$SMOKE_TAG")"
+          if [[ ! "$image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo 'Expected exactly one loaded smoke image' >&2
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Smoke production image
+        env:
+          AEON_SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
+          AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/smoke-image.sh
+      # Exercise production BuildKit provenance locally; registry/attestation writes stay disabled.
+      - name: Export production image with provenance locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          push: false
+          platforms: linux/${{ matrix.arch }}
+          provenance: mode=max
+          outputs: type=oci,dest=${{ runner.temp }}/release-${{ matrix.arch }}.tar
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+      - name: Record dry run
+        run: echo 'linux/${{ matrix.arch }} built and smoked natively; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"
+
+  agentd-rehearsal:
+    name: agentd-rehearsal (${{ matrix.arch }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      AEON_DEVELOPER_ID_TEAM: P66J39QV6V
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - name: Build darwin paimos-agentd with LocalAuthentication
+        env:
+          AEON_DARWIN_ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-release-binaries.sh darwin-agentd
+      - name: Native unsigned agent qualification
+        env:
+          AEON_DARWIN_ARCH: ${{ matrix.arch }}
+        run: bash scripts/release-rehearsal-native.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rehearsal-agentd-darwin-${{ matrix.arch }}
+          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  assets-rehearsal:
+    needs: [agentd-rehearsal, image-dry-run]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: rehearsal-agentd-darwin-*
+          path: dist
+          merge-multiple: true
+      - name: Exact production assets assembly
+        run: |
+          set -euo pipefail
+          go run scripts/rehearsal-step.go assets 'Build linux paimos-agentd and aeon-cli' > "$RUNNER_TEMP/assemble.sh"
+          bash "$RUNNER_TEMP/assemble.sh"
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Pin-bot dry-run with offline source and attestation inputs
+        run: node scripts/release-rehearsal-pin.mjs
+      - name: Exact production index, attestation and gh draft invocations
+        run: node scripts/release-rehearsal-offline.mjs
+      - name: Tap dry-run fixtures with writes disabled
+        run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs
+
+  # This stable check is required on the release PR by the coordinator. Always
+  # run the aggregate so a failed/skipped dependency can never become a receipt.
+  release-rehearsal:
+    if: always()
+    needs: [image-dry-run, agentd-rehearsal, assets-rehearsal]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require every rehearsal job and record the exact SHA
+        env:
+          IMAGE: ${{ needs.image-dry-run.result }}
+          NATIVE: ${{ needs.agentd-rehearsal.result }}
+          ASSETS: ${{ needs.assets-rehearsal.result }}
+        run: |
+          set -euo pipefail
+          test "$IMAGE" = success
+          test "$NATIVE" = success
+          test "$ASSETS" = success
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PYRECEIPT'
+          import json, os, hashlib
+          from pathlib import Path
+          receipt = {
+            'schema': 'aeon.release-rehearsal.v1', 'sha': os.environ['GITHUB_SHA'],
+            'repository': os.environ['GITHUB_REPOSITORY'], 'event': os.environ['GITHUB_EVENT_NAME'],
+            'ref': os.environ['GITHUB_REF'], 'run_id': os.environ['GITHUB_RUN_ID'],
+            'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'version': json.loads(Path('version.json').read_text()),
+            'release_workflow_sha256': hashlib.sha256(Path('.github/workflows/release.yml').read_bytes()).hexdigest(),
+            'disabled': ['push', 'attest', 'sign', 'notarize', 'publish', 'tag', 'tap', 'deploy'],
+          }
+          Path(os.environ['RUNNER_TEMP'], 'release-rehearsal.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PYRECEIPT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-rehearsal-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-rehearsal.json
+          if-no-files-found: error
+          retention-days: 14

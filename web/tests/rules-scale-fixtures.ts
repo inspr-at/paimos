@@ -352,7 +352,7 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
     }
     if (path === '/api/rules/budget') {
       if (method === 'PUT') budget = { max_bytes: body.max_bytes, layer_max_bytes: body.layer_max_bytes ?? {} }
-      return fulfil(route, { ...budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 })
+      return fulfil(route, { ...budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 500000, min_layer_bytes: 500 })
     }
     if (path === '/api/rules/explained' && method === 'GET') {
       const live = sets.filter(item => item.published_version && (item.scope.layer === 'company' || item.scope.project_id === url.searchParams.get('project_id')))

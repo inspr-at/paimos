@@ -3,7 +3,8 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
-import { removeSession, removeStaleSessions, undoRemoval, type HarnessSession } from '../../lib/agents'
+import type { HarnessSession } from '../../lib/agents'
+import { removeSession, removeStaleSessions, undoRemoval } from '../../lib/agentRows'
 import { removalConsequence } from './sessionActions'
 import { toast } from '../../lib/toast'
 import { useAgents } from '../../stores/agents'
@@ -39,7 +40,7 @@ export function useSessionRemoval() {
     busy.value = true
     try {
       const result = await removeSession(session, 'Removed from Agents by a person')
-      agents.recordRemoval(result.session)
+      agents.recordSession(result.session)
       await leaveIfSelected(session.id)
       // Undo only where the server says this person may undo the event (events.undo).
       const event = result.undoable === true ? result.event_id : undefined
@@ -51,7 +52,7 @@ export function useSessionRemoval() {
 
   async function undo(eventId: number, label: string) {
     try {
-      agents.recordRemoval(await undoRemoval(eventId))
+      agents.recordSession(await undoRemoval(eventId))
       toast(`${label} is back`)
     } catch (error) {
       toast(error instanceof Error ? `Could not undo: ${error.message}` : 'Could not undo the removal.', { tone: 'error' })
@@ -77,9 +78,9 @@ export function useSessionRemoval() {
         for (let more = true, rounds = 0; more && rounds < 50; rounds++) {
           const result = await removeStaleSessions(project, 'Removed from Agents: no accepted heartbeat for 15 minutes')
           for (const item of result.items) {
-            agents.recordRemoval(item.session)
+            const { id } = agents.recordSession(item.session)
             count++
-            await leaveIfSelected(item.session.id)
+            await leaveIfSelected(id)
           }
           more = !!result.more && result.items.length > 0
         }

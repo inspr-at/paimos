@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { api, APIError } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import type { HarnessSession } from '../../lib/agents'
+import { readControlResponse, readManagedSettings, sendManagedControl } from '../../lib/agentRows'
 import { useVisualViewport } from '../../lib/visualViewport'
 import { managedControlSession, managedControlUnavailable } from '../../lib/managedControl'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -18,7 +20,7 @@ interface SettingModel { model: string; efforts: string[] }
 interface Control { id: string; session_id: string; kind: Kind; state: 'pending' | 'claimed' | 'completed'; outcome: 'applied' | 'rejected' | null; reason: string | null; expires_at: string }
 // runStatus: the bound run's status when the session read does not carry it.
 const props = defineProps<{ session: ManagedSession; now: number; runStatus?: string | null }>()
-const auth = useSession(), uid = useId()
+const auth = useSession(), agents = useAgents(), uid = useId()
 const draft = ref(''), error = ref(''), busy = ref(false), composing = ref(false), confirmStop = ref(false)
 // The session panel is a full-height sheet below 720px. Keep one action row
 // there; Steer, Stop and setting edits open a bottom sheet instead of growing it.
@@ -56,9 +58,8 @@ const feedback = computed(() => {
   const reasons: Record<string, string> = { setting_rejected: `${name} rejected by the harness.`, setting_catalog_changed: 'Rejected · the account catalog changed.', authorization_expired: 'Expired before delivery.', authorization_revoked: 'Rejected · permission was revoked.', transient_input_unavailable: 'Rejected · the server lost the pending text.', budget_exhausted: 'Rejected · the run reached its budget.', outcome_unconfirmed: 'Outcome unconfirmed · the input will not be sent again.', child_unavailable: 'Rejected · the owned process is unavailable.', graceful_stop_timeout: 'Stop unconfirmed · the process may still be running.' }
   return reasons[c.reason || ''] || `${name} rejected · refresh this session before trying again.`
 })
-const path = () => `/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}`
-async function json<T>(url: string, body?: unknown): Promise<T> {
-  const response = await api(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+async function json<T>(answer: Promise<Response>): Promise<T> {
+  const response = await answer
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new APIError(response.status, data.error || 'The control could not be requested.')
   return data as T
@@ -98,7 +99,7 @@ async function check(turn = epoch) {
   if (!id || turn !== epoch) return
   clearTimeout(timer)
   try {
-    const value = await json<Control>(`${path()}/controls/${encodeURIComponent(id)}`)
+    const value = await json<Control>(readControlResponse(props.session.project_id, props.session.id, id))
     if (turn !== epoch) return
     if (value.session_id !== props.session.id || value.id !== id) throw new Error('The control response did not match this session.')
     result.value = value; uncertain.value = false; error.value = ''; request = null
@@ -120,7 +121,7 @@ async function editSetting(kind: Setting) {
   const turn = epoch
   loadingSettings.value = true
   try {
-    const data = await json<{ models: SettingModel[] }>(`${path()}/managed-settings`)
+    const data = await json<{ models: SettingModel[] }>(readManagedSettings(props.session.project_id, props.session.id))
     if (turn === epoch) models.value = data.models
   } catch (e) { if (turn === epoch) error.value = e instanceof Error ? e.message : 'Settings could not be loaded.' }
   finally { if (turn === epoch) loadingSettings.value = false }
@@ -130,7 +131,9 @@ async function sendRequest() {
   const turn = epoch, payload = request
   busy.value = true; error.value = ''; confirmStop.value = false
   try {
-    const value = await json<Control>(`${path()}/managed-controls`, payload)
+    const value = await json<Control>(sendManagedControl(props.session.project_id, props.session.id, payload))
+    // The server accepted it, whichever session this panel shows by now: the lists re-read.
+    void agents.afterWrite()
     if (turn !== epoch) return
     if (value.session_id !== props.session.id || value.id !== payload.request_id) throw new Error('The control response did not match this session.')
     result.value = value; request = null; uncertain.value = false; draft.value = ''; composing.value = false; editing.value = null
@@ -204,29 +207,34 @@ async function sendRequest() {
           <button type="button" class="icon-btn flat" aria-label="Close" @click="closeSheet"><AppIcon name="close" :size="15" /></button>
         </header>
         <div class="sheet-body">
-          <form v-if="confirmStop" class="sheet-form" @submit.prevent="submit('stop')">
+          <form v-if="confirmStop" :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit('stop')">
             <p class="sheet-lead">End this session?</p>
-            <div class="sheet-actions"><button type="submit" class="btn" :disabled="!!unavailable || waiting">Confirm stop</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
-          <form v-else-if="editing" class="sheet-form" @submit.prevent="submit(editing)">
+          <form v-else-if="editing" :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit(editing)">
             <input v-if="editing === 'rename'" :id="`${uid}-setting`" v-model="settingValue" maxlength="128" :disabled="waiting" autocomplete="off" :aria-label="settingNames[editing]" />
             <select v-else :id="`${uid}-setting`" v-model="settingValue" :aria-label="settingNames[editing]" :disabled="waiting || loadingSettings || !settingChoices.length">
               <option value="" disabled>Choose {{ settingNames[editing].toLowerCase() }}</option>
               <option v-for="value in settingChoices" :key="value" :value="value">{{ value }}</option>
             </select>
             <p v-if="editing !== 'rename' && !loadingSettings && !settingChoices.length" class="hint">No compatible choices in this account’s catalog.</p>
-            <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!validValue || waiting || loadingSettings || !!unavailable">Save {{ settingNames[editing].toLowerCase() }}</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
-          <form v-else class="sheet-form" @submit.prevent="submit('steer')">
+          <form v-else :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit('steer')">
             <label :for="`${uid}-steer`">What should change?</label>
             <textarea :id="`${uid}-steer`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" :aria-describedby="`${uid}-help`" placeholder="Describe the next step…" />
             <p :id="`${uid}-help`" class="hint">{{ session.harness === 'claude' ? 'Queues your message for the next turn and interrupts the current one.' : 'Adds your message to the running turn.' }}</p>
-            <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
           <p v-if="sheetOpen && feedback" class="feedback" role="status">{{ feedback }}</p>
           <p v-if="sheetOpen && error" class="hint" role="alert">{{ error }}</p>
-          <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
         </div>
+        <footer class="pinned-actions">
+          <div class="sheet-recovery-slot">
+            <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
+          </div>
+          <div class="sheet-actions">
+            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !confirmStop && !canSteer)">{{ confirmStop ? 'Confirm stop' : editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}</button>
+            <button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button>
+          </div>
+        </footer>
       </div>
     </dialog>
   </section>
@@ -257,16 +265,19 @@ summary{cursor:pointer;width:fit-content;display:flex;align-items:center;gap:6px
 .overflow-menu :deep(.mi-text small){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-3);line-height:1.35}
 .menu-note{margin:4px 10px 6px;padding-top:8px;border-top:1px solid var(--line);overflow-wrap:anywhere}
 .overflow-menu:not(:has([role="menuitem"])) .menu-note{border-top:0;padding-top:0}
-.steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:auto;max-height:min(88dvh, var(--vv-h, 88dvh));margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
+.steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:var(--vv-h, 100dvh);max-height:var(--vv-h, 100dvh);margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
 .steer-sheet::backdrop{background:var(--scrim)}
-.sheet-card{display:flex;flex-direction:column;max-height:min(88dvh, var(--vv-h, 88dvh));border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
+.sheet-card{display:flex;flex-direction:column;height:100%;max-height:100%;border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
 .grabber{align-self:center;width:40px;height:4px;margin-top:8px;border-radius:999px;background:var(--line-2)}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px 4px 20px}
 .sheet-head h2{font-size:17px}
 .sheet-head .icon-btn{width:44px;height:44px}
-.sheet-body{display:grid;gap:10px;padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
+.sheet-body{position:relative;flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding:4px 16px 16px}
 .sheet-lead{margin:0;font-size:14px}
 .sheet-actions{display:flex;gap:8px}
+.sheet-form{flex:none;min-height:0;display:flex;flex-direction:column}
+.sheet-recovery-slot{height:44px;overflow:auto}
+.pinned-actions{display:flex;flex-direction:column;gap:8px;flex:none;padding:12px 16px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
 .sheet-actions .btn{flex:1;min-height:44px}
 @media(max-width:720px){
   .managed-controls{gap:8px;padding-top:8px}

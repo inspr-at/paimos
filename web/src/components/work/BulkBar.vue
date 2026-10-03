@@ -7,10 +7,11 @@ import KeyCap from '../KeyCap.vue'
 // What to do with the selected tickets. It floats over the list's lower edge,
 // changes nothing by itself, and every change it starts can be undone at once.
 // frame: the list's left edge and width, so the bar centres over the list, not the docked panel.
-defineProps<{ count: number; loaded: number; total: number | null; busy: boolean; canWrite: boolean; canRelease?: boolean; frame?: { left: number; width: number } | null }>()
+// deleted: selected tickets someone deleted meanwhile (AEON-326); changes leave them out.
+defineProps<{ count: number; loaded: number; total: number | null; busy: boolean; canWrite: boolean; canRelease?: boolean; canQueue?: boolean; frame?: { left: number; width: number } | null; deleted?: number }>()
 const emit = defineEmits<{
   status: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; labels: [anchor: HTMLElement]
-  move: [anchor: HTMLElement]; release: [anchor: HTMLElement]; archive: []; clear: []; selectAll: []
+  move: [anchor: HTMLElement]; release: [anchor: HTMLElement]; archive: []; queue: []; clear: []; selectAll: []
 }>()
 const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 </script>
@@ -19,8 +20,10 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
   <div class="bulk-dock" :style="frame ? { left: `${frame.left}px`, width: `${frame.width}px` } : undefined">
     <div class="bulk-bar" role="toolbar" :aria-label="`${plural(count, 'selected ticket')}`" :aria-busy="busy">
       <span class="count" aria-live="polite"><b class="mono">{{ count.toLocaleString('en-GB') }}</b><span class="count-word">selected</span></span>
-      <button v-if="total !== null && count < total && count >= loaded && loaded < total" type="button" class="link" @click="emit('selectAll')">Select all {{ total.toLocaleString('en-GB') }}</button>
+      <span v-if="deleted" class="gone" role="status"><AppIcon name="alert" :size="13" />{{ plural(deleted, 'selected ticket was', 'selected tickets were') }} deleted</span>
+      <button v-else-if="total !== null && count < total && count >= loaded && loaded < total" type="button" class="link" @click="emit('selectAll')">Select all {{ total.toLocaleString('en-GB') }}</button>
       <span class="rule" aria-hidden="true" />
+      <button v-if="canQueue" type="button" class="act" aria-label="Queue" aria-keyshortcuts="q" data-tip="Queue for the next free agent · q" :disabled="busy" @click="emit('queue')"><AppIcon name="queue-add" :size="14" /><span class="label">Queue</span></button>
       <template v-if="canWrite">
         <button type="button" class="act" aria-label="Status" aria-keyshortcuts="s" data-tip="Status · s" :disabled="busy" @click="emit('status', at($event))"><AppIcon name="check" :size="14" /><span class="label">Status</span></button>
         <button type="button" class="act" aria-label="Assignee" aria-keyshortcuts="a" data-tip="Assignee · a" :disabled="busy" @click="emit('assignee', at($event))"><AppIcon name="user" :size="14" /><span class="label">Assignee</span></button>
@@ -56,6 +59,8 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 .act:disabled { opacity: .5; }
 .act:focus-visible, .close:focus-visible, .link:focus-visible { box-shadow: var(--focus-ring); }
 .read-only { padding: 0 10px; font-size: 12.5px; color: var(--ink-3); }
+.gone { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 999px; background: var(--chip-bg); color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+.gone svg { color: var(--ink-3); }
 .close { display: inline-flex; align-items: center; gap: 6px; height: 36px; margin-left: 4px; padding: 0 8px 0 10px; border: 0; border-radius: 999px; background: var(--chip-bg); color: var(--ink-2); }
 .close:hover { color: var(--ink); background: var(--row-selected); }
 .esc { font-size: 10px; }
@@ -69,7 +74,7 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
   }
   /* The list header already says how many. The toolbar keeps the count for its name. */
   .count { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .esc, .rule, .link { display: none; }
+  .esc, .rule, .link, .gone { display: none; }
   .act, .close {
     flex-direction: column; gap: 2px; width: 100%; height: 52px; min-width: 0; min-height: 44px; margin: 0; padding: 4px 2px;
     justify-content: center; border-radius: 12px; background: transparent; color: var(--ink); font-size: 10px; font-weight: 600; line-height: 1;

@@ -5,13 +5,14 @@ import { RouterLink } from 'vue-router'
 import { harnessLabel } from '../../lib/agentState'
 import { agentKey, elapsedFor, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
+import { STALE_LIST_TIP } from '../../lib/listFreshness'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import LiveBot from '../projects/LiveBot.vue'
 
 // The people working on one ticket right now (AEON-233): one bot and name in the
 // Assignee cell, and +N when several are bound. The control sits in the row and
 // never selects or opens the ticket. A withheld session stays a detail, not a link.
-const props = withDefaults(defineProps<{ workers: LiveAgent[]; ticketKey: string; variant?: 'cell' | 'cue' }>(), { variant: 'cell' })
+const props = withDefaults(defineProps<{ workers: LiveAgent[]; ticketKey: string; variant?: 'cell' | 'cue'; stale?: boolean }>(), { variant: 'cell', stale: false })
 const live = useLiveAgents()
 const id = useId()
 const root = ref<HTMLElement>()
@@ -36,6 +37,7 @@ const leadLabel = computed(() => {
   const limits = [
     live.truncated ? 'Some live sessions are not shown.' : '',
     live.pollStale ? 'Showing the last successful update.' : '',
+    props.stale ? STALE_LIST_TIP : '',
   ].filter(Boolean)
   return `${lineLabel(agent)}${limits.length ? ` ${limits.join(' ')}` : ''}`
 })
@@ -96,10 +98,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span v-if="lead" ref="root" class="ticket-workers" :class="`as-${variant}`" @click.stop @keydown="onKey" @dragstart.stop.prevent>
+  <span v-if="lead" ref="root" class="ticket-workers" :class="[`as-${variant}`, { stale }]" @click.stop @keydown="onKey" @dragstart.stop.prevent>
     <component
       :is="leadTo ? RouterLink : 'button'" :ref="setLeadTrigger" :to="leadTo || undefined" :type="leadTo ? undefined : 'button'"
-      class="worker-lead" :data-tip="`${who(lead)} · ${phaseLabel(lead)}`" :aria-label="leadLabel" :aria-expanded="!leadTo ? open : undefined" :aria-controls="!leadTo && open ? id : undefined"
+      class="worker-lead" :data-tip="stale ? `${who(lead)} · ${STALE_LIST_TIP}` : `${who(lead)} · ${phaseLabel(lead)}`" :aria-label="leadLabel" :aria-expanded="!leadTo ? open : undefined" :aria-controls="!leadTo && open ? id : undefined"
       @click.stop="leadClick"
     >
       <LiveBot :id="lead.principal_id" :state="lead.state" :harness="lead.harness" :event-pulse="live.eventPulseFor(lead)" :size="botSize" />
@@ -135,6 +137,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .ticket-workers { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.ticket-workers.stale { opacity: .5; }
 .worker-lead {
   display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 22px; padding: 0 2px 0 0;
   border: 0; border-radius: 999px; background: transparent; color: var(--ink); font: 600 12.5px/1 var(--font); text-decoration: none; cursor: pointer;
@@ -146,7 +149,9 @@ onBeforeUnmount(() => {
 }
 .worker-lead:hover, .worker-more:hover { background: var(--row-hover); }
 .worker-lead:focus-visible, .worker-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.as-cue .worker-lead { height: 20px; padding: 0 6px 0 1px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+.as-cue { flex-shrink: 0; min-width: max-content; max-width: none; }
+.as-cue .worker-lead { flex-shrink: 0; min-width: max-content; max-width: none; height: 20px; padding: 0 6px 0 1px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+.as-cue .worker-name { flex-shrink: 0; min-width: max-content; overflow: visible; text-overflow: clip; }
 .as-cue .worker-lead:focus-visible { box-shadow: inset 0 0 0 1px var(--chip-line), var(--focus-ring); }
 .worker-pop { position: fixed; z-index: 80; width: min(280px, calc(100vw - 16px)); max-height: min(320px, calc(100vh - 16px)); overflow: auto; padding: 6px; }
 .worker-pop ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }

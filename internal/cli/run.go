@@ -133,10 +133,15 @@ func redact(msg, secret string) string {
 
 func (rt *runtime) root() *Command {
 	subs := []*Command{
+		rt.cmdStatus(),
+		rt.cmdStatusline(),
 		rt.cmdAuth(),
 		rt.cmdKeys(),
+		rt.cmdScopes(),
 		rt.cmdWhoami(""),
 		rt.cmdIssue(),
+		rt.cmdQueue(),
+		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
 		rt.cmdRelation(),
@@ -144,6 +149,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdRulesTLDR(),
 		rt.cmdRulesCompare(),
 		rt.cmdRules(),
+		rt.cmdDoctrine(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
 		rt.cmdExternalStage(),
@@ -154,6 +160,9 @@ func (rt *runtime) root() *Command {
 		rt.cmdKnowledge(),
 		rt.cmdSearch("search"),
 		rt.cmdModel(),
+		rt.cmdCapacity(),
+		rt.cmdAgents(),
+		rt.cmdUse(),
 		rt.cmdOnboard(),
 		rt.cmdSession(),
 		rt.cmdHook(),
@@ -161,6 +170,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdListen(),
 		rt.cmdMessage(),
 		rt.cmdMCP(),
+		rt.cmdAsk(),
 		{
 			Name:  "version",
 			Short: "Print the calendar version",

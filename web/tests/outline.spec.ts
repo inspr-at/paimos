@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, type Call, type MockNode } from './work-fixtures'
+import { openOne } from './live-server'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -21,6 +22,79 @@ function tree() {
   return data
 }
 const lists = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.method === 'GET')
+
+// Review 326g: neither a lazy root nor a child level may admit a page read
+// before a gap. Hold the retry too, to check the deleted row never flashes.
+for (const level of ['root', 'children'] as const) {
+  test(`a lazy ${level} page crossing a stream gap is read again before it shows`, async ({ browser }) => {
+    let releaseFirst!: () => void, releaseRetry!: () => void, releaseStream!: () => void
+    const first = new Promise<void>(resolve => { releaseFirst = resolve })
+    const retry = new Promise<void>(resolve => { releaseRetry = resolve })
+    const stream = new Promise<void>(resolve => { releaseStream = resolve })
+    const parent = level === 'root' ? 'p-pharos' : 'n-epic'
+    const victim = level === 'root' ? 'n-4' : 'n-1'
+    const key = level === 'root' ? 'PHAROS-14' : 'PHAROS-11'
+    let requests = 0, computed = 0
+    const h = await openOne(browser, '/p/PHAROS/tickets?view=outline&closed=1', {
+      first: stream,
+      hold: ({ method, path, query }) => {
+        if (method !== 'GET' || path !== '/api/nodes' || query.get('parent_id') !== parent || query.get('kind') === 'epic') return
+        const n = ++requests
+        return { until: n === 1 ? first : retry, computed: () => { computed++ } }
+      },
+    })
+    try {
+      if (level === 'children') await row(h.page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+      await expect.poll(() => computed).toBe(1)
+      h.data.nodes.splice(h.data.nodes.findIndex(node => node.id === victim), 1)
+      releaseStream()
+      await expect.poll(() => h.live.requests.length).toBeGreaterThan(1)
+      releaseFirst()
+      await expect.poll(() => computed).toBeGreaterThanOrEqual(2)
+      await expect(row(h.page, key)).toHaveCount(0)
+      releaseRetry()
+      await expect(row(h.page, level === 'root' ? 'PHAROS-10' : 'PHAROS-12')).toBeVisible()
+      await expect(outline(h.page).locator('tr.ghost.tree-row')).toHaveCount(0)
+      await expect(row(h.page, key)).toHaveCount(0)
+      expect(requests).toBeGreaterThanOrEqual(2)
+      expect(h.errors).toEqual([])
+    } finally { releaseFirst(); releaseRetry(); releaseStream(); await h.close() }
+  })
+}
+
+test('a created child moved away remotely and back locally remains expandable after reload', async ({ browser }) => {
+  const data = fixtures()
+  data.nodes.push({ ...structuredClone(data.nodes.find(node => node.id === 'n-epic')!), id: 'empty', key: 'PHAROS-30', title: 'Empty epic' })
+  const h = await openOne(browser, '/p/PHAROS/PHAROS-30?view=outline&closed=1', { data })
+  const page = h.page, panel = page.getByRole('complementary', { name: 'Ticket details' })
+  try {
+    const children = panel.getByRole('region', { name: 'Tickets in this epic' })
+    await children.getByRole('button', { name: 'Add ticket' }).click()
+    await children.getByLabel('New ticket title').fill('Return this child')
+    await page.keyboard.press('Enter')
+    await expect(children.locator('.child-row')).toHaveCount(1)
+    const child = data.nodes.find(node => node.title === 'Return this child')!
+    Object.assign(child, { parent_id: 'n-epic', updated_at: new Date(Date.parse(child.updated_at) + 60_000).toISOString() })
+    await ticketViews(page).getByRole('tab', { name: 'List', exact: true }).click()
+    await expect(page.getByRole('grid', { name: 'Tickets' })).toBeVisible()
+    await ticketViews(page).getByRole('tab', { name: 'Outline', exact: true }).click()
+    await expect(row(page, 'PHAROS-30')).toBeVisible()
+    await expect(row(page, 'PHAROS-30').locator('.twisty')).toHaveCount(0)
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await row(page, child.key).getByText(child.key, { exact: true }).click()
+    await panel.getByRole('button', { name: 'More actions' }).click()
+    await page.getByRole('menuitem', { name: 'Move to another epic…' }).click()
+    await page.getByLabel('Find an epic').fill('Empty epic')
+    await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
+    await page.keyboard.press('Enter')
+    await expect(page.getByText(/moved to PHAROS-30 Empty epic/)).toBeVisible()
+    await expect(row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' })).toBeVisible()
+    await row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' }).click()
+    await expect(row(page, child.key)).toBeVisible()
+    expect(child.parent_id).toBe('empty')
+    expect(h.errors).toEqual([])
+  } finally { await h.close() }
+})
 
 test('the List | Outline switch keeps the view in the URL and the same toolbar', async ({ page }) => {
   const errors = watchErrors(page)
@@ -51,6 +125,8 @@ test('the List | Outline switch keeps the view in the URL and the same toolbar',
 })
 
 test('epics show subtree progress; children indent under their parents with guide lines', async ({ page }) => {
+  // Keep this lazy-query count deterministic: a failed stream retries pages.
+  await controlledStream(page)
   const calls = await mockWork(page, tree())
   await page.goto('/p/PHAROS?view=outline&closed=1')
   await expect(row(page, 'PHAROS-10')).toBeVisible()
@@ -251,6 +327,404 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(await child.evaluate(el => getComputedStyle(el).paddingLeft)).toBe('24px')
     await child.locator('.title-link').click()
     await expect(page.getByRole('complementary', { name: 'Ticket details' })).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}
+
+// A persistent, controllable stream: a real loss can be observed before any
+// reconnect, independent of the chunked SSE fixture used by the two-tab specs.
+async function controlledStream(page: Page) {
+  await page.addInitScript(() => {
+    class Source {
+      readyState = 1
+      onerror: (() => void) | null = null
+      listeners = new Map<string, ((event: unknown) => void)[]>()
+      constructor() {
+        ;(window as unknown as { outlineStream: Source }).outlineStream = this
+        queueMicrotask(() => this.emit('stream.ready', { after: 500, resumed: false }))
+      }
+      addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]) }
+      emit(type: string, data: unknown) { for (const listener of this.listeners.get(type) ?? []) listener({ data: JSON.stringify(data), lastEventId: '501' }) }
+      fail() { this.readyState = 0; this.onerror?.() }
+      close() { this.readyState = 2 }
+    }
+    window.EventSource = Source as unknown as typeof EventSource
+  })
+}
+async function outlineEvent(page: Page, node: MockNode, fields: string[], change = 'updated') {
+  await page.evaluate(({ node, fields, change }) => {
+    const stream = (window as unknown as { outlineStream: { emit: (type: string, data: unknown) => void } }).outlineStream
+    stream.emit(`node.${change}`, { id: 501, type: `node.${change}`, actor_principal_id: 'another-person', node_changes: [{ id: node.id, project_id: node.project, fields, change, revision: node.updated_at }] })
+  }, { node, fields, change })
+}
+async function outlineGap(page: Page, loss = false) {
+  await page.evaluate(loss => {
+    const stream = (window as unknown as { outlineStream: { emit: (type: string, data: unknown) => void; fail: () => void } }).outlineStream
+    if (loss) stream.fail()
+    else stream.emit('stream.ready', { after: 900, resumed: false })
+  }, loss)
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (${scheme})`, async ({ page }) => {
+    await controlledStream(page)
+    await page.emulateMedia({ colorScheme: scheme })
+    const errors = watchErrors(page), data = fixtures()
+    await mockWork(page, data)
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect(row(page, 'PHAROS-11')).toBeVisible()
+    await row(page, 'PHAROS-14').getByRole('checkbox').check()
+    const n = data.nodes.find(n => n.id === 'n-1')!
+    Object.assign(n, { title: 'Hetzner title changed live', updated_at: ago(-1) })
+    await outlineEvent(page, n, ['title'])
+    await expect(row(page, n.key)).toContainText(n.title)
+    await expect(row(page, n.key)).toHaveClass(/live-flash/)
+    const before = await keys(page).allTextContents()
+    Object.assign(n, { parent_id: 'p-pharos', updated_at: ago(-2) })
+    await outlineEvent(page, n, ['parent_id'])
+    const removed = data.nodes.find(n => n.id === 'n-2')!
+    removed.updated_at = ago(-3)
+    data.nodes.splice(data.nodes.indexOf(removed), 1)
+    await outlineEvent(page, removed, ['deleted_at'], 'deleted')
+    const added = { ...structuredClone(n), id: 'live-new', key: 'PHAROS-99', title: 'New work from another tab', updated_at: ago(-4) }
+    data.nodes.push(added)
+    await outlineEvent(page, added, [], 'created')
+    await expect(row(page, n.key).locator('.live-label')).toHaveText('Moved')
+    await expect(row(page, removed.key).locator('.live-label')).toHaveText('Deleted')
+    await expect(page.getByRole('button', { name: '3 updates · Show' })).toBeVisible()
+    await expect(keys(page)).toHaveText(before)
+    await expect(row(page, n.key)).toHaveAttribute('aria-level', '2')
+    await page.waitForTimeout(2200)
+    await expect(keys(page)).toHaveText(before)
+    if (process.env.OUTLINE_SHOTS_DIR) {
+      const { mkdirSync } = await import('node:fs')
+      mkdirSync(process.env.OUTLINE_SHOTS_DIR, { recursive: true })
+      for (const width of [1600, 390]) {
+        await page.setViewportSize({ width, height: 950 })
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        await page.screenshot({ path: `${process.env.OUTLINE_SHOTS_DIR}/outline-live-${width}-${scheme}.png` })
+      }
+    }
+    await page.getByRole('button', { name: '3 updates · Show' }).click()
+    await expect(row(page, n.key)).toHaveAttribute('aria-level', '1')
+    await expect(row(page, removed.key)).toHaveCount(0)
+    await expect(row(page, added.key)).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}
+
+test('AEON-385: filtered ancestor values and ancestry follow events without reloading', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline&q=Hetzner')
+  await expect(row(page, 'PHAROS-11')).toBeVisible()
+  await row(page, 'PHAROS-11').getByRole('checkbox').check()
+  const epic = data.nodes.find(n => n.id === 'n-epic')!
+  Object.assign(epic, { title: 'Ancestor renamed live', updated_at: ago(-1) })
+  await outlineEvent(page, epic, ['title'])
+  await expect(row(page, epic.key)).toContainText(epic.title)
+  const ancestor = { ...structuredClone(epic), id: 'ancestor', key: 'PHAROS-98', title: 'New ancestor', parent_id: 'p-pharos' }
+  data.nodes.push(ancestor)
+  Object.assign(epic, { parent_id: ancestor.id, updated_at: ago(-2) })
+  await outlineEvent(page, epic, ['parent_id'])
+  await expect(row(page, epic.key).locator('.live-label')).toHaveText('Moved')
+  await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '2')
+  await expect(row(page, ancestor.key)).toHaveCount(0)
+  await page.getByRole('button', { name: '1 update · Show' }).click()
+  await expect(row(page, ancestor.key)).toBeVisible()
+  await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '3')
+  Object.assign(ancestor, { title: 'Fresh ancestor title', updated_at: ago(-3) })
+  await outlineEvent(page, ancestor, ['title'])
+  await expect(row(page, ancestor.key)).toContainText(ancestor.title)
+  await expect(row(page, ancestor.key)).toHaveClass(/dimmed/)
+  Object.assign(ancestor, { title: 'Hetzner ancestor', updated_at: ago(-4) })
+  await outlineEvent(page, ancestor, ['title'])
+  await expect(row(page, ancestor.key)).not.toHaveClass(/dimmed/)
+  expect(errors).toEqual([])
+})
+
+test('AEON-385: a child page is distrusted at stream loss, before reconnect', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  let firstRelease!: () => void, retryRelease!: () => void, computed = 0, requests = 0
+  const first = new Promise<void>(resolve => { firstRelease = resolve })
+  const retry = new Promise<void>(resolve => { retryRelease = resolve })
+  await mockWork(page, data, { hold: call => {
+    if (call.method === 'GET' && call.path === '/api/nodes' && call.query.get('parent_id') === 'n-epic') {
+      return { until: ++requests === 1 ? first : retry, computed: () => { computed++ } }
+    }
+  } })
+  try {
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect.poll(() => computed).toBe(1)
+    data.nodes.splice(data.nodes.findIndex(n => n.id === 'n-1'), 1)
+    await outlineGap(page, true)
+    firstRelease()
+    await expect.poll(() => computed).toBeGreaterThanOrEqual(2)
+    await expect(row(page, 'PHAROS-11')).toHaveCount(0)
+    retryRelease()
+    await expect(row(page, 'PHAROS-12')).toBeVisible()
+    await expect(row(page, 'PHAROS-11')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally { firstRelease(); retryRelease() }
+})
+
+test('AEON-385: an old parent page cannot restore the count after moving its last child', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  data.nodes = data.nodes.filter(n => !['n-2', 'n-3'].includes(n.id))
+  let hold = false, computed = 0, release!: () => void
+  const wait = new Promise<void>(resolve => { release = resolve })
+  await mockWork(page, data, { hold: call => {
+    if (hold && call.method === 'GET' && call.path === '/api/nodes' && call.query.get('kind') === 'epic' && call.query.get('parent_id') === 'p-pharos') return { until: wait, computed: () => { computed++ } }
+  } })
+  try {
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect(row(page, 'PHAROS-11')).toBeVisible()
+    hold = true
+    await outlineGap(page)
+    await expect.poll(() => computed).toBe(1)
+    await row(page, 'PHAROS-11').dragTo(outline(page).locator('.outline-group'))
+    await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '1')
+    await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
+    release()
+    await expect.poll(() => page.locator('.live-pill').count()).toBe(0)
+    await page.waitForTimeout(300)
+    await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } finally { release() }
+})
+
+test('AEON-385: bulk move relocates lazy Outline rows immediately and sends displayed revisions', async ({ page }) => {
+  const data = fixtures(), errors = watchErrors(page)
+  const revisions = Object.fromEntries(data.nodes.filter(n => ['n-1', 'n-2'].includes(n.id)).map(n => [n.id, n.updated_at]))
+  const calls = await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await row(page, key).getByRole('checkbox').check()
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Collapse PHAROS-10' }).click()
+  await page.getByRole('toolbar', { name: '2 selected tickets' }).getByRole('button', { name: 'Move' }).click()
+  await page.getByRole('dialog', { name: 'Epic for 2 tickets' }).getByRole('option', { name: 'No epic' }).click()
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key)).toHaveAttribute('aria-level', '1')
+  await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
+  expect(calls.find(call => call.path === '/api/nodes/bulk')?.body).toMatchObject({ parent_id: 'p-pharos', if_unmodified_since: revisions })
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key)).toHaveAttribute('aria-level', '2')
+  expect(errors).toEqual([])
+})
+
+
+test('AEON-385: filtered field patches keep sibling order', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline&q=Cloud')
+  await expect(row(page, 'PHAROS-12')).toBeVisible()
+  const before = await keys(page).allTextContents()
+  const ticket = data.nodes.find(n => n.id === 'n-2')!
+  Object.assign(ticket, { title: 'Cloud connector changed live', updated_at: ago(-1) })
+  await outlineEvent(page, ticket, ['title'])
+  await expect(row(page, ticket.key)).toContainText(ticket.title)
+  await expect(keys(page)).toHaveText(before)
+  await expect(page.locator('.live-pill')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+for (const timing of ['before', 'after'] as const) {
+  test(`AEON-385 fix1: expanding a destination ${timing} a remote move keeps one row through Show`, async ({ page }) => {
+    await controlledStream(page)
+    const data = tree(), errors = watchErrors(page)
+    let release!: () => void, computed = 0
+    const held = new Promise<void>(resolve => { release = resolve })
+    await mockWork(page, data, { hold: ({ method, path, query }) => {
+      if (method === 'GET' && path === '/api/nodes' && query.get('parent_id') === 'n-epic-2') return { until: held, computed: () => { computed++ } }
+    } })
+    try {
+      await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+      await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+      await expect(row(page, 'PHAROS-11')).toBeVisible()
+      await row(page, 'PHAROS-14').getByRole('checkbox').check()
+      async function expandDestination() {
+        await row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' }).click()
+        await expect.poll(() => computed).toBe(1)
+        await row(page, 'PHAROS-30').getByRole('button', { name: 'Collapse PHAROS-30' }).click()
+        await row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' }).click()
+      }
+      if (timing === 'before') await expandDestination()
+      const moving = data.nodes.find(n => n.id === 'n-1')!
+      Object.assign(moving, { parent_id: 'n-epic-2', updated_at: ago(-1) })
+      await outlineEvent(page, moving, ['parent_id'])
+      await expect(row(page, moving.key).locator('.live-label')).toHaveText('Moved')
+      if (timing === 'after') await expandDestination()
+      if (timing === 'before') await page.getByRole('button', { name: '1 update · Show' }).click()
+      release()
+      await expect(row(page, 'PHAROS-31')).toBeVisible()
+      await expect(row(page, moving.key)).toHaveCount(1)
+      if (timing === 'after') {
+        // Collapsing the destination must not hide the row still held under A.
+        await row(page, 'PHAROS-30').getByRole('button', { name: 'Collapse PHAROS-30' }).click()
+        await expect(row(page, moving.key)).toBeVisible()
+        await row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' }).click()
+        await page.getByRole('button', { name: '1 update · Show' }).click()
+      }
+      await expect(row(page, moving.key)).toHaveCount(1)
+      await row(page, 'PHAROS-10').getByRole('button', { name: 'Collapse PHAROS-10' }).click()
+      await expect(row(page, moving.key)).toBeVisible()
+      await row(page, 'PHAROS-30').getByRole('button', { name: 'Collapse PHAROS-30' }).click()
+      await expect(row(page, moving.key)).toHaveCount(0)
+      expect(errors).toEqual([])
+    } finally { release() }
+  })
+}
+
+test('AEON-385 fix1: a closed parent remains dimmed context and stays out of List matches', async ({ page }) => {
+  await controlledStream(page)
+  const data = fixtures(), errors = watchErrors(page)
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets?view=outline')
+  await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+  await row(page, 'PHAROS-14').getByRole('checkbox').check()
+  const epic = data.nodes.find(n => n.id === 'n-epic')!
+  Object.assign(epic, { state: 'done', updated_at: ago(-1) })
+  await outlineEvent(page, epic, ['state'])
+  await expect(row(page, epic.key).locator('.live-label')).toHaveText('Closed')
+  await page.getByRole('button', { name: '1 update · Show' }).click()
+  await expect(row(page, epic.key)).toHaveClass(/dimmed/)
+  const child = data.nodes.find(n => n.id === 'n-1')!
+  Object.assign(child, { title: 'An open child after its parent closed', updated_at: ago(-2) })
+  await outlineEvent(page, child, ['title'])
+  await expect(row(page, child.key)).toContainText(child.title)
+  await expect(row(page, epic.key)).toHaveClass(/dimmed/)
+  await ticketViews(page).getByRole('tab', { name: 'List', exact: true }).click()
+  await expect(page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-10$/ }) })).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+for (const view of ['lazy', 'filtered'] as const) {
+  test(`AEON-385 fix1: Show keeps ${view} siblings with field patches in place`, async ({ page }) => {
+    await controlledStream(page)
+    const data = fixtures(), errors = watchErrors(page)
+    await mockWork(page, data)
+    await page.goto(`/p/PHAROS/tickets?view=outline&${view === 'lazy' ? 'closed=1' : 'q=Cloud'}`)
+    if (view === 'lazy') await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect(row(page, 'PHAROS-12')).toBeVisible()
+    await row(page, 'PHAROS-11').getByRole('checkbox').check()
+    const before = await keys(page).allTextContents()
+    const patched = data.nodes.find(n => n.id === 'n-2')!
+    Object.assign(patched, { title: 'Cloud connector patched in place', updated_at: ago(-1) })
+    await outlineEvent(page, patched, ['title'])
+    await expect(row(page, patched.key)).toContainText(patched.title)
+    const added = { ...structuredClone(patched), id: 'new-order', key: 'PHAROS-99', title: 'New Cloud connector', updated_at: ago(-2) }
+    data.nodes.push(added)
+    await outlineEvent(page, added, [], 'created')
+    await page.getByRole('button', { name: '1 update · Show' }).click()
+    await expect(row(page, added.key)).toBeVisible()
+    expect((await keys(page).allTextContents()).filter(key => key !== added.key)).toEqual(before)
+    // An explicit reload starts a new ordering from current server values.
+    await page.reload()
+    if (view === 'lazy') await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await expect(row(page, 'PHAROS-11')).toBeVisible()
+    const reloaded = await keys(page).allTextContents()
+    expect(reloaded.indexOf(added.key)).toBeLessThan(reloaded.indexOf(patched.key))
+    expect(reloaded.indexOf(patched.key)).toBeLessThan(reloaded.indexOf('PHAROS-11'))
+    expect(errors).toEqual([])
+  })
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`AEON-385 fix1: the phone updates pill floats without shifting rows (${scheme})`, async ({ page }) => {
+    await controlledStream(page)
+    await page.setViewportSize({ width: 390, height: 950 })
+    await page.emulateMedia({ colorScheme: scheme })
+    const data = fixtures(), errors = watchErrors(page)
+    await mockWork(page, data)
+    await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
+    await expect(row(page, 'PHAROS-10')).toBeVisible()
+    const before = (await row(page, 'PHAROS-10').boundingBox())!
+    const added = { ...structuredClone(data.nodes.find(n => n.id === 'n-4')!), id: 'phone-new', key: 'PHAROS-99', title: 'New phone work', updated_at: ago(-1) }
+    data.nodes.push(added)
+    await outlineEvent(page, added, [], 'created')
+    const pill = page.getByRole('button', { name: '1 update · Show' })
+    await expect(pill).toBeVisible()
+    expect(Math.abs((await row(page, 'PHAROS-10').boundingBox())!.y - before.y)).toBeLessThan(1)
+    const pillBox = (await pill.boundingBox())!
+    expect(pillBox.y).toBeGreaterThan(before.y + before.height)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await pill.click()
+    await expect(row(page, added.key)).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}
+
+for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty', 'selected']) for (const scheme of ['light', 'dark'] as const) {
+  test(`AEON-385 fix2: phone ${view} chip clears controls for ${audience} (${scheme})`, async ({ page }) => {
+    await controlledStream(page)
+    await page.setViewportSize({ width: 390, height: 950 })
+    await page.emulateMedia({ colorScheme: scheme })
+    const data = fixtures(), errors = watchErrors(page)
+    await mockWork(page, data, { readOnly: audience === 'viewer' })
+    await page.goto(`/p/PHAROS/tickets?view=${view}&closed=1${audience === 'empty' ? '&q=Zebra' : ''}`)
+    const rows = page.locator('tr.ticket-row:not(.ghost)')
+    if (audience === 'empty') await expect(page.getByText('No tickets match these filters', { exact: true })).toBeVisible()
+    else await expect(rows.first()).toBeVisible()
+    if (audience === 'selected') {
+      await page.locator('.phone-pick').getByRole('button', { name: 'Select', exact: true }).click()
+      await rows.first().getByRole('checkbox').check()
+      await expect(page.locator('.bulk-bar')).toBeVisible()
+    } else await expect(page.locator('.phone-pick')).toHaveCount(0)
+    const before = audience === 'empty' ? null : (await rows.first().boundingBox())!
+    // Hold the idle clock so each actual tap is checked while updates wait,
+    // including viewers and empty views which have no selection blocker.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100))
+    const added = { ...structuredClone(data.nodes.find(n => n.id === 'n-4')!), id: 'chip-new', key: 'PHAROS-99', title: 'Zebra arriving live', updated_at: ago(-1) }
+    data.nodes.push(added)
+    await outlineEvent(page, added, [], 'created')
+    await page.clock.runFor(200)
+    const pill = page.getByRole('button', { name: '1 update · Show' })
+    await expect(pill).toBeVisible()
+    if (before) expect(Math.abs((await rows.first().boundingBox())!.y - before.y)).toBeLessThan(1)
+    async function clearControls() {
+      const box = (await pill.boundingBox())!
+      expect(Math.abs(box.x + box.width / 2 - 195)).toBeLessThan(1)
+      expect(box.height).toBeGreaterThanOrEqual(44)
+      for (const control of await page.locator('.toolbar-wrap button, .toolbar-wrap input, .bulk-bar, .app-footer').all()) {
+        if (!await control.isVisible()) continue
+        const other = (await control.boundingBox())!
+        const overlap = box.x < other.x + other.width && box.x + box.width > other.x && box.y < other.y + other.height && box.y + box.height > other.y
+        expect(overlap, `chip intersects ${await control.getAttribute('aria-label') ?? await control.getAttribute('class')}`).toBe(false)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    }
+    await clearControls()
+    if (process.env.OUTLINE_SHOTS_DIR) {
+      const { mkdirSync } = await import('node:fs')
+      mkdirSync(process.env.OUTLINE_SHOTS_DIR, { recursive: true })
+      await page.screenshot({ path: `${process.env.OUTLINE_SHOTS_DIR}/chip-${view}-${audience}-390-${scheme}.png` })
+    }
+    const search = page.getByRole('searchbox', { name: 'Search tickets in this project' })
+    await search.click(); await expect(search).toBeFocused()
+    await expect(pill).toBeVisible()
+    await page.getByRole('button', { name: 'Filters', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Filters', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'New ticket', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'New ticket title', exact: true })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(pill).toBeVisible()
+    if (audience !== 'empty') {
+      await page.locator('#main').evaluate(el => { el.scrollTop = el.scrollHeight })
+      await clearControls()
+      const last = (await rows.last().boundingBox())!, chip = (await pill.boundingBox())!
+      expect(last.y + last.height).toBeLessThanOrEqual(chip.y)
+    }
+    await pill.click()
+    await expect(pill).toHaveCount(0)
+    await expect(rows.filter({ hasText: added.key })).toBeVisible()
     expect(errors).toEqual([])
   })
 }

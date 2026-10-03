@@ -147,7 +147,8 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	}
 
 	// About 300 tickets and enough live sessions that a per-row sequential scan
-	// would show up. The lateral should probe harness_sessions_ticket_eta.
+	// would show up. The lateral should probe a ticket index: the partial
+	// harness_sessions_ticket_eta, or harness_sessions_ticket_node (AEON-329).
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id, key, kind_id, title, state, parent_id, position)
             SELECT $1, 'BULK-'||g, $2, 'Bulk '||g, 'new', $3, g FROM generate_series(1, 300) g`, p.TenantID, ticket.ID, root.ID); err != nil {
@@ -220,8 +221,8 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 			}
 		}
 	}
-	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") {
-		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (seq loops %.0f, indexes %v)", seqLoops, indexes)
+	if seqLoops > 1 || (!slices.Contains(indexes, "harness_sessions_ticket_eta") && !slices.Contains(indexes, "harness_sessions_ticket_node")) {
+		t.Fatalf("assignee sort did not probe a ticket session index (seq loops %.0f, indexes %v)", seqLoops, indexes)
 	}
 }
 
@@ -314,7 +315,7 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 	}
 	// The two open rows are probed while ordering. The page is stored people.
 	// A probe of all 300 before paging is at least 300 loops; the page stays well under that.
-	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") || indexLoops < 40 || indexLoops >= 300 {
+	if seqLoops > 1 || (!slices.Contains(indexes, "harness_sessions_ticket_eta") && !slices.Contains(indexes, "harness_sessions_ticket_node")) || indexLoops < 40 || indexLoops >= 300 {
 		t.Fatalf("stored-person leads were not limited to the page (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
 	}
 }
@@ -519,8 +520,8 @@ func explainAssigneeProbesAt(t *testing.T, p tenant.Principal, rootID string, an
 		t.Fatal(err)
 	}
 	indexLoops, seqLoops, indexes := harnessProbeStats(planRaw)
-	if !slices.Contains(indexes, "harness_sessions_ticket_eta") {
-		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
+	if !slices.Contains(indexes, "harness_sessions_ticket_eta") && !slices.Contains(indexes, "harness_sessions_ticket_node") {
+		t.Fatalf("assignee sort did not probe a ticket session index (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
 	}
 	t.Logf("assignee sort probes: %.0f index loops, %.0f seq (indexes %v)", indexLoops, seqLoops, indexes)
 	return indexLoops, seqLoops
@@ -538,7 +539,8 @@ func harnessProbeStats(planRaw string) (indexLoops, seqLoops float64, indexes []
 			if n["Relation Name"] == "harness_sessions" {
 				if name, ok := n["Index Name"].(string); ok {
 					indexes = append(indexes, name)
-					if name == "harness_sessions_ticket_eta" {
+					// Both indexes probe the same ticket key; 0996 also covers stopped sessions.
+					if name == "harness_sessions_ticket_eta" || name == "harness_sessions_ticket_node" {
 						if loops, ok := n["Actual Loops"].(float64); ok {
 							indexLoops += loops
 						}
@@ -750,6 +752,73 @@ func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 	for _, item := range sorted.Items {
 		if item.Key == mix.Key && (item.LeadWorker == nil || item.LeadWorker.Name != "Zed") {
 			t.Fatalf("sorted lead %#v", item.LeadWorker)
+		}
+	}
+}
+
+// AEON-437: reported progress never moves a live session down the lead order. A
+// worker at 100% that went quiet has no recorded exit, so it is still awaiting a
+// heartbeat or unresponsive, and a pending approval on its run still makes it
+// wait: both lead over a fresh working session, exactly as under 100%.
+func TestListLeadIgnoresReportedProgress(t *testing.T) {
+	p := newPrincipal(t, "assignee-full-progress")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Full progress"}`)
+	makeTicket := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	ada := insertNamedAgent(t, p.TenantID, "Ada")
+	person := insertPerson(t, p.TenantID, "Nia")
+	stamp := func(node, label string, progress int, created, heartbeat time.Duration) string {
+		t.Helper()
+		id := insertLiveSessionStamp(t, p.TenantID, root.ID, ada, node, "claude", "worker", label, "working", "busy", time.Now().UTC().Add(-created), time.Now().UTC().Add(-heartbeat))
+		if _, err := adminPool.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=$2 WHERE id=$1::uuid`, id, progress); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	quiet, silent, approval := makeTicket("FULL-1"), makeTicket("FULL-2"), makeTicket("FULL-3")
+	// Past the red threshold (10 minutes) at 100%: unresponsive, as at 99%.
+	stamp(silent.ID, "Silent", 100, 40*time.Minute, 12*time.Minute)
+	stamp(silent.ID, "Fresh", 30, time.Minute, time.Second)
+	// Past the yellow threshold (3 minutes) at 100%: awaiting a heartbeat.
+	stamp(quiet.ID, "Quiet", 100, time.Minute, 4*time.Minute)
+	stamp(quiet.ID, "Live", 30, 2*time.Minute, time.Second)
+	// A pending approval on the quiet worker's run: waiting, which outranks working.
+	waiting := stamp(approval.ID, "Needy", 100, time.Minute, 4*time.Minute)
+	stamp(approval.ID, "Busy", 30, 2*time.Minute, time.Second)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		var run, order string
+		if err := tx.QueryRow(t.Context(), `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).Scan(&run, &order); err != nil {
+			return err
+		}
+		for _, statement := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'FWO-1',id,'Order',$3 FROM node_kinds WHERE slug='work_order'`, []any{p.TenantID, order, root.ID}},
+			{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, []any{p.TenantID, order, person.ID}},
+			{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,status) VALUES($1,$2,$3,$4,'running')`, []any{p.TenantID, run, order, ada}},
+			{`UPDATE harness_sessions SET run_id=$2 WHERE id=$1`, []any{waiting, run}},
+			{`INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,run_id,scope,resource_kind,resource_id,rationale,expires_at)
+				VALUES($1,$2,$2,$3,'nodes.write','node',$4,'Needs a person',now()+interval '1 hour')`, []any{p.TenantID, ada, run, root.ID}},
+		} {
+			if _, err := tx.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{silent.Key: "Silent", quiet.Key: "Quiet", approval.Key: "Needy"}
+	for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at").Items {
+		if item.LeadWorker == nil || item.LeadWorker.Name != want[item.Key] {
+			t.Fatalf("%s lead %#v, want %s", item.Key, item.LeadWorker, want[item.Key])
 		}
 	}
 }

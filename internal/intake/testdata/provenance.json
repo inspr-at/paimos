@@ -1,0 +1,27 @@
+{
+  "repository": "inspr-at/aithema",
+  "revision": "06cc4ab94fd21181a024cc819dd4680b751dcaaf",
+  "note": "Copied byte-for-byte read-only contract vectors. Route, generation and replacement scenarios mirror test/host-kit and test/host-kit-intake.test.js. Native Aeon projection envelopes retain existing HTTP success statuses.",
+  "files": [
+    {
+      "source": "contracts/capabilities.json",
+      "local": "capabilities.json",
+      "sha256": "4e7b09dcf08dc6f6023c1542c737a065b08317d97317c90ff51d0eef3de041c2"
+    },
+    {
+      "source": "contracts/error-codes.json",
+      "local": "error-codes.json",
+      "sha256": "f15caa4e3273f96b9206ede436811d79548e63e1c2e01e7732ce841318bd2c46"
+    },
+    {
+      "source": "contracts/transitions.json",
+      "local": "transitions.json",
+      "sha256": "f21d26df527b3f4ec31e590db32e41f1a857f052c46a9e3a3820b302df0067c4"
+    },
+    {
+      "source": "contracts/fixtures/valid/token.delegated.json",
+      "local": "token.delegated.json",
+      "sha256": "044d32bfa5d007e01aeed60a33a74268de2571cbc9149825e8b9c23a7d15a16d"
+    }
+  ]
+}

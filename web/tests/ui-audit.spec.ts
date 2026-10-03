@@ -14,7 +14,7 @@ import { crmData, HOFER, mockCRM } from './crm-fixtures'
 import { Q, mockPublicQuote, mockQuotes, quoteWorld } from './quote-list-fixtures'
 import { mockSettings, settingsData, makePng } from './settings-fixtures'
 import { mockProfiles, profileWorld, PROFILE } from './profile-fixtures'
-import { mockReleases, releaseHistory } from './releases-fixtures'
+import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
 import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, type Kind, type Raw } from './ui-audit-rules'
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
@@ -85,7 +85,7 @@ const scenarios: Scenario[] = [
   { state: 'inspector Text', route: editor, setup: 'editor', act: inspectorTab('Text') },
   { state: 'inspector Section', route: editor, setup: 'editor', act: inspectorTab('Section') },
   { state: 'inspector Document', route: editor, setup: 'editor', act: inspectorTab('Document') },
-  { state: 'release history sheet', route: '/', act: async page => { await visible('main')(page); await page.getByRole('button', { name: /^Release history, version / }).click(); await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible() } },
+  { state: 'release history sheet', route: '/', act: async page => { await visible('main')(page); await page.getByRole('button', { name: RELEASE_HISTORY_NAME }).click(); await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible() } },
   { state: 'new quote dialog', route: quote, act: async page => { await listContent('Onlineshop Erweiterung Weihnachten')(page); await page.getByRole('button', { name: 'New quote' }).first().click(); await expect(page.getByRole('dialog', { name: 'New quote' })).toBeVisible() } },
   { state: 'crop dialog', route: '/settings/personal', act: async page => { await visible('main')(page); const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: /^(Add a photo|Change your photo)$/ }).click(); await (await chooser).setFiles({ name: 'audit.png', mimeType: 'image/png', buffer: makePng(240, 240) }); await expect(page.getByRole('dialog', { name: 'Crop your photo' })).toBeVisible() } },
   { state: 'link dialog', route: `${quote}/${Q.issued}`, act: async page => { await visible('.quote-document')(page); const details = page.getByRole('complementary', { name: 'Details' }); if (!await details.isVisible()) await page.getByRole('button', { name: 'Details' }).click(); await expect(details).toBeVisible(); const revoke = details.getByRole('button', { name: 'Revoke link' }); if (!await revoke.isVisible()) { const create = details.getByRole('button', { name: 'Create link' }); await expect(create).toBeVisible(); await create.click(); await expect(revoke).toBeVisible() } await revoke.click(); await expect(page.getByRole('dialog', { name: 'Revoke the customer link?' })).toBeVisible() } },

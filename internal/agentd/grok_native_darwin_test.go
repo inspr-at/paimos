@@ -33,7 +33,7 @@ func TestGrokAssetsStayPinned(t *testing.T) {
 		t.Fatal("Grok isolation assets changed")
 	}
 	if _, err := NewGrokAdapter(map[string]GrokBinding{"account": {Variant: "invalid"}}).Start(context.Background(), StartRequest{
-		Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}, AccountKey: "account"}, func(AdapterEvent) {}); err == nil {
+		Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: "xai"}, AccountKey: "account"}, func(AdapterEvent) {}); err == nil {
 		t.Fatal("unknown native variant accepted")
 	}
 }
@@ -43,7 +43,7 @@ func TestGrokQualifiedVerificationReachesPinnedNativePreflight(t *testing.T) {
 		t.Skip("native Grok verification is qualified only on darwin/arm64")
 	}
 	r := verificationRequest(t)
-	r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}
+	r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: "xai"}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +101,8 @@ func TestGrokNativeUsageUpdate(t *testing.T) {
 	if p.violation.Load() || got != nil {
 		t.Fatal("token-free usage update became tokens or a violation")
 	}
-	p.onEvent([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"usage_update","inputTokens":11,"outputTokens":3,"cachedReadTokens":4}}}`))
-	if p.violation.Load() || got == nil || got.Model != grokModel || got.InputTokens == nil || *got.InputTokens != 11 || got.OutputTokens == nil || *got.OutputTokens != 3 || got.CachedInputTokens == nil || *got.CachedInputTokens != 4 || got.BillingMode != "unknown" {
+	p.onEvent([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"usage_update","inputTokens":11,"outputTokens":3,"cachedReadTokens":4,"cacheCreationTokens":2}}}`))
+	if p.violation.Load() || got == nil || got.Model != grokModel || got.InputTokens == nil || *got.InputTokens != 17 || got.OutputTokens == nil || *got.OutputTokens != 3 || got.CachedInputTokens == nil || *got.CachedInputTokens != 4 || got.BillingMode != "unknown" {
 		t.Fatalf("native usage %+v violation %t", got, p.violation.Load())
 	}
 }

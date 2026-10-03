@@ -2,19 +2,44 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
-import { LAYER_LABEL, LAYERS, putBudget, rulesMessage, type LayerName, type RuleBudgetView } from '../../lib/rules'
+import KeyCap from '../KeyCap.vue'
+import { LAYER_LABEL, LAYERS, putBudget, rulesMessage, type LayerName, type RuleBudgetView, type RuleBudgetBlocker } from '../../lib/rules'
 
 // The workspace budget for one session file (AEON-314): a total and optional
 // caps per layer. Everyone sees it; people who manage the workspace change it.
 const props = defineProps<{ view: RuleBudgetView; canManage: boolean }>()
 const emit = defineEmits<{ saved: [view: RuleBudgetView] }>()
 const editing = ref(false)
+const budgetForm = ref<HTMLFormElement | null>(null)
 const busy = ref(false)
 const error = ref('')
 const total = ref('')
 const caps = ref<Record<LayerName, string>>({ company: '', project: '', person: '', agent: '' })
 const fmt = (n: number) => n.toLocaleString('en-US')
 const blockingCount = computed(() => (props.view.blocking_clients?.length ?? 0) + (props.view.blocking_clients_more ?? 0))
+const whole = (value: string) => /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN
+const proposedBytes = computed(() => editing.value ? whole(total.value) : props.view.max_bytes)
+const validEstimate = computed(() => Number.isSafeInteger(proposedBytes.value) && proposedBytes.value > 0)
+const tokens = computed(() => Math.ceil(proposedBytes.value / 4))
+const deliveredBytes = (client: RuleBudgetBlocker) => Math.min(validEstimate.value ? proposedBytes.value : props.view.max_bytes, client.max_session_file_bytes)
+const tipLanguage = ref<'en' | 'de'>('en')
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const tips = {
+  en: [
+    'Keep always-on rules small: start around 4–16 KB; long preambles dilute attention (context rot) and cost tokens in every session.',
+    'Load detail on demand: put playbooks, examples and domain packs into skills, docs or knowledge agents fetch when relevant.',
+    'Put stable text first and changing content last so prompt caching can make repeated sessions cheaper.',
+    'Write specific, checkable instructions without duplicates across layers: one rule, one place.',
+    'Measure before and after each change with outcome analysis per rules version.',
+  ],
+  de: [
+    'Halte dauerhafte Regeln bei etwa 4–16 KB; lange Einleitungen verwässern die Aufmerksamkeit (Context Rot) und kosten in jeder Sitzung Tokens.',
+    'Lade Details bei Bedarf: lege Anleitungen, Beispiele und Fachregeln in Skills, Dokumente oder Wissen, das Agenten bei Bedarf abrufen.',
+    'Stelle stabilen Text an den Anfang und veränderliche Inhalte ans Ende, damit Prompt-Caching wiederholte Sitzungen günstiger machen kann.',
+    'Schreibe konkrete, überprüfbare Anweisungen ohne Dopplungen zwischen Ebenen: eine Regel, ein Ort.',
+    'Miss vor und nach jeder Änderung die Ergebnisse mit der Ergebnisanalyse je Regelversion.',
+  ],
+}
 
 const line = computed(() => {
   const parts = [`${fmt(props.view.max_bytes)} bytes per session file`]
@@ -32,8 +57,8 @@ function start() {
   error.value = ''
   editing.value = true
 }
-const whole = (value: string) => /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN
 async function save() {
+  if (busy.value) return
   const max = whole(total.value)
   if (!(max >= props.view.min_bytes && max <= props.view.ceiling_bytes)) { error.value = `The budget is between ${fmt(props.view.min_bytes)} and ${fmt(props.view.ceiling_bytes)} bytes.`; return }
   const layers: Partial<Record<LayerName, number>> = {}
@@ -51,10 +76,28 @@ async function save() {
     editing.value = false
   } catch (cause) { error.value = rulesMessage(cause) } finally { busy.value = false }
 }
+
+function onKeydown(event: KeyboardEvent) {
+  if (!editing.value || event.isComposing) return
+  if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    void save()
+  } else if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    const target = event.target
+    if (target instanceof HTMLElement && target.matches('input, textarea, select, [contenteditable="true"]')) {
+      budgetForm.value?.focus()
+    } else if (!busy.value) {
+      editing.value = false
+    }
+  }
+}
 </script>
 
 <template>
-  <section class="budget-section" aria-labelledby="rules-budget-title">
+  <section class="budget-section" aria-labelledby="rules-budget-title" @keydown="onKeydown">
     <div class="head">
       <div class="titles">
         <h3 id="rules-budget-title">Budget</h3>
@@ -63,42 +106,55 @@ async function save() {
       </div>
       <button v-if="canManage && !editing" type="button" class="btn sm ghost" @click="start">Change</button>
     </div>
+    <form v-if="editing" ref="budgetForm" class="form" tabindex="-1" :aria-busy="busy" @submit.prevent="save">
+      <div class="buttons">
+        <button type="button" class="btn sm ghost" :disabled="busy" aria-keyshortcuts="Escape" @click="editing = false">Cancel <span class="keys" aria-hidden="true"><KeyCap k="Esc" /></span></button>
+        <button type="submit" class="btn sm primary" :disabled="busy" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'">Save budget <span class="keys" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span></button>
+      </div>
+      <label class="fld total"><span>Total <span class="opt">bytes</span></span>
+        <input v-model="total" class="field" inputmode="numeric" autocomplete="off" :disabled="busy" aria-describedby="rules-budget-range">
+        <span id="rules-budget-range" class="range">{{ fmt(view.min_bytes) }} to {{ fmt(view.ceiling_bytes) }}<template v-if="view.default_bytes !== view.ceiling_bytes">; default {{ fmt(view.default_bytes) }}</template></span>
+      </label>
+      <label v-for="layer in LAYERS" :key="layer" class="fld"><span>{{ LAYER_LABEL[layer] }}</span>
+        <input v-model="caps[layer]" class="field" inputmode="numeric" autocomplete="off" :disabled="busy" placeholder="No cap">
+      </label>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+    </form>
     <details v-if="canManage && view.blocking_clients?.length" class="compatibility">
-      <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Larger files need a client update <span class="opt">· {{ blockingCount }}</span></span></summary>
-      <p>Clients active in the last seven days limit new budgets to {{ fmt(view.ceiling_bytes) }} bytes.</p>
+      <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Client delivery <span class="opt">· {{ blockingCount }}</span></span></summary>
+      <p>Clients active in the last seven days receive up to these amounts; whole rules may use fewer bytes.</p>
       <ul>
         <li v-for="(client, index) in view.blocking_clients" :key="index">
           <span class="client-host" :title="client.host">{{ client.host }}</span>
           <span class="client-detail" :title="[client.harness, client.version].filter(Boolean).join(' · ')">{{ client.harness }}<template v-if="client.version"> · {{ client.version }}</template></span>
-          <span class="client-limit">{{ fmt(client.max_session_file_bytes) }} bytes</span>
+          <span class="client-limit">{{ fmt(deliveredBytes(client)) }} bytes<small v-if="deliveredBytes(client) < proposedBytes" class="truncated">truncated</small></span>
         </li>
         <li v-if="view.blocking_clients_more" class="more">and {{ fmt(view.blocking_clients_more) }} more</li>
       </ul>
     </details>
-    <p v-else-if="canManage && view.ceiling_bytes <= view.default_bytes" class="lede">Larger files unlock once active clients report support.</p>
-    <form v-if="editing" class="form" @submit.prevent="save" @keydown.esc.prevent="editing = false">
-      <label class="fld total"><span>Total <span class="opt">bytes</span></span>
-        <input v-model="total" class="field" inputmode="numeric" autocomplete="off" :aria-describedby="'rules-budget-range'">
-        <span id="rules-budget-range" class="range">{{ fmt(view.min_bytes) }} to {{ fmt(view.ceiling_bytes) }}<template v-if="view.default_bytes !== view.ceiling_bytes">; default {{ fmt(view.default_bytes) }}</template></span>
-      </label>
-      <label v-for="layer in LAYERS" :key="layer" class="fld"><span>{{ LAYER_LABEL[layer] }}</span>
-        <input v-model="caps[layer]" class="field" inputmode="numeric" autocomplete="off" placeholder="No cap">
-      </label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <div class="buttons">
-        <button type="button" class="btn sm ghost" :disabled="busy" @click="editing = false">Cancel</button>
-        <button type="submit" class="btn sm primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save budget' }}</button>
+    <div v-if="validEstimate" class="cost" aria-live="polite">
+      <p class="estimate">≈ {{ fmt(tokens) }} tokens loaded into every session</p>
+      <p class="range">Estimate at full budget · bytes ÷ 4; actual use depends on rules, language and model.</p>
+      <p v-if="proposedBytes > 128000" class="warning strong">Every agent session starts with this much context; it costs tokens and money.</p>
+      <p v-else-if="proposedBytes > 64000" class="warning">Large always-on files use more context; consider loading details on demand.</p>
+    </div>
+    <details v-if="editing" class="tip">
+      <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Tip <span class="opt">· Keep the kernel small</span></span></summary>
+      <div class="tip-heading">
+        <span class="range">{{ tipLanguage === 'de' ? 'Praktische Richtwerte · Ende 2026' : 'Practical defaults · late 2026' }}</span>
+        <select v-model="tipLanguage" class="field tip-language" aria-label="Tip language"><option value="en">English</option><option value="de">Deutsch</option></select>
       </div>
-    </form>
+      <ul :lang="tipLanguage"><li v-for="text in tips[tipLanguage]" :key="text">{{ text }}</li></ul>
+    </details>
   </section>
 </template>
 
 <style scoped>
 .budget-section { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
-.compatibility { font-size: 12.5px; color: var(--ink-2); }
-.compatibility summary { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; max-width: 100%; }
+.compatibility, .tip { font-size: 12.5px; color: var(--ink-2); }
+.compatibility summary, .tip summary { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; max-width: 100%; }
 .chev { flex: none; }
-.compatibility[open] .chev { transform: rotate(90deg); }
+.compatibility[open] .chev, .tip[open] .chev { transform: rotate(90deg); }
 .compatibility p { margin: 8px 0; color: var(--ink-3); }
 .compatibility ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .compatibility li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; }
@@ -106,6 +162,15 @@ async function save() {
 .client-host, .client-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .client-detail, .client-limit { color: var(--ink-3); }
 .client-limit { font-variant-numeric: tabular-nums; }
+.truncated { display: block; font-size: 11.5px; color: var(--ink-2); }
+.cost { display: grid; gap: 4px; }
+.cost p { margin: 0; }
+.estimate { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.warning { padding: 10px 12px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2); font-size: 12.5px; }
+.warning.strong { font-weight: 600; }
+.tip-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.tip-language { width: auto; min-height: 32px; font-size: 12px; }
+.tip ul { padding-left: 18px; margin: 10px 0 0; display: grid; gap: 8px; line-height: 1.5; }
 @media (max-width: 480px) {
   .compatibility li { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; }
   .client-host { grid-column: 1 / -1; }
@@ -123,5 +188,6 @@ h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .range { color: var(--ink-3); font-size: 11.5px; font-weight: 450; }
 .error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 12.5px; }
 .buttons { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.buttons .keys { display: inline-flex; align-items: center; gap: 2px; opacity: .7; }
 @media (max-width: 760px) { .form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .total { grid-column: 1 / -1; } }
 </style>

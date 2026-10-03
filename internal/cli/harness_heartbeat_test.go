@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
 )
 
@@ -57,6 +58,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": transcriptEntryID, "harness": "codex", "model": "fixture-model", "effort": "high", "enabled": true}})
+		case r.URL.Path == "/api/me/leaving-at" || r.URL.Path == "/api/me/agent-pause-settings":
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			_, _ = w.Write([]byte(`{"principal":{"id":"44444444-4444-4444-8444-444444444444","name":"worker"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions":
@@ -83,6 +86,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 func heartbeatRuntime(t *testing.T, srv *httptest.Server) (*runtime, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	isolate(t)
+	// Session-index maintenance must not touch the operator's real home.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
 	var stdout, stderr bytes.Buffer
@@ -251,6 +256,14 @@ func TestRunHeartbeatOwnerExitMarksStopped(t *testing.T) {
 }
 
 func TestCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T) {
+	for _, message := range []string{"active generation conflicts with registration", harness.RegistrationLeaseConflict} {
+		t.Run(message, func(t *testing.T) {
+			testCoordinatorHeartbeatRetriesActiveGeneration(t, message)
+		})
+	}
+}
+
+func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message string) {
 	var calls []hbCall
 	registrations, waits := 0, 0
 	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
@@ -260,7 +273,7 @@ func TestCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T) {
 		registrations++
 		if registrations <= 3 {
 			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"error":"active generation conflicts with registration"}`))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 		} else {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":"` + transcriptSessionID + `"}`))
@@ -405,6 +418,11 @@ func TestCoordinatorHeartbeatRetryRejectsOtherFailures(t *testing.T) {
 		{"worker", "worker", transcriptSessionID, "active generation conflicts with registration", 409},
 		{"no native reference", "coordinator", "", "active generation conflicts with registration", 409},
 		{"other conflict", "coordinator", transcriptSessionID, "successor registration conflicts", 409},
+		{"vendor conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent", 409},
+		{"vendor fingerprint conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent (sha256:0123456789abcdef)", 409},
+		{"metadata conflict", "coordinator", transcriptSessionID, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata", 409},
+		{"worker lease conflict", "worker", transcriptSessionID, harness.RegistrationLeaseConflict, 409},
+		{"lease conflict without source", "coordinator", "", harness.RegistrationLeaseConflict, 409},
 		{"archived", "coordinator", transcriptSessionID, "archived generation revoked; use a new session reference and worker lease", 409},
 		{"forbidden", "coordinator", transcriptSessionID, "active generation conflicts with registration", 403},
 		{"server error", "coordinator", transcriptSessionID, "active generation conflicts with registration", 500},
@@ -481,7 +499,7 @@ func TestRunHeartbeatCLIOwnerExit(t *testing.T) {
 	if len(reg) != 1 {
 		t.Fatal("missing registration")
 	}
-	if reg[0].body["max_session_file_bytes"] != float64(64000) || reg[0].body["rules_client_version"] == nil {
+	if reg[0].body["max_session_file_bytes"] != float64(rules.MaxBytes) || reg[0].body["rules_client_version"] == nil {
 		t.Fatal("CLI registration lacks capability")
 	}
 	if _, ok := reg[0].body["model"]; ok {
@@ -555,7 +573,7 @@ func TestRunHeartbeatLabelChangeSentOnce(t *testing.T) {
 	}
 	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
 	for _, beat := range beats {
-		if beat.body["max_session_file_bytes"] != float64(64000) || beat.body["rules_client_version"] == nil {
+		if beat.body["max_session_file_bytes"] != float64(rules.MaxBytes) || beat.body["rules_client_version"] == nil {
 			t.Fatal("CLI heartbeat lacks capability")
 		}
 	}
@@ -652,14 +670,15 @@ func TestRunHeartbeatMissingNameSource(t *testing.T) {
 	if _, ok := beats[0].body["display_label"]; ok {
 		t.Fatal("missing name source sent a label")
 	}
-	if beats[0].body["model"] != "claude-test" {
-		t.Fatalf("model %#v", beats[0].body["model"])
+	reg := hbWhere(calls, http.MethodPost, "/harness-sessions")
+	if reg[0].body["model"] != "claude-test" || beats[0].body["model"] != nil {
+		t.Fatalf("initial model should be registration only: %#v / %#v", reg[0].body, beats[0].body)
 	}
 	if _, ok := beats[0].body["account_label"]; ok {
 		t.Fatal("unknown account label was sent")
 	}
-	if beats[0].body["reasoning_effort"] != "high" {
-		t.Fatalf("effort %#v", beats[0].body["reasoning_effort"])
+	if reg[0].body["reasoning_effort"] != "high" || beats[0].body["reasoning_effort"] != nil {
+		t.Fatalf("initial effort should be registration only: %#v / %#v", reg[0].body, beats[0].body)
 	}
 }
 
@@ -1593,25 +1612,54 @@ func TestRunHeartbeatFinalUsageFlush(t *testing.T) {
 }
 
 func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
-	repo, _ := gitRepo(t)
+	// Keep the fixture independent of the host's Git configuration and clock.
+	// In particular, no background maintenance may outlive its temporary repo.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "gc.auto")
+	t.Setenv("GIT_CONFIG_VALUE_0", "0")
+	t.Setenv("GIT_CONFIG_KEY_1", "maintenance.auto")
+	t.Setenv("GIT_CONFIG_VALUE_1", "false")
+	started := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	commitDate := started.Add(time.Second).Format(time.RFC3339)
+	t.Setenv("GIT_AUTHOR_DATE", commitDate)
+	t.Setenv("GIT_COMMITTER_DATE", commitDate)
+	repo, base := gitRepo(t)
+	branch := strings.TrimSpace(gitCmd(t, repo, "symbolic-ref", "HEAD"))
+	for i := 1; i <= 21; i++ {
+		gitCommit(t, repo, fmt.Sprintf("c%02d", i))
+	}
+	tip := strings.TrimSpace(gitCmd(t, repo, "rev-parse", "HEAD"))
+	gitCmd(t, repo, "update-ref", "-m", "fixture: hide history", branch, base, tip)
+	// Retain the real oldest-first Git walk and reflog attribution, but inject
+	// its time cutoff rather than depending on registration's wall clock.
+	disk := heartbeatDisk{
+		BoundWorktree: repo,
+		BoundBranch:   strings.TrimPrefix(branch, "refs/heads/"),
+		StartRev:      base,
+		StartedUnix:   started.Unix(),
+	}
 	var calls []hbCall
 	srv := heartbeatFixture(t, &calls, "", "")
 	defer srv.Close()
 	rt, _, stderr := heartbeatRuntime(t, srv)
 	opts := heartbeatTestOptions(t.TempDir())
 	opts.Worktree = repo
-	made := false
 	beats := 0
 	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
 		alive: func(int) bool { return true },
 		label: func() (string, bool) { return "worker", true },
+		commits: func(worktree, since string) ([]heartbeatCommit, error) {
+			disk.CommitCursor = since
+			batch, _ := localHeartbeatCommits(context.Background(), worktree, &disk)
+			return batch, nil
+		},
 		wait: func(context.Context, int, time.Duration) error {
 			beats++
-			if beats == 1 && !made {
-				for i := 1; i <= 21; i++ {
-					gitCommit(t, repo, fmt.Sprintf("c%02d", i))
-				}
-				made = true
+			if beats == 1 {
+				// The wait callback is a synchronous barrier: all objects and
+				// reflog entries exist before the next beat can read them.
+				gitCmd(t, repo, "update-ref", "-m", "fixture: expose history", branch, tip, base)
 			}
 			if beats >= 3 {
 				return errOwnerExited
@@ -1626,6 +1674,9 @@ func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
 	if len(heartbeats) != 3 {
 		t.Fatalf("beats %d", len(heartbeats))
 	}
+	if _, ok := heartbeats[0].body["commits"]; ok {
+		t.Fatal("history was sent before the wait barrier exposed it")
+	}
 	first := commitSubjects(t, heartbeats[1].body["commits"])
 	second := commitSubjects(t, heartbeats[2].body["commits"])
 	if len(first) != 20 || first[0] != "c01" || first[19] != "c20" {
@@ -1634,9 +1685,9 @@ func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
 	if len(second) != 1 || second[0] != "c21" {
 		t.Fatalf("second batch %v", second)
 	}
-	for _, subject := range first {
-		if subject == "c21" {
-			t.Fatal("later commit was sent before the cursor advanced")
+	for i, subject := range first {
+		if want := fmt.Sprintf("c%02d", i+1); subject != want {
+			t.Fatalf("first batch commit %d: got %q, want %q", i, subject, want)
 		}
 	}
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { agentData, mockAgents, sessionListReads, type AgentWorld } from './agents-fixtures'
 
 const world: AgentWorld = { me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {
   'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' },
@@ -10,14 +10,14 @@ const world: AgentWorld = { me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-
 async function setup(page: Page, admin = true) {
   await mockWork(page, fixtures(), { admin })
   const data = agentData(world)
-  await mockAgents(page, data)
+  const calls = await mockAgents(page, data)
   const selected = data.sessions[1]!
   Object.assign(selected, { management_mode: 'unmanaged', host: 'workstation-offline', display_label: 'ops', advertised_capabilities: ['status'] })
   const preview = { session_id: selected.id, host: selected.host, display_label: 'ops', observed_revision: 'a'.repeat(64), confirmation: `archive ${selected.id} on ${selected.host}`, process_state: 'unknown', process_scope: 'No process will be signalled. This action archives this registration only; other sessions and child processes are unaffected.', can_archive: true, force_stop_available: false, force_stop_reason: 'Force stop requires a live daemon with verified ownership of this exact process generation.' }
   await page.route('**/harness-sessions/*/recovery', route => route.fulfill({ json: preview }))
   await page.goto(`/agents/${selected.id}`)
   await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
-  return { data, selected, preview }
+  return { data, selected, preview, calls }
 }
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Recover session' })
 
@@ -94,11 +94,11 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
 }
 
 async function managed(page: Page) {
-  const { selected, preview } = await setup(page)
+  const { selected, preview, calls } = await setup(page)
   Object.assign(preview, { force_stop_available: true, force_confirmation: `force stop ${selected.id} on ${selected.host} group 1234`, process_ownership: { daemon_id: 'workstation-agentd', generation: '1'.repeat(32), process_id: '2'.repeat(32), root_pid: 1234, group_id: 1234, started_at: '2026-09-27T10:00:00Z' } })
   await page.getByRole('button', { name: 'Recover', exact: true }).click()
   await dialog(page).getByRole('radio', { name: 'Force stop process' }).click()
-  return { selected, preview: preview as typeof preview & { force_confirmation: string } }
+  return { selected, calls, preview: preview as typeof preview & { force_confirmation: string } }
 }
 
 test('force stop shows the exact group and waits for verified daemon outcome', async ({ page }) => {
@@ -120,6 +120,19 @@ test('force stop shows the exact group and waits for verified daemon outcome', a
   outcome = 'applied'
   await expect(page).toHaveURL(/\/agents$/)
   await expect(page.getByText('The daemon signalled the owned process group and verified that its root process exited. Processes outside that group were not targeted.')).toBeVisible()
+})
+
+test('an accepted force stop reads the lists again before the daemon answers', async ({ page }) => {
+  const { preview, calls } = await managed(page)
+  const control = { id: 'force-control', state: 'claimed', outcome: null, reason: null }
+  await page.route('**/controls/force-stop', route => route.fulfill({ status: 201, json: control }))
+  await page.route('**/controls/force-control', route => route.fulfill({ json: control }))
+  await dialog(page).getByLabel('Reason for recovery').fill('Owned process ignored normal stop')
+  await dialog(page).getByLabel('Type the exact confirmation').fill(preview.force_confirmation)
+  const before = sessionListReads(calls)
+  await dialog(page).getByRole('button', { name: 'Force stop session' }).click()
+  await expect(page.getByRole('dialog', { name: 'Force stop requested' })).toContainText('Process exit has not been confirmed')
+  await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
 
 for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {

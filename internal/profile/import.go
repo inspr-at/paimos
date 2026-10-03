@@ -157,7 +157,11 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 		}
 		var principalID string
 		err = db.InTenant(ctx, job.Pool, tenantID, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT DISTINCT coalesce(p.linked_to,p.id)::text FROM principals p LEFT JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND p.kind='person' AND lower(coalesce(i.email,p.email,''))=lower($2)`, tenantID, email)
+			rows, err := tx.Query(ctx, `SELECT DISTINCT coalesce(p.linked_to,p.id)::text
+				FROM principals p LEFT JOIN identities i ON i.id=p.identity_id
+				WHERE p.tenant_id=$1 AND p.kind='person'
+				  AND translate(coalesce(i.email,p.email,''),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+				      =translate($2,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')`, tenantID, email)
 			if err != nil {
 				return err
 			}
@@ -218,6 +222,12 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			report.WouldWrite++
 			continue
 		}
+		var staged []*attachments.Staged
+		closeStaged := func() {
+			for _, blob := range staged {
+				_ = blob.Close()
+			}
+		}
 		if avatarPath != "" {
 			body, err := job.Source.avatar(ctx, avatarPath)
 			if err != nil {
@@ -238,24 +248,14 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				size = cfg.Height
 			}
 			crop := Crop{X: (cfg.Width - size) / 2, Y: (cfg.Height - size) / 2, Size: size}
-			original, variants, err := ProcessAvatar(body, crop)
+			staged, err = stageAvatarData(ctx, job.Store, tenantID, body, crop)
 			if err != nil {
 				return report, err
 			}
-			store := job.Store
-			store.MaxSize = 0
-			saved, err := store.Put(ctx, tenantID, bytes.NewReader(original))
-			if err != nil {
-				return report, err
-			}
-			after.AvatarOriginalHash = saved.SHA256
+			after.AvatarOriginalHash = staged[0].SHA256
 			after.AvatarHashes = map[string]string{}
-			for size, b := range variants {
-				saved, err := store.Put(ctx, tenantID, bytes.NewReader(b))
-				if err != nil {
-					return report, err
-				}
-				after.AvatarHashes[fmt.Sprint(size)] = saved.SHA256
+			for i, size := range []int{32, 64, 128, 256} {
+				after.AvatarHashes[fmt.Sprint(size)] = staged[i+1].SHA256
 			}
 		}
 		// Serialize target writes, re-read and apply the classic snapshot only to
@@ -274,6 +274,9 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				next.AvatarOriginalHash = after.AvatarOriginalHash
 				next.AvatarHashes = after.AvatarHashes
 			}
+			if err := attachments.Publish(ctx, tx, attachments.OwnerAvatar, staged...); err != nil {
+				return err
+			}
 			if same(current, next) {
 				return nil
 			}
@@ -283,6 +286,7 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			report.Written++
 			return nil
 		})
+		closeStaged()
 		if err != nil {
 			return report, err
 		}

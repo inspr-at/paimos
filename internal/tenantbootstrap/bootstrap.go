@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -58,6 +59,9 @@ func Create(ctx context.Context, pool *pgxpool.Pool, slug, name string) (string,
 	err = db.InTenant(ctx, pool, id, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,$2,$3)`, id, slug, name); err != nil {
 			return fmt.Errorf("create tenant: %w", err)
+		}
+		if err := modelprefs.SeedKinds(ctx, tx, id); err != nil {
+			return err
 		}
 		actor, err := bootstrapActor(ctx, tx, id)
 		if err != nil {

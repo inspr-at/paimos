@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -26,7 +27,8 @@ const migrationLock int64 = 780002
 var migrationFiles embed.FS
 
 // migrate applies each unrecorded SQL file in its own transaction, except
-// explicitly marked single concurrent index builds (see concurrentIndex).
+// explicitly marked single concurrent index builds (see concurrentIndex) and
+// 1088's resumable CHECK expansion/validation/replacement phases.
 // A later call skips files already listed in schema_migrations.
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return MigrateWithHook(ctx, pool, nil)
@@ -34,8 +36,19 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 // MigrateWithHook runs pending migrations and calls before just before each
 // file. Migration tests use it to populate an older schema; production passes
-// no hook through migrate.
+// no hook through migrate. Phase commits do not change its filename-only API.
 func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string) error) error {
+	return migrateWithHooks(ctx, pool, before, nil)
+}
+
+// MigrateWithPhaseHook observes only 1088's staged CHECK transactions, after
+// completed phases have committed. Tests can interrupt or contend at a boundary
+// without changing the existing MigrateWithHook filename callback contract.
+func MigrateWithPhaseHook(ctx context.Context, pool *pgxpool.Pool, beforePhase func(string) error) error {
+	return migrateWithHooks(ctx, pool, nil, beforePhase)
+}
+
+func migrateWithHooks(ctx context.Context, pool *pgxpool.Pool, before, beforePhase func(string) error) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("migration connection: %w", err)
@@ -84,7 +97,66 @@ func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string
 				return fmt.Errorf("migrate public link tokens: %w", err)
 			}
 		}
-		if err := applyFile(ctx, conn, name); err != nil {
+		if name == "1061_agent_roles_models_read.sql" {
+			if err := migrateTenantAgentRoles(ctx, conn, name); err != nil {
+				return fmt.Errorf("migrate agent role model discovery: %w", err)
+			}
+		}
+		if err := applyFile(ctx, conn, name, beforePhase); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FORCE RLS also applies to the migration owner. Run the additive role backfill
+// in each tenant before recording the file globally. ON CONFLICT makes retries
+// after a partially completed run safe; the normal file application is a no-op
+// for an unscoped owner and harmless for a bypass migration connection.
+func migrateTenantAgentRoles(ctx context.Context, conn *pgxpool.Conn, name string) error {
+	sql, err := migrationFiles.ReadFile("migrations/" + name)
+	if err != nil {
+		return err
+	}
+	// Reuse the advisory-lock connection, including for pools of size one.
+	rows, err := conn.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := func() error {
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			if err := enterTenant(ctx, tx, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '5s'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR UPDATE`, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, string(sql)); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}(); err != nil {
 			return err
 		}
 	}
@@ -162,7 +234,7 @@ func migratePublicLinkTokens(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
+func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func(string) error) error {
 	body, err := migrationFiles.ReadFile("migrations/" + name)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", name, err)
@@ -170,6 +242,9 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 	stmts := splitSQL(string(body))
 	if len(stmts) == 0 {
 		return fmt.Errorf("migration %s has no statements", name)
+	}
+	if name == "1088_more_harnesses.sql" {
+		return applyMoreHarnessChecks(ctx, conn, name, body, stmts, before)
 	}
 	index, table, err := concurrentIndex(string(body), stmts)
 	if err != nil {
@@ -189,6 +264,26 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 			return fmt.Errorf("migrate %s: %w", name, err)
 		}
 	}
+	if name == "1063_work_classification_model_identity.sql" {
+		if err := backfillWorkMetadata(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1074_model_display_effort.sql" {
+		if err := backfillModelProfileDisplay(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1076_ticket_human_check.sql" {
+		if err := backfillHumanCheckSchemas(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1135_account_readiness.sql" {
+		if err := backfillReadinessMemberships(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 		return fmt.Errorf("record %s: %w", name, err)
 	}
@@ -198,7 +293,237 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 	return nil
 }
 
-// The first-line opt-out is deliberately narrow: exactly one CREATE INDEX
+// Existing accounts need canonical resource IDs before a new daemon probes.
+// Scope each bounded tenant page with ordinary FORCE RLS in the same schema
+// transaction; failure rolls back both migration and membership backfill.
+func backfillReadinessMemberships(ctx context.Context, tx pgx.Tx) error {
+	after := "00000000-0000-0000-0000-000000000000"
+	for {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants WHERE id>$1::uuid ORDER BY id LIMIT 100`, after)
+		if err != nil {
+			return err
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		for _, id := range ids {
+			if err := enterTenant(ctx, tx, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_resources(tenant_id,kind,identity_kind,identity_key)
+    SELECT tenant_id,CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'account',
+    encode(sha256(convert_to('account:'||id::text||':'||CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'UTF8')),'hex') FROM agent_accounts WHERE tenant_id=$1
+    ON CONFLICT(tenant_id,kind,identity_kind,identity_key) DO NOTHING`, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision)
+    SELECT a.tenant_id,a.id,r.id,a.link_revision FROM agent_accounts a JOIN account_readiness_resources r ON r.tenant_id=a.tenant_id AND r.identity_kind='account'
+    AND r.kind=CASE WHEN a.harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END
+    AND r.identity_key=encode(sha256(convert_to('account:'||a.id::text||':'||r.kind,'UTF8')),'hex') WHERE a.tenant_id=$1
+    ON CONFLICT(tenant_id,account_id,resource_id) DO NOTHING`, id); err != nil {
+				return err
+			}
+		}
+		after = ids[len(ids)-1]
+	}
+}
+
+// Keep 1088 one numbered migration while committing installation's exclusive
+// DDL locks before validation scans hot tables. The old enums stay enforced
+// until all supersets validate; retiring them and recording the complete file
+// is atomic. Temporary phase records commit with their DDL so interruptions
+// resume safely, and finalization removes only this migration's own records.
+func applyMoreHarnessChecks(ctx context.Context, conn *pgxpool.Conn, name string, body []byte, stmts []string, before func(string) error) error {
+	const count = 10
+	if len(stmts) != 2*count+2 || stmts[0] != "SET LOCAL lock_timeout = '5s'" || !strings.HasPrefix(stmts[len(stmts)-1], "DO $$") {
+		return fmt.Errorf("migration %s: unexpected staged CHECK shape", name)
+	}
+	add := regexp.MustCompile(`(?s)^ALTER TABLE ([a-z_][a-z0-9_]*) ADD CONSTRAINT ([a-z_][a-z0-9_]*)\s+CHECK \(.+\) NOT VALID$`)
+	for i := 0; i < count; i++ {
+		match := add.FindStringSubmatch(stmts[i+1])
+		if match == nil || strings.Join(strings.Fields(stmts[count+i+1]), " ") != "ALTER TABLE "+match[1]+" VALIDATE CONSTRAINT "+match[2] {
+			return fmt.Errorf("migration %s: CHECK installation/validation mismatch at check %d", name, i+1)
+		}
+	}
+	phases := []struct {
+		name  string
+		stmts []string
+	}{
+		{"install", stmts[1 : count+1]},
+		{"validate", stmts[count+1 : 2*count+1]},
+		{"replace", stmts[2*count+1:]},
+	}
+	prefix := name + "#check-phase:"
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	keys := []string{prefix + digest + ":install", prefix + digest + ":validate"}
+	applied, err := appliedVersions(ctx, conn)
+	if err != nil {
+		return err
+	}
+	for version := range applied {
+		if strings.HasPrefix(version, prefix) && version != keys[0] && version != keys[1] {
+			return fmt.Errorf("migration %s: interrupted CHECK phases have different source bytes", name)
+		}
+	}
+	for i, phase := range phases {
+		if i < len(keys) && applied[keys[i]] {
+			continue
+		}
+		if before != nil {
+			if err := before(name + "#" + phase.name); err != nil {
+				return fmt.Errorf("before %s#%s: %w", name, phase.name, err)
+			}
+		}
+		if err := func() error {
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			if _, err := tx.Exec(ctx, stmts[0]); err != nil {
+				return err
+			}
+			for _, stmt := range phase.stmts {
+				if _, err := tx.Exec(ctx, stmt); err != nil {
+					return err
+				}
+			}
+			version := name
+			if i < len(keys) {
+				version = keys[i]
+			} else if _, err := tx.Exec(ctx, `DELETE FROM schema_migrations WHERE version=ANY($1::text[])`, keys); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES($1)`, version); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}(); err != nil {
+			return fmt.Errorf("migrate %s#%s: %w", name, phase.name, err)
+		}
+	}
+	return nil
+}
+
+// FORCE RLS also applies to the migration owner. Existing strict work schemas
+// need the server's completion property before a later fields replacement.
+// Keep this backfill and the expansion in one migration transaction.
+func backfillHumanCheckSchemas(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(AllProjects(ctx, "AEON-521 human-check schema migration"), tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties}',
+		 coalesce(field_schema->'properties','{}'::jsonb) || aeon_human_check_properties())
+		 WHERE slug IN ('ticket','task') AND tenant_id=current_setting('aeon.tenant_id')::uuid`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Run under ordinary tenant RLS and explicit service project visibility in the
+// migration transaction. Failure rolls back both expansion and backfill, so a
+// retry cannot silently skip unfinished work. Historical nodes are untouched.
+func backfillWorkMetadata(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(AllProjects(ctx, "AEON-503 model identity migration"), tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties}',
+		 coalesce(field_schema->'properties','{}'::jsonb) || aeon_work_classification_properties())
+		 WHERE slug IN ('ticket','task') AND tenant_id=current_setting('aeon.tenant_id')::uuid`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_session_model_profiles()`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Metadata lives beside immutable profiles. Backfill every tenant in the same
+// transaction as expansion and migration recording, with FORCE RLS intact.
+func backfillModelProfileDisplay(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(ctx, tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_model_profile_display()`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// The first-line opt-out is deliberately narrow: exactly one CREATE [UNIQUE] INDEX
 // CONCURRENTLY with unqualified, lowercase identifiers. It is not a general
 // escape hatch for arbitrary nontransactional migration batches.
 func concurrentIndex(body string, stmts []string) (string, string, error) {
@@ -207,7 +532,7 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 		return "", "", nil
 	}
 	if len(stmts) == 1 {
-		pattern := `^CREATE INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
+		pattern := `^CREATE (?:UNIQUE )?INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)\s*\(`
 		if match := regexp.MustCompile(pattern).FindStringSubmatch(stmts[0]); match != nil {
 			return match[1], match[2], nil
 		}
@@ -237,17 +562,22 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 	// leave either a valid index before recording, or an invalid partial build.
 	// Reuse only a valid index on the expected table; rebuild an invalid one.
 	var valid bool
+	var unique bool
+	requiresUnique := strings.HasPrefix(stmt, "CREATE UNIQUE INDEX ")
 	var existingTable string
-	err := conn.QueryRow(ctx, `SELECT i.indisvalid, t.relname
+	err := conn.QueryRow(ctx, `SELECT i.indisvalid, i.indisunique, t.relname
 		FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
 		JOIN pg_namespace n ON n.oid=c.relnamespace
 		JOIN pg_class t ON t.oid=i.indrelid
-		WHERE n.nspname=current_schema() AND c.relname=$1`, index).Scan(&valid, &existingTable)
+		WHERE n.nspname=current_schema() AND c.relname=$1`, index).Scan(&valid, &unique, &existingTable)
 	if err != nil && err != pgx.ErrNoRows {
 		return fmt.Errorf("inspect %s: %w", name, err)
 	}
 	if err == nil && existingTable != table {
 		return fmt.Errorf("migrate %s: index %s belongs to unexpected table %s", name, index, existingTable)
+	}
+	if err == nil && unique != requiresUnique {
+		return fmt.Errorf("migrate %s: index %s has unexpected uniqueness", name, index)
 	}
 	if err == nil && !valid {
 		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY `+pgx.Identifier{index}.Sanitize()); err != nil {
@@ -260,8 +590,8 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 		}
 		// IF NOT EXISTS may also skip a conflicting non-index relation. Never
 		// record a skipped or incomplete build as a successful migration.
-		if err := conn.QueryRow(ctx, `SELECT indisvalid AND indrelid=$2::regclass
-			FROM pg_index WHERE indexrelid=to_regclass($1)`, index, table).Scan(&valid); err != nil {
+		if err := conn.QueryRow(ctx, `SELECT indisvalid AND indrelid=$2::regclass AND indisunique=$3
+			FROM pg_index WHERE indexrelid=to_regclass($1)`, index, table, requiresUnique).Scan(&valid); err != nil {
 			return fmt.Errorf("verify %s: %w", name, err)
 		}
 		if !valid {

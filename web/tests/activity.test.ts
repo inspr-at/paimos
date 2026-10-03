@@ -47,6 +47,7 @@ test('changes read in product words', () => {
   assert.equal(describeChange({ field: 'parent', from: 'a', to: 'b' }).label, 'moved it to another parent')
   assert.deepEqual(describeChange({ field: 'tags', from: null, to: 'process-learning' }), { label: 'added the label', to: 'process-learning' })
   assert.deepEqual(describeChange({ field: 'tags', from: 'ops', to: 'ops, process-learning' }), { label: 'changed labels', from: 'ops', to: 'ops, process-learning' })
+  assert.deepEqual(describeChange({ field: 'kind', from: 'ticket', to: 'epic' }), { label: 'changed the type', from: 'Ticket', to: 'Epic' })
 })
 
 test('an automatic change keeps the job that wrote it', () => {

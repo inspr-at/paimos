@@ -23,13 +23,13 @@ test('automatic columns follow the table width and the data', () => {
   assert.deepEqual(ids(2400, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'release', 'tags', 'estimate', 'created', 'updated'])
 })
 
-test('a saved choice fixes order and visibility; what cannot fit steps aside', () => {
+test('a saved choice fixes order and visibility across desktop widths', () => {
   const prefs = { order: ['updated', 'status', 'epic'] as const, visible: ['updated', 'status', 'epic', 'estimate'] as const }
   const p = { order: [...prefs.order], visible: [...prefs.visible] }
   assert.deepEqual(ids(2000, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
-  // 118 key + 240 title + 104 + 138 + 220 + 96 = 916: estimate goes first, then epic.
-  assert.deepEqual(ids(900, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic'])
-  assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status'])
+  // All saved columns remain drawn at narrower desktop widths.
+  assert.deepEqual(ids(900, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
+  assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
   assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
   assert.deepEqual(ids(390, { phone: true, present: { estimate: true } }), ['key', 'title', 'status', 'priority', 'updated', 'estimate'])
@@ -41,7 +41,7 @@ test('a saved choice fixes order and visibility; what cannot fit steps aside', (
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
   assert.deepEqual(orderOf({ order: ['title', 'created', 'bogus' as never, 'created'] }).slice(0, 4), ['key', 'title', 'created', 'status'])
-  assert.equal(orderOf(null).length, 14)
+  assert.equal(orderOf(null).length, 18)
   assert.deepEqual(automaticColumns(1600, { eta: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'eta'])
   assert.deepEqual(automaticColumns(1600, { eta: true, progress: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'progress', 'eta'])
   assert.deepEqual(automaticColumns(1200, { progress: true, eta: true }), ['key', 'title', 'status', 'priority', 'updated', 'progress', 'eta'])
@@ -53,15 +53,15 @@ test('order keeps Key and Title first and appends unknown or missing columns', (
   assert.deepEqual(moveColumn(order, 'key', 1), order)
 })
 
-test('progress leaves before Estimate when a saved choice cannot fit', () => {
+test('a saved choice retains progress and ETA when space gets tight', () => {
   const prefs = { visible: ['status', 'updated', 'estimate', 'progress', 'eta'] as const }
   const shown = ['key', 'title', 'status', 'estimate', 'updated', 'progress', 'eta'] as const
   const width = (names: readonly string[]) => names.reduce((sum, id) => sum + (id === 'title' ? 240 : COLUMN_BY_ID.get(id as ColumnId)!.width), 0)
   const p = { visible: [...prefs.visible] }
   assert.deepEqual(ids(width(shown), { phone: false, prefs: p }), [...shown])
-  assert.deepEqual(ids(width(shown) - 1, { phone: false, prefs: p }), shown.filter(id => id !== 'eta'))
+  assert.deepEqual(ids(width(shown) - 1, { phone: false, prefs: p }), [...shown])
   const kept = shown.filter(id => id !== 'eta')
-  assert.deepEqual(ids(width(kept) - 1, { phone: false, prefs: p }), ['key', 'title', 'status', 'estimate', 'updated'])
+  assert.deepEqual(ids(width(kept) - 1, { phone: false, prefs: p }), [...shown])
 })
 
 test('widths clamp to each column’s bounds', () => {
@@ -140,4 +140,20 @@ test('attachment positions are decimal strings the server accepts', () => {
   const a = (id: string, position: string) => ({ id, position }) as Attachment
   assert.deepEqual([a('b', '2.000000000000000'), a('a', '1.5'), a('c', '1.5')].sort(byPosition).map(x => x.id), ['a', 'c', 'b'])
   assert.equal(positionOf(a('x', 'nope')), 0)
+})
+
+test('planning joins Automatic when filled; saved ticks retain empty columns', () => {
+  const all = { model: true, tokens: true, list_cost: true }
+  assert.deepEqual(automaticColumns(1600, all), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'model', 'tokens', 'list_cost', 'created', 'updated'])
+  assert.deepEqual(automaticColumns(1200, all), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(orderOf(null).slice(9, 14), ['estimate', 'model', 'suggested', 'tokens', 'list_cost'])
+  const prefs = { visible: ['status', 'tokens', 'list_cost', 'paid', 'model'] as ColumnId[] }
+  const saved = ['key', 'title', 'status', 'model', 'tokens', 'list_cost']
+  assert.deepEqual(ids(1600, { phone: false, prefs, present: {} }), saved)
+  assert.deepEqual(ids(700, { phone: false, prefs, present: all }), saved)
+  assert.deepEqual(ids(1600, { phone: false, prefs, present: all, costAllowed: false }), saved.filter(id => id !== 'list_cost'))
+  assert.deepEqual(ids(390, { phone: true, prefs, present: all }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.equal(COLUMN_BY_ID.get('list_cost')!.label, 'Cost')
+  assert.equal(COLUMN_BY_ID.get('list_cost')!.width, 128)
+  assert.equal(COLUMN_BY_ID.has('paid'), false)
 })

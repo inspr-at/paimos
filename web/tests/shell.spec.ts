@@ -12,7 +12,7 @@ const projects = [
 ]
 const projectNodes = projects.map(p => ({ id: p.id, key: p.key, title: p.title, body: '', state: p.state, kind_slug: 'project', fields: { classic: { key: p.id === 'p1' ? 'BAKE' : 'CLINIC', description: 'A small studio project.' } } }))
 
-async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
+async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; codename?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
   let signedIn = options.signedIn ?? true
   const calls: { path: string; method: string; body: string | null }[] = []
   await page.route('**/api/**', async route => {
@@ -24,7 +24,7 @@ async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signe
     if (path === '/api/nodes') return route.fulfill({ json: { items: projectNodes, next_cursor: null } })
     if (path === '/api/nodes/tree') return route.fulfill({ json: { items: [], next_cursor: null } })
     if (path === '/api/events/stream') return route.fulfill({ contentType: 'text/event-stream', body: ': heartbeat\n\n' })
-    if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2' } })
+    if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2', ...(options.codename ? { codename: options.codename } : {}) } })
     if (path === '/api/me') {
       if (options.sessionFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
       const live = options.auth?.signedIn ?? signedIn
@@ -81,11 +81,16 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         else expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(56)
         // Phones get 44px touch targets; a desktop pointer works with the compact rail.
         const min = viewport.width < 600 ? 44 : 20
-        for (const control of await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').all()) {
-          const inSwitch = await control.evaluate(el => !!el.closest('label.switch'))
-          const bounds = await (inSwitch ? control.locator('xpath=ancestor::label[1]') : control).boundingBox()
-          expect(bounds!.height).toBeGreaterThanOrEqual(min)
-          expect(bounds!.width).toBeGreaterThanOrEqual(min)
+        // Visible controls can change as the shell settles. Snapshot their
+        // rectangles together instead of resolving stale nth() locators later.
+        const controls = await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').evaluateAll(elements => elements.map(el => {
+          const target = el.closest('label.switch') ?? el
+          const { height, width } = target.getBoundingClientRect()
+          return { height, width }
+        }))
+        for (const bounds of controls) {
+          expect(bounds.height).toBeGreaterThanOrEqual(min)
+          expect(bounds.width).toBeGreaterThanOrEqual(min)
         }
         await mkdir('/tmp/aeon-p05-shots', { recursive: true })
         await page.screenshot({ path: `/tmp/aeon-p05-shots/${screen}-${viewport.width}-${colorScheme}.png`, fullPage: true })
@@ -95,12 +100,12 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
   }
 }
 
-test('401 redirects, production hides email sign-in, INSPR navigates to login', async ({ page }) => {
+test('401 redirects, production hides email sign-in, OIDC navigates to login', async ({ page }) => {
   await mockAPI(page, { signedIn: false })
   await page.goto('/')
   await expect(page).toHaveURL('/signin')
   await expect(page.getByLabel('Email address')).toHaveCount(0)
-  await page.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL('/api/auth/login')
 })
 
@@ -151,12 +156,12 @@ test('a revoked session is checked on the next navigation', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toHaveCount(0)
 })
 
-test('INSPR ID sign-in resumes the saved path after the full-page callback', async ({ page }) => {
+test('OIDC sign-in resumes the saved path after the full-page callback', async ({ page }) => {
   const auth = { signedIn: false }
   await mockAPI(page, { auth })
   await page.goto('/signin?error=expired&return=/agents')
   await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
-  await page.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL('/api/auth/login')
   auth.signedIn = true
   await page.goto('/') // The OIDC callback returns home with its new session.
@@ -279,6 +284,54 @@ test('version uses six-segment Pretty, keyboard reveal, exact clipboard and one 
   await expect(version).toHaveAttribute('data-copy-state', 'copied')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(canonical)
   expect(calls.filter(call => call.path === '/api/version')).toHaveLength(1)
+})
+
+// AEON-430: the sign-in card names the release too; the version waits for hover or focus.
+test('sign-in card shows the release name; hover and focus reveal the version, and the name still copies it', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const calls = await mockAPI(page, { signedIn: false, codename: 'Hinged Hangar' })
+  await page.goto('/signin')
+  const copy = page.locator('.card-foot').getByRole('button', { name: `Hinged Hangar, version ${canonical} — Copy version` })
+  await expect(copy).toBeVisible()
+  await expect(copy.locator('.rn-name')).toHaveText('Hinged Hangar')
+  // No calendar version at rest: the name shows, the stamp waits, and the page never draws the number.
+  await expect(copy.locator('.rn-name')).toHaveCSS('opacity', '1')
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+  await expect(page.locator('.card-foot .version-coordinate')).toHaveCount(0)
+  await copy.hover()
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await expect(copy.locator('.rn-stamp .calendar-version')).toContainText('26·09·23 12:00')
+  await page.mouse.move(2, 2)
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+  await copy.focus()
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Tab')
+  await expect(copy).toBeFocused()
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await expect(copy).toHaveAccessibleDescription(versionName)
+  await page.keyboard.press('Enter')
+  await expect(copy).toHaveAttribute('data-copy-state', 'copied')
+  await expect(copy.locator('[role="status"]')).toHaveText('Copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(canonical)
+  expect(calls.filter(call => call.path === '/api/version')).toHaveLength(1)
+  // The confirmation passes; focus is still on the name, so the version stays; moving on brings the name back.
+  await expect(copy).not.toHaveAttribute('data-copy-state', /.+/)
+  await expect(copy.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  await page.keyboard.press('Tab')
+  await expect(copy.locator('.rn-name')).toHaveCSS('opacity', '1')
+})
+
+test('sign-in card: when the clipboard is unavailable the version is offered selected', async ({ page, context }) => {
+  await context.grantPermissions([])
+  await page.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) } }); document.execCommand = () => false })
+  await mockAPI(page, { signedIn: false, codename: 'Hinged Hangar' })
+  await page.goto('/signin')
+  const copy = page.locator('.card-foot').getByRole('button', { name: /— Copy version$/ })
+  await copy.click()
+  await expect(copy).toHaveAttribute('data-copy-state', 'failed')
+  await expect(copy.locator('.copy-note')).toHaveText(canonical)
+  await expect(copy.locator('[role="status"]')).toContainText('Copy unavailable')
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(canonical)
 })
 
 test('dev version remains plain text', async ({ page }) => {

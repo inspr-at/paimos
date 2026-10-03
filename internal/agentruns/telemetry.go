@@ -8,10 +8,13 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -21,20 +24,24 @@ const GenerationHeader = "X-Aeon-Daemon-Generation"
 
 // Telemetry contains only bounded identifiers and counters, never vendor text.
 type Telemetry struct {
-	Sequence   int64       `json:"sequence"`
-	Kind       string      `json:"kind"`
-	Status     string      `json:"status,omitempty"`
-	Input      int64       `json:"input_tokens_delta"`
-	Output     int64       `json:"output_tokens_delta"`
-	Cached     int64       `json:"cached_input_tokens_delta"`
-	Reasoning  int64       `json:"reasoning_tokens_delta"`
-	Cost       int64       `json:"cost_micros_delta"`
-	Tools      int32       `json:"tool_count_delta"`
-	Turns      int32       `json:"turn_count_delta"`
-	Model      string      `json:"effective_model,omitempty"`
-	Evidence   string      `json:"model_evidence,omitempty"`
-	ErrorCode  string      `json:"error_code,omitempty"`
-	GitCommits []GitCommit `json:"git_commits,omitempty"`
+	ServiceTier   string                  `json:"service_tier,omitempty"`
+	ReviewRange   *reviewgate.CommitRange `json:"review_range,omitempty"`
+	LimitWindow   string                  `json:"limit_window,omitempty"`
+	LimitResetsAt *time.Time              `json:"limit_resets_at,omitempty"`
+	Sequence      int64                   `json:"sequence"`
+	Kind          string                  `json:"kind"`
+	Status        string                  `json:"status,omitempty"`
+	Input         int64                   `json:"input_tokens_delta"`
+	Output        int64                   `json:"output_tokens_delta"`
+	Cached        int64                   `json:"cached_input_tokens_delta"`
+	Reasoning     int64                   `json:"reasoning_tokens_delta"`
+	Cost          int64                   `json:"cost_micros_delta"`
+	Tools         int32                   `json:"tool_count_delta"`
+	Turns         int32                   `json:"turn_count_delta"`
+	Model         string                  `json:"effective_model,omitempty"`
+	Evidence      string                  `json:"model_evidence,omitempty"`
+	ErrorCode     string                  `json:"error_code,omitempty"`
+	GitCommits    []GitCommit             `json:"git_commits,omitempty"`
 }
 
 // GitCommit is one commit this run introduced after its launch revision.
@@ -68,6 +75,9 @@ func (t Telemetry) validate() error {
 		t.Cached > 1_000_000_000_000 || t.Reasoning > 1_000_000_000_000 {
 		return workorders.Fail(400, "positive sequence and nonnegative counters required")
 	}
+	if t.ServiceTier != "" && !servicetier.Valid(t.ServiceTier) {
+		return workorders.Fail(400, "invalid telemetry service tier")
+	}
 	switch t.Kind {
 	case "started", "heartbeat", "turn", "tool", "usage", "status", "finished":
 	default:
@@ -97,9 +107,21 @@ func (t Telemetry) validate() error {
 		return workorders.Fail(400, "vendor evidence requires effective_model")
 	}
 	switch t.ErrorCode {
-	case "", "event_stream_bound", "app_server_protocol", "child_exit_failed", "turn_failed", "child_stop_failed", "ownership_lost", "reporter_unavailable", "workspace_conflict", "decision_refused":
+	case "", "event_stream_bound", "app_server_protocol", "child_exit_failed", "turn_failed", "child_stop_failed", "ownership_lost", "reporter_unavailable", "workspace_conflict", "decision_refused", "vendor_limit":
 	default:
 		return workorders.Fail(400, "invalid error code")
+	}
+	if t.LimitWindow != "" && t.LimitWindow != "5h" && t.LimitWindow != "weekly" && t.LimitWindow != "monthly" && t.LimitWindow != "other" {
+		return workorders.Fail(400, "invalid limit window")
+	}
+	if (t.LimitWindow != "" || t.LimitResetsAt != nil) && t.ErrorCode != "vendor_limit" {
+		return workorders.Fail(400, "limit requires vendor_limit")
+	}
+	if t.LimitResetsAt != nil && (t.LimitResetsAt.IsZero() || t.LimitResetsAt.After(time.Now().Add(366*24*time.Hour))) {
+		return workorders.Fail(400, "invalid limit reset")
+	}
+	if t.ReviewRange != nil && (!t.ReviewRange.Valid() || t.Kind != "finished" || (t.Status != "" && t.Status != "completed")) {
+		return workorders.Fail(400, "review range requires completed builder telemetry and distinct full commits")
 	}
 	if len(t.GitCommits) > 20 {
 		return workorders.Fail(400, "too many git commits")
@@ -113,7 +135,13 @@ func (t Telemetry) validate() error {
 }
 
 func sameTelemetry(a, b Telemetry) bool {
-	if a.Sequence != b.Sequence || a.Kind != b.Kind || a.Status != b.Status || a.Input != b.Input || a.Output != b.Output || a.Cached != b.Cached || a.Reasoning != b.Reasoning || a.Cost != b.Cost || a.Tools != b.Tools || a.Turns != b.Turns || a.Model != b.Model || a.Evidence != b.Evidence || a.ErrorCode != b.ErrorCode || len(a.GitCommits) != len(b.GitCommits) {
+	if (a.ReviewRange == nil) != (b.ReviewRange == nil) || a.ReviewRange != nil && *a.ReviewRange != *b.ReviewRange {
+		return false
+	}
+	if a.LimitWindow != b.LimitWindow || (a.LimitResetsAt == nil) != (b.LimitResetsAt == nil) || a.LimitResetsAt != nil && !a.LimitResetsAt.Equal(*b.LimitResetsAt) {
+		return false
+	}
+	if a.ServiceTier != b.ServiceTier || a.Sequence != b.Sequence || a.Kind != b.Kind || a.Status != b.Status || a.Input != b.Input || a.Output != b.Output || a.Cached != b.Cached || a.Reasoning != b.Reasoning || a.Cost != b.Cost || a.Tools != b.Tools || a.Turns != b.Turns || a.Model != b.Model || a.Evidence != b.Evidence || a.ErrorCode != b.ErrorCode || len(a.GitCommits) != len(b.GitCommits) {
 		return false
 	}
 	for i := range a.GitCommits {
@@ -209,6 +237,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		v.CachedInputTokens > 1_000_000_000_000-t.Cached || v.ReasoningTokens > 1_000_000_000_000-t.Reasoning {
 		return nil, workorders.Fail(400, "usage counter overflow")
 	}
+	if t.ReviewRange != nil && v.ReadOnlyReview {
+		return nil, workorders.Fail(400, "reviewers cannot request recursive reviews")
+	}
 	before := v
 	model, evidence := v.EffectiveModel, v.ModelEvidence
 	if t.Model != "" {
@@ -218,8 +249,8 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if t.Evidence != "" {
 		evidence = t.Evidence
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,input_tokens_delta,output_tokens_delta,cached_input_tokens_delta,reasoning_tokens_delta,cost_micros_delta,tool_count_delta,turn_count_delta,error_code,status)
-	 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,nullif($12,''),nullif($13,''))`, p.TenantID, v.ID, t.Sequence, t.Kind, t.Input, t.Output, t.Cached, t.Reasoning, t.Cost, t.Tools, t.Turns, t.ErrorCode, t.Status); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,input_tokens_delta,output_tokens_delta,cached_input_tokens_delta,reasoning_tokens_delta,cost_micros_delta,tool_count_delta,turn_count_delta,error_code,status,limit_window,limit_resets_at,service_tier)
+	 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,nullif($12,''),nullif($13,''),$14,$15,nullif($16,''))`, p.TenantID, v.ID, t.Sequence, t.Kind, t.Input, t.Output, t.Cached, t.Reasoning, t.Cost, t.Tools, t.Turns, t.ErrorCode, t.Status, t.LimitWindow, t.LimitResetsAt, t.ServiceTier); err != nil {
 		return nil, err
 	}
 	v, err = scan(tx.QueryRow(ctx, `UPDATE agent_runs SET status=$2,input_tokens=input_tokens+$3,output_tokens=output_tokens+$4,cached_input_tokens=cached_input_tokens+$5,reasoning_tokens=reasoning_tokens+$6,cost_micros=cost_micros+$7,
@@ -240,8 +271,16 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 	}
+	if err = armVendorRetry(ctx, tx, v); err != nil {
+		return nil, err
+	}
 	if err = workorders.BlockBudget(ctx, tx, p, o); err != nil {
 		return nil, err
+	}
+	if t.ReviewRange != nil && m.reviews != nil {
+		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange); err != nil {
+			return nil, err
+		}
 	}
 	after := struct {
 		RunID    string          `json:"run_id"`

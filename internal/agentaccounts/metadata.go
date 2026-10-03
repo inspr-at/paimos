@@ -18,6 +18,7 @@ import (
 )
 
 type metadataWrite struct {
+	BillingMode       *string  `json:"billing_mode"`
 	Label             *string  `json:"label"`
 	Plan              *string  `json:"plan"`
 	HostLabel         *string  `json:"host_label"`
@@ -75,6 +76,14 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if in.Label == nil || in.Plan == nil || in.HostLabel == nil || in.AllowedProfileIDs == nil || len(in.AllowedProfileIDs) > 256 {
 		return Account{}, fail(http.StatusBadRequest, "label, plan, host_label and profile array required")
 	}
+	if in.BillingMode != nil {
+		if p.Kind != tenant.Person {
+			return Account{}, fail(http.StatusForbidden, "only a person can declare account billing")
+		}
+		if *in.BillingMode != "unknown" && *in.BillingMode != "api" && *in.BillingMode != "subscription" {
+			return Account{}, fail(http.StatusBadRequest, "invalid billing mode")
+		}
+	}
 	label, err := metadataText(*in.Label, false)
 	if err != nil {
 		return Account{}, err
@@ -115,10 +124,22 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if count != len(ids) {
 		return Account{}, fail(http.StatusBadRequest, "profiles must be enabled tenant profiles for this harness")
 	}
-	if before.Label == label && before.Plan == plan && before.HostLabel == host && before.AllowedProfileIDs != nil && slices.Equal(before.AllowedProfileIDs, ids) {
+	if before.Harness == "pi" && before.Provider != "" && before.Model != "" {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles WHERE id::text = ANY($1::text[]) AND model=$2`, ids, before.Provider+"/"+before.Model).Scan(&count); err != nil {
+			return Account{}, err
+		}
+		if count != len(ids) {
+			return Account{}, fail(http.StatusBadRequest, "pi grants must match the account model; change the model in Settings")
+		}
+	}
+	billing := before.BillingMode
+	if in.BillingMode != nil {
+		billing = *in.BillingMode
+	}
+	if before.BillingMode == billing && before.Label == label && before.Plan == plan && before.HostLabel == host && before.AllowedProfileIDs != nil && slices.Equal(before.AllowedProfileIDs, ids) {
 		return before, nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET label=$2, plan=$3, host_label=$4, allowed_model_profile_ids=$5::uuid[] WHERE id=$1::uuid`, id, label, plan, host, ids); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET label=$2, plan=$3, host_label=$4, allowed_model_profile_ids=$5::uuid[], billing_mode=$6 WHERE id=$1::uuid`, id, label, plan, host, ids, billing); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, id)
@@ -129,4 +150,60 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 		return Account{}, err
 	}
 	return after, nil
+}
+
+// renameAccount changes only the display label (AEON-384 inline rename), so
+// a rename never turns a legacy model-grant policy into an explicit one.
+func renameAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, label string) (Account, error) {
+	if !uuidRE.MatchString(id) {
+		return Account{}, fail(http.StatusNotFound, "account not found")
+	}
+	label, err := metadataText(label, false)
+	if err != nil {
+		return Account{}, err
+	}
+	before, err := lockAccount(ctx, tx, id)
+	if err != nil {
+		return Account{}, err
+	}
+	if before.Label == label {
+		return before, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET label=$2 WHERE id=$1::uuid`, id, label); err != nil {
+		return Account{}, err
+	}
+	after, err := getAccount(ctx, tx, id)
+	if err != nil {
+		return Account{}, err
+	}
+	return after, writeEvent(ctx, tx, p, evUpdated, before, after)
+}
+
+func (m *Module) rename(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in struct {
+		Label string `json:"label"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = renameAccount(r.Context(), tx, p, r.PathValue("accountId"), in.Label)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
 }

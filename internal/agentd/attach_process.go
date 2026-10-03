@@ -12,6 +12,9 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 )
 
+// Only a kernel-confirmed missing or zombie process yields this sentinel.
+var errAttachExited = errors.New("pinned process exited")
+
 type attachObservation struct {
 	attachwatch.Process
 	Parent  int
@@ -57,10 +60,18 @@ func attachPeer(r *http.Request) (attachObservation, error) {
 }
 
 // An injected command launched beneath the selected agent cannot approve it.
-// This is defense in depth, not a boundary against unrestricted same-UID code.
+// This is defence in depth, not a boundary against unrestricted same-UID code.
+// Touch ID needs a person at the Mac and stops code that can only drive
+// terminals or the browser. Boolean confirmation is refused. Activation
+// requires a Secure Enclave signature over the server nonce and the canonical
+// reason. Reading pairing state cannot turn a boolean into local_confirmed.
 func independentAttachPeer(peer, target attachObservation, observe func(int) (attachObservation, error)) bool {
 	current, err := observe(peer.PID)
-	if err != nil || current.Process != peer.Process || current.UID != target.UID || !current.TTY || current.Session <= 1 || current.Session == current.PID {
+	if err != nil || !sameAttachProcessIdentity(current, peer) || current.UID != target.UID || !current.TTY || current.Session <= 1 || current.Session == current.PID {
+		return false
+	}
+	selected, err := observe(target.PID)
+	if err != nil || !sameAttachProcessIdentity(selected, target) {
 		return false
 	}
 	leader, err := observe(current.Session)
@@ -69,19 +80,55 @@ func independentAttachPeer(peer, target attachObservation, observe func(int) (at
 	}
 	// A double fork can hide the parent chain, but a setsid/pty helper either
 	// leads its own session or still belongs to the attacker's (possibly dead)
-	// session leader. Both ancestry walks must remain independent on every poll.
-	return independentAttachAncestry(current.PID, target.PID, observe) && independentAttachAncestry(leader.PID, target.PID, observe)
+	// session leader. The helper, leader and target walks must remain independent.
+	seen := map[int]attachObservation{current.PID: attachProcessIdentity(current), selected.PID: attachProcessIdentity(selected)}
+	if before, exists := seen[leader.PID]; exists && before != attachProcessIdentity(leader) {
+		return false
+	}
+	seen[leader.PID] = attachProcessIdentity(leader)
+	if !independentAttachAncestry(current.PID, target.PID, current.UID, observe, seen) ||
+		!independentAttachAncestry(leader.PID, target.PID, current.UID, observe, seen) ||
+		!independentAttachAncestry(target.PID, current.PID, current.UID, observe, seen) {
+		return false
+	}
+	// Re-read the whole graph: no PID may be reused or reparented during the
+	// decision, including a root-owned login/sshd leader shared by both walks.
+	for pid, before := range seen {
+		after, err := observe(pid)
+		if err != nil || attachProcessIdentity(after) != before {
+			return false
+		}
+	}
+	return true
 }
 
-func independentAttachAncestry(pid, target int, observe func(int) (attachObservation, error)) bool {
+// Ancestors need only kernel identity, never their executable or cwd. macOS
+// denies those path reads for root-owned login and sshd-session processes.
+// Linux denies /proc/<pid>/exe and /proc/<pid>/cwd across users, including
+// root-owned sshd, su and sudo.
+func attachProcessIdentity(p attachObservation) attachObservation {
+	p.Executable, p.CWD = "", ""
+	return p
+}
+
+func sameAttachProcessIdentity(a, b attachObservation) bool {
+	return a.PID == b.PID && a.UID == b.UID && a.Started != "" && a.Started == b.Started
+}
+
+func independentAttachAncestry(pid, target, uid int, observe func(int) (attachObservation, error), seen map[int]attachObservation) bool {
 	for i := 0; i < 128 && pid > 1; i++ {
 		if pid == target {
 			return false
 		}
 		p, err := observe(pid)
-		if err != nil || p.PID != pid || p.Parent < 1 || p.Parent == pid {
+		if err != nil || p.PID != pid || p.Started == "" || p.Parent < 1 || p.Parent == pid || p.UID != uid && p.UID != 0 {
 			return false
 		}
+		identity := attachProcessIdentity(p)
+		if before, exists := seen[pid]; exists && before != identity {
+			return false
+		}
+		seen[pid] = identity
 		pid = p.Parent
 	}
 	return pid == 1

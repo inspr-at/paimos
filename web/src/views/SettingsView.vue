@@ -8,6 +8,7 @@ import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
 import BusinessSection from '../components/settings/BusinessSection.vue'
 import PersonalSection from '../components/settings/PersonalSection.vue'
+import DeveloperSection from '../components/settings/DeveloperSection.vue'
 import ProjectsSection from '../components/settings/ProjectsSection.vue'
 import PortalSection from '../components/settings/PortalSection.vue'
 import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
@@ -16,6 +17,7 @@ import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import AccountsSection from '../components/settings/AccountsSection.vue'
 import { SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
+import { doctrineInbox } from '../lib/doctrineInbox'
 
 // Settings: Personal for everyone; Workspace, Business and Projects for admins;
 // Access for whoever may see the members (can('members.read')).
@@ -39,8 +41,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', 'agent-rules': 'book', accounts: 'gauge', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, developer: DeveloperSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', developer: 'gear', 'agent-rules': 'book', accounts: 'gauge', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers', portal: 'globe' }
 
 // A deep link scrolls to its card once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
@@ -77,6 +79,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
           <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
           <span class="link-text"><span class="link-label">{{ section.label }}</span><span class="link-summary">{{ section.summary }}</span></span>
           <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
+          <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'} for review`" />
         </RouterLink>
       </nav>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
@@ -118,6 +121,8 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 .link-label { font-weight: 600; font-size: 13.5px; }
 .link-summary { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--ink-3); }
+/* Doctrine proposals wait (AEON-444): a small neutral dot. */
+.waiting-dot { justify-self: center; width: 7px; height: 7px; margin: 0 7px; border-radius: 50%; background: var(--ink-2); }
 .body { min-width: 0; }
 .gate { display: grid; justify-items: center; gap: 8px; max-width: 560px; margin: 0 auto; padding: 40px 28px; text-align: center; }
 .gate h2 { font-size: 17px; }

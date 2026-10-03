@@ -638,7 +638,17 @@
           }
         ]
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1approvals 200/items/allOf/0",
+      "/GET ~1approvals 200/items/allOf/0/properties/target",
+      "/POST ~1approvals 201/allOf/0",
+      "/POST ~1approvals 201/allOf/0/properties/target",
+      "/POST ~1approvals~1{approvalId}~1decision 200/allOf/0",
+      "/POST ~1approvals~1{approvalId}~1decision 200/allOf/0/properties/target",
+      "/POST ~1approvals~1{approvalId}~1revoke 200/allOf/0",
+      "/POST ~1approvals~1{approvalId}~1revoke 200/allOf/0/properties/target"
+    ]
   },
   "baseline-batches": {
     "version": "baseline-batches/1.0",
@@ -689,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.3",
-    "sha256": "c5fb34f021d524bcb2bca218fba67e924856e723529fa1cb8261588f6621b828",
+    "version": "harness-session/2.6",
+    "sha256": "da031929b5e8199fa22d2b79cf5246038ef4b236a109fe1b47b63e940d884a7c",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -746,6 +756,14 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "agent_activity_mode": {
+            "enum": [
+              "off",
+              "tool_activity",
+              "agent_summary"
+            ],
+            "type": "string"
           },
           "agent_principal_id": {
             "format": "uuid",
@@ -830,6 +848,11 @@
               "null"
             ]
           },
+          "command": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$",
+            "type": "string"
+          },
           "commits": {
             "items": {
               "properties": {
@@ -851,6 +874,71 @@
             },
             "maxItems": 20,
             "type": "array"
+          },
+          "continuation": {
+            "properties": {
+              "brief": {
+                "type": "string"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "succeeds_session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "succeeds_session_id",
+              "handover",
+              "brief"
+            ],
+            "type": "object"
           },
           "controls": {
             "items": {
@@ -979,6 +1067,69 @@
             "format": "date-time",
             "type": "string"
           },
+          "current_activity": {
+            "oneOf": [
+              {
+                "properties": {
+                  "at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "source": {
+                    "enum": [
+                      "agent",
+                      "auto"
+                    ],
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 60,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "source",
+                  "at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_activity_history": {
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "agent",
+                    "auto"
+                  ],
+                  "type": "string"
+                },
+                "text": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text",
+                "source",
+                "at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "display_label": {
             "maxLength": 128,
             "type": [
@@ -1001,13 +1152,25 @@
           "eta_stale": {
             "type": "boolean"
           },
+          "finished": {
+            "type": "boolean"
+          },
+          "generator": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$",
+            "type": "string"
+          },
           "harness": {
             "enum": [
               "codex",
               "claude",
               "pi",
               "cursor",
-              "grok"
+              "grok",
+              "gemini",
+              "opencode",
+              "media",
+              "terminal"
             ],
             "type": "string"
           },
@@ -1019,6 +1182,9 @@
             ]
           },
           "has_problem": {
+            "type": "boolean"
+          },
+          "has_vendor_session_ref": {
             "type": "boolean"
           },
           "heartbeat_at": {
@@ -1046,6 +1212,19 @@
               "long_poll",
               "stream",
               "ack"
+            ],
+            "type": "string"
+          },
+          "limit_resets_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit_window": {
+            "enum": [
+              "5h",
+              "weekly",
+              "monthly",
+              "other"
             ],
             "type": "string"
           },
@@ -1101,6 +1280,22 @@
               "null"
             ]
           },
+          "model_profile_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_raw": {
+            "maxLength": 128,
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "needs_attention": {
             "type": "boolean"
           },
@@ -1110,6 +1305,235 @@
               "string",
               "null"
             ]
+          },
+          "pause": {
+            "properties": {
+              "control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "deadline_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "deliver": {
+                "type": "boolean"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "handover_point": {
+                "type": "string"
+              },
+              "interrupt_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "leaving_request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "stop_now",
+                  "pause_quickly",
+                  "pause",
+                  "wrap_up"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              "paused_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "planned_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "requested_by_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resume_requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "starts_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "requested",
+                  "planned",
+                  "paused",
+                  "resume_requested",
+                  "resumed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "stop_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "stop_expires_in_ms": {
+                "maximum": 45000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "stop_requested": {
+                "type": "boolean"
+              },
+              "successor_session_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "wake_in_ms": {
+                "maximum": 86400000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "control_id",
+              "state",
+              "requested_by_principal_id",
+              "requested_at",
+              "reason",
+              "deadline_at"
+            ],
+            "type": "object"
+          },
+          "pause_can_interrupt": {
+            "type": "boolean"
+          },
+          "pause_progress": {
+            "properties": {
+              "command": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command_left_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_outcome": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "interrupt": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "next_point": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "next_point_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reported_at": {
+                "format": "date-time",
+                "readOnly": true,
+                "type": "string"
+              },
+              "step": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "reported_at"
+            ],
+            "type": "object"
           },
           "phase": {
             "enum": [
@@ -1202,6 +1626,11 @@
             ],
             "type": "string"
           },
+          "row_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "run_id": {
             "format": "uuid",
             "type": [
@@ -1214,6 +1643,143 @@
               "string",
               "null"
             ]
+          },
+          "service_tier": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest"
+            ],
+            "type": "string"
+          },
+          "service_tier_reports": {
+            "items": {
+              "properties": {
+                "adapter_version": {
+                  "type": "string"
+                },
+                "applies": {
+                  "enum": [
+                    "next_run",
+                    "next_turn"
+                  ],
+                  "type": "string"
+                },
+                "change_instructions": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tiers": {
+                  "items": {
+                    "properties": {
+                      "mechanism": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "enum": [
+                          "Default",
+                          "Fast",
+                          "Fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "offered": {
+                        "type": "boolean"
+                      },
+                      "price_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "speed_factor": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "tier": {
+                        "enum": [
+                          "default",
+                          "fast",
+                          "fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "usage_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "name",
+                      "offered",
+                      "speed_factor",
+                      "price_multiplier",
+                      "usage_multiplier",
+                      "mechanism"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "harness",
+                "model",
+                "harness_version",
+                "adapter_version",
+                "checked_at",
+                "source",
+                "applies",
+                "change_instructions",
+                "tiers"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier_revision": {
+            "minimum": 0,
+            "type": "integer"
           },
           "stop_reason": {
             "type": [
@@ -1228,12 +1794,50 @@
               "null"
             ]
           },
+          "supported_pause_levels": {
+            "items": {
+              "enum": [
+                "stop_now",
+                "pause_quickly",
+                "pause",
+                "wrap_up"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "ticket_node_id": {
             "format": "uuid",
             "type": [
               "string",
               "null"
             ]
+          },
+          "vendor_limited": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "missing_progress",
+                    "missing_eta",
+                    "ticket_without_estimate"
+                  ],
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "hint"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "watch": {
             "properties": {
@@ -1244,8 +1848,16 @@
                   "null"
                 ]
               },
+              "mode": {
+                "const": "lease",
+                "type": "string"
+              },
               "owner_id": {
                 "format": "uuid",
+                "type": "string"
+              },
+              "process_state": {
+                "const": "confirmed_exited",
                 "type": "string"
               },
               "request_id": {
@@ -1300,7 +1912,8 @@
           "activity",
           "activity_sequence",
           "revision",
-          "created_at"
+          "created_at",
+          "finished"
         ],
         "type": "object"
       },
@@ -1359,6 +1972,14 @@
             },
             "type": "array"
           },
+          "agent_activity_mode": {
+            "enum": [
+              "off",
+              "tool_activity",
+              "agent_summary"
+            ],
+            "type": "string"
+          },
           "agent_principal_id": {
             "format": "uuid",
             "type": "string"
@@ -1442,6 +2063,11 @@
               "null"
             ]
           },
+          "command": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$",
+            "type": "string"
+          },
           "commits": {
             "items": {
               "properties": {
@@ -1463,6 +2089,71 @@
             },
             "maxItems": 20,
             "type": "array"
+          },
+          "continuation": {
+            "properties": {
+              "brief": {
+                "type": "string"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "succeeds_session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "succeeds_session_id",
+              "handover",
+              "brief"
+            ],
+            "type": "object"
           },
           "controls": {
             "items": {
@@ -1591,6 +2282,69 @@
             "format": "date-time",
             "type": "string"
           },
+          "current_activity": {
+            "oneOf": [
+              {
+                "properties": {
+                  "at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "source": {
+                    "enum": [
+                      "agent",
+                      "auto"
+                    ],
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 60,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "source",
+                  "at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_activity_history": {
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "agent",
+                    "auto"
+                  ],
+                  "type": "string"
+                },
+                "text": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text",
+                "source",
+                "at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "display_label": {
             "maxLength": 128,
             "type": [
@@ -1613,13 +2367,25 @@
           "eta_stale": {
             "type": "boolean"
           },
+          "finished": {
+            "type": "boolean"
+          },
+          "generator": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$",
+            "type": "string"
+          },
           "harness": {
             "enum": [
               "codex",
               "claude",
               "pi",
               "cursor",
-              "grok"
+              "grok",
+              "gemini",
+              "opencode",
+              "media",
+              "terminal"
             ],
             "type": "string"
           },
@@ -1631,6 +2397,9 @@
             ]
           },
           "has_problem": {
+            "type": "boolean"
+          },
+          "has_vendor_session_ref": {
             "type": "boolean"
           },
           "heartbeat_at": {
@@ -1658,6 +2427,19 @@
               "long_poll",
               "stream",
               "ack"
+            ],
+            "type": "string"
+          },
+          "limit_resets_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit_window": {
+            "enum": [
+              "5h",
+              "weekly",
+              "monthly",
+              "other"
             ],
             "type": "string"
           },
@@ -1713,6 +2495,22 @@
               "null"
             ]
           },
+          "model_profile_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_raw": {
+            "maxLength": 128,
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "needs_attention": {
             "type": "boolean"
           },
@@ -1722,6 +2520,235 @@
               "string",
               "null"
             ]
+          },
+          "pause": {
+            "properties": {
+              "control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "deadline_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "deliver": {
+                "type": "boolean"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "handover_point": {
+                "type": "string"
+              },
+              "interrupt_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "leaving_request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "stop_now",
+                  "pause_quickly",
+                  "pause",
+                  "wrap_up"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              "paused_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "planned_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "requested_by_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resume_requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "starts_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "requested",
+                  "planned",
+                  "paused",
+                  "resume_requested",
+                  "resumed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "stop_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "stop_expires_in_ms": {
+                "maximum": 45000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "stop_requested": {
+                "type": "boolean"
+              },
+              "successor_session_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "wake_in_ms": {
+                "maximum": 86400000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "control_id",
+              "state",
+              "requested_by_principal_id",
+              "requested_at",
+              "reason",
+              "deadline_at"
+            ],
+            "type": "object"
+          },
+          "pause_can_interrupt": {
+            "type": "boolean"
+          },
+          "pause_progress": {
+            "properties": {
+              "command": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command_left_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_outcome": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "interrupt": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "next_point": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "next_point_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reported_at": {
+                "format": "date-time",
+                "readOnly": true,
+                "type": "string"
+              },
+              "step": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "reported_at"
+            ],
+            "type": "object"
           },
           "phase": {
             "enum": [
@@ -1814,6 +2841,11 @@
             ],
             "type": "string"
           },
+          "row_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "run_id": {
             "format": "uuid",
             "type": [
@@ -1826,6 +2858,143 @@
               "string",
               "null"
             ]
+          },
+          "service_tier": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest"
+            ],
+            "type": "string"
+          },
+          "service_tier_reports": {
+            "items": {
+              "properties": {
+                "adapter_version": {
+                  "type": "string"
+                },
+                "applies": {
+                  "enum": [
+                    "next_run",
+                    "next_turn"
+                  ],
+                  "type": "string"
+                },
+                "change_instructions": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tiers": {
+                  "items": {
+                    "properties": {
+                      "mechanism": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "enum": [
+                          "Default",
+                          "Fast",
+                          "Fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "offered": {
+                        "type": "boolean"
+                      },
+                      "price_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "speed_factor": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "tier": {
+                        "enum": [
+                          "default",
+                          "fast",
+                          "fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "usage_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "name",
+                      "offered",
+                      "speed_factor",
+                      "price_multiplier",
+                      "usage_multiplier",
+                      "mechanism"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "harness",
+                "model",
+                "harness_version",
+                "adapter_version",
+                "checked_at",
+                "source",
+                "applies",
+                "change_instructions",
+                "tiers"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier_revision": {
+            "minimum": 0,
+            "type": "integer"
           },
           "stop_reason": {
             "type": [
@@ -1840,12 +3009,50 @@
               "null"
             ]
           },
+          "supported_pause_levels": {
+            "items": {
+              "enum": [
+                "stop_now",
+                "pause_quickly",
+                "pause",
+                "wrap_up"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "ticket_node_id": {
             "format": "uuid",
             "type": [
               "string",
               "null"
             ]
+          },
+          "vendor_limited": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "missing_progress",
+                    "missing_eta",
+                    "ticket_without_estimate"
+                  ],
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "hint"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "watch": {
             "properties": {
@@ -1856,8 +3063,16 @@
                   "null"
                 ]
               },
+              "mode": {
+                "const": "lease",
+                "type": "string"
+              },
               "owner_id": {
                 "format": "uuid",
+                "type": "string"
+              },
+              "process_state": {
+                "const": "confirmed_exited",
                 "type": "string"
               },
               "request_id": {
@@ -1912,11 +3127,52 @@
           "activity",
           "activity_sequence",
           "revision",
-          "created_at"
+          "created_at",
+          "finished"
         ],
         "type": "object"
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/account_label",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/branch",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/brief",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/commits/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/continuation/properties/handover",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/current_activity/oneOf/0",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/current_activity_history/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/harness_version",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/model",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/handover",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/level",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/reasoning_effort",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items/properties/tiers/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items/properties/tiers/items/properties/tier",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/supported_pause_levels/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/worktree",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/account_label",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/branch",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/brief",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/commits/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/continuation/properties/handover",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/current_activity/oneOf/0",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/current_activity_history/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/harness_version",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/model",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/handover",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/level",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/reasoning_effort",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items/properties/tiers/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items/properties/tiers/items/properties/tier",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/supported_pause_levels/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/worktree"
+    ]
   },
   "journey": {
     "version": "journey/1.3",
@@ -2249,11 +3505,14 @@
         ],
         "type": "object"
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1projects~1{projectId}~1journey 200/properties/stages/items/properties/target"
+    ]
   },
   "me": {
-    "version": "me/1.0",
-    "sha256": "465ed2c221370e2964ee074fe4955f02fe13562b3faf3e8074867f8cf7856141",
+    "version": "me/1.2",
+    "sha256": "fc3949fd89221d495d61295bd91cbc732ab595948aef47b8467f89381e155b0a",
     "shape": {
       "GET /me 200": {
         "properties": {
@@ -2299,6 +3558,10 @@
               }
             ]
           },
+          "oidc_display_name": {
+            "maxLength": 48,
+            "type": "string"
+          },
           "principal": {
             "properties": {
               "email": {
@@ -2343,6 +3606,61 @@
           },
           "tenant": {
             "properties": {
+              "brand": {
+                "properties": {
+                  "logo": {
+                    "properties": {
+                      "height": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  "logo_dark": {
+                    "properties": {
+                      "height": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  "short_name": {
+                    "maxLength": 32,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "id": {
                 "format": "uuid",
                 "type": "string"
@@ -2536,7 +3854,11 @@
           }
         ]
       }
-    }
+    },
+    "request_paths": [
+      "/POST ~1stage-handoffs~1{handoffId}~1evidence 201/allOf/0",
+      "/POST ~1stage-handoffs~1{handoffId}~1evidence 201/allOf/0/properties/artifact"
+    ]
   },
   "stage-handoffs": {
     "version": "stage-handoffs/1.0",
@@ -2960,7 +4282,11 @@
         ],
         "type": "object"
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1stage-handoffs~1{handoffId} 200/properties/result/allOf/0",
+      "/POST ~1stage-handoffs 201/properties/result/allOf/0"
+    ]
   },
   "stage-launch": {
     "version": "stage-launch/1.0",
@@ -3116,6 +4442,9 @@
           }
         ]
       }
-    }
+    },
+    "request_paths": [
+      "/POST ~1stage-handoffs~1{handoffId}~1result 200/allOf/0"
+    ]
   }
 }

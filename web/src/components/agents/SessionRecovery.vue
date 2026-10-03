@@ -2,10 +2,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, APIError } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import type { HarnessSession } from '../../lib/agents'
+import { readControlResponse, readSessionRecovery, forceStopSession, archiveSession } from '../../lib/agentRows'
 import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
 
@@ -46,9 +47,8 @@ const forceResult = computed(() => {
   if (control.outcome === 'applied' && control.reason === 'owned_group_signalled_root_exited') return 'The daemon signalled the owned process group and verified that its root process exited. Processes outside that group were not targeted.'
   return `The daemon did not confirm termination (${(control.reason || 'unknown result').replaceAll('_', ' ')}). Refresh the session before another action.`
 })
-const path = () => `/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}`
-async function json<T>(url: string, body?: unknown): Promise<T> {
-  const response = await api(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+async function json<T>(answer: Promise<Response>): Promise<T> {
+  const response = await answer
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new APIError(response.status, data.error || `Request failed (${response.status})`)
   return data as T
@@ -59,7 +59,7 @@ async function refresh() {
   loading.value = true; error.value = ''; confirmation.value = ''; preview.value = null
   requestId = crypto.randomUUID()
   try {
-    const value = await json<Preview>(`${path()}/recovery`)
+    const value = await json<Preview>(readSessionRecovery(props.session.project_id, props.session.id))
     if (turn === epoch && visible.value && value.session_id === props.session.id) {
       preview.value = value
       if (!value.can_archive && value.force_stop_available) action.value = 'force'
@@ -92,7 +92,7 @@ async function checkForce(turn = epoch) {
   if (forceControl.value.state === 'completed') { await finishForce(); return }
   if (Date.now() >= forceDeadline) { forceExpired.value = true; return }
   try {
-    const result = await json<ForceControl>(`${path()}/controls/${encodeURIComponent(forceControl.value.id)}`)
+    const result = await json<ForceControl>(readControlResponse(props.session.project_id, props.session.id, forceControl.value.id))
     if (turn !== epoch) return
     forceControl.value = result; error.value = ''
     if (result.state === 'completed') { forceExpired.value = false; await finishForce(); return }
@@ -104,7 +104,9 @@ async function submit() {
   busy.value = true; error.value = ''
   const turn = epoch
   try {
-    const result = await json<ForceControl>(`${path()}/${action.value === 'force' ? 'controls/force-stop' : 'archive'}`, { expected_revision: preview.value.observed_revision, confirmation: confirmation.value, request_id: requestId, reason: reason.value.trim() })
+    const result = await json<ForceControl>((action.value === 'force' ? forceStopSession : archiveSession)(props.session.project_id, props.session.id, { expected_revision: preview.value.observed_revision, confirmation: confirmation.value, request_id: requestId, reason: reason.value.trim() }))
+    // Accepted: a force stop is now a control for the daemon, an archive is done. Either changes the lists.
+    void agents.afterWrite()
     if (turn !== epoch) return
     if (action.value === 'force') {
       forceControl.value = result
@@ -138,8 +140,14 @@ defineExpose({ open })
   <button v-if="allowed && !session.archived_at && !hideTrigger" type="button" class="btn sm ghost" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
   <dialog ref="dialog" class="recovery-dialog" :aria-labelledby="`${uid}-title`" :aria-describedby="`${uid}-intro`" @cancel.prevent="close">
     <div class="recovery-card">
-      <div class="recovery-body">
       <h2 :id="`${uid}-title`">{{ done ? 'Session archived' : forceControl ? 'Force stop requested' : 'Recover session' }}</h2>
+      <div class="recovery-actions">
+        <button ref="cancelButton" type="button" class="btn" :disabled="busy" @click="close">{{ done || forceControl ? 'Close' : 'Cancel' }}</button>
+        <button v-if="!done && !forceControl && !preview && !loading" type="button" class="btn" @click="refresh">Refresh details</button>
+        <button v-if="forceExpired" type="button" class="btn" @click="refresh">Refresh details</button>
+        <button v-if="!done && !forceControl && available" type="button" class="btn" :class="action === 'force' ? 'danger' : 'primary'" :disabled="!canSubmit" @click="submit">{{ busy ? 'Requesting…' : action === 'force' ? 'Force stop session' : 'Archive session' }}</button>
+      </div>
+      <div class="recovery-body">
       <p v-if="done" :id="`${uid}-intro`" role="status">The registration is closed and its history is retained. Process state is unknown; no process was stopped.</p>
       <p v-else-if="forceControl" :id="`${uid}-intro`" role="status">{{ forceResult }}</p>
       <template v-else>
@@ -177,22 +185,16 @@ defineExpose({ open })
       </template>
       <p v-if="error" class="recovery-error" role="alert">{{ error }}</p>
       </div>
-      <div class="recovery-actions">
-        <button ref="cancelButton" type="button" class="btn" :disabled="busy" @click="close">{{ done || forceControl ? 'Close' : 'Cancel' }}</button>
-        <button v-if="!done && !forceControl && !preview && !loading" type="button" class="btn" @click="refresh">Refresh details</button>
-        <button v-if="forceExpired" type="button" class="btn" @click="refresh">Refresh details</button>
-        <button v-if="!done && !forceControl && available" type="button" class="btn" :class="action === 'force' ? 'danger' : 'primary'" :disabled="!canSubmit" @click="submit">{{ busy ? 'Requesting…' : action === 'force' ? 'Force stop session' : 'Archive session' }}</button>
-      </div>
     </div>
   </dialog>
 </template>
 
 <style scoped>
-.recovery-dialog { width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
+.recovery-dialog { position: fixed; inset: 96px 0 auto; margin: 0 auto; width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 112px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
 .recovery-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100dvh - 30px); }
-.recovery-body { display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
-h2 { font-size: 19px; line-height: 1.2; }
+.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box; max-height: min(660px, calc(100dvh - 114px)); }
+.recovery-body { flex: 1; align-content: start; display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
+h2 { flex: none; font-size: 19px; line-height: 1.2; }
 p { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .quiet { color: var(--ink-3); }
 .choices { display: grid; gap: 8px; }
@@ -218,6 +220,6 @@ code { display: block; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; colo
 .confirmation-text { padding: 8px 10px; border-radius: 8px; background: var(--code-bg); user-select: all; }
 .recovery-error { color: var(--danger); }
 .recovery-actions { flex-shrink: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.recovery-actions .btn { min-height: 40px; }
-@media (max-width: 500px) { .recovery-card { padding: 18px 16px 16px; gap: 14px; } .recovery-actions .btn { flex: 1; } }
+.recovery-actions .btn { width: 180px; min-height: 40px; }
+@media (max-width: 500px) { .recovery-dialog { inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; border-radius: 0; } .recovery-card { height: 100%; max-height: none; padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); gap: 14px; } .recovery-body { order: 1; } .recovery-actions { order: 2; } .recovery-actions .btn { flex: 1; } }
 </style>

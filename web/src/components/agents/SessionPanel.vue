@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
-import { api, getNode } from '../../lib/api'
+import { getNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Approval, HarnessSessionDetail, SessionControl } from '../../lib/agents'
+import type { Approval, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
@@ -25,12 +26,17 @@ import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
 import LiveWatch from './LiveWatch.vue'
-import { activityOf, currentStep, type ActivitySession } from './activity'
+import { activityOf, currentStep, currentActivity, activityDurations } from './activity'
+import { cleanActivityNote } from '../../lib/activityPrivacy'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 import { quickRemoval } from './sessionActions'
+import { sessionEtaEligible } from './sessionRow'
+import ServiceTierBlock from './ServiceTierBlock.vue'
+import { useServiceTiers } from '../../stores/serviceTiers'
+const serviceTiers = useServiceTiers()
 
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
@@ -73,23 +79,29 @@ function selectTab(next: SessionTab) {
 }
 watch(() => route.query.tab, value => { if (value === 'messages' || value === 'overview') tab.value = value })
 useVisualViewport(root)
-const detail = ref<(HarnessSessionDetail & ActivitySession) | null>(null)
 const ticketState = ref('')
 
 const s = computed(() => props.view?.session)
 const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
 const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
-const activity = computed(() => detail.value?.id === s.value?.id ? detail.value : props.view ? activityOf(props.view) : null)
-const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
+// The detail read lands in the ledger like every other copy of the session, so what is
+// shown here is always the row the ledger holds: a detail that arrives late never
+// replaces a newer list row, and the list never hides the detail's history (AEON-449).
+const activity = computed(() => props.view ? activityOf(props.view) : null)
+const reported = computed(() => s.value)
 // A watched session has no Messages tab, so it always shows the overview with the live view.
 const pane = computed<SessionTab>(() => reported.value?.watch ? 'overview' : tab.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
-const timeline = computed(() => activity.value?.activity_history ?? [])
-const metadataHistory = computed(() => metadataChanges(detail.value?.id === s.value?.id ? detail.value?.metadata_history : undefined))
+const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : (activity.value?.activity_history ?? []).flatMap(item => {
+  const note = cleanActivityNote(item.note)
+  return note ? [{ ...item, note }] : []
+}))
+const currentTimeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activityDurations((activity.value?.current_activity_history ?? []).filter(item => activity.value?.agent_activity_mode !== 'tool_activity' || item.source === 'auto'), props.now, s.value?.stopped_at))
+const metadataHistory = computed(() => metadataChanges(s.value?.metadata_history))
 const step = computed(() => {
   if (!props.view) return ''
-  return props.view.status.reasons?.length ? currentStep(props.view) : activity.value?.activity_note || currentStep(props.view)
+  return currentActivity(props.view, props.now) || currentStep(props.view)
 })
 const setupLine = computed(() => {
   const r = reported.value
@@ -113,11 +125,7 @@ watch([
   const controller = new AbortController()
   onCleanup(() => controller.abort())
   try {
-    const response = await api(`/projects/${encodeURIComponent(current.project_id)}/harness-sessions/${encodeURIComponent(current.id)}`, { signal: controller.signal })
-    if (response.ok) {
-      const body = await response.json() as HarnessSessionDetail & ActivitySession
-      if (!controller.signal.aborted && s.value?.id === current.id) detail.value = body
-    }
+    await agents.loadSessionDetail(current.project_id, current.id, controller.signal)
   } catch { /* The list still shows the latest step if detail is unavailable. */ }
 }, { immediate: true })
 watch(() => props.view?.ticket?.id, async id => {
@@ -138,6 +146,10 @@ onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
 const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
 const quick = computed(() => !!props.view && quickRemoval(props.view))
+function pickTier() {
+  const view = props.view, anchor = root.value?.querySelector<HTMLElement>('[aria-label="More session actions"]')
+  if (view && anchor) serviceTiers.open(view.session, view.name, anchor)
+}
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
@@ -172,6 +184,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more>
+          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
@@ -213,18 +226,23 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">
           <span :data-tip="`Since ${absoluteTime(view.session.created_at)}`">{{ view.session.stopped_at ? 'Ran' : 'Running' }} {{ elapsed(view.session, now) }}</span>
-          <template v-if="view.session.stopped_at"> · {{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
+          <template v-if="view.session.stopped_at"> · {{ view.status.state === 'done' ? 'Done' : stopReasonLabel(view.session.stop_reason) || 'Ended' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
           <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
           <template v-else> · no heartbeat yet</template>
         </p>
         <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
-        <p v-if="view.ticket && !view.session.stopped_at && etaFromSession(view.session)" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" /></p>
+        <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
         <SessionStateEvidence :view="view" :now="now" />
-        <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
+        <ol v-if="currentTimeline.length" class="activity-timeline" aria-label="Current activity history">
+          <li v-for="(item, index) in currentTimeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at" :title="absoluteTime(item.at)">{{ item.duration }}</time><span>{{ item.text }}</span></li>
+        </ol>
+        <ol v-else-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>
         </ol>
         <DeliveryRating v-if="s && s.phase === 'stopped'" :session-id="s.id" />
       </section>
+
+      <ServiceTierBlock :key="view.session.id" :session="view.session" :name="view.name" />
 
       <section class="block first" aria-labelledby="setup-title">
         <h3 id="setup-title" class="eyebrow">Details</h3>
@@ -255,8 +273,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section v-if="run" class="block" aria-labelledby="telemetry-title">
         <h3 id="telemetry-title" class="eyebrow">Current run</h3>
+        <p v-if="run.wait" class="outside-note">{{ capacityWaitText(run.wait, 'Agents', now) }}</p>
         <div class="telemetry">
-          <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="RUN_OUTCOME[run.status].tone">{{ RUN_OUTCOME[run.status].label }}</span></div>
+          <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="run.wait?.code === 'vendor' ? '' : RUN_OUTCOME[run.status].tone">{{ run.wait?.code === 'vendor' ? 'Throttled' : RUN_OUTCOME[run.status].label }}</span></div>
           <div class="metric"><span class="metric-label">Tokens in</span><b>{{ tokens(run.input_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Tokens out</span><b>{{ tokens(run.output_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Cost</span><b>{{ cost(run.cost_micros) }}</b></div>

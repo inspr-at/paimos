@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "code_extensions": [
+    ".go",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".py",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".html",
+    ".css",
+    ".scss",
+    ".nix",
+    ".lock",
+    ".toml"
+  ],
+  "code_names": [
+    "Dockerfile",
+    "Makefile",
+    "justfile",
+    "go.mod",
+    "go.sum"
+  ],
+  "slices": [
+    {
+      "id": "S1",
+      "key": "security-core",
+      "title": "Identity, authz and the security core",
+      "paths": [
+        "internal/auth/**",
+        "internal/authz/**",
+        "internal/identity/**",
+        "internal/agentsecurity/**",
+        "internal/credentialguard/**",
+        "internal/unicodeguard/**",
+        "internal/agentpairing/**",
+        "internal/stepup/**",
+        "internal/agentaccounts/**",
+        "internal/accountprivacy/**",
+        "internal/approvals/**",
+        "internal/principallink/**",
+        "internal/scopecode/**",
+        "internal/systemactor/**",
+        "internal/operatoractor/**",
+        "internal/tenant/**",
+        "internal/tenantbootstrap/**",
+        "internal/profile/**",
+        "internal/imagework/**",
+        "internal/attachwatch/**",
+        "internal/linkvault/**",
+        "internal/sessionrequest/**",
+        "internal/agentverification/**",
+        "internal/attachments/**",
+        "internal/db/**",
+        "internal/dbtest/**",
+        "internal/config/**",
+        "internal/httpapi/**",
+        "cmd/**",
+        "embed.go"
+      ]
+    },
+    {
+      "id": "S2",
+      "key": "agent-runtime",
+      "title": "Agent runtime, harnesses and runs",
+      "paths": [
+        "internal/agentd/**",
+        "internal/agentsetup/**",
+        "internal/harness/**",
+        "internal/servicetier/**",
+        "internal/harnesslaunch/**",
+        "internal/agentdwire/**",
+        "internal/ownedprocess/**",
+        "internal/piprobe/**",
+        "internal/grokprobe/**",
+        "internal/capacity/**",
+        "internal/agentplan/**",
+        "internal/sessionusage/**",
+        "internal/agentruns/**",
+        "internal/agentactivity/**",
+        "internal/agentcompat/**",
+        "internal/runkind/**",
+        "internal/workqueue/**",
+        "internal/ticketwork/**",
+        "internal/eta/**",
+        "internal/modelprovider/**",
+        "internal/openrouter/**",
+        "internal/modelregistry/**",
+        "internal/modelprefs/**",
+        "internal/crossreview/**",
+        "internal/reviewgate/**",
+        "internal/agents/**"
+      ]
+    },
+    {
+      "id": "S3",
+      "key": "cli-inbox",
+      "title": "CLI, inbox, client, plugins, events",
+      "paths": [
+        "internal/cli/**",
+        "internal/inbox/**",
+        "internal/client/**",
+        "internal/plugins/**",
+        "internal/events/**"
+      ]
+    },
+    {
+      "id": "S4",
+      "key": "rules-knowledge",
+      "title": "Rules, doctrine and knowledge",
+      "paths": [
+        "internal/rules/**",
+        "internal/rulesimport/**",
+        "internal/rulescompare/**",
+        "internal/knowledge/**",
+        "internal/embedding/**",
+        "internal/search/**",
+        "internal/greetings/**"
+      ]
+    },
+    {
+      "id": "S5",
+      "key": "domain-a",
+      "title": "Product domain A: nodes, business, imports",
+      "paths": [
+        "internal/nodes/**",
+        "internal/business/**",
+        "internal/importer/**",
+        "internal/imports/**",
+        "internal/fromclassic/**",
+        "internal/quotepdf/**",
+        "internal/deliveryvote/**",
+        "internal/workorders/**"
+      ]
+    },
+    {
+      "id": "S6",
+      "key": "domain-b",
+      "title": "Product domain B: portal, journey, planning surfaces",
+      "paths": [
+        "internal/portal/**",
+        "internal/journey/**",
+        "internal/stagehandoff/**",
+        "internal/intake/**",
+        "internal/requirements/**",
+        "internal/questions/**",
+        "internal/decisiondesk/**",
+        "internal/outcomes/**",
+        "internal/relations/**",
+        "internal/projectgroups/**",
+        "internal/views/**",
+        "internal/demo/**",
+        "internal/tenantbrand/**",
+        "internal/brand/**",
+        "internal/ticketbenefits/**",
+        "internal/statusautopilot/**",
+        "internal/recurrences/**",
+        "internal/usagedashboard/**",
+        "internal/activity/**"
+      ]
+    },
+    {
+      "id": "S7",
+      "key": "platform-ci",
+      "title": "Aithema, releases, CI, scripts, API contract",
+      "paths": [
+        "internal/aithema/**",
+        "internal/localjournal/**",
+        "internal/releasehistory/**",
+        "internal/releases/**",
+        "internal/reportercontract/**",
+        "internal/ciproof/**",
+        "internal/ciexecutor/**",
+        "internal/deploytarget/**",
+        "internal/version/**",
+        "internal/perf/**",
+        "scripts/**",
+        ".github/**",
+        "api/**",
+        "deploy/**",
+        "docs/**",
+        "Dockerfile",
+        "justfile",
+        "Makefile",
+        "*.json",
+        "flake.nix",
+        "flake.lock",
+        "go.mod",
+        "go.sum",
+        ".dockerignore",
+        ".gitignore",
+        "*.md",
+        "LICENSE",
+        "NOTICE"
+      ]
+    },
+    {
+      "id": "S8",
+      "key": "web-ui",
+      "title": "Web UI: views and components",
+      "paths": [
+        "web/src/views/**",
+        "web/src/components/**"
+      ]
+    },
+    {
+      "id": "S9",
+      "key": "web-core-tests",
+      "title": "Web core and web tests",
+      "paths": [
+        "web/src/**",
+        "web/tests/**",
+        "web/e2e/**",
+        "web/*",
+        "web/.vscode/**",
+        "web/public/**"
+      ],
+      "exclude": [
+        "web/src/views/**",
+        "web/src/components/**"
+      ]
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -26,6 +27,7 @@ import (
 )
 
 type Module struct {
+	ignoredHarnessReport  sync.Once
 	pool                  *pgxpool.Pool
 	origin, defaultTenant string
 	mu                    sync.Mutex
@@ -33,7 +35,7 @@ type Module struct {
 	watch                 watchRelay
 	watchKeys             watchPollKeys
 	managed               *ManagedSetup
-	formula               *HomebrewFormula
+	accountLinkPepper     []byte
 }
 type rate struct {
 	start time.Time
@@ -48,16 +50,9 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*confi
 	return &Module{pool: pool, origin: origin, defaultTenant: defaultTenant, clients: map[string]rate{}, managed: managedSetup(origin, nixGuide...)}
 }
 
-// SetHomebrewFormula attaches the tap check. Nil keeps the previous guide, which always publishes Homebrew.
-func (m *Module) SetHomebrewFormula(f *HomebrewFormula) {
-	if m == nil {
-		return
-	}
-	m.formula = f
-}
-
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
+	m.mountAccountLink(mux)
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
 	mux.HandleFunc("POST /api/agent-pairing/device", m.device)
 	mux.HandleFunc("POST /api/agent-pairing/redeem", m.redeem)
@@ -69,6 +64,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent-pairing/computers/{computerId}", m.person("account.read", m.get))
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/disconnect", m.person("account.manage", m.disconnect))
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect", m.person("account.manage", m.disconnect))
+	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/remove", m.person("account.manage", m.remove))
 	mux.HandleFunc("GET /api/agent-pairing/self", m.self)
 	mux.HandleFunc("POST /api/agent-pairing/self/disconnect", m.self)
 }
@@ -87,16 +83,8 @@ func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
 	if m.managed != nil {
 		guide["managed_setup"] = m.managed
 	}
-	if m.formula == nil {
-		guide["homebrew_command"] = homebrewCommand(m.origin)
-	} else if current, known := m.formula.Current(); !known {
-		guide["homebrew_formula_current"] = nil
-	} else {
-		guide["homebrew_formula_current"] = current
-		if current {
-			guide["homebrew_command"] = homebrewCommand(m.origin)
-		}
-	}
+	guide["homebrew_command"] = homebrewCommand(m.origin)
+	guide["agent_compatibility"] = agentcompat.Supported()
 	reply(w, guide)
 }
 
@@ -155,7 +143,7 @@ func (m *Module) person(permission string, fn func(http.ResponseWriter, *http.Re
 }
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+		if err := LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -163,14 +151,19 @@ func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error)
 }
 
 // Count attempts in its own committed transaction, even when the operation
-// subsequently fails. Only three bounded rows per tenant are ever allocated.
+// subsequently fails. Only predefined bounded buckets per tenant are allocated.
 func (m *Module) limit(ctx context.Context, tenantID, bucket string, max int) error {
 	var count int
+	table := "agent_pairing_limits"
+	switch bucket {
+	case "link_offer", "link_poll", "link_lookup", "link_approve":
+		table = "account_person_link_limits"
+	}
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO agent_pairing_limits(tenant_id,bucket,attempts) VALUES($1,$2,1)
+		return tx.QueryRow(ctx, `INSERT INTO `+table+`(tenant_id,bucket,attempts) VALUES($1,$2,1)
    ON CONFLICT(tenant_id,bucket) DO UPDATE SET
-    attempts=CASE WHEN agent_pairing_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE agent_pairing_limits.attempts+1 END,
-    starts_at=CASE WHEN agent_pairing_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE agent_pairing_limits.starts_at END
+    attempts=CASE WHEN `+table+`.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE `+table+`.attempts+1 END,
+    starts_at=CASE WHEN `+table+`.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE `+table+`.starts_at END
    RETURNING attempts`, tenantID, bucket).Scan(&count)
 	})
 	if err != nil {
@@ -243,7 +236,7 @@ func (m *Module) device(w http.ResponseWriter, r *http.Request) {
 			if state != "connected" {
 				return fail(409, "pairing_revoked", "computer is disconnecting or revoked; pair afresh")
 			}
-			if in.RuntimeHash != runtime || in.LifecycleHash != h || in.Workspace != original.Workspace || in.Platform != original.Platform || in.Arch != original.Arch || in.ComputerName != original.ComputerName {
+			if in.LocalAuthPublicKey != original.LocalAuthPublicKey || in.RuntimeHash != runtime || in.LifecycleHash != h || in.Workspace != original.Workspace || in.Platform != original.Platform || in.Arch != original.Arch || in.ComputerName != original.ComputerName {
 				return fail(409, "conflict", "existing computer binding must remain unchanged")
 			}
 		}
@@ -412,7 +405,7 @@ func (m *Module) proof(w http.ResponseWriter, r *http.Request, reconcile bool) {
 			if err = finalizeDrain(r.Context(), tx, *rec.ComputerID); err != nil {
 				return err
 			}
-			if err = cleanup(r.Context(), tx, *rec.ComputerID, in); err != nil {
+			if err = m.cleanup(r.Context(), tx, *rec.ComputerID, in); err != nil {
 				return err
 			}
 		} else if rec.State == "approved" {

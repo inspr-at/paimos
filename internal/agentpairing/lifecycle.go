@@ -4,9 +4,14 @@ package agentpairing
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -15,8 +20,25 @@ import (
 // Lock is acquired before work-order/run/account locks by every paired
 // dispatch, claim, probe, settlement and lifecycle mutation. This serializes
 // revocation with in-flight credentials that passed the HTTP auth boundary.
+// Keep this primitive pairing-only: run polling and telemetry do not need tree.
 func Lock(ctx context.Context, tx pgx.Tx) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+
+// LockMutation enters an account/lifecycle transaction in the shipped order:
+// pairing, tree, tenant, then resource rows. Take the tree before the new tenant
+// authorization fence, even if this particular operation does not need tree;
+// callers may later write tree rows. Call only at transaction entry, before
+// resource locks. NO KEY UPDATE permits FK checks while RequireTx sees live grants.
+func LockMutation(ctx context.Context, tx pgx.Tx) error {
+	if err := Lock(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`)
 	return err
 }
 
@@ -208,10 +230,15 @@ func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_requests SET state='revoked' WHERE (computer_id=$1 OR details->>'existing_computer_id'=$1::text) AND state IN ('pending','approved','redeemed')`, id); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return cancelDisconnectedAccountLinks(ctx, tx, id)
 }
 func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
+	if err := cancelDisconnectedAccountLinks(ctx, tx, computer); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
   AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting'))`, computer)
 	if err != nil {
@@ -250,9 +277,37 @@ func disconnectRequest(ctx context.Context, tx pgx.Tx, rec record) error {
 	if rec.Details.ExistingComputerID == "" {
 		return revokeComputer(ctx, tx, *rec.ComputerID)
 	}
-	return nil
+	return cancelDisconnectedAccountLinks(ctx, tx, *rec.ComputerID)
 }
-func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
+
+// reportProgress appends agent_pairing.reported for the person who approved
+// this pairing, never for the workspace: the audience is stored on the event and
+// the events policy (1050) hides the row from every other reader. The agent is
+// the actor. A pairing with no approver publishes nothing.
+func reportProgress(ctx context.Context, tx pgx.Tx, computer, state string) error {
+	var principal, tenantID, audience string
+	err := tx.QueryRow(ctx, `
+SELECT c.principal_id::text, c.tenant_id::text, coalesce(person.linked_to, person.id)::text
+FROM agent_pairing_computers c
+JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+JOIN principals person ON person.tenant_id=q.tenant_id AND person.id=q.approved_by
+WHERE c.id=$1`, computer).Scan(&principal, &tenantID, &audience)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	metadata, err := json.Marshal(map[string]string{"audience_principal_id": audience})
+	if err != nil {
+		return err
+	}
+	_, err = events.Append(ctx, tx, tenant.Principal{ID: principal, TenantID: tenantID, Kind: tenant.Agent}, events.Change{
+		Type: "agent_pairing.reported", After: map[string]any{"computer_id": computer, "setup_state": state}, Metadata: metadata,
+	})
+	return err
+}
+func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
 	changed := false
 	if in.HookCapabilities != nil {
 		if len(in.HookCapabilities) > 5 {
@@ -296,8 +351,46 @@ func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) e
 		default:
 			return fail(400, "invalid_request", "unknown setup error")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode); err != nil {
+		statuses, details, err := m.harnessReports(ctx, tx, computer, in.Progress)
+		if err != nil {
 			return err
+		}
+		release := agentcompat.Release{}
+		if in.Progress.AgentRelease != nil {
+			reported := *in.Progress.AgentRelease
+			if safeText(reported.Protocol, 64) && safeText(reported.Version, 64) && safeText(reported.VersionScheme, 64) {
+				release = reported
+			}
+		}
+		// A legacy daemon omits reports. Clear stale state after a downgrade.
+		// Last-seen moves on every report; the event fires only when setup or a
+		// harness report actually changes, so a heartbeat does not flood the stream.
+		var progressChanged bool
+		err = tx.QueryRow(ctx, `
+WITH prev AS (
+  SELECT id, setup_state, setup_error, harness_statuses, harness_details, agent_protocol, agent_version, agent_version_scheme
+  FROM agent_pairing_computers WHERE id=$1 AND state='connected'
+)
+UPDATE agent_pairing_computers c
+SET setup_state=$2, setup_error=$3, harness_statuses=$4, harness_details=$5, agent_protocol=$6, agent_version=$7, agent_version_scheme=$8, last_seen_at=clock_timestamp()
+FROM prev WHERE c.id=prev.id
+RETURNING prev.setup_state IS DISTINCT FROM c.setup_state
+  OR prev.setup_error IS DISTINCT FROM c.setup_error
+  OR prev.harness_statuses IS DISTINCT FROM c.harness_statuses
+  OR prev.harness_details IS DISTINCT FROM c.harness_details
+  OR prev.agent_protocol IS DISTINCT FROM c.agent_protocol
+  OR prev.agent_version IS DISTINCT FROM c.agent_version
+  OR prev.agent_version_scheme IS DISTINCT FROM c.agent_version_scheme`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details, release.Protocol, release.Version, release.VersionScheme).Scan(&progressChanged)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = nil
+		}
+		if err != nil {
+			return err
+		}
+		if progressChanged {
+			if err = reportProgress(ctx, tx, computer, in.Progress.State); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -343,4 +436,70 @@ func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) e
 		return audit(ctx, tx, tenant.Principal{ID: principal, TenantID: tenantID, Kind: tenant.Agent}, "agent_pairing.cleanup_acknowledged", map[string]any{"computer_id": computer, "account_ids": in.Cleaned, "computer_cleanup_confirmed": in.ComputerCleaned})
 	}
 	return nil
+}
+
+// harnessReports treats optional telemetry as advisory: version skew must not
+// prevent lifecycle fences or cleanup acknowledgements from being reconciled.
+func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string, progress *SetupProgress) (map[string]string, map[string]agentsetup.HarnessDetail, error) {
+	statuses := map[string]string{}
+	details := map[string]agentsetup.HarnessDetail{}
+	enrolled := map[string]bool{}
+	enrolledAccounts := map[string][]string{}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT a.harness, e.account_id::text FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND e.state<>'revoked'`, computer)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var harness, accountID string
+		if err := rows.Scan(&harness, &accountID); err != nil {
+			return nil, nil, err
+		}
+		enrolled[harness] = true
+		enrolledAccounts[harness] = append(enrolledAccounts[harness], accountID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	dropped := false
+	for harness, status := range progress.HarnessStatuses {
+		if _, ok := agentsetup.HarnessReport(harness, status, ""); !ok || !enrolled[harness] {
+			dropped = true
+			continue
+		}
+		// A newer state token stays in harness_details; the legacy map keeps
+		// its closed set for older readers.
+		if agentsetup.KnownHarnessState(status) {
+			statuses[harness] = status
+		}
+	}
+	for harness, report := range progress.HarnessDetails {
+		detail, ok := agentsetup.HarnessReport(harness, report.State, report.Reason)
+		legacy, hasLegacy := progress.HarnessStatuses[harness]
+		if !ok || !enrolled[harness] || hasLegacy && legacy != report.State {
+			dropped = true
+			continue
+		}
+		if agentsetup.KnownHarnessState(detail.State) {
+			statuses[harness] = detail.State
+		}
+		// Never persist client-supplied commands, paths or diagnostics: the
+		// fix is derived from the harness and reason code. Attention on a
+		// non-ready report is ignored. A ready report keeps only enrolled
+		// accounts that are a proper subset and still need a fix.
+		if detail.State == "ready" {
+			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
+			detail.Attention = block.Accounts
+			detail.AttentionCount = block.Count
+			detail.AttentionTruncated = block.Truncated
+		}
+		details[harness] = detail
+	}
+	if dropped {
+		m.ignoredHarnessReport.Do(func() {
+			// Once per module lifetime; no untrusted keys or values enter logs.
+			slog.Warn("ignored unsupported or unenrolled pairing harness report; lifecycle reconciliation continues")
+		})
+	}
+	return statuses, details, nil
 }

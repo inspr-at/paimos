@@ -3,6 +3,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, myPermissions } from '../lib/authz'
+import type { AttachQueueRow, AttachReview } from '../lib/attachWatch'
 import { pairingPermissions } from '../lib/agentPairing'
 import { message, subscribeAgents, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
@@ -18,14 +19,18 @@ import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
+import ChangeTierPopover from '../components/agents/ChangeTierPopover.vue'
+import TierToast from '../components/agents/TierToast.vue'
+import { useServiceTiers } from '../stores/serviceTiers'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
-import CapacityCard from '../components/agents/CapacityCard.vue'
+import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
-import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
+import AttachPending from '../components/agents/AttachPending.vue'
 
 // Markus's desk for agents: a compact live line under the title, what waits on him
 // (only when something does), the accounts with today's plan, then every session
@@ -37,6 +42,13 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
+// Briefing links focus the existing request card; decisions stay on that card.
+watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
+  if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
+  await nextTick()
+  cursor.value = id
+  focusRow(id)
+}, { immediate: true })
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
 const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
@@ -45,6 +57,8 @@ const updatedAge = computed(() => agents.sessionsUpdatedAt === null ? '' : `${Ma
 const freshnessTip = computed(() => [live.value ? 'Connected to live updates' : 'Refreshing every 20 seconds', updatedFull.value ? `last update ${updatedFull.value}` : ''].filter(Boolean).join(' · '))
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
+const attachDialog = ref<InstanceType<typeof AttachApproval>>()
+const attachPending = ref<InstanceType<typeof AttachPending>>()
 const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
 const pairingAccess = computed(() => pairingPermissions({
   permissions: [...myPermissions()],
@@ -70,7 +84,15 @@ const canDecide = computed(() => session.identity?.principal.kind === 'person' &
 const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const showCapacity = computed(() => agents.loaded && capacity.state !== 'forbidden' && agents.accountsState !== 'forbidden')
-const waiting = computed(() => agents.needsCount + capacity.signins.length)
+
+// ---------- Accounts and computers: one computer-first panel (AEON-499) ----------
+const showSetup = computed(() => agents.loaded && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
+const pageTitle = ref<HTMLElement>()
+const attachCount = ref(0)
+const attachRows = ref<AttachQueueRow[]>([])
+const attachHistory = ref<AttachQueueRow[]>([])
+const waiting = computed(() => agents.needsCount + capacity.signins.length + attachCount.value)
+function reviewAttach(request: AttachReview) { attachDialog.value?.show(request, attachRows.value.map(row => row.review)) }
 
 // ---------- Resources and people ----------
 function resource(approval: Approval): Resource {
@@ -98,13 +120,43 @@ function openAgent(principalId: string) {
 }
 
 // ---------- Actions ----------
-async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
-  await agents.decide(approval, decision, reason)
-  toast(`${decision === 'approved' ? 'Approved' : 'Denied'}: ${agents.askerName(approval.agent_principal_id, approval.agent_name).name} was told.`)
-  await nextTick()
-  const next = agents.pending[0]
-  cursor.value = next ? `a:${next.id}` : ''
-  if (next) focusRow(cursor.value)
+// A decision confirms on its own card, which moves focus on and announces it (AEON-505);
+// the page keeps Needs you while a decided card still shows, then folds it away.
+const settling = ref(false)
+const announcement = ref('')
+function announce(text: string) { announcement.value = ''; void nextTick(() => { announcement.value = text }) }
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+let foldHadFocus = false
+// The height folds to nothing and a negative margin takes the column gap with it, so
+// what follows moves up smoothly and does not jump when the card is gone.
+function foldNeeds(el: Element, done: () => void) {
+  const card = el as HTMLElement
+  foldHadFocus = card.contains(document.activeElement)
+  // The app owns this fold; native anchoring must not correct its scroll offset.
+  const scroller = card.closest<HTMLElement>('main'), anchor = scroller?.style.overflowAnchor ?? ''
+  if (scroller) scroller.style.overflowAnchor = 'none'
+  const remove = () => {
+    done()
+    requestAnimationFrame(() => { if (scroller) scroller.style.overflowAnchor = anchor })
+  }
+  if (reducedMotion() || !card.parentElement) { remove(); return }
+  const px = (value: string) => parseFloat(value) || 0
+  const style = getComputedStyle(card)
+  const edges = px(style.borderTopWidth) + px(style.borderBottomWidth) + px(style.paddingTop) + px(style.paddingBottom)
+  const gap = px(getComputedStyle(card.parentElement).rowGap)
+  Object.assign(card.style, { height: `${card.offsetHeight}px`, minHeight: '0', overflow: 'clip' })
+  void card.offsetHeight
+  Object.assign(card.style, { transition: 'height .28s cubic-bezier(.4, 0, .2, 1), margin-bottom .28s cubic-bezier(.4, 0, .2, 1), opacity .2s ease', height: '0px', marginBottom: `${-(gap + edges)}px`, opacity: '0' })
+  const finish = () => { clearTimeout(timer); card.removeEventListener('transitionend', ended); remove() }
+  const ended = (event: TransitionEvent) => { if (event.target === card && event.propertyName === 'height') finish() }
+  const timer = setTimeout(finish, 450)
+  card.addEventListener('transitionend', ended)
+}
+// Focus that was inside the folded card goes to Decided, never to the page body.
+function needsFolded() {
+  if (!foldHadFocus) return
+  foldHadFocus = false
+  document.querySelector<HTMLElement>('.agents-page .decided .history-toggle')?.focus({ preventScroll: true })
 }
 async function resolveHeld(request: HeldRequest, decision: 'resolved' | 'dismissed', note: string) {
   await agents.resolve(request, decision, note)
@@ -188,6 +240,7 @@ function move(step: number) {
   // With the panel open, the panel follows the cursor through sessions.
   if (sessionId.value && cursor.value.startsWith('s:')) void router.replace({ path: `/agents/${cursor.value.slice(2)}`, query: route.query })
 }
+const serviceTiers = useServiceTiers()
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -220,12 +273,20 @@ let stop: (() => void) | undefined
 const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
-function changed() {
+let tierCatchUp = false
+function changed(event?: string) {
+  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
-  debounce = setTimeout(() => { debounce = undefined; void agents.loadAll() }, 400)
+  debounce = setTimeout(() => {
+    debounce = undefined
+    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
+    void agents.loadAll()
+  }, 400)
 }
+let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  stopTierWatch = serviceTiers.watchPage()
   void agents.loadAll()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
@@ -234,6 +295,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
+  stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
 })
@@ -245,7 +307,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <header class="page-head">
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
-        <h1 id="agents-title">Agents</h1>
+        <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
         <LiveLine :views="agents.views" :now="agents.now" :loaded="agents.loaded" @open="openSession" @jump="jump" />
       </div>
       <div class="head-side">
@@ -259,10 +321,11 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <template v-else>Connecting…</template>
           </span>
         </p>
+        <RouterLink class="context-link" to="/decision-desk">Decision Desk</RouterLink>
         <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
         </div>
-        <AttachApproval />
+        <AttachApproval ref="attachDialog" :now="agents.now" @changed="(result, declined) => attachPending?.settle(result, declined)" />
         <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect your machine</RouterLink>
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
       </div>
@@ -272,13 +335,18 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
          page does not jump as each read lands. -->
     <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
-        <ApprovalQueue
-          v-if="agents.loaded && waiting"
-          ref="queue" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
-          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
-          @focus-row="id => cursor = id" @open-agent="openAgent"
-        />
-        <CapacityCard v-if="showCapacity" />
+        <AttachPending ref="attachPending" :now="agents.now" @count="count => attachCount = count" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
+        <Transition :css="false" @leave="foldNeeds" @after-leave="needsFolded">
+          <ApprovalQueue
+            v-if="agents.loaded && (waiting || settling || rows.length)"
+            ref="queue" :attaches="rows" :attach-history="attachHistory" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
+            :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
+            @review-attach="request => { attachRows = rows; reviewAttach(request) }" @dismiss-attach="id => attachPending?.dismiss(id)" @focus-row="id => cursor = id" @open-agent="openAgent" @settling="active => settling = active" @announce="announce"
+          />
+        </Transition>
+        </AttachPending>
+        <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
+        <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
@@ -288,12 +356,11 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <ApprovalQueue
-          v-if="agents.loaded && !waiting && history.length" history-only
+          v-if="agents.loaded && !waiting && !settling && !attachRows.length && (history.length || attachHistory.length)" history-only :attach-history="attachHistory"
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
-          :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+          :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
-        <RunQueue v-if="agents.loaded" />
-        <ConnectedComputers v-if="agents.loaded" :permissions="pairingAccess" compact-empty embedded />
+        <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
@@ -304,7 +371,10 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
+    <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.instance" />
+    <TierToast />
     <StartAgentDialog ref="startDialog" />
+    <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
   </section>
 </template>
 
@@ -326,7 +396,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .freshness.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
 .freshness.stale .live-mark { background: var(--gold); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
-.main-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+/* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
+.main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }

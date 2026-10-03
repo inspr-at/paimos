@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -105,6 +106,45 @@ func securityMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func aithemaViewPolicy(origin string, next http.Handler) http.Handler {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SPA navigation cannot relax the document's Permissions-Policy. The
+		// app document must allow same-origin capture before entering Journey.
+		// Public portal documents retain their microphone denial.
+		if r.URL.Path != "/portal" && !strings.HasPrefix(r.URL.Path, "/portal/") {
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; connect-src 'self' wss://"+u.Host+"; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func attachmentViewPolicy(origin string, next http.Handler) http.Handler {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(origin, " ;\r\n\t") {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/portal" && !strings.HasPrefix(r.URL.Path, "/portal/") {
+			policy := strings.Split(w.Header().Get("Content-Security-Policy"), ";")
+			out := make([]string, 0, len(policy)+1)
+			for _, directive := range policy {
+				directive = strings.TrimSpace(directive)
+				if !strings.HasPrefix(directive, "frame-src ") && directive != "" {
+					out = append(out, directive)
+				}
+			}
+			out = append(out, "frame-src 'self' "+origin)
+			w.Header().Set("Content-Security-Policy", strings.Join(out, "; "))
+		}
 		next.ServeHTTP(w, r)
 	})
 }

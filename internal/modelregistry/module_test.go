@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -214,7 +215,7 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	astra := profileBySlug(profiles, "codex-astra-xhigh")
 	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
 		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 4 || gate.Ladder[1].SkipReasons[0] != "author family" {
+		len(gate.Ladder) != 6 || gate.Ladder[1].SkipReasons[0] != "author family" {
 		t.Fatalf("gate %+v", gate)
 	}
 	otherGate := decode[Resolution](t, &other, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude", "", http.StatusOK)
@@ -223,6 +224,56 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	}
 	if otherGate.Profile.ID == gate.Profile.ID {
 		t.Fatal("profile ids leaked across tenants")
+	}
+}
+
+func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "family-aliases", "person", "Ada", []string{"admin"})
+	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
+	now := time.Now()
+	for _, tc := range []struct{ input, family string }{
+		{"claude", "anthropic"}, {"codex", "openai"}, {"grok", "xai"},
+		{"anthropic", "anthropic"}, {"openai", "openai"}, {"xai", "xai"}, {"cursor", "cursor"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			path := "/api/models/resolve?role=review-gate&author_family="
+			got := decode[Resolution](t, &admin, http.MethodGet, path+tc.input, "", http.StatusOK)
+			want := decode[Resolution](t, &admin, http.MethodGet, path+tc.family, "", http.StatusOK)
+			if got.AuthorFamily != tc.family || !reflect.DeepEqual(got, want) || got.Profile == nil || got.Profile.Family == tc.family {
+				t.Fatalf("alias resolution %+v differs from family resolution %+v", got, want)
+			}
+			err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+				got, err := ResolveReview(t.Context(), tx, admin, tc.input, "", now)
+				if err != nil {
+					return err
+				}
+				want, err := ResolveReview(t.Context(), tx, admin, tc.family, "", now)
+				if err != nil {
+					return err
+				}
+				if !reflect.DeepEqual(got, want) || len(got.Ladder) == 0 {
+					t.Fatalf("review alias route %+v differs from family route %+v", got, want)
+				}
+				for _, candidate := range got.Ladder {
+					for _, profile := range profiles {
+						if profile.ID == candidate.ProfileID && profile.Family == tc.family && !strings.Contains(strings.Join(candidate.SkipReasons, ";"), "author family") {
+							t.Errorf("review candidate from author's family was not excluded: %+v", candidate)
+						}
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, input := range []string{"pi", "opencode", "unknown"} {
+		status, body := call(t, &admin, http.MethodGet, "/api/models/resolve?role=review-gate&author_family="+input, "")
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "openai, anthropic, xai, cursor, google or local") {
+			t.Fatalf("invalid family %q: status %d, body %s", input, status, body)
+		}
 	}
 }
 

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { pct, poolSentence } from '../../lib/capacity'
+import { pct, poolSentence, sourceLine, consumptionLine } from '../../lib/capacity'
 import { bandReadings, bandRows, plural, type BandRow } from '../../lib/usageWork'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
@@ -12,8 +12,8 @@ import HarnessMark from '../agents/HarnessMark.vue'
 import PlanSentence from '../agents/PlanSentence.vue'
 
 // "Now" on the Usage page: one row per vendor pool, from the same store, gauge
-// and plan sentence as the Agents desk. What binds first comes first. Pacing is
-// changed on the Agents desk; this band only reads.
+// (with what is kept for you) and plan sentence as the Agents desk. What binds
+// first comes first. Pacing is changed on the Agents desk; this band only reads.
 const capacity = useCapacity()
 const agents = useAgents()
 const now = computed(() => agents.now)
@@ -28,7 +28,8 @@ const retry = () => Promise.all([agents.refreshAccounts(), capacity.load()])
 function gaugeLabel(row: BandRow) {
   if (row.left === null) return ''
   const scope = bandReadings(row) ? `, ${bandReadings(row)}` : row.accounts > 1 ? `, ${row.accounts} accounts` : ''
-  const base = `${row.pool.name}${scope}: ${Math.round(row.left)}% left`
+  const kept = row.gauge && row.gauge.yours >= 0.5 ? `, ${pct(row.gauge.yours)} kept for you` : ''
+  const base = `${row.pool.name}${scope}: ${Math.round(row.left)}% left${kept}`
   return row.today ? `${base}, ${row.today.used} of ${row.today.share} used today` : base
 }
 const planText = (row: BandRow) => [row.accounts > 1 && !bandReadings(row) ? `${row.accounts} accounts` : '', row.pool.plan].filter(Boolean).join(' · ')
@@ -43,7 +44,7 @@ function resetTip(row: BandRow) {
     <header class="band-head">
       <h2 id="band-title">Capacity</h2>
       <span v-if="capacity.ready.total" class="meta">{{ capacity.ready.live }} of {{ plural(capacity.ready.total, 'account') }} ready</span>
-      <RouterLink class="pacing" to="/agents" data-tip="Work days, nights, Sprint and Hold are on the Agents desk"><AppIcon name="sliders" :size="15" />Pacing</RouterLink>
+      <RouterLink class="pacing" to="/agents" data-tip="Work days, Keep for you, nights, Sprint and Hold are on the Agents desk"><AppIcon name="sliders" :size="15" />Pacing</RouterLink>
     </header>
 
     <div v-if="loading" class="rows" aria-hidden="true">
@@ -59,19 +60,20 @@ function resetTip(row: BandRow) {
     <ul v-else class="rows">
       <li v-for="row in rows" :key="row.pool.id" class="row" :data-pool="row.pool.id">
         <div class="name">
-          <span class="vendor"><HarnessMark :harness="row.pool.id" :size="15" /></span>
+          <span class="vendor"><HarnessMark :harness="row.pool.mark || row.pool.id" :size="15" /></span>
           <span class="pool-name">{{ row.pool.name }}</span>
           <span v-if="planText(row)" class="plan-name" :title="planText(row)">{{ planText(row) }}</span>
         </div>
-        <CapacityGauge class="bar" :gauge="row.gauge" :left="row.left ?? 0" :value="row.left ?? 0" :label="gaugeLabel(row)" :ahead="!!row.today?.ahead" />
+        <CapacityGauge v-if="row.gauge || !row.pool.rows.some(r => r.learning || r.sharedQuotaName)" class="bar" :gauge="row.gauge" :left="row.left ?? 0" :value="row.left ?? 0" :label="gaugeLabel(row)" :ahead="!!row.today?.ahead" :estimated="row.pool.rows.some(r => r.primary?.reading.source === 'estimate')" />
         <span class="left num"><template v-if="row.left !== null"><b>{{ pct(row.left) }}</b> left</template></span>
         <span class="reset num" :data-tip="resetTip(row)">
           <template v-if="row.reset">resets <b>{{ row.reset.label }}</b><span v-if="row.reset.window" class="win"> · {{ row.reset.window }}</span></template>
         </span>
+        <p v-if="row.pool.rows.some(r => r.primary?.reading.source === 'estimate' || !r.primary && r.learning)" class="estimate-source">{{ row.pool.rows.filter(r => r.primary?.reading.source === 'estimate' || !r.primary && r.learning).map(r => r.primary ? sourceLine(r, now) : `${consumptionLine(r.learning!)} · ${sourceLine(r, now)}`).join('; ') }}</p>
         <p class="sentence" :class="{ ahead: poolSentence(row.pool, now).ahead }"><span v-if="bandReadings(row)" class="partial">{{ sentenceCase(bandReadings(row)) }}. </span><PlanSentence :sentence="poolSentence(row.pool, now)" /></p>
       </li>
     </ul>
-    <footer v-if="rows.some(r => r.gauge)" class="band-foot"><CapacityLegend /></footer>
+    <footer v-if="rows.some(r => r.gauge)" class="band-foot"><CapacityLegend :yours="rows.some(r => (r.gauge?.yours ?? 0) >= 0.5)" /></footer>
   </section>
 </template>
 
@@ -101,6 +103,7 @@ function resetTip(row: BandRow) {
 .reset b { color: var(--ink); font-weight: 600; }
 .win { color: var(--ink-3); }
 .num { font-variant-numeric: tabular-nums; }
+.estimate-source { grid-column: 2 / -1; margin: 0; font-size: 12px; color: var(--ink-3); }
 .sentence { grid-area: sentence; margin: 2px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
 .sentence :deep(b) { color: var(--ink); font-weight: 600; }
 .sentence :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -120,6 +123,7 @@ function resetTip(row: BandRow) {
     grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name left" "bar bar" "reset reset" "sentence sentence";
     gap: 6px 12px; padding: 12px 14px;
   }
+  .estimate-source { grid-column: 1 / -1; }
   .reset { justify-self: start; font-size: 12.5px; color: var(--ink-3); }
   .band-foot { padding: 10px 14px 12px; gap: 6px 14px; }
 }

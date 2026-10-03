@@ -10,11 +10,13 @@ import { mockReleases, presentedHistory } from './releases-fixtures'
 const NOW = Date.parse('2026-09-29T12:00:00Z')
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const detail = (page: Page) => sheet(page).locator('article.detail')
-const rows = (page: Page) => sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const rows = (page: Page) => sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 
 async function open(page: Page, index = 0, locale?: string) {
   const history = presentedHistory(NOW)
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   await mockReleases(page, history)
   if (locale) {
     const profile = { principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale, greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }
@@ -83,7 +85,7 @@ test('without a presentation: the blocks lead, and a release without them is ver
   const d = detail(page)
   await expect(d.locator('.kicker')).toHaveCount(0)
   await expect(d.locator('.headline')).toHaveCount(0)
-  await expect(d.getByRole('heading', { level: 2, name: history.releases[1]!.version })).toBeVisible()
+  await expect(d.getByRole('heading', { level: 2, name: history.releases[1]!.codename })).toBeVisible()
   await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.getByRole('region', { name: 'Features, 1' }).locator('.pill-title')).toHaveText('Wide lists')
   // PHAROS-11 has no pill, so it keeps its chip.

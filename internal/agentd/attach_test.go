@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 func attachFixtureFile(t *testing.T, initial string) string {
@@ -141,6 +143,13 @@ func TestAttachTailRefusesLinksReplacementAndNonregular(t *testing.T) {
 		t.Fatal("replacement reopened")
 	}
 }
+
+// Consent, lease and ancestry fixtures model a verified Codex CLI image.
+// Unsigned macOS images are covered by the identity refusal regressions.
+func attachCodexSignatureFixture(context.Context, string) (attachSignature, error) {
+	return attachSignature{TeamID: attachVendorTeam(Codex), Identifier: attachVendorIdentifier(Codex), Signed: true}, nil
+}
+
 func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	t.Setenv("AEON_URL", "https://unpaired.invalid")
 	path := attachFixtureFile(t, "old turns\n")
@@ -158,10 +167,11 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	target := attachObservation{Process: attachwatch.Process{PID: 4000, UID: os.Getuid(), Started: "agent-start", Executable: exe, CWD: root}, Parent: 1, TTY: true}
 	var sent []attachwatch.DeviceRequest
 	failNetwork := false
+	serverExpiry := time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second)
 	exchange := func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 		sent = append(sent, in)
 		if failNetwork {
-			return attachwatch.View{}, errors.New("offline")
+			return attachwatch.View{}, ErrAttachExchange
 		}
 		state := "pending"
 		var until *time.Time
@@ -170,13 +180,14 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 			v := time.Now().Add(attachwatch.Lease)
 			until = &v
 		}
-		return attachwatch.View{RequestID: in.RequestID, Digest: in.Snapshot.Digest(), Snapshot: in.Snapshot, State: state, UserCode: "123456789", LeaseUntil: until}, nil
+		return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Snapshot.Digest(), attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Snapshot.Digest(), Snapshot: in.Snapshot, State: state, UserCode: "123456789", LeaseUntil: until, ExpiresAt: serverExpiry}, nil
 	}
 	m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: exchange})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer m.Close(t.Context())
+	m.signature = attachCodexSignatureFixture
 	m.observe = func(pid int) (attachObservation, error) {
 		if pid == target.PID {
 			return target, nil
@@ -189,6 +200,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		}
 		return attachObservation{}, errors.New("unknown fixture PID")
 	}
+	m.ancestry = m.observe
 	req := AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path}
 	v, err := m.handle(t.Context(), peer, req)
 	if err != nil {
@@ -205,9 +217,16 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	if _, err = m.handle(t.Context(), badPeer, AttachLocalRequest{Operation: "confirm", ID: v.ID, Digest: v.Digest}); err == nil {
 		t.Fatal("other peer confirmed")
 	}
+	if v.ExpiresAt != nil {
+		t.Fatal("a preview has no server expiry yet")
+	}
 	v, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "confirm", ID: v.ID, Digest: v.Digest})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The helper tells the person how long the code lives from the server's expiry.
+	if v.ExpiresAt == nil || !v.ExpiresAt.Equal(serverExpiry) || v.Code != "123456789" {
+		t.Fatalf("confirmed view lacks the server expiry or code: %+v", v)
 	}
 	appendAttach(t, path, "before browser approval\n")
 	poll := func() (AttachLocalView, error) {
@@ -253,6 +272,112 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		t.Fatal("attach wrote local hooks or journals")
 	}
 }
+
+// Only recognized owner causes get a fixed next step. Either way the refused
+// request leaves no attach state or transcript reader behind.
+func TestAttachRefusalNamesOwnerCausesAndClearsLocalState(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"full list":         {&client.StatusError{Status: 429, Message: attachwatch.LiveLimitMessage}, "attach requests already wait for approval in Aeon"},
+		"other limit":       {&client.StatusError{Status: 429, Message: "computer attach limit reached"}, "Stop an attached helper"},
+		"other status":      {&client.StatusError{Status: 403, Message: attachwatch.LiveLimitMessage}, "approve or decline one"},
+		"offline":           {errors.Join(ErrAttachExchange, errors.New("private transport failure")), "Check the connection"},
+		"registration lost": {&client.StatusError{Status: 403, Message: "daemon poll key rejected"}, "restart agentd"},
+		"draining":          {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalDraining}, "aeon-agentd add-harness"},
+		"enrollment":        {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalEnrollment}, "aeon-agentd add-harness"},
+		"version":           {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion}, "Update Aeon and paimos-agentd"},
+		"pairing":           {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalPairing}, "pair this computer again"},
+		"revoked bearer":    {&client.StatusError{Status: 401, Message: "unauthorized"}, "pairing no longer authenticates"},
+		"ticket":            {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalTicket}, "Check the ticket belongs to the selected project"},
+		"ticket access":     {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalTicket}, "owner has project access"},
+		"expired":           {&client.StatusError{Status: 410, AttachRefusal: attachwatch.RefusalExpired}, "approve the new code"},
+		"wrong status":      {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalVersion}, "inspect the attach request in the server logs"},
+		"unrecognized":      {&client.StatusError{Status: 409, AttachRefusal: "private arbitrary server payload"}, "inspect the attach request in the server logs"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := attachFixtureFile(t, "old turns\n")
+			root := filepath.Dir(path)
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			exe, err = filepath.EvalSymlinks(exe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			peer := attachObservation{Process: attachwatch.Process{PID: 3000, UID: os.Getuid(), Started: "cli-start", Executable: exe, CWD: root}, Parent: 2000, Session: 2000, TTY: true}
+			leader := attachObservation{Process: attachwatch.Process{PID: 2000, UID: os.Getuid(), Started: "terminal-start", Executable: exe, CWD: root}, Parent: 1, Session: 2000, TTY: true}
+			target := attachObservation{Process: attachwatch.Process{PID: 4000, UID: os.Getuid(), Started: "agent-start", Executable: exe, CWD: root}, Parent: 1, TTY: true}
+			m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+				return attachwatch.View{}, tc.err
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer m.Close(t.Context())
+			m.signature = attachCodexSignatureFixture
+			m.observe = func(pid int) (attachObservation, error) {
+				switch pid {
+				case target.PID:
+					return target, nil
+				case peer.PID:
+					return peer, nil
+				case leader.PID:
+					return leader, nil
+				}
+				return attachObservation{}, errors.New("unknown fixture PID")
+			}
+			m.ancestry = m.observe
+			v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: "confirm", ID: v.ID, Digest: v.Digest})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+			if len(m.sessions) != 0 {
+				t.Fatal("a refused request kept local state")
+			}
+			// What the helper prints must pass the attach diagnostic filter unchanged.
+			w := httptest.NewRecorder()
+			http.Error(w, err.Error(), 409)
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatal("the local reply lost the message")
+			}
+		})
+	}
+}
+
+func TestDisabledAttachKeepsRefusalBehindLocalAuthentication(t *testing.T) {
+	for _, cause := range []error{
+		&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion},
+		&client.StatusError{Status: 400, Message: "invalid attach request"},
+		&client.StatusError{Status: 409, Message: "update agentd to attach protocol 2"},
+		&AttachLocalError{Code: "attach_version_mismatch", Hint: "Update the server and restart agentd."},
+	} {
+		m := DisabledAttachManager(cause)
+		_, err := m.handle(t.Context(), attachObservation{}, AttachLocalRequest{Operation: "preview"})
+		var detail *AttachLocalError
+		if !errors.As(err, &detail) || detail.Code != "attach_version_mismatch" || len(m.sessions) != 0 {
+			t.Fatal("disabled manager lost the fixed repair or created attach state")
+		}
+		for _, bearer := range []string{"", "wrong", "fixture-local-token"} {
+			r := httptest.NewRequest("POST", "/v1/attach", strings.NewReader(`{"operation":"preview"}`))
+			if bearer != "" {
+				r.Header.Set("Authorization", "Bearer "+bearer)
+			}
+			w := httptest.NewRecorder()
+			m.serve(w, r, "fixture-local-token")
+			if w.Code != 403 || strings.Contains(w.Body.String(), "attach_version_mismatch") || strings.Contains(w.Body.String(), "Update") {
+				t.Fatal("disabled cause leaked before bearer and kernel-peer checks")
+			}
+		}
+		m.Close(t.Context())
+	}
+}
 func TestAttachInjectedJoinAndClientOptionsFailClosed(t *testing.T) {
 	peer := attachObservation{Process: attachwatch.Process{PID: 3, UID: 10}, Parent: 2}
 	agent := attachObservation{Process: attachwatch.Process{PID: 2, UID: 10}, Parent: 1}
@@ -284,12 +409,40 @@ func TestAttachBearerAloneCannotJoin(t *testing.T) {
 	}
 }
 
+func TestAttachRootAncestorIsAcceptedWithoutPaths(t *testing.T) {
+	uid := 10
+	proc := func(pid, owner, parent, session int) attachObservation {
+		return attachObservation{Process: attachwatch.Process{PID: pid, UID: owner, Started: "start"}, Parent: parent, Session: session, TTY: true}
+	}
+	peer, target := proc(30, uid, 20, 10), proc(40, uid, 50, 40)
+	graph := map[int]attachObservation{
+		30: peer, 20: proc(20, uid, 10, 10), 10: proc(10, 0, 1, 10),
+		40: target, 50: proc(50, 0, 1, 40),
+	}
+	observe := func(pid int) (attachObservation, error) {
+		p, ok := graph[pid]
+		if !ok {
+			return attachObservation{}, errors.New("missing fixture process")
+		}
+		return p, nil
+	}
+	if !independentAttachPeer(peer, target, observe) {
+		t.Fatal("root sshd or sudo ancestor refused")
+	}
+	foreign := graph[50]
+	foreign.UID = uid + 1
+	graph[50] = foreign
+	if independentAttachPeer(peer, target, observe) {
+		t.Fatal("foreign ancestor accepted")
+	}
+}
+
 func TestAttachSessionAncestryRejectsPTYBypasses(t *testing.T) {
 	for _, attack := range []string{"independent terminal", "injected child", "setsid helper", "double fork dead leader", "target session", "descendant session leader", "lost tty", "ancestry cycle"} {
 		t.Run(attack, func(t *testing.T) {
-			peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: 10}, Parent: 20, Session: 20, TTY: true}
-			target := attachObservation{Process: attachwatch.Process{PID: 40, UID: 10}, Parent: 1, Session: 40, TTY: true}
-			leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: 10}, Parent: 1, Session: 20, TTY: true}
+			peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: 10, Started: "helper"}, Parent: 20, Session: 20, TTY: true}
+			target := attachObservation{Process: attachwatch.Process{PID: 40, UID: 10, Started: "target"}, Parent: 1, Session: 40, TTY: true}
+			leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: 10, Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 			switch attack {
 			case "injected child":
 				peer.Parent = target.PID
@@ -336,7 +489,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 				}
 				root := filepath.Dir(path)
 				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
-				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid(), Started: "leader"}, Parent: 1, Session: 20, TTY: true}
 				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
 				dead := false
 				var sent []attachwatch.DeviceRequest
@@ -346,12 +499,13 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 					if in.Operation == "poll" {
 						state = "active"
 					}
-					return attachwatch.View{RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state}, nil
+					return attachwatch.View{ConsentMode: attachwatch.ConsentAeon, ConsentDigest: attachwatch.ConsentDigest(in.RequestID, in.Snapshot.Digest(), attachwatch.ConsentAeon), RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state}, nil
 				}})
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer m.Close(t.Context())
+				m.signature = attachCodexSignatureFixture
 				m.observe = func(pid int) (attachObservation, error) {
 					for _, p := range []attachObservation{peer, target, leader} {
 						if pid == p.PID && !(dead && pid == leader.PID) {
@@ -360,6 +514,7 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 					}
 					return attachObservation{}, errors.New("dead fixture process")
 				}
+				m.ancestry = m.observe
 				v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
 				if err != nil {
 					t.Fatal(err)
@@ -389,9 +544,14 @@ func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
 				case "leader becomes target child":
 					peer.Parent, leader.Parent = 1, target.PID
 				}
+				signatureCalls := 0
+				m.signature = func(ctx context.Context, pid string) (attachSignature, error) {
+					signatureCalls++
+					return attachCodexSignatureFixture(ctx, pid)
+				}
 				m.sessions[v.ID].touched = time.Now().Add(-2 * time.Second)
-				if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err == nil || len(m.sessions) != 0 {
-					t.Fatal("changed helper ancestry retained watch")
+				if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err == nil || len(m.sessions) != 0 || signatureCalls != 0 {
+					t.Fatal("changed helper ancestry retained watch or reached signature verification")
 				}
 				for _, request := range sent {
 					if request.Operation != "detach" || request.Text != "" {

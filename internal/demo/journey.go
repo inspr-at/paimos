@@ -118,7 +118,7 @@ func (s *seeder) journey() error {
 }
 
 func (s *seeder) brief(project string) error {
-	note := "Fictional brief source for the Lumen Archive demo."
+	note := "Fictional brief source for the archive demo."
 	sum := sha256.Sum256([]byte(note))
 	var source idBody
 	if err := s.api.do(s.admin, "", http.MethodPost, "/api/projects/"+project+"/intake/sources", map[string]any{
@@ -133,7 +133,7 @@ func (s *seeder) brief(project string) error {
 	var draft idBody
 	if err := s.api.do(s.scribe, s.scribeKey, http.MethodPost, "/api/projects/"+project+"/intake/drafts", map[string]any{
 		"kind": "brief", "title": "A quiet reading room",
-		"body":            "The Lumen Archive wants a reading room that stays quiet after dusk. This text is fictional demo copy.",
+		"body":            "The archive wants a reading room that stays quiet after dusk. This text is fictional demo copy.",
 		"base_event_id":   0,
 		"citations":       []map[string]string{{"source_id": source.ID, "locator": "paragraph-1"}},
 		"idempotency_key": "demo-brief",
@@ -146,6 +146,53 @@ func (s *seeder) brief(project string) error {
 		return fmt.Errorf("accept brief: %w", err)
 	}
 	return nil
+}
+
+// pendingJourney leaves a live, revision-bound requirements gate on a second
+// project. The existing Lumen build and its applied approvals stay intact.
+func (s *seeder) pendingJourney() error {
+	project := s.ids["NGLASS-1"]
+	view, err := s.journeyView(project)
+	if err != nil {
+		return err
+	}
+	if err := s.api.do(s.admin, "", http.MethodPut, "/api/projects/"+project+"/journey/profile", map[string]any{
+		"profile": "personal", "expected_revision": view.Revision,
+	}, http.StatusOK, nil, nil); err != nil {
+		return err
+	}
+	if err := s.brief(project); err != nil {
+		return err
+	}
+	view, err = s.journeyView(project)
+	if err != nil {
+		return err
+	}
+	view, err = s.act(project, map[string]any{
+		"action": "confirm_brief", "expected_revision": view.Revision, "idempotency_key": "demo-glass-confirm-brief",
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.api.do(s.admin, "", http.MethodPost, "/api/projects/"+project+"/requirements", map[string]any{
+		"kind": "functional", "title": "Fit quiet glass panes in the reading room",
+		"body":              "Fictional glass specification for the archive. A person must agree it before work starts.",
+		"expected_revision": view.Revision, "idempotency_key": "demo-glass-requirement",
+	}, http.StatusCreated, nil, nil); err != nil {
+		return err
+	}
+	view, err = s.journeyView(project)
+	if err != nil {
+		return err
+	}
+	if view.Stage != "requirements" || view.RequirementsScope == "" {
+		return fmt.Errorf("North Glass has no live requirements gate")
+	}
+	return s.api.do(s.scribe, s.scribeKey, http.MethodPost, "/api/approvals", map[string]any{
+		"scope": view.RequirementsScope, "resource_kind": "node", "resource_id": project,
+		"rationale":  "Lumen Scribe asks a person to agree the fictional North Glass pane requirements.",
+		"expires_at": time.Now().Add(72 * time.Hour).UTC(),
+	}, http.StatusCreated, nil, nil)
 }
 
 func (s *seeder) agree(project, key string) error {

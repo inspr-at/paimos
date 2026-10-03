@@ -31,10 +31,11 @@ async function openAgents(page: Page, path = '/agents') {
   await expect(page.locator('.agents-page .row').first()).toBeVisible()
 }
 // Account management lives in Settings → Accounts (AEON-299).
-async function grantAccounts(page: Page) {
+async function grantAccounts(page: Page, manage = false) {
   await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     effective.workspace.permissions.push('account.read')
+    if (manage) effective.workspace.permissions.push('account.manage')
     return route.fulfill({ json: effective })
   })
 }
@@ -82,7 +83,7 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await setup(page)
   await openAgents(page)
   // Three buckets in urgency order; each row still names its exact state.
-  await expect(page.locator('.group-row')).toHaveText([/Needs attention\s*\d+/, /Live\s*\d+/, /Stopped\s*1/])
+  await expect(page.locator('.group-row')).toHaveText([/Needs attention\s*\d+/, /Live\s*\d+/, /Ended\s*1/])
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
@@ -93,7 +94,7 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await expect(row(page, session(6)).locator('.agent-state-label')).toHaveText('Working')
   // Stopped sessions fold away until asked for.
   await expect(row(page, session(7))).toHaveCount(0)
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, session(7))).toBeVisible()
   // One compact live line; the table groups carry the rest.
   await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText(/^\d+ live/)
@@ -215,7 +216,8 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   await expect(reason).toBeFocused()
   await reason.fill('Fine for this run.')
   await page.keyboard.press('Enter')
-  await expect(page.locator('.toast').filter({ hasText: 'Approved: nova was told.' })).toBeVisible()
+  // The card itself confirms (AEON-505), then folds away.
+  await expect(queue(page).locator('.item.settled')).toContainText('Approved·nova may claim a run and start work')
   expect(calls.find(c => c.path.endsWith('/decision'))?.body).toEqual({ decision: 'approved', reason: 'Fine for this run.' })
   expect(data.approvals.find(a => a.scope === 'run.claim' && a.decision === 'approved' && a.agent_principal_id.endsWith('2'))).toBeTruthy()
   await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(3)
@@ -355,10 +357,10 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await setup(page)
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
-  // Rows follow urgency: the problem camy sits right above nova.
-  await row(page, session(8)).locator('.c-state').click()
-  await expect(page).toHaveURL(`/agents/${session(8)}`)
-  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
+  // Rows follow urgency, then start time: kite, which needs you and started first, sits right above nova.
+  await row(page, kite).locator('.c-state').click()
+  await expect(page).toHaveURL(`/agents/${kite}`)
+  await expect(panel(page).getByRole('heading', { name: /kite/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
   await expect(page).toHaveURL(`/agents/${nova}`)
@@ -424,45 +426,30 @@ test('held action requests resolve or dismiss with an optional note, by button o
   await expect(page.getByRole('link', { name: 'Agents, 3 need you' })).toBeVisible()
 })
 
-test('accounts show what is left and the pace; admins can drain and resume', async ({ page }) => {
+test('Settings lists limits set by hand as Set by you, never as a vendor percent; admins can drain and resume', async ({ page }) => {
   const { calls } = await setup(page)
-  await grantAccounts(page)
+  await grantAccounts(page, true)
   await page.goto('/settings/accounts')
-  const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
+  const accounts = page.locator('#agent-accounts')
   const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
-  await expect(claude).toContainText('28% tokens left')
-  await expect(claude).toContainText('5-hour')
+  await expect(claude.locator('.chip.mine')).toHaveText('Set by you')
   await expect(claude).toContainText('Team')
-  await expect(claude).toContainText('Ahead of pace')
-  await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Daily')
-  await expect(accounts.locator('.account').filter({ hasText: 'Cursor Business' })).toContainText('Monthly')
-  await expect(claude.getByRole('meter')).toHaveAttribute('aria-valuenow', '28')
-  await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Room to spare')
-  const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
-  await codex.hover()
-  await codex.getByRole('button', { name: 'Drain' }).click()
-  await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
-  await expect(codex).toContainText('Draining')
-  expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })
-})
-
-test('an unmeasured allowance is unknown, not a percentage left', async ({ page }) => {
-  const { data } = await setup(page)
-  ;(data.accounts[0].windows[0] as Record<string, unknown>).provisional = true
-  await grantAccounts(page)
-  await page.goto('/settings/accounts')
-  const claude = page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: 'Claude Max' })
-  await expect(claude).toContainText('Unmeasured')
-  await expect(claude).toContainText('allowance unknown')
-  await expect(claude).not.toContainText('%')
+  await claude.getByRole('button', { name: 'Details for Claude Max' }).click()
+  await expect(claude.locator('ul.mine .what')).toContainText('5,000,000 tokens')
+  await expect(claude.locator('ul.mine')).not.toContainText('%')
   await expect(claude.getByRole('meter')).toHaveCount(0)
+  const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
+  await codex.getByRole('switch', { name: /Agents may use it/ }).click()
+  await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
+  await expect(codex.locator('.state')).toHaveText('Paused')
+  expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })
 })
 
 test('accounts explain themselves when the person may not see them', async ({ page }) => {
   await setup(page, { accountsForbidden: true })
   await grantAccounts(page)
   await page.goto('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('visible to workspace admins')
+  await expect(page.locator('#agent-accounts')).toContainText('visible to workspace admins')
 })
 
 test('an empty workspace explains how an agent connects', async ({ page }) => {

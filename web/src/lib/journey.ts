@@ -76,10 +76,13 @@ export interface IntakeSource {
 export interface IntakeTurn { id: string; source_id: string; ordinal: number; speaker: 'person' | 'agent'; speaker_principal_id: string; body: string; created_at: string }
 export interface Citation { source_id: string; turn_id?: string; locator: string }
 export interface TicketSuggestion { title: string; estimated_hours: string | number; later: boolean; access_change: boolean }
+export type IntakeExtensions = Record<string, { version: string; data: unknown }>
 export interface IntakeDraft {
   id: string; kind: 'brief' | 'requirement'; requirement_kind?: Requirement['kind']; target_node_id?: string; title: string; body: string
-  base_event_id: number; citations: Citation[]; ticket_suggestions: TicketSuggestion[]; status: 'proposed' | 'accepted' | 'rejected'
+  base_event_id: number; citations: Citation[]; ticket_suggestions: TicketSuggestion[]; status: 'proposed' | 'accepted' | 'rejected' | 'superseded'
   proposed_at: string; accepted_at: string | null
+  requester_principal_id?: string; supersedes_draft_id?: string
+  extensions?: IntakeExtensions; document_bytes?: string
 }
 export interface Intake { sources: IntakeSource[]; turns: IntakeTurn[]; drafts: IntakeDraft[] }
 export interface Handoff {
@@ -117,7 +120,7 @@ export const agreeRequirements = (project: string, body: { expected_revision: nu
   request<Requirement[]>(`${root(project)}/requirements/agree`, 'POST', body)
 export const getWalker = (project: string, release: string) => request<Walker>(`${releaseRoot(project, release)}/walker`)
 export const putPlan = (project: string, release: string, body: PlanWrite) => request<Walker>(`${releaseRoot(project, release)}/plan`, 'PUT', body)
-export const getIntake = (project: string) => request<Intake>(`${root(project)}/intake`)
+export const getIntake = (project: string, nodeId?: string) => request<Intake>(`${root(project)}/intake${nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : ''}`)
 export const acceptDraft = (project: string, draft: IntakeDraft) =>
   request<IntakeDraft>(`${root(project)}/intake/drafts/${enc(draft.id)}/accept`, 'POST', { expected_base_event_id: draft.base_event_id })
 export const getHandoff = (id: string) => request<Handoff>(`/stage-handoffs/${enc(id)}`)

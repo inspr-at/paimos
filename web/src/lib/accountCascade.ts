@@ -5,11 +5,12 @@
 // is not filled from the tenant model list. account_key and other secrets are
 // never read or shown.
 import { api } from './api.ts'
+import { capacityWaitText, isCapacityWait, type CapacityWait } from './capacityWait.ts'
 import { duration, harnessLabel } from './agentState.ts'
 
 export const WORK_ROLES = ['scout', 'mechanical', 'build', 'build-hard', 'review-gate'] as const
 export type WorkRole = typeof WORK_ROLES[number]
-export const AUTHOR_FAMILIES = ['openai', 'anthropic', 'xai', 'cursor'] as const
+export const AUTHOR_FAMILIES = ['openai', 'anthropic', 'xai', 'cursor', 'google', 'local'] as const
 export type AuthorFamily = typeof AUTHOR_FAMILIES[number]
 export const UNAVAILABLE_REASONS = ['state', 'probe', 'capacity', 'allowance', 'models'] as const
 export type UnavailableReason = typeof UNAVAILABLE_REASONS[number]
@@ -18,9 +19,9 @@ const STEPS: CascadeStep[] = ['host', 'harness', 'account', 'model', 'effort']
 const STEP_KEY = { host: 'hostId', harness: 'harness', account: 'accountId', model: 'modelKey', effort: 'profileId' } as const
 const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 const EFFORT_LABEL: Record<string, string> = {
-  none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
+  off: 'Off', none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
 }
-const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor' }
+const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor', google: 'Google', local: 'Local' }
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
 const NAMED_SPANS = [
@@ -31,19 +32,20 @@ const NAMED_SPANS = [
 ]
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SECRET = /token|secret|password|credential|api[-_]?key|authorization|codex_home|claude_config|sk-[a-z0-9]|-----begin|bearer\s/i
-const UNITS = ['requests', 'tokens', 'cost_micros']
+const UNITS = ['requests', 'tokens', 'cost_micros', 'percent']
 const PACES = ['steady', 'frontload', 'unrestricted']
 
 export interface CatalogEffort { effort: string; model_profile_id: string; version: string }
 export interface CatalogModel { model: string; family: string; efforts: CatalogEffort[] }
 export interface CatalogWindow {
   id: string; account_id?: string; starts_at: string; ends_at: string
-  unit: 'requests' | 'tokens' | 'cost_micros'
+  unit: 'requests' | 'tokens' | 'cost_micros' | 'percent'
   allowance: number; used: number; reserved: number
   pace_model: 'steady' | 'frontload' | 'unrestricted'; burst_ratio: number; provisional: boolean
   remaining: number; pace_remaining: number
 }
 export interface CatalogAccount {
+  wait?: CapacityWait
   id: string; label: string; plan: string; registered_by_principal_id: string
   state: 'available' | 'draining' | 'unavailable'
   last_probe_at: string | null; last_probe_ok: boolean | null
@@ -108,6 +110,7 @@ function isAccount(value: unknown): value is CatalogAccount {
     && Array.isArray(value.windows) && value.windows.every(isWindow)
     && Array.isArray(value.models) && value.models.every(isModel)
     && (value.default_model_profile_id === null || isUuid(value.default_model_profile_id))
+    && (value.wait === undefined || isCapacityWait(value.wait))
 }
 function isHarness(value: unknown): value is CatalogHarness {
   return isRecord(value) && typeof value.harness === 'string' && (value.default_account_id === null || isUuid(value.default_account_id))
@@ -218,24 +221,36 @@ function knownFraction(account: CatalogAccount | undefined) {
 }
 function preferredHarness(host: CatalogHost | undefined) {
   let best: { harness: string; fraction: number; id: string } | null = null
+  let only = ''
+  let runnable = 0
   for (const item of host?.harnesses ?? []) {
     const account = defaultAccount(item)
+    if (!account) continue
+    runnable++
+    only = item.harness
     const fraction = knownFraction(account)
-    if (!account || fraction == null) continue
+    if (fraction == null) continue
     if (!best || fraction > best.fraction || (fraction === best.fraction && account.id < best.id)) best = { harness: item.harness, fraction, id: account.id }
   }
-  return best?.harness ?? ''
+  if (best) return best.harness
+  return runnable === 1 ? only : ''
 }
 function preferredHost(catalog: AgentAccountCatalog) {
   let best: { host: string; fraction: number; id: string } | null = null
+  let only = ''
+  let runnable = 0
   for (const host of catalog.hosts) {
     const harness = harnessOf(host, preferredHarness(host))
     const account = defaultAccount(harness)
+    if (!account) continue
+    runnable++
+    only = host.daemon_id
     const fraction = knownFraction(account)
-    if (!account || fraction == null) continue
+    if (fraction == null) continue
     if (!best || fraction > best.fraction || (fraction === best.fraction && account.id < best.id)) best = { host: host.daemon_id, fraction, id: account.id }
   }
-  return best?.host ?? ''
+  if (best) return best.host
+  return runnable === 1 ? only : ''
 }
 function routedModel(account: CatalogAccount | undefined) {
   const id = account?.default_model_profile_id
@@ -328,7 +343,7 @@ function modelLabel(model: CatalogModel, models: CatalogModel[]) {
 }
 function accountOptionLabel(account: CatalogAccount) {
   const plan = accountPlan(account)
-  const extra = account.available ? allowancePhrase(account) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
+  const extra = account.wait ? capacityWaitText(account.wait) : account.available ? allowancePhrase(account) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
   return [accountName(account), plan, extra].filter(Boolean).join(' · ')
 }
 
@@ -370,7 +385,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
     roleNote,
     profileId: selectedEffort?.model_profile_id ?? '',
     agentId: account?.registered_by_principal_id ?? '',
-    status: statusFor(account, accounts),
+    status: statusFor(account, accounts, choice.harness),
     requested: {
       host: hosts.find(item => item.value === choice.hostId)?.label || 'Not selected',
       harness: choice.harness ? harnessLabel(choice.harness) : 'Not selected',
@@ -402,6 +417,7 @@ function accountNote(choice: CascadeChoice, touch: CascadeTouch, accounts: Catal
   if (!choice.harness) return ''
   if (!accounts.length) return 'No account is enrolled for this harness on this host.'
   if (!account) return 'Choose an account. An unavailable account stays listed with the reason it cannot be the default.'
+  if (account.wait) return capacityWaitText(account.wait)
   if (!account.available) return account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')
   const allowance = allowanceSentence(account)
   if (accounts.length === 1) return `Only one account is enrolled here. ${allowance}`
@@ -424,9 +440,10 @@ function effortNote(choice: CascadeChoice, model: CatalogModel | undefined, effo
   if (selected && selected.model_profile_id === account?.default_model_profile_id && choice.profileId) return 'The thinking level is the one routed for this work.'
   return ''
 }
-function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount[]): CascadeStatus {
+function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount[], harness: string): CascadeStatus {
   if (!accounts.length) return { label: 'No enrolled account', detail: 'There is no account to pin for this host and harness.', tone: 'warn' }
   if (!account) return { label: 'Choose an account', detail: 'The run is pinned to the account you choose. It does not fall back to another one.', tone: 'warn' }
+  if (account.wait) return { label: capacityWaitText(account.wait, `${harnessLabel(harness)} agents`), detail: account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.', tone: 'warn' }
   if (!account.available) {
     return { label: reasonLabel(account), detail: `${account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')} The run can still queue. Routing rechecks this account and does not switch to another.`, tone: 'warn' }
   }

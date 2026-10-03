@@ -9,32 +9,43 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (f *fixture) pinCapacitySchedule(t *testing.T, runID string) {
+// roundTheClock gives the run's account an owner schedule that is always in
+// hours, sprinting, with Keep for you off. These claims are about reading
+// authority and freshness. The default 08–22 band waits after 22:00 UTC, and a
+// window that crosses midnight otherwise keeps only today's slice — less than
+// the 100 units this run already holds. Sprint pins the whole remainder.
+func roundTheClock(t *testing.T, f *fixture, runID string) {
 	t.Helper()
-	// These tests exercise reading authority and reservation freshness, not
-	// working hours. Sprint keeps the full remaining quota available at night
-	// and on weekends without weakening either of those checks.
-	schedule := capacity.DefaultSchedule()
-	schedule.Override = "sprint"
-	raw, err := json.Marshal(schedule)
-	if err != nil {
-		t.Fatal(err)
+	var accountID string
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT account_id::text FROM agent_runs WHERE id=$1`, runID).Scan(&accountID)
+	})
+	roundTheClockAccount(t, f, accountID)
+}
+
+func roundTheClockAccount(t *testing.T, f *fixture, accountID string) {
+	t.Helper()
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, runID, f.person.ID); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,schedule) VALUES($1,$2,'user','',$3)`, f.person.TenantID, f.person.ID, raw)
+	s.Reserve = capacity.ReserveOff
+	s.Override = "sprint"
+	raw, _ := json.Marshal(s)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=$1 RETURNING tenant_id,id)
+ INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a
+ ON CONFLICT (tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, accountID, f.person.ID, raw)
 		return err
 	})
 }
 
-func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
+func TestCapacityClaimRechecksReadingAuthorityAndStaleHardStop(t *testing.T) {
 	f := setup(t)
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
-	f.pinCapacitySchedule(t, run.ID)
+	roundTheClock(t, f, run.ID)
 	update := func(allowed bool, age string, used int) {
 		t.Helper()
 		f.tx(t, f.agent, func(tx pgx.Tx) error {
@@ -42,8 +53,22 @@ func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
 			return err
 		})
 	}
+	// Decision 1C permits aging alone (covered by the obsolete-claim lifecycle
+	// tests). A real 100% fact must still block after its reading ages. Keep the
+	// refusal assertion and establish the hard fact that now justifies it.
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_readiness_facts(tenant_id,resource_id,window_key,reported_by_account_id,binding_revision,source,observed_at,reading_at,used_percent,credit_state)
+ SELECT a.tenant_id,m.resource_id,'5h',a.id,a.link_revision,'harness',clock_timestamp()-interval '11 minutes',clock_timestamp()-interval '11 minutes',100,'unknown'
+ FROM agent_runs r JOIN agent_accounts a ON a.id=r.account_id JOIN account_readiness_memberships m ON m.account_id=a.id WHERE r.id=$1`, run.ID)
+		return err
+	})
 	update(true, "11 minutes", 0)
-	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
+	claimFailure(t, f, run.ID, ids, "reserved capacity is not eligible")
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		// A newer reading of this same resource/window clears only this stop.
+		_, err := tx.Exec(t.Context(), `UPDATE account_readiness_facts SET used_percent=0,observed_at=clock_timestamp(),reading_at=clock_timestamp() WHERE reported_by_account_id=(SELECT account_id FROM agent_runs WHERE id=$1) AND window_key='5h'`, run.ID)
+		return err
+	})
 	update(false, "0 minutes", 0)
 	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
 	update(true, "0 minutes", 1)
@@ -57,7 +82,7 @@ func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
-	f.pinCapacitySchedule(t, run.ID)
+	roundTheClock(t, f, run.ID)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET unit='percent',allowance=100,used=0,reserved=1,capacity_kind='5h',capacity_read_at=clock_timestamp()-interval '11 minutes',capacity_allowed=true,capacity_refresh_run=$1 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID)
 		if err != nil {
@@ -66,5 +91,31 @@ func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
 		_, err = tx.Exec(t.Context(), `UPDATE account_reservations SET reserved_units=1 WHERE run_id=$1`, run.ID)
 		return err
 	})
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
+}
+
+func TestClaimSharedQuotaWindowKeepsDoorOwnership(t *testing.T) {
+	f := setup(t)
+	run := f.run(t, f.order(t, nil))
+	ids := f.reserve(t, run)
+	sibling := uuid()
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,quota_fingerprint,quota_pool_fingerprint) VALUES($1,$2::uuid,$2::text,'codex','other-daemon',$3,'Sibling',repeat('ab',32),repeat('ab',32))`, f.agent.TenantID, sibling, f.other.ID); err != nil {
+			return err
+		}
+		// The ledger may be on a different daemon, but only the run's own daemon
+		// may claim. An unrelated quota is never accepted even with the exact IDs.
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET account_id=$2 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID, sibling)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody([]string{uuid()}), 409, nil)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32),quota_pool_fingerprint=repeat('ab',32) WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID)
+		return err
+	})
+	wrong := claimBody(ids)
+	wrong["daemon_id"] = "other-daemon"
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", wrong, 403, nil)
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
 	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
 }

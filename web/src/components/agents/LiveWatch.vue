@@ -2,15 +2,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { HarnessSession } from '../../lib/agents'
-import { appendWatchText, attachAction, watchText } from '../../lib/attachWatch'
+import { openSessionWatch } from '../../lib/agentRows'
+import { appendWatchText, attachAction, metadataOnlyAttach, watchText } from '../../lib/attachWatch'
 import { can, onAccessChange } from '../../lib/authz'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession }>()
 const identity = useSession()
+const agents = useAgents()
 const person = computed(() => identity.identity?.principal.kind === 'person')
-const allowed = computed(() => person.value && can('harness.watch', props.session.project_id))
+const metadataOnly = computed(() => !!props.session.watch && metadataOnlyAttach(props.session.watch))
+const allowed = computed(() => !metadataOnly.value && person.value && can('harness.watch', props.session.project_id))
 const owner = computed(() => person.value && props.session.watch?.owner_id === identity.identity?.principal.id)
 const text = ref('')
 const state = ref<'idle' | 'connecting' | 'live' | 'ended'>('idle')
@@ -31,7 +35,7 @@ function start() {
   stop()
   if (!allowed.value || !available.value) return
   error.value = ''; state.value = 'connecting'; lastFrame = Date.now()
-  const current = new EventSource(`/api/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}/watch`)
+  const current = openSessionWatch(props.session.project_id, props.session.id)
   stream = current
   const fresh = () => stream === current && allowed.value && available.value
   current.addEventListener('keepalive', () => { if (!fresh()) return; lastFrame = Date.now(); state.value = 'live' })
@@ -49,11 +53,12 @@ async function revoke() {
   if (!owner.value || !props.session.watch) return
   const requestID = props.session.watch.request_id
   revoking.value = true; error.value = ''
-  try { await attachAction(`/${encodeURIComponent(requestID)}/revoke`); if (props.session.watch?.request_id === requestID) { revoked.value = true; stop(true) } }
+  try { await attachAction(`/${encodeURIComponent(requestID)}/revoke`); void agents.afterWrite(); if (props.session.watch?.request_id === requestID) { revoked.value = true; stop(true) } }
   catch { if (props.session.watch?.request_id === requestID) error.value = 'Could not revoke the watch. Try again.' }
   finally { revoking.value = false }
 }
-watch(() => [props.session.id, identity.identity?.tenant.id, identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
+// A fresh canonical row for the same consent must not clear a local revocation.
+watch([() => props.session.id, () => props.session.watch?.request_id, () => identity.identity?.tenant.id, () => identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
 watch([allowed, available], () => { if (!allowed.value || !available.value) stop(true) })
 const stopAccess = onAccessChange(() => stop(true))
 function hidden() { if (document.hidden) stop() }
@@ -62,21 +67,26 @@ onBeforeUnmount(() => { stop(); stopAccess(); document.removeEventListener('visi
 </script>
 
 <template>
-  <section v-if="session.watch && (allowed || owner)" class="live-watch" aria-label="Live conversation">
+  <section v-if="session.watch && (allowed || owner)" class="live-watch" :aria-label="metadataOnly ? 'Attached session' : 'Live conversation'">
     <div class="watch-head">
-      <h3>Live conversation</h3>
+      <h3>{{ metadataOnly ? 'Attached session' : 'Live conversation' }}</h3>
       <button v-if="watching" class="btn small" type="button" @click="stop()">Stop viewing</button>
       <button v-else-if="allowed && available" class="btn small" type="button" @click="start"><AppIcon name="eye" :size="14" />Watch live</button>
     </div>
-    <p class="terms">read-only · ends when the owner revokes</p>
+    <p v-if="metadataOnly" class="terms">Session status only; no conversation text is read or shared.</p>
+    <p v-else class="terms">read-only · ends when the owner revokes</p>
     <template v-if="watching">
       <p class="provenance">Written by the agent, not verified.</p>
       <pre v-if="text" tabindex="0" aria-label="Agent-written live text">{{ text }}</pre>
       <p v-else class="waiting" role="status">{{ state === 'connecting' ? 'Connecting…' : 'Waiting for new turns…' }}</p>
     </template>
+    <p v-else-if="session.watch.process_state === 'confirmed_exited'" class="waiting" role="status">Process exit confirmed.</p>
+    <p v-else-if="metadataOnly && !available" class="waiting" role="status">{{ session.watch.state === 'unreachable' ? 'Session unreachable. Process exit is unconfirmed.' : 'Session detached. Process exit is unconfirmed.' }}</p>
+    <p v-else-if="revoked || session.watch.state === 'detached'" class="waiting" role="status">Watch detached. Process exit is unconfirmed.</p>
+    <p v-else-if="session.watch.state === 'unreachable'" class="waiting" role="status">Watch unreachable. Process exit is unconfirmed.</p>
     <p v-else-if="state === 'ended' || !available" class="waiting" role="status">Watch ended or unreachable. Process exit is unconfirmed.</p>
-    <details class="limits"><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />Privacy and trust</summary><p>Only new turns are shared. Redaction is best effort; processes running as the same user are not isolated.</p></details>
-    <button v-if="owner && available" class="revoke" type="button" :disabled="revoking" @click="revoke">{{ revoking ? 'Revoking…' : 'Revoke watch for everyone' }}</button>
+    <details v-if="!metadataOnly" class="limits"><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />Privacy and trust</summary><p>Only new turns are shared. Redaction is best effort; processes running as the same user are not isolated.</p></details>
+    <button v-if="owner && available" class="revoke" type="button" :disabled="revoking" @click="revoke">{{ revoking ? 'Revoking…' : metadataOnly ? 'Detach session' : 'Revoke watch for everyone' }}</button>
     <p v-if="error" role="alert">{{ error }}</p>
   </section>
 </template>

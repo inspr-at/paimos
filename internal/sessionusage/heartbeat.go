@@ -18,9 +18,9 @@ type HeartbeatLine struct {
 	Absolute                         bool
 }
 
-// CountReport builds a provisional unknown-billing usage report from known counters.
+// CountReport builds a provisional usage report with explicit billing when supplied.
 // A false result means the model or a counter cannot be reported.
-func CountReport(model string, input, output, cached int64, cachedKnown bool) (UsageReport, bool) {
+func CountReport(model string, input, output, cached int64, cachedKnown bool, billing ...string) (UsageReport, bool) {
 	canonical, err := canonicalModel(model)
 	if err != nil || input < 0 || output < 0 || cached < 0 || input > maxToken || output > maxToken || cached > maxToken {
 		return UsageReport{}, false
@@ -28,8 +28,12 @@ func CountReport(model string, input, output, cached int64, cachedKnown bool) (U
 	if cachedKnown && cached > input {
 		return UsageReport{}, false
 	}
+	mode := "unknown"
+	if len(billing) == 1 {
+		mode = BillingMode(billing[0])
+	}
 	in, out := input, output
-	report := UsageReport{Model: canonical, InputTokens: &in, OutputTokens: &out, Provisional: true, BillingMode: "unknown"}
+	report := UsageReport{Model: canonical, InputTokens: &in, OutputTokens: &out, Provisional: true, BillingMode: mode}
 	if cachedKnown {
 		c := cached
 		report.CachedInputTokens = &c
@@ -79,6 +83,40 @@ func ParseHeartbeatLine(source, fallback string, line []byte) (HeartbeatLine, bo
 		return parseCodexHeartbeat(fields, fallback)
 	case "cursor":
 		return parseCursorHeartbeat(fields, fallback)
+	case "gemini", "opencode":
+		fields, id, err := unwrapRecord(fields)
+		if err != nil {
+			return HeartbeatLine{}, false, nil
+		}
+		rec, outcome, err := classifyACP(source, fields)
+		if err != nil || outcome != outcomeUse {
+			return HeartbeatLine{}, false, nil
+		}
+		model := rec.model
+		if model == "" {
+			model = fallback
+		}
+		model, err = canonicalModel(model)
+		if err != nil {
+			return HeartbeatLine{}, false, nil
+		}
+		if rec.id != "" && id != "" {
+			return HeartbeatLine{}, false, nil
+		}
+		if rec.id != "" {
+			id = rec.id
+		}
+		snap := rec.delta
+		absolute := rec.cumulative != nil
+		if absolute {
+			snap = rec.cumulative
+		} else if id == "" {
+			return HeartbeatLine{}, false, nil
+		}
+		if snap == nil {
+			return HeartbeatLine{}, false, nil
+		}
+		return HeartbeatLine{Model: model, Input: snap.input, Output: snap.output, Cached: snap.cached, Reasoning: snap.reasoning, ReasoningKnown: snap.reasoningKnown, ID: id, Absolute: absolute}, true, nil
 	default:
 		return HeartbeatLine{}, false, nil
 	}
@@ -164,7 +202,12 @@ func CursorPromptUsage(fields map[string]json.RawMessage, model string) (UsageRe
 	if err != nil || !snap.inputKnown || !snap.cachedKnown {
 		return UsageReport{}, false
 	}
-	return CountReport(model, snap.input, snap.output, snap.cached, true)
+	report, ok := CountReport(model, snap.input, snap.output, snap.cached, true)
+	if ok && snap.reasoningKnown {
+		reasoning := snap.reasoning
+		report.ReasoningTokens = &reasoning
+	}
+	return report, ok
 }
 
 // ParseGrokUsage reads a rewritten usage.json snapshot. Per-model counters win

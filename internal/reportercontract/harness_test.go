@@ -7,6 +7,8 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Status and heartbeat share HarnessSession. Callers that never send an estimate
@@ -40,6 +42,22 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("missing %s in %#v", op, shape)
 		}
 		props, _ := body["properties"].(map[string]any)
+		watch, _ := props["watch"].(map[string]any)
+		watchProps, _ := watch["properties"].(map[string]any)
+		watchRequired, _ := watch["required"].([]any)
+		for _, field := range []string{"mode", "process_state"} {
+			if _, exists := watchProps[field]; !exists || isRequired(watchRequired, field) {
+				t.Fatalf("%s watch.%s must be optional", op, field)
+			}
+		}
+		watchMode, _ := watchProps["mode"].(map[string]any)
+		if watchMode["const"] != "lease" {
+			t.Fatalf("%s watch.mode must describe status-only leases", op)
+		}
+		watchState, _ := watchProps["state"].(map[string]any)
+		if !reflect.DeepEqual(watchState["enum"], []any{"active", "detached", "unreachable"}) {
+			t.Fatalf("%s changed the existing watch state enum", op)
+		}
 		reasons, _ := props["attention_reasons"].(map[string]any)
 		items, _ := reasons["items"].(map[string]any)
 		kindProps, _ := items["properties"].(map[string]any)
@@ -48,7 +66,11 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("%s attention kinds = %#v", op, kind["enum"])
 		}
 		required, _ := body["required"].([]any)
-		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls"} {
+		finished, _ := props["finished"].(map[string]any)
+		if finished["type"] != "boolean" || !isRequired(required, "finished") {
+			t.Fatalf("%s finished must be a required response boolean", op)
+		}
+		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings", "pause_progress"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
 			}
@@ -56,5 +78,263 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 				t.Fatalf("%s requires %s", op, field)
 			}
 		}
+	}
+}
+
+func TestPausePlanningHeartbeatFieldsStayOptional(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := child(doc, "paths", "/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "requestBody", "content", "application/json", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := schema
+	if !reflect.DeepEqual(request["required"], []any{"phase", "activity_sequence"}) {
+		t.Fatal("planning report changed legacy heartbeat requirements")
+	}
+	fields := request["properties"].(map[string]any)
+	for _, field := range []string{"step", "next_point", "next_point_in_min", "finish_in_min", "finish_outcome", "interrupt", "command", "command_left_min"} {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("missing planning heartbeat field %s", field)
+		}
+	}
+	current, err := Current(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := current["harness-session"]
+	var shape map[string]any
+	if err := json.Unmarshal(after.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range shape {
+		delete(value.(map[string]any)["properties"].(map[string]any), "pause_progress")
+	}
+	before, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bump, err := RequiredBump(Pin{Version: "harness-session/2.3", SHA256: "before-planning", Shape: before}, after); err != nil || bump != "minor" {
+		t.Fatalf("optional planning snapshot classified as %s: %v", bump, err)
+	}
+}
+
+func TestHarnessPauseAndContinuationAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var shape map[string]any
+	if err = json.Unmarshal(now.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range shape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		for _, field := range []string{"pause", "continuation"} {
+			if _, ok := props[field]; !ok || isRequired(body["required"].([]any), field) {
+				t.Fatalf("%s %s must be optional", op, field)
+			}
+			delete(props, field)
+		}
+	}
+	before, _ := json.Marshal(shape)
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.9", SHA256: "before-pause", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("pause addition: %s %v", bump, err)
+	}
+}
+
+// Compare the real response pin to its pre-finished shape, rather than only
+// checking a regenerated pin against itself. Both operations must stay additive.
+func TestHarnessFinishedResponseAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var beforeShape map[string]any
+	if err := json.Unmarshal(now.Shape, &beforeShape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range beforeShape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		if _, exists := props["finished"]; !exists || !isRequired(body["required"], "finished") {
+			t.Fatalf("%s must include required finished before comparing", op)
+		}
+		delete(props, "finished")
+		var required []any
+		for _, field := range body["required"].([]any) {
+			if field != "finished" {
+				required = append(required, field)
+			}
+		}
+		body["required"] = required
+	}
+	before, err := json.Marshal(beforeShape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.6", SHA256: "before-finished", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("finished response addition: got %q, %v; want minor", bump, err)
+	}
+}
+
+func TestHarnessModelIdentityAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var beforeShape map[string]any
+	if err := json.Unmarshal(now.Shape, &beforeShape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range beforeShape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		for _, key := range []string{"model_raw", "model_profile_id"} {
+			property, ok := props[key].(map[string]any)
+			if !ok || isRequired(body["required"], key) || !reflect.DeepEqual(property["type"], []any{"string", "null"}) {
+				t.Fatalf("%s %s must be optional and nullable", op, key)
+			}
+			delete(props, key)
+		}
+	}
+	before, err := json.Marshal(beforeShape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.8", SHA256: "before-model-identity", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("model identity addition: %s %v", bump, err)
+	}
+}
+
+// Compare pins from the real OpenAPI operations, including the request side of
+// components expanded into the response. A new request requirement is breaking
+// even when the same component also appears in a server response.
+func TestHarnessSharedComponentAddition(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, component, want      string
+		required, nested, indirect bool
+	}{
+		{"required commit", "HarnessCommit", "major", true, false, false},
+		{"required ownership", "HarnessProcessOwnership", "major", true, false, false},
+		{"optional commit", "HarnessCommit", "minor", false, false, false},
+		{"nested request requirement", "HarnessCommit", "major", true, true, false},
+		{"referenced request body and transitive schema", "HarnessCommit", "major", true, false, true},
+		{"response-only session", "HarnessSession", "minor", true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc map[string]any
+			if err := yaml.Unmarshal(openAPI, &doc); err != nil {
+				t.Fatal(err)
+			}
+			schemas, err := child(doc, "components", "schemas")
+			if err != nil {
+				t.Fatal(err)
+			}
+			component := tc.component
+			if tc.indirect {
+				// This copy has no other request users, so the scanner must follow
+				// both the requestBody reference and the nested schema reference.
+				component = "SharedCommit"
+				schemas[component] = schemas[tc.component]
+				schemas["CommitEnvelope"] = map[string]any{
+					"allOf": []any{map[string]any{"$ref": "#/components/schemas/" + component}},
+				}
+				post, err := child(doc, "paths", "/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post")
+				if err != nil {
+					t.Fatal(err)
+				}
+				bodies, err := child(doc, "components", "requestBodies")
+				if err != nil {
+					t.Fatal(err)
+				}
+				bodies["CommitHeartbeat"] = map[string]any{"content": map[string]any{
+					"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/CommitEnvelope"}},
+				}}
+				post["requestBody"] = map[string]any{"$ref": "#/components/requestBodies/CommitHeartbeat"}
+				commits, err := child(schemas, "HarnessSession", "properties", "commits")
+				if err != nil {
+					t.Fatal(err)
+				}
+				commits["items"] = map[string]any{"$ref": "#/components/schemas/" + component}
+			}
+			body, err := child(schemas, component)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.nested {
+				body["properties"].(map[string]any)["nested"] = map[string]any{
+					"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []any{"id"},
+				}
+				body = body["properties"].(map[string]any)["nested"].(map[string]any)
+			}
+			pin := func() Pin {
+				t.Helper()
+				raw, err := yaml.Marshal(doc)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pins, err := Current(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Exercise serialized pins as used by the contract comparison CLI.
+				raw, err = json.Marshal(pins["harness-session"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result Pin
+				if err := json.Unmarshal(raw, &result); err != nil {
+					t.Fatal(err)
+				}
+				return result
+			}
+			before := pin()
+			body["properties"].(map[string]any)["extra"] = map[string]any{"type": "string"}
+			if tc.required {
+				body["required"] = append(body["required"].([]any), "extra")
+			}
+			after := pin()
+			got, err := RequiredBump(before, after)
+			if err != nil || got != tc.want {
+				t.Fatalf("%s addition: got %q, %v; want %s", component, got, err, tc.want)
+			}
+			// Historical pins lack provenance. The new pin must still classify
+			// shared requirements conservatively during that transition.
+			before.RequestPaths = nil
+			got, err = RequiredBump(before, after)
+			if err != nil || got != tc.want {
+				t.Fatalf("%s legacy pin addition: got %q, %v; want %s", component, got, err, tc.want)
+			}
+		})
 	}
 }

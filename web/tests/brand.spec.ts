@@ -28,18 +28,20 @@ test('a different brand names the title, header, footer, menu, release history a
   await expect(page.getByRole('link', { name: 'NOVA DAWN home' })).toBeVisible()
   await expect(page.locator('.app-header .wordmark')).toHaveText('NOVADAWN')
   await expect(page.locator('.app-header .wordmark sup')).toHaveText('DAWN')
-  await expect(page.locator('footer.app-footer .footer-name')).toHaveText('NOVA DAWN')
+  await expect(page.locator('footer.app-footer .footer-name .footer-wordmark')).toHaveText('NOVA DAWN')
 
   await page.getByRole('button', { name: /^Account for / }).click()
   await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')
 
-  await page.locator('.version-pill').click()
+  await page.locator('footer.app-footer .version-pill').click()
   const sheet = page.getByRole('dialog', { name: 'NOVA DAWN releases' })
   await expect(sheet).toBeVisible()
-  // The generation is a label, never a version.
-  await expect(sheet).toContainText('NOVA 3 · Release history')
+  // The generation is a label, never a version, and waits for Details (AEON-488).
+  await expect(sheet.locator('.head .eyebrow')).toHaveText('NOVA DAWN · Release')
+  await sheet.getByRole('radio', { name: 'Details' }).click()
+  await expect(sheet.locator('.head .eyebrow')).toHaveText(/^NOVA 3 · DAWN releases · \d+ published · 1 reserved$/)
   await expect(page).toHaveTitle('Releases · NOVA DAWN')
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')
@@ -47,7 +49,7 @@ test('a different brand names the title, header, footer, menu, release history a
 
   state.server = history.current
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(page.locator('.toast')).toHaveText(new RegExp(`^NOVA DAWN was updated to ${history.current.replace(/\./g, '\\.')}`))
+  await expect(page.locator('.toast')).toHaveText(new RegExp(`^NOVA DAWN was updated to ${history.releases[0].codename}`))
   expect(await chromeText(page)).not.toMatch(DEFAULT)
 })
 

@@ -15,11 +15,34 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	ShareUsage           bool                `json:"share_usage"`
+	PendingCheck         *AccountCheck       `json:"pending_check,omitempty"`
+	ReadinessResources   []ReadinessResource `json:"readiness_resources,omitempty"`
+	OwnerPersonID        *string             `json:"owner_person_id,omitempty"`
+	OwnerPersonName      string              `json:"owner_person_name,omitempty"`
+	LinkedAt             *time.Time          `json:"linked_at,omitempty"`
+	LinkRevision         int64               `json:"link_revision,omitempty"`
+	BillingMode          string              `json:"billing_mode"`
+	Provider             string              `json:"provider,omitempty"`
+	Model                string              `json:"model,omitempty"`
+	ModelStatus          string              `json:"model_status,omitempty"`
+	ModelDataNote        bool                `json:"model_data_note,omitempty"`
+	OpenRouterCredits    *openrouter.Credits `json:"openrouter_credits,omitempty"`
+	OngoingUseApproved   bool                `json:"ongoing_use_approved"`
+	ReadingSupport       string              `json:"reading_support"`
+	QuotaFingerprint     string              `json:"quota_fingerprint"`
+	QuotaPoolFingerprint string              `json:"quota_pool_fingerprint"`
+	StatuslineEnabled    bool                `json:"statusline_enabled"`
+	// StatuslineOptIn is own for the person who approved the paired computer,
+	// workspace for a workspace owner or admin who did not, and empty when
+	// this caller cannot opt the account in. It is not a stored column.
+	StatuslineOptIn   string     `json:"statusline_opt_in,omitempty"`
 	ID                string     `json:"id"`
 	AccountKey        string     `json:"account_key"`
 	Harness           string     `json:"harness"`
@@ -27,6 +50,8 @@ type Account struct {
 	Label             string     `json:"label"`
 	Plan              string     `json:"plan"`
 	HostLabel         string     `json:"host_label"`
+	GroupID           string     `json:"group_id,omitempty"`
+	GroupName         string     `json:"group_name,omitempty"`
 	AllowedProfileIDs []string   `json:"allowed_model_profile_ids"`
 	MaxParallel       int        `json:"max_parallel_runs"`
 	RegisteredBy      string     `json:"registered_by_principal_id"`
@@ -36,19 +61,28 @@ type Account struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	Windows           []Window   `json:"windows"`
 	daemonGeneration  *string
+	residencyEvidence *ResidencyEvidence
 }
 
 // Window is one allowance bound for a single unit.
 type Window struct {
 	// Internal routing metadata; never accepted from or serialized to user APIs.
+	recoveryPermits     []recoveryPermit
 	pairingVerification bool
 	capacityReadAt      *time.Time
 	capacityAllowed     bool
 	capacityKind        string
+	capacitySource      string
+	capacityHold        int64
+	capacityPresence    bool
 	capacityBucket      string
 	capacityRetired     bool
 	capacityRefreshRun  *string
 	capacityBudget      *float64
+	// Set when Keep for you binds: the paced share without it, and when the
+	// reserve is gone.
+	capacityShare        *float64
+	capacityReserveUntil *time.Time
 
 	ID          string    `json:"id"`
 	AccountID   string    `json:"account_id"`
@@ -61,6 +95,9 @@ type Window struct {
 	Used        int64     `json:"used"`
 	Reserved    int64     `json:"reserved"`
 	Provisional bool      `json:"provisional"`
+	// SetByYou marks a manual window, set by a person rather than read from
+	// the vendor. It caps on top of readings (AEON-384).
+	SetByYou bool `json:"set_by_you,omitempty"`
 }
 
 // Reservation is one held estimate against a window.
@@ -72,11 +109,13 @@ type Reservation struct {
 
 // RouteResult is the account chosen for a queued run.
 type RouteResult struct {
-	AccountID    string        `json:"account_id"`
-	AccountKey   string        `json:"account_key"`
-	AccountLabel string        `json:"account_label"`
-	DaemonID     string        `json:"daemon_id"`
-	Reservations []Reservation `json:"reservations"`
+	BillingMode       string        `json:"billing_mode"`
+	SubscriptionLabel string        `json:"subscription_label,omitempty"`
+	AccountID         string        `json:"account_id"`
+	AccountKey        string        `json:"account_key"`
+	AccountLabel      string        `json:"account_label"`
+	DaemonID          string        `json:"daemon_id"`
+	Reservations      []Reservation `json:"reservations"`
 }
 
 // HarnessHealth summarises whether a harness can take new work.
@@ -90,6 +129,7 @@ type HarnessHealth struct {
 }
 
 type httpError struct {
+	code   string
 	status int
 	msg    string
 }
@@ -139,6 +179,10 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 	var he *httpError
 	if errors.As(err, &he) {
+		if he.code != "" {
+			httpapi.WriteJSON(w, he.status, map[string]string{"error": he.msg, "code": he.code})
+			return
+		}
 		httpapi.WriteError(w, he.status, he.msg)
 		return
 	}
@@ -158,7 +202,7 @@ func writeErr(w http.ResponseWriter, err error) {
 
 func validHarness(s string) bool {
 	switch s {
-	case "codex", "claude", "pi", "cursor", "grok":
+	case "codex", "claude", "pi", "cursor", "grok", "gemini", "opencode":
 		return true
 	default:
 		return false

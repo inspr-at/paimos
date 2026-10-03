@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SC1: one presentation contract for sessions, project indicators and previews.
 // Evidence stays separate from presentation; viewer thresholds never mutate it.
-export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'stopped'
+export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'done' | 'stopped'
 import { normalizeAgentPalette, type AgentPalette } from './agentPalettes.ts'
 export type { AgentPalette }
 export interface AgentStatePreference {
@@ -13,11 +13,11 @@ export const DEFAULT_AGENT_STATE: Readonly<AgentStatePreference> = {
 }
 export const STATE_LABEL: Record<AgentState, string> = {
   working: 'Working', awaiting: 'Awaiting heartbeat', waiting: 'Needs something', throttled: 'Throttled', problem: 'Problem',
-  unresponsive: 'No heartbeat', idle: 'Idle', stale: 'Idle · no heartbeat', stopped: 'Stopped',
+  unresponsive: 'No heartbeat', idle: 'Idle', stale: 'Idle · no heartbeat', done: 'Done', stopped: 'Ended',
 }
 export const inactiveState = (state: AgentState) => state === 'idle' || state === 'stale' || state === 'stopped'
 export const movingState = (state: AgentState) => state === 'working'
-export const STATE_PRIORITY: Record<AgentState, number> = { problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, stopped: 8 }
+export const STATE_PRIORITY: Record<AgentState, number> = { problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, done: 8, stopped: 9 }
 export function leadingState(states: (AgentState | undefined)[]): AgentState {
   return states.reduce<AgentState>((lead, state) => STATE_PRIORITY[state ?? 'working'] < STATE_PRIORITY[lead] ? state ?? 'working' : lead, 'stopped')
 }
@@ -60,9 +60,13 @@ export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' |
 }
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
-  stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null
-  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
+  stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; progress_pct?: number | null
+  // The server's answer to "did it complete its job": always sent, false included, also
+  // where stop_reason is withheld. The only input to Done; nothing here derives it.
+  finished: boolean
+  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: readonly AttentionReason[]
   eta_stale?: boolean
+  vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }
 // Stop reasons are free text. Match error words, not arbitrary nonempty reasons:
 // "user requested", "completed", "stopped", "cancelled" are normal stops.
@@ -72,6 +76,12 @@ export const LOST_CONTACT = 'heartbeat_lost'
 export function problemReason(reason?: string | null) {
   return !!reason && reason !== LOST_CONTACT && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
 }
+// AEON-437: Done is positive evidence: the worker reported all of its work AND its
+// launcher recorded a clean exit. The server derives `finished` from exactly that
+// (aeon_session_finished) and puts it in every session, live and event payload, so
+// it is the one answer and this file has no second one: it never reads the percent
+// or the stop reason to decide Done. A plain stop, a force stop, a spent budget, a
+// failure and a silence the server closed are not a finish; they are Ended or failed.
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
 export function heartbeatEvidence(evidence: StateEvidence, now: number) {
@@ -84,16 +94,34 @@ export function heartbeatEvidence(evidence: StateEvidence, now: number) {
 
 // Registration is not a heartbeat, and loss of reporting is not proof that the
 // worker failed. Keep its severity visible with a distinct word and explanation.
+const RESET_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function limitUntil(reset: string, now: number) {
+  const at = new Date(reset)
+  if (Number.isNaN(at.getTime())) return ''
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  const today = new Date(now)
+  if (at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate()) return ` until ${time}`
+  return ` until ${at.getDate()} ${RESET_MONTHS[at.getMonth()]} ${time}`
+}
+
 export function assessAgentState(evidence: StateEvidence, now: number, preferences = DEFAULT_AGENT_STATE, needs = false): StateAssessment {
   const result = (state: AgentState, reasons: StateReason[] = [], label = STATE_LABEL[state]) => ({ state, label, reasons })
   const problems: StateReason[] = []
   if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: `Reported stop reason: ${evidence.stop_reason}`, next: 'Check the session activity and its bound ticket before starting a replacement.' })
-  if (['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
+  if (!evidence.vendor_limited && ['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
   if (evidence.has_problem ?? (problems.length > 0)) {
     if (!problems.length) problems.push({ code: 'reported', detail: 'The service reported a problem without a visible reason.', next: 'Refresh this session and check its run history or ask the session owner for the missing reason.' })
     return result('problem', problems)
   }
-  if (evidence.phase === 'stopped' || evidence.stopped_at) return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
+  if (evidence.vendor_limited && (!evidence.limit_resets_at || Date.parse(evidence.limit_resets_at) > now)) {
+    const window = ({ '5h': '5-hour limit', weekly: 'Weekly limit', monthly: 'Monthly limit' } as Record<string, string>)[evidence.limit_window ?? ''] ?? 'Vendor limit'
+    const until = evidence.limit_resets_at ? limitUntil(evidence.limit_resets_at, now) : ''
+    return result('throttled', [{ code: 'vendor-limit', detail: `${window}${until}.`, next: 'Check account capacity before starting another run.' }], `Throttled · ${window.toLowerCase()}${until}`)
+  }
+  if (evidence.phase === 'stopped' || evidence.stopped_at) {
+    if (evidence.finished) return result('done')
+    return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
+  }
   const heartbeat = heartbeatEvidence(evidence, now)
   const working = ['starting', 'working', 'stopping'].includes(evidence.phase) && !['idle', 'throttled'].includes(evidence.activity)
   const heartbeatReason: StateReason = {

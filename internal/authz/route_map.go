@@ -6,22 +6,114 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-// PublicRoute marks an explicitly public API route. Unknown routes have no
-// declaration and must be denied by the authorization boundary.
+// PublicRoute marks a matched route that is public. Unknown routes have no
+// declaration and must be denied by the authorization boundary. Session
+// refresh uses the same marker, so it cannot disagree with authorization.
 const PublicRoute = "public"
+
+// AuthenticatedRoute requires a principal resolved by authentication, without
+// a role or key scope. It is reserved for the caller's own identity endpoint.
+const AuthenticatedRoute = "authenticated"
 
 // RoutePermissions declares the permission for each registered API pattern.
 // Customer quote routes accept one of two permissions; the quote handler also
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/model-preferences": "models.read",
+	// Level-specific, person-only authority is rechecked under the mutation fence.
+	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
+	"GET /api/work-kinds":                                        "models.read",
+	"POST /api/work-kinds":                                       "model_prefs.manage",
+	"PATCH /api/work-kinds/{kindId}":                             "model_prefs.manage",
+	"DELETE /api/work-kinds/{kindId}":                            "model_prefs.manage",
+	"POST /api/work-kinds/{kindId}/restore":                      "model_prefs.manage",
+	"POST /api/models/{id}/retire":                               "models.manage",
+	"DELETE /api/models/{id}/retire":                             "models.manage",
+	"POST /api/projects/{projectId}/questions":                   "questions.ask",
+	"GET /api/projects/{projectId}/questions":                    "questions.read",
+	"GET /api/questions/{questionId}":                            "questions.read",
+	"GET /api/questions/{questionId}/status":                     "questions.read",
+	"POST /api/questions/{questionId}/decision":                  "questions.decide",
+	"GET /api/decision-desk":                                     "questions.read",
+	"GET /api/agents/plan":                                       "agents.plan.read",
+	"GET /api/recurrences":                                       "recurrences.manage",
+	"POST /api/recurrences":                                      "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}":                        "recurrences.manage",
+	"PUT /api/recurrences/{recurrenceId}":                        "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/pause":                 "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/resume":                "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/run-now":               "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}/preview":                "recurrences.manage",
+	"GET /api/decision-desk/projection":                          "profile.read",
+
+	"GET /api/journey/next-actions":                                           "journey.read",
+	"POST /api/agent-pairing/account-link":                                    "account.probe",
+	"POST /api/agent-pairing/account-link/lookup":                             "profile.write",
+	"POST /api/agent-pairing/account-link/{requestId}/approve":                "profile.write",
+	"GET /api/agent-pairing/account-links":                                    "profile.write",
+	"POST /api/agent-pairing/account-links/{accountId}/unlink":                "profile.write",
+	"GET /api/queue/{nodeId}/readiness":                                       "nodes.read",
+	"POST /api/queue/{nodeId}/estimate":                                       "nodes.read",
+	"GET /api/queue":                                                          "nodes.read",
+	"POST /api/queue":                                                         "nodes.read",
+	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
+	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
+	"POST /api/queue/reset":                                                   "nodes.read",
+	"POST /api/queue/next":                                                    "nodes.read",
+	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
+	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
+	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/tokens":            "intake.write",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/control":           "intake.write",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/host-event":        "intake.write",
+	"POST /api/aithema/deprovision":                                           "plugins.manage",
+	"GET /api/aithema/callbacks/{callbackId}":                                 "plugins.manage",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/proxy/{operation}": "intake.write",
+	"GET /api/projects/{projectId}/aithema/sessions/{sid}/proxy/{operation}":  "intake.write",
+
+	// Aithema delegates authentication to the journal module: a public outer
+	// declaration never bypasses its JWT, exact capability or transaction fence.
+	"POST /api/aithema/journal/sessions/{sid}/records":   "public",
+	"POST /api/aithema/journal/sessions/{sid}/snapshots": "public",
+	"POST /api/aithema/journal/sessions/{sid}/op.result": "public",
+	"GET /api/aithema/journal/sessions/{sid}/records":    "public",
+	"GET /api/aithema/journal/sessions/{sid}/cursor":     "public",
+	"GET /api/aithema/journal/sessions/{sid}/authority":  "public",
+	"POST /api/aithema/ledger/sessions/{sid}/admit":      "public",
+	"POST /api/aithema/ledger/sessions/{sid}/claim":      "public",
+	"POST /api/aithema/ledger/sessions/{sid}/settle":     "public",
+	"POST /api/aithema/ledger/sessions/{sid}/recover":    "public",
+	"GET /api/aithema/ledger/sessions/{sid}/holds":       "public",
+
+	"GET /api/nodes/{nodeId}/reviews":                                                   "work_orders.read",
+	"POST /api/nodes/{nodeId}/reviews":                                                  "work_orders.write",
+	"DELETE /api/agent-accounts/{accountId}/{resource}":                                 "account.manage",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent":              "harness.write",
+	"GET /api/rules/doctrine/proposals":                                                 "rules.read",
+	"GET /api/rules/doctrine/analysis":                                                  "rules.read",
+	"POST /api/rules/doctrine/proposals":                                                "rules.write",
+	"POST /api/rules/doctrine/proposals/{proposalId}/refresh":                           "rules.write",
+	"POST /api/rules/doctrine/proposals/{proposalId}/approve":                           "rules.publish",
+	"POST /api/rules/doctrine/proposals/{proposalId}/pins":                              "settings.manage",
+	"GET /api/rules/doctrine/inbox":                                                     "rules.read",
+	"GET /api/rules/doctrine/inbox/summary":                                             "rules.read",
+	"POST /api/rules/doctrine/inbox":                                                    "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/pull-request":                          "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/dismiss":                               "rules.write",
+	"POST /api/rules/doctrine/inbox/{proposalId}/notified":                              "rules.read",
 	"GET /api/me/security/session-watching":                                             "profile.read",
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",
 	"POST /api/agent-pairing/attach/lookup":                                             "account.manage",
+	"GET /api/agent-pairing/attach/pending":                                             "account.manage",
 	"POST /api/agent-pairing/attach/{requestId}/approve":                                "account.manage",
 	"POST /api/agent-pairing/attach/{requestId}/revoke":                                 "account.manage",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch":                  "harness.watch",
@@ -60,6 +152,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/computers/{computerId}":                                     "account.read",
 	"POST /api/agent-pairing/computers/{computerId}/disconnect":                         "account.manage",
 	"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": "account.manage",
+	"POST /api/agent-pairing/computers/{computerId}/remove":                             "account.manage",
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
@@ -86,13 +179,32 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/tags/{tagId}":                                               "tags.manage",
 	"DELETE /api/time-entries/{id}":                                          "hours.write",
 	"DELETE /api/views/{viewId}":                                             "views.write",
+	"GET /api/agent-accounts/readiness":                                      "account.read",
+	"POST /api/agent-accounts/{accountId}/check":                             "account.manage",
+	"PUT /api/agent-accounts/{accountId}/sharing":                            "account.manage",
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/catalog":                                        "account.read",
+	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
+	"PUT /api/agent-accounts/quota-pool":                                     "account.manage",
+	"GET /api/agent-accounts/groups":                                         "account.read",
+	"POST /api/agent-accounts/groups":                                        "account.manage",
+	"PATCH /api/agent-accounts/groups/{id}":                                  "account.manage",
+	"DELETE /api/agent-accounts/groups/{id}":                                 "account.manage",
+	"GET /api/agent-accounts/pins":                                           "account.read",
+	"PUT /api/agent-accounts/pins":                                           "run.create",
+	"DELETE /api/agent-accounts/pins":                                        "run.create",
+	"GET /api/agent-accounts/use":                                            "account.read|account.probe",
+	"POST /api/agent-accounts/runs/{runId}/target":                           "run.create",
 	"PUT /api/agent-accounts/{accountId}/metadata":                           "account.manage",
+	"GET /api/agent-accounts/{accountId}/residency-evidence":                 "account.read",
+	"PUT /api/agent-accounts/{accountId}/residency-evidence":                 "account.manage|account.probe", // Handler distinguishes owning person from bound host key.
+	"PUT /api/agent-accounts/{accountId}/label":                              "account.manage",
+	"PUT /api/agent-accounts/{accountId}/limit":                              "account.manage",
 	"GET /api/agent-keys":                                                    "keys.read",
 	"GET /api/approvals":                                                     "approvals.read",
 	"GET /api/audit":                                                         "audit.read",
 	"GET /api/attachments/{id}/content":                                      "attachments.read",
+	"POST /api/attachments/{id}/preview":                                     "attachments.read",
 	"GET /api/auth/callback":                                                 "public",
 	"GET /api/auth/login":                                                    "public",
 	"GET /api/authz/permissions":                                             "roles.read",
@@ -112,12 +224,21 @@ var RoutePermissions = map[string]string{
 	"GET /api/events/stream":                                                 "events.read",
 	"GET /api/from-classic":                                                  "nodes.read",
 	"GET /api/harness-sessions":                                              "harness.read",
+	"GET /api/me/agent-pause-settings":                                       "harness.read",
+	"PUT /api/me/agent-pause-settings":                                       "harness.read",
+	"GET /api/me/leaving-at":                                                 "harness.read",
+	"PUT /api/me/leaving-at":                                                 "harness.control",
+	"DELETE /api/me/leaving-at":                                              "harness.control",
+	"POST /api/harness-sessions/pause":                                       "harness.control",
+	"POST /api/harness-sessions/resume":                                      "harness.control",
 	"GET /api/harness-sessions/live":                                         "nodes.read",
 	"GET /api/harness-sessions/{sessionId}/delivery-rating":                  "nodes.read",
 	"PUT /api/harness-sessions/{sessionId}/delivery-rating":                  "nodes.read",
 	"DELETE /api/harness-sessions/{sessionId}/delivery-rating":               "nodes.read",
 	"GET /api/usage/dashboard":                                               "harness.read",
 	"GET /api/health":                                                        "public",
+	"POST /api/reviews/github":                                               "public", // Authenticated by host-owned GitHub HMAC, never a tenant session.
+	"GET /api/aithema/jwks":                                                  "public",
 	"GET /api/ready":                                                         "public",
 	"GET /api/imports":                                                       "imports.read",
 	"GET /api/imports/{importId}":                                            "imports.read",
@@ -126,14 +247,17 @@ var RoutePermissions = map[string]string{
 	"GET /api/inbox/stream":                                                  "inbox.read",
 	"GET /api/inbox/targets":                                                 "inbox.read",
 	"GET /api/kinds":                                                         "nodes.read",
+	"GET /api/status/help":                                                   "nodes.read",
 	"GET /api/kinds/{kindId}":                                                "nodes.read",
 	"GET /api/knowledge":                                                     "knowledge.read",
 	"GET /api/knowledge/graph":                                               "knowledge.read",
 	"GET /api/knowledge/learnings":                                           "knowledge.read",
 	"GET /api/knowledge/resolve":                                             "knowledge.read",
 	"GET /api/knowledge/{id}":                                                "knowledge.read",
-	"GET /api/me":                                                            "profile.read|profile.portal_read",
+	"GET /api/me":                                                            AuthenticatedRoute,
 	"GET /api/me/greeting":                                                   "profile.read|profile.portal_read",
+	"GET /api/me/host-labels":                                                "harness.read",
+	"PUT /api/me/host-labels":                                                "harness.read",
 	"GET /api/me/permissions":                                                "authz.read",
 	"GET /api/me/profile":                                                    "profile.read|profile.portal_read",
 	"GET /api/members":                                                       "members.read",
@@ -163,9 +287,14 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
 	"GET /api/inbox/message-status":                                          "inbox.receipt",
 	"POST /api/agent-accounts/{accountId}/capacity/approve":                  "account.manage",
+	"GET /api/agent-accounts/capacity/next":                                  "account.read|account.probe",
 	"GET /api/agent-accounts/capacity":                                       "account.read",
 	"GET /api/agent-accounts/{accountId}/readings":                           "account.read|account.probe", // Handler requires read for people, probe + ownership for agents.
 	"POST /api/agent-accounts/{accountId}/readings":                          "account.probe",
+	"PUT /api/agent-accounts/{accountId}/signals":                            "account.probe",
+	"GET /api/agent-accounts/{accountId}/statusline":                         "account.probe",
+	"PUT /api/agent-accounts/{accountId}/statusline":                         "account.manage",
+	"POST /api/agent-accounts/{accountId}/quota-key":                         "account.probe",
 	"POST /api/agent-accounts/capacity/preview":                              "account.read",
 	"GET /api/agent-accounts/capacity/schedule":                              "account.read",
 	"PUT /api/agent-accounts/capacity/schedule":                              "account.manage",
@@ -196,6 +325,13 @@ var RoutePermissions = map[string]string{
 	"GET /api/public/portal/{tenantSlug}/catalog.json":                                "public",
 	"GET /api/public/portal/{tenantSlug}/llms.txt":                                    "public",
 	"GET /api/public/portal/{tenantSlug}/releases":                                    "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap":                                     "public",
+	"GET /api/public/portal/{tenantSlug}/roadmap.json":                                "public",
+	"GET /portal/{tenantSlug}":                                                        "public",
+	"GET /portal/{tenantSlug}/catalog.json":                                           "public",
+	"GET /portal/{tenantSlug}/llms.txt":                                               "public",
+	"GET /portal/{tenantSlug}/roadmap":                                                "public",
+	"GET /portal/{tenantSlug}/roadmap.json":                                           "public",
 	"GET /api/public/quotes/{publicTenant}/{token}":                                   "public",
 	"GET /api/public/quotes/{publicTenant}/{token}/pdf":                               "public",
 	"GET /api/quote-profiles":                                                         "quotes.read",
@@ -238,6 +374,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/work-orders":                                                                      "work_orders.read",
 	"GET /api/work-orders/{workOrderId}":                                                        "work_orders.read",
 	"PATCH /api/agent-accounts/{accountId}":                                                     "account.manage",
+	"POST /api/agent-accounts/{accountId}/archive":                                              "account.manage", // Person-only Remove (AEON-402).
 	"PATCH /api/attachments/{id}":                                                               "attachments.write",
 	"PATCH /api/crm/contacts/{contactId}":                                                       "crm.write",
 	"PATCH /api/crm/organisations/{organisationId}":                                             "crm.write",
@@ -279,6 +416,8 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-accounts/route":                                                            "account.route",
 	"POST /api/agent-accounts/{accountId}/probe":                                                "account.probe",
 	"POST /api/agent-accounts/{accountId}/windows":                                              "account.manage",
+	"DELETE /api/agent-accounts/{accountId}/windows/{windowId}":                                 "account.manage",
+	"POST /api/agent-accounts/{accountId}/windows/{windowId}/repeat":                            "account.manage",
 	"POST /api/agent-keys":                                                                      "keys.manage",
 	"POST /api/members/agents":                                                                  "keys.manage",
 	"POST /api/members/invites":                                                                 "members.manage",
@@ -331,12 +470,18 @@ var RoutePermissions = map[string]string{
 	"POST /api/portal/wishes/{wishId}/reject":                                                   "settings.manage",
 	"POST /api/nodes/{nodeId}/attachments":                                                      "attachments.write",
 	"POST /api/nodes/{nodeId}/comments":                                                         "comments.write",
+	"POST /api/nodes/{nodeId}/convert":                                                          "nodes.write",
 	"POST /api/nodes/{nodeId}/move":                                                             "nodes.move",
 	"POST /api/nodes/{nodeId}/project-move":                                                     "nodes.move",
 	"POST /api/project-groups":                                                                  "project_groups.write",
 	"POST /api/project-groups/assign":                                                           "project_groups.write",
 	"POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt":           "stage.verify",
 	"POST /api/projects/{projectId}/harness-sessions":                                           "harness.write",
+	"POST /api/projects/{projectId}/harness-sessions/pause":                                     "harness.control",
+	"POST /api/projects/{projectId}/harness-sessions/resume":                                    "harness.control",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause":                         "harness.control",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause-plan":                    "harness.worker",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/resume":                        "harness.control",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery":             "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls":              "harness.control",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/managed-settings":               "harness.control",
@@ -350,6 +495,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop":                          "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield":                         "harness.worker",
 	"POST /api/projects/{projectId}/intake/drafts":                                              "intake.write",
+	"POST /api/projects/{projectId}/intake/drafts/{draftId}/replace":                            "intake.write",
 	"POST /api/projects/{projectId}/intake/drafts/{draftId}/accept":                             "intake.decide",
 	"POST /api/projects/{projectId}/intake/sources":                                             "intake.write",
 	"POST /api/projects/{projectId}/intake/transcript-turns":                                    "intake.write",
@@ -386,6 +532,8 @@ var RoutePermissions = map[string]string{
 	"POST /api/relations":                                                                       "relations.write",
 	"POST /api/roles":                                                                           "roles.manage",
 	"POST /api/runs/{runId}/claim":                                                              "run.claim",
+	"POST /api/runs/{runId}/capacity-override":                                                  "run.create", // Person-only, queued managed run; handler checks work-order edit access.
+	"POST /api/runs/{runId}/cancel":                                                             "run.create", // Person-only, queued run; handler checks work-order edit access (AEON-402).
 	"POST /api/runs/{runId}/telemetry":                                                          "run.telemetry",
 	"POST /api/stage-handoffs":                                                                  "stage_handoffs.write",
 	"POST /api/stage-handoffs/{handoffId}/classic-batch-alias":                                  "stage_handoffs.decide",
@@ -415,6 +563,23 @@ var RoutePermissions = map[string]string{
 	"PUT /api/quotes/{quoteId}/profile":                                                         "quotes.write",
 	"GET /api/settings/eta-interval":                                                            "settings.manage",
 	"PUT /api/settings/eta-interval":                                                            "settings.manage",
+	"GET /api/settings/brand":                                                                   "settings.manage",
+	"PUT /api/settings/brand":                                                                   "settings.manage",
+	"GET /api/settings/model-provider":                                                          "settings.manage",
+	"PUT /api/settings/model-provider":                                                          "settings.manage",
+	"POST /api/settings/model-provider/test":                                                    "settings.manage",
+	"PUT /api/settings/brand/logo/{variant}":                                                    "settings.manage",
+	"DELETE /api/settings/brand/logo/{variant}":                                                 "settings.manage",
+	"GET /api/brand/logo/{variant}":                                                             "profile.read|profile.portal_read",
+	"GET /api/settings/status-autopilot":                                                        "nodes.read",
+	"PUT /api/settings/status-autopilot":                                                        "settings.manage",
+	"GET /api/projects/{projectId}/status-autopilot":                                            "nodes.read",
+	"PUT /api/projects/{projectId}/status-autopilot":                                            "settings.manage",
+	"GET /api/status-autopilot/changes":                                                         "nodes.read",
+	"GET /api/status-autopilot/proposals":                                                       "nodes.read",
+	"PUT /api/status-autopilot/proposals/{eventId}":                                             "settings.manage",
+	"GET /api/settings/agent-activity":                                                          "settings.manage",
+	"PUT /api/settings/agent-activity":                                                          "settings.manage",
 	"GET /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                                          "harness.worker",
@@ -423,13 +588,31 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
 }
 
+// Tier reads, worker reports and person decisions use the existing session permissions.
+func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/ask"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision"] = "harness.control"
+}
+
 func PermissionForPattern(pattern string) (string, bool) {
 	permission, ok := RoutePermissions[pattern]
 	return permission, ok
 }
 
+// PatternIsPublic reports whether the router's matched pattern is a public
+// declaration. Session refresh and the authentication gate use this and not
+// the request URL: the router accepts other spellings of the same pattern.
+func PatternIsPublic(pattern string) bool {
+	declaration, ok := PermissionForPattern(pattern)
+	return ok && declaration == PublicRoute
+}
+
 // RequirePattern denies missing declarations. A public declaration leaves the
-// route's own capability or login checks in place. Quote portal declarations
+// route's own capability or login checks in place. An authenticated declaration
+// requires the trusted principal set by authentication. Quote portal declarations
 // allow either staff or customer authority; the handler checks ownership.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	declaration, ok := PermissionForPattern(pattern)
@@ -438,6 +621,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	}
 	if declaration == PublicRoute {
 		return nil
+	}
+	if declaration == AuthenticatedRoute {
+		if p, ok := tenant.PrincipalFrom(ctx); ok && p.ID != "" && p.TenantID != "" {
+			return nil
+		}
+		return ErrForbidden
 	}
 	var denialErr error = ErrForbidden
 	for _, permission := range strings.Split(declaration, "|") {

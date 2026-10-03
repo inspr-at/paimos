@@ -41,7 +41,7 @@ func RunFence(ctx context.Context, tx pgx.Tx, account, run string, claim bool) e
 	var claimed, expired, ongoing bool
 	var harness, platform, arch string
 	err := tx.QueryRow(ctx, `SELECT q.details->>'platform',q.details->>'arch',(SELECT harness FROM agent_accounts WHERE id=e.account_id),verification_run_id::text,verification_claimed_at IS NOT NULL,e.verification_expires_at<=clock_timestamp(),
-  ongoing_approved_at IS NOT NULL AND EXISTS(SELECT 1 FROM account_allowance_windows w WHERE w.account_id=e.account_id AND NOT w.pairing_verification AND w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp())
+  ongoing_approved_at IS NOT NULL
   FROM agent_pairing_enrollments e JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE account_id=$1`, account).Scan(&platform, &arch, &harness, &verification, &claimed, &expired, &ongoing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -51,7 +51,7 @@ func RunFence(ctx context.Context, tx pgx.Tx, account, run string, claim bool) e
 	}
 	if verification == nil || *verification != run {
 		if !ongoing {
-			return fail(409, "verification_only", "separately approved ongoing limits required")
+			return fail(409, "verification_only", "ongoing account approval required")
 		}
 		return nil
 	}

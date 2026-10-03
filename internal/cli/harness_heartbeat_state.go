@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 )
 
 // heartbeatHold is the exclusive owner of one private state directory.
@@ -19,6 +20,11 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	ModelSent             bool                    `json:"model_sent,omitempty"`
+	SentModel             string                  `json:"sent_model,omitempty"`
+	SentEffort            string                  `json:"sent_effort,omitempty"`
+	ActivityMode          string                  `json:"agent_activity_mode,omitempty"`
+	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
 	AppliedModelSequence  int64                   `json:"applied_model_sequence,omitempty"`
 	AppliedRenameSequence int64                   `json:"applied_rename_sequence,omitempty"`
@@ -37,6 +43,8 @@ type heartbeatDisk struct {
 	SentCommits           []string                `json:"sent_commits,omitempty"`
 	StartRev              string                  `json:"start_rev,omitempty"`
 	Usage                 []heartbeatUsageDisk    `json:"usage,omitempty"`
+	UsagePath             string                  `json:"usage_path,omitempty"`
+	UsageSource           string                  `json:"usage_source,omitempty"`
 	PendingUsage          []heartbeatPendingUsage `json:"pending_usage,omitempty"`
 	UsageOffset           int64                   `json:"usage_offset,omitempty"`
 	UsageRecent           []string                `json:"usage_recent,omitempty"`
@@ -46,12 +54,18 @@ type heartbeatDisk struct {
 	OwnerStart            string                  `json:"owner_start,omitempty"`
 	BoundWorktree         string                  `json:"bound_worktree,omitempty"`
 	BoundBranch           string                  `json:"bound_branch,omitempty"`
+	BoundTicket           string                  `json:"bound_ticket,omitempty"`
+	RegisteredAt          time.Time               `json:"registered_at,omitempty"`
 	StartedUnix           int64                   `json:"started_unix,omitempty"`
 	CommitCursor          string                  `json:"commit_cursor,omitempty"`
 	Terminal              bool                    `json:"terminal,omitempty"`
 	TerminalReason        string                  `json:"terminal_reason,omitempty"`
 	Closed                bool                    `json:"closed,omitempty"`
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
+
+	// The observation fence survives clearing RequestedModel and helper
+	// restarts. Keep the existing JSON key for compatibility with saved state.
+	RequestedModelBaseline *heartbeatModelBaseline `json:"requested_model_baseline,omitempty"`
 }
 
 // heartbeatCodexCursor is the Codex scan context that must survive between
@@ -93,20 +107,26 @@ type heartbeatPendingUsage struct {
 	Recent            []string              `json:"recent,omitempty"`
 	Discard           bool                  `json:"discard,omitempty"`
 	Codex             *heartbeatCodexCursor `json:"codex,omitempty"`
+	AccountID         string                `json:"account_id,omitempty"`
 	BillingMode       string                `json:"billing_mode,omitempty"`
 	SubscriptionLabel string                `json:"subscription_label,omitempty"`
 }
 
 type heartbeatSession struct {
-	id    string
-	lease string
-	disk  heartbeatDisk
-	hold  heartbeatHold
+	// pauseWakeAt is derived from a DB-clock hint and never persisted or used as signal authority.
+	pauseWakeAt time.Time
+	id          string
+	lease       string
+	disk        heartbeatDisk
+	hold        heartbeatHold
+	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
+	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
+	stopReason string
 }
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock":
+	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
 		return true
 	default:
 		return false

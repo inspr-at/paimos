@@ -20,6 +20,10 @@ export default defineConfig({
         target: process.env.AEON_API_URL ?? 'http://127.0.0.1:8080',
         rewrite: path => path.replace(/^\/portal\/([^/]+)\/catalog\.json$/, '/api/public/portal/$1/catalog.json'),
       },
+      '^/portal/[^/]+/roadmap\\.json$': {
+        target: process.env.AEON_API_URL ?? 'http://127.0.0.1:8080',
+        rewrite: path => path.replace(/^\/portal\/([^/]+)\/roadmap\.json$/, '/api/public/portal/$1/roadmap.json'),
+      },
     },
   },
 })

@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -24,6 +25,7 @@ const (
 	evReserved   = "account.reserved"
 	evSettled    = "account.settled"
 	evReleased   = "account.released"
+	evArchived   = "account.archived"
 )
 
 func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType string, before, after any) error {
@@ -31,19 +33,40 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 	return err
 }
 
+// clockKey permits an in-process clock override; production uses transaction
+// time. It cannot be supplied through the HTTP contract.
+type clockKey struct{}
+
 func dbNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if now, ok := ctx.Value(clockKey{}).(time.Time); ok {
+		return now, nil
+	}
 	var now time.Time
 	err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now)
 	return now, err
 }
 
+// retiredSQL matches an account that left the workspace's lists (AEON-402): a
+// person removed it, or its only computer binding is revoked for good. Its
+// runs, readings and events stay; it never routes again.
+const retiredSQL = `(agent_accounts.archived_at IS NOT NULL OR EXISTS (SELECT 1 FROM agent_pairing_enrollments e
+		WHERE e.tenant_id = agent_accounts.tenant_id AND e.account_id = agent_accounts.id AND e.state = 'revoked'))`
+
+// listAccounts lists the workspace's current accounts, without retired ones.
 func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
+	return queryAccounts(ctx, tx, false)
+}
+
+// queryAccounts with retired lists every account, for a daemon reconciling
+// its own registrations.
+func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		ORDER BY created_at, id`)
+		WHERE $1 OR NOT `+retiredSQL+`
+		ORDER BY created_at, id`, retired)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +89,7 @@ func getAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts WHERE id = $1::uuid`, id)
 	account, err := scanAccount(row)
 	if err != nil {
@@ -85,7 +108,7 @@ func scanAccount(row scanner) (Account, error) {
 	var account Account
 	err := row.Scan(&account.ID, &account.AccountKey, &account.Harness, &account.DaemonID, &account.Label,
 		&account.MaxParallel, &account.RegisteredBy, &account.State, &account.LastProbeAt, &account.LastProbeOK,
-		&account.daemonGeneration, &account.CreatedAt, &account.Plan, &account.HostLabel, &account.AllowedProfileIDs)
+		&account.daemonGeneration, &account.CreatedAt, &account.Plan, &account.HostLabel, &account.AllowedProfileIDs, &account.ReadingSupport, &account.QuotaFingerprint, &account.StatuslineEnabled, &account.Provider, &account.Model, &account.ModelStatus, &account.ModelDataNote, &account.OpenRouterCredits, &account.GroupID, &account.QuotaPoolFingerprint, &account.BillingMode)
 	account.Windows = []Window{}
 	return account, err
 }
@@ -93,6 +116,10 @@ func scanAccount(row scanner) (Account, error) {
 func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Account, error) {
 	if len(accounts) == 0 {
 		return accounts, nil
+	}
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.ID)
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT w.id::text, w.account_id::text, w.starts_at, w.ends_at, w.unit,
@@ -104,10 +131,10 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		           SELECT 1 FROM account_reservations r
 		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id
 		             AND r.state = 'settled' AND r.actual_units = 0
-		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text
+		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
-		WHERE NOT w.pairing_verification AND NOT w.capacity_retired
-		ORDER BY w.account_id, w.starts_at, w.id`)
+		WHERE w.account_id=ANY($1::uuid[]) AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
+		ORDER BY w.account_id, w.starts_at, w.id`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -115,11 +142,13 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	byAccount := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
 		}
 		if w.capacityReadAt != nil {
-			w.Provisional = w.capacityKind == "refresh"
+			w.Provisional = synthetic(w)
+		} else {
+			w.SetByYou = true
 		} // Vendor percentage is measured; token settlement is irrelevant.
 		byAccount[w.AccountID] = append(byAccount[w.AccountID], w)
 	}
@@ -127,11 +156,19 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		return nil, err
 	}
 	for i := range accounts {
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,
+ (SELECT e.evidence FROM agent_account_residency_evidence e WHERE e.tenant_id=a.tenant_id AND e.account_id=a.id AND e.binding=`+residencyBindingSQL+`)
+ FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision, &accounts[i].ShareUsage, &accounts[i].residencyEvidence); err != nil {
+			return nil, err
+		}
 		if ws := byAccount[accounts[i].ID]; ws != nil {
 			accounts[i].Windows = ws
 		} else {
 			accounts[i].Windows = []Window{}
 		}
+	}
+	if err := fillGroupNames(ctx, tx, accounts); err != nil {
+		return nil, err
 	}
 	return accounts, nil
 }
@@ -232,7 +269,7 @@ func findAccount(ctx context.Context, tx pgx.Tx, daemonID, harness, key string) 
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
 		WHERE daemon_id = $1 AND harness = $2 AND account_key = $3`, daemonID, harness, key)
 	account, err := scanAccount(row)
@@ -251,14 +288,20 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
-	DaemonID         string  `json:"daemon_id"`
-	DaemonGeneration string  `json:"daemon_generation"`
-	Available        bool    `json:"available"`
-	HostLabel        *string `json:"host_label"`
+	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
+	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
+	DaemonID          string              `json:"daemon_id"`
+	DaemonGeneration  string              `json:"daemon_generation"`
+	Available         bool                `json:"available"`
+	HostLabel         *string             `json:"host_label"`
 	// Failure says why a probe failed: auth_failed only when the vendor status
 	// command confirmed a sign-out for this account, else unavailable.
 	Failure string `json:"failure,omitempty"`
 }
+
+// A restart heartbeat can commit while the obsolete check result is rejected.
+// The HTTP wrapper must report that partial result after the transaction commits.
+type probeHeartbeatCommitted struct{ error }
 
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
 	if !uuidRE.MatchString(accountID) {
@@ -301,19 +344,91 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if before.RegisteredBy != p.ID {
 		return Account{}, fail(http.StatusForbidden, "only the registering agent can probe")
 	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return Account{}, err
+	}
+	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(now.Add(time.Minute))) {
+		return Account{}, fail(400, "invalid OpenRouter credits")
+	}
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
 	}
+	if report := in.Readiness; report != nil && uuidRE.MatchString(report.CheckID) &&
+		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
+		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
+		before.daemonGeneration != nil && *before.daemonGeneration != generation {
+		c, err := scanCheck(tx.QueryRow(ctx, `SELECT `+checkColumns+` FROM account_readiness_checks WHERE id=$1 AND account_id=$2`, report.CheckID, accountID))
+		if err != nil && !isNoRows(err) {
+			return Account{}, err
+		}
+		// Only a currently pending check may announce the restart. Replaying a
+		// receipt from an older generation cannot move the heartbeat backwards.
+		if err == nil && c.State == "pending" && c.BindingRevision == before.LinkRevision &&
+			c.DaemonGeneration != nil && *c.DaemonGeneration == *before.daemonGeneration && now.Before(c.ExpiresAt) {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=$3,last_probe_failure=$4,last_daemon_generation=$5 WHERE id=$1`, accountID, now, in.Available, failure, generation); err != nil {
+				return Account{}, err
+			}
+			after, err := getAccount(ctx, tx, accountID)
+			if err != nil {
+				return Account{}, err
+			}
+			if err := learnOnline(ctx, tx, after, now); err != nil {
+				return Account{}, err
+			}
+			if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+				return Account{}, err
+			}
+			return after, &probeHeartbeatCommitted{&httpError{status: 409, code: "stale_binding", msg: "check belongs to previous daemon generation; heartbeat recorded, check facts discarded"}}
+		}
+	}
+	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
+		return Account{}, err
+	}
+	if err := reconcileReadinessResources(ctx, tx, before); err != nil {
+		return Account{}, err
+	}
+	if c := before.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if c := in.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if in.Readiness != nil {
+		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
+		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+			return Account{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
-		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
-		    last_probe_failure = $5
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure); err != nil {
+		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
+		    last_probe_failure = $5, openrouter_credits=$6
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, now); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err
+	}
+	if after.LastProbeAt != nil {
+		if err := learnOnline(ctx, tx, after, *after.LastProbeAt); err != nil {
+			return Account{}, err
+		}
 	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
 		return Account{}, err
@@ -325,7 +440,7 @@ func lockAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts WHERE id = $1::uuid FOR UPDATE`, id)
 	account, err := scanAccount(row)
 	if isNoRows(err) {
@@ -351,6 +466,10 @@ func updateState(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if !validState(state) {
 		return Account{}, fail(http.StatusBadRequest, "invalid state")
+	}
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM agent_accounts WHERE id = $1::uuid`, accountID).Scan(&archived); err == nil && archived {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "this account was removed", code: "account_removed"}
 	}
 	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
 		return Account{}, err
@@ -412,7 +531,7 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM account_allowance_windows
-			WHERE account_id = $1::uuid AND unit = $2 AND NOT pairing_verification
+			WHERE account_id = $1::uuid AND unit = $2 AND NOT pairing_verification AND removed_at IS NULL
 			  AND starts_at < $4 AND ends_at > $3
 		)`, accountID, in.Unit, in.StartsAt, in.EndsAt).Scan(&overlap); err != nil {
 		return Window{}, err
@@ -436,8 +555,84 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 		return Window{}, err
 	}
 	w.Provisional = true // No reservation has measured usage in a new window.
+	w.SetByYou = true
 	if err := writeEvent(ctx, tx, p, evWindow, nil, w); err != nil {
 		return Window{}, err
 	}
 	return w, nil
+}
+
+// archiveAccount removes an account from the workspace's lists (AEON-402). A
+// paired binding is disconnected first; queued runs bound to it are cancelled
+// and release their holds. It refuses while a run works on the account, so its
+// accounting stays known. Nothing is deleted: runs, readings and events stay.
+func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string) (Account, error) {
+	if !uuidRE.MatchString(accountID) {
+		return Account{}, fail(http.StatusNotFound, "account not found")
+	}
+	before, err := lockAccount(ctx, tx, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM agent_accounts WHERE id = $1::uuid`, accountID).Scan(&archived); err != nil {
+		return Account{}, err
+	}
+	if archived {
+		return before, nil
+	}
+	if err := agentpairing.DisconnectAccount(ctx, tx, p, accountID); errors.Is(err, agentpairing.ErrActiveRuns) {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
+	} else if err != nil {
+		return Account{}, err
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND status IN ('starting','running','waiting'))`, accountID).Scan(&active); err != nil {
+		return Account{}, err
+	}
+	if active {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
+	}
+	// A vendor-handoff retry has no pin of its own; retry_account_id is its target.
+	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_runs WHERE status = 'queued'
+		AND (account_id = $1::uuid OR COALESCE(requested_account_id, retry_account_id) = $1::uuid) ORDER BY id FOR UPDATE`, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	var queued []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return Account{}, err
+		}
+		queued = append(queued, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return Account{}, err
+	}
+	cancelled := []string{}
+	for _, id := range queued {
+		ok, err := agentpairing.CancelQueuedRun(ctx, tx, id)
+		if err != nil {
+			return Account{}, err
+		}
+		if ok {
+			cancelled = append(cancelled, id)
+		}
+	}
+	var at time.Time
+	if err := tx.QueryRow(ctx, `UPDATE agent_accounts SET state = 'unavailable', archived_at = clock_timestamp(), archived_by_principal_id = $2::uuid
+		WHERE id = $1::uuid RETURNING archived_at`, accountID, p.ID).Scan(&at); err != nil {
+		return Account{}, err
+	}
+	after, err := getAccount(ctx, tx, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	if err := writeEvent(ctx, tx, p, evArchived, before, map[string]any{"account": after, "archived_at": at, "cancelled_run_ids": cancelled}); err != nil {
+		return Account{}, err
+	}
+	return after, nil
 }

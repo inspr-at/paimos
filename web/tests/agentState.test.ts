@@ -2,10 +2,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens, windowSummary,
+  agentName, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
+  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens,
 } from '../src/lib/agentState.ts'
-import type { AgentRun, AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
+import type { AgentRun, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
 const now = Date.parse('2026-09-24T12:00:00Z')
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
@@ -13,7 +13,7 @@ function session(fields: Partial<HarnessSession> = {}): HarnessSession {
   return {
     id: 's1', project_id: 'p1', agent_principal_id: 'a1', run_id: 'r1', ticket_node_id: 'n1', work_order_id: null, parent_harness_session_id: null,
     harness: 'claude', host: 'imac0', management_mode: 'managed', role: 'worker', work_shape: 'ship', advertised_capabilities: ['interrupt', 'stop'],
-    phase: 'working', activity: 'busy', activity_sequence: 1, revision: 1, heartbeat_at: ago(0.5), stopped_at: null, stop_reason: null, created_at: ago(90), ...fields,
+    phase: 'working', activity: 'busy', activity_sequence: 1, revision: 1, heartbeat_at: ago(0.5), stopped_at: null, stop_reason: null, finished: false, created_at: ago(90), ...fields,
   }
 }
 function approval(fields: Partial<Approval> = {}): Approval {
@@ -45,28 +45,28 @@ test('session families cross status groups without losing any worker or orphan',
   assert.equal(tree[0]!.count, 3)
   assert.equal(tree[0]!.liveCount, 2)
   assert.equal(tree[0]!.children[0]!.children[0]!.view.session.id, 'grandchild')
-  assert.equal(views[1]!.status.label, 'Stopped')
+  assert.equal(views[1]!.status.label, 'Ended')
 })
 
-test('worker families sort working and starting by heartbeat, then idle, then stopped', () => {
+test('worker families sort working and starting by start time, then idle, then stopped; heartbeats never decide', () => {
   const sessions = [
     session({ id: 'lead', role: 'coordinator' }),
     session({ id: 'stopped', parent_harness_session_id: 'lead', phase: 'stopped', stopped_at: ago(0), heartbeat_at: ago(0) }),
-    session({ id: 'idle', parent_harness_session_id: 'lead', activity: 'idle', heartbeat_at: ago(0) }),
-    session({ id: 'busy-older', parent_harness_session_id: 'lead', heartbeat_at: ago(1) }),
-    session({ id: 'starting', parent_harness_session_id: 'lead', phase: 'starting', heartbeat_at: ago(0.1) }),
-    session({ id: 'busy-newer', parent_harness_session_id: 'lead', heartbeat_at: ago(0.2) }),
-    session({ id: 'idle-needs', parent_harness_session_id: 'lead', activity: 'idle', heartbeat_at: ago(0.1) }),
-    session({ id: 'stale', parent_harness_session_id: 'lead', heartbeat_at: ago(30) }),
+    session({ id: 'idle', parent_harness_session_id: 'lead', activity: 'idle', heartbeat_at: ago(0), created_at: ago(50) }),
+    session({ id: 'busy-older', parent_harness_session_id: 'lead', heartbeat_at: ago(0.1), created_at: ago(60) }),
+    session({ id: 'starting', parent_harness_session_id: 'lead', phase: 'starting', heartbeat_at: ago(0.1), created_at: ago(20) }),
+    session({ id: 'busy-newer', parent_harness_session_id: 'lead', heartbeat_at: ago(1), created_at: ago(30) }),
+    session({ id: 'idle-needs', parent_harness_session_id: 'lead', activity: 'idle', heartbeat_at: ago(0.1), created_at: ago(40) }),
+    session({ id: 'stale', parent_harness_session_id: 'lead', heartbeat_at: ago(30), created_at: ago(45) }),
   ]
   const tree = sessionForest(sessions.map(s => ({ session: s, status: sessionStatus(s, now, s.id === 'idle-needs') })), now)
-  assert.deepEqual(tree[0]!.children.map(n => n.view.session.id), ['starting', 'busy-newer', 'busy-older', 'idle', 'idle-needs', 'stale', 'stopped'])
+  assert.deepEqual(tree[0]!.children.map(n => n.view.session.id), ['busy-older', 'busy-newer', 'starting', 'idle', 'stale', 'idle-needs', 'stopped'])
   assert.equal(tree[0]!.workingCount, 4) // includes the working lead
   assert.equal(tree[0]!.liveCount, 7) // includes idle, never a fabricated stop
   assert.equal(tree[0]!.count, 8)
 })
 
-test('live descendants keep stopped parents ahead of history; heartbeat ties use session ID', () => {
+test('live descendants keep stopped parents ahead of history; start-time ties use session ID', () => {
   const sessions = [
     session({ id: 'lead' }),
     session({ id: 'stopped', parent_harness_session_id: 'lead', phase: 'stopped', stopped_at: ago(0) }),
@@ -104,7 +104,7 @@ test('heartbeat waiting has its own group while real requests still need a perso
   const overdue = session({ id: 'overdue', heartbeat_at: ago(4), needs_attention: false })
   const request = session({ ...fresh, id: 'request', needs_attention: true })
   const groups = groupSessions([fresh, overdue, request], now, () => false)
-  assert.deepEqual(groups.awaiting.map(view => view.session.id), ['new', 'overdue'])
+  assert.deepEqual(groups.awaiting.map(view => view.session.id), ['overdue', 'new'])
   assert.deepEqual(groups.needs.map(view => view.session.id), ['request'])
   assert.equal(sessionStatus(session({ ...fresh, heartbeat_at: ago(0) }), now).group, 'working')
   assert.equal(sessionStatus(session({ ...fresh, created_at: ago(10) }), now).group, 'unresponsive')
@@ -122,15 +122,26 @@ test('only an exact run approval attributes person action to a session', () => {
   assert.equal(needsYou(session({ phase: 'stopped', stopped_at: ago(1) }), [approval()], []), false)
 })
 
-test('groups sort live sessions by heartbeat and stopped ones by when they stopped', () => {
+test('groups sort live sessions by start time and stopped ones by when they stopped', () => {
   const groups = groupSessions([
-    session({ id: 'old', heartbeat_at: ago(1.5) }), session({ id: 'new', heartbeat_at: ago(0.1) }),
+    session({ id: 'new', heartbeat_at: ago(1.5), created_at: ago(10) }), session({ id: 'old', heartbeat_at: ago(0.1), created_at: ago(80) }),
     session({ id: 'stopA', phase: 'stopped', stopped_at: ago(60) }), session({ id: 'stopB', phase: 'stopped', stopped_at: ago(5) }),
     session({ id: 'asks', agent_principal_id: 'a9' }),
   ], now, s => s.agent_principal_id === 'a9')
-  assert.deepEqual(groups.working.map(e => e.session.id), ['new', 'old'])
+  assert.deepEqual(groups.working.map(e => e.session.id), ['old', 'new'])
   assert.deepEqual(groups.stopped.map(e => e.session.id), ['stopB', 'stopA'])
   assert.deepEqual(groups.needs.map(e => e.session.id), ['asks'])
+})
+
+test('a heartbeat never reorders a group; only start time and id do', () => {
+  const ids = ['c', 'a', 'd', 'b']
+  const base = ids.map((id, i) => session({ id, created_at: ago(i < 2 ? 50 : 40 - i) }))
+  const order = groupSessions(base, now, () => false).working.map(e => e.session.id)
+  assert.deepEqual(order, ['a', 'c', 'd', 'b'])
+  for (let round = 0; round < 25; round++) {
+    const beats = base.map((s, i) => ({ ...s, heartbeat_at: ago(((round * 7 + i * 13) % 17) / 10) }))
+    assert.deepEqual(groupSessions(beats.reverse(), now, () => false).working.map(e => e.session.id), order)
+  }
 })
 
 test('agent names come from the message address, else the host', () => {
@@ -185,23 +196,6 @@ test('the server’s risk wins over the local rule; runs use the server duration
   assert.equal(runDuration({ ...run, started_at: null }, now), '')
 })
 
-test('allowance windows: what is left, the pace and which window binds', () => {
-  const window = (fields: Partial<AllowanceWindow>): AllowanceWindow => ({ id: 'w', account_id: 'x', starts_at: ago(60), ends_at: ago(-60), unit: 'tokens', allowance: 1000, used: 0, reserved: 0, pace_model: 'steady', burst_ratio: 0, ...fields })
-  const ahead = windowSummary(window({ used: 700 }), now)!
-  assert.equal(ahead.pace, 'ahead')
-  assert.equal(Math.round(ahead.left * 100), 30)
-  assert.equal(windowSummary(window({ used: 480, reserved: 20 }), now)!.pace, 'on')
-  assert.equal(windowSummary(window({ used: 100 }), now)!.pace, 'under')
-  assert.equal(windowSummary(window({ starts_at: ago(-10), ends_at: ago(-70) }), now), null)
-  assert.equal(windowSummary(window({ allowance: 0 }), now), null)
-  const binding = bindingWindow([window({ id: 'roomy', used: 100 }), window({ id: 'tight', used: 900 })], now)!
-  assert.equal(binding.window.id, 'tight')
-  assert.equal(bindingWindow(undefined, now), null)
-  const fresh = window({ id: 'fresh', used: 0, provisional: true })
-  assert.equal(bindingWindow([fresh, window({ id: 'tight', used: 900 })], now)!.window.id, 'tight')
-  assert.equal(bindingWindow([fresh], now)!.window.provisional, true)
-})
-
 test('numbers read short: durations, tokens and cost', () => {
   assert.deepEqual([duration(45_000), duration(12 * 60_000), duration(134 * 60_000), duration(60 * 60_000), duration(28 * 3_600_000)], ['45s', '12m', '2h 14m', '1h', '1d 4h'])
   assert.deepEqual([tokens(950), tokens(4200), tokens(184_300), tokens(2_500_000)], ['950', '4.2k', '184k', '2.5M'])
@@ -215,7 +209,17 @@ test('fresh session projection cannot be changed by a stale optional run or requ
   }
 })
 
-test('vendor percentage windows have an explicit unit label', async () => {
- const { UNIT_LABEL } = await import('../src/lib/agentState.ts')
- assert.equal(UNIT_LABEL.percent, 'percent')
+test('a finished session sits with the ended ones; one that only went quiet at 100% keeps its heartbeat state (AEON-437)', () => {
+  const done = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100, finished: true }), now)
+  assert.deepEqual([done.state, done.label, done.group, done.tone], ['done', 'Done', 'stopped', 'done'])
+  const early = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 60 }), now)
+  assert.deepEqual([early.state, early.label, early.group, early.tone], ['stopped', 'Ended', 'stopped', 'stopped'])
+  const plain = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'stopped', progress_pct: 100 }), now)
+  assert.deepEqual([plain.state, plain.label, plain.group, plain.tone], ['stopped', 'Ended', 'stopped', 'stopped'])
+  const failed = sessionStatus(session({ phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_failed', progress_pct: 100 }), now)
+  assert.deepEqual([failed.state, failed.group, failed.tone], ['problem', 'problem', 'problem'])
+  const quiet = sessionStatus(session({ heartbeat_at: ago(12), progress_pct: 100 }), now)
+  assert.deepEqual([quiet.state, quiet.group, quiet.tone], ['unresponsive', 'unresponsive', 'attention'])
+  const buckets = groupSessions([session({ id: 'a', phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100, finished: true }), session({ id: 'b', phase: 'stopped', stopped_at: ago(3), stop_reason: 'stopped', progress_pct: 100 })], now, () => false)
+  assert.deepEqual(buckets.stopped.map(entry => [entry.session.id, entry.status.state]), [['a', 'done'], ['b', 'stopped']])
 })

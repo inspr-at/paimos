@@ -10,39 +10,49 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
-	EstimateHours   *float64 `json:"estimate_hours,omitempty"`
-	EstimateSource  string   `json:"estimate_source,omitempty"`
-	EstimateBy      string   `json:"estimate_by,omitempty"`
-	EstimateAt      string   `json:"estimate_at,omitempty"`
-	PillEN          string   `json:"pill_en,omitempty"`
-	PillDE          string   `json:"pill_de,omitempty"`
-	BenefitEN       string   `json:"benefit_en,omitempty"`
-	BenefitDE       string   `json:"benefit_de,omitempty"`
-	Hide            bool     `json:"hide_from_release_notes,omitempty"`
-	Warnings        []string `json:"warnings,omitempty"`
-	IssueKey        string   `json:"issue_key"`
-	Title           string   `json:"title"`
-	Type            string   `json:"type"`
-	Status          string   `json:"status"`
-	Priority        string   `json:"priority"`
-	RouteRole       string   `json:"route_role,omitempty"`
-	RouteRoleSource string   `json:"route_role_source,omitempty"`
-	RouteRoleBy     string   `json:"route_role_by,omitempty"`
-	RouteRoleAt     string   `json:"route_role_at,omitempty"`
-	Area            string   `json:"area,omitempty"`
-	AreaSource      string   `json:"area_source,omitempty"`
-	AreaBy          string   `json:"area_by,omitempty"`
-	AreaAt          string   `json:"area_at,omitempty"`
-	Description     string   `json:"description,omitempty"`
-	ID              string   `json:"id"`
-	Assignee        string   `json:"assignee,omitempty"`
-	Tags            []string `json:"tags,omitempty"`
-	Comments        []string `json:"comments,omitempty"`
+	Queued              *workqueue.Queued `json:"queued,omitempty"`
+	EstimateHours       *float64          `json:"estimate_hours,omitempty"`
+	EstimateSource      string            `json:"estimate_source,omitempty"`
+	EstimateBy          string            `json:"estimate_by,omitempty"`
+	EstimateAt          string            `json:"estimate_at,omitempty"`
+	PillEN              string            `json:"pill_en,omitempty"`
+	PillDE              string            `json:"pill_de,omitempty"`
+	BenefitEN           string            `json:"benefit_en,omitempty"`
+	BenefitDE           string            `json:"benefit_de,omitempty"`
+	Hide                bool              `json:"hide_from_release_notes,omitempty"`
+	Warnings            []string          `json:"warnings,omitempty"`
+	IssueKey            string            `json:"issue_key"`
+	Title               string            `json:"title"`
+	Type                string            `json:"type"`
+	Status              string            `json:"status"`
+	Priority            string            `json:"priority"`
+	RouteRole           string            `json:"route_role,omitempty"`
+	RouteRoleSource     string            `json:"route_role_source,omitempty"`
+	RouteRoleBy         string            `json:"route_role_by,omitempty"`
+	RouteRoleAt         string            `json:"route_role_at,omitempty"`
+	Area                string            `json:"area,omitempty"`
+	AreaSource          string            `json:"area_source,omitempty"`
+	AreaBy              string            `json:"area_by,omitempty"`
+	AreaAt              string            `json:"area_at,omitempty"`
+	RouteRoleConfirmed  *bool             `json:"route_role_confirmed,omitempty"`
+	AreaConfirmed       *bool             `json:"area_confirmed,omitempty"`
+	Complexity          string            `json:"complexity,omitempty"`
+	ComplexitySource    string            `json:"complexity_source,omitempty"`
+	ComplexityBy        string            `json:"complexity_by,omitempty"`
+	ComplexityAt        string            `json:"complexity_at,omitempty"`
+	ComplexityConfirmed *bool             `json:"complexity_confirmed,omitempty"`
+	Description         string            `json:"description,omitempty"`
+	ID                  string            `json:"id"`
+	Assignee            string            `json:"assignee,omitempty"`
+	Tags                []string          `json:"tags,omitempty"`
+	Comments            []string          `json:"comments,omitempty"`
 }
 
 type issueInput struct {
@@ -80,26 +90,34 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		estimate = &h
 	}
 	return issueView{
+		Queued:        n.Queued,
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
-		IssueKey:        n.Key,
-		Title:           n.Title,
-		Type:            kinds.slug(n.KindID),
-		Status:          n.State,
-		Priority:        fieldString(fields, "priority"),
-		RouteRole:       fieldString(fields, "route_role"),
-		RouteRoleSource: fieldString(fields, "route_role_source"),
-		RouteRoleBy:     fieldString(fields, "route_role_by"),
-		RouteRoleAt:     fieldString(fields, "route_role_at"),
-		Area:            fieldString(fields, "area"),
-		AreaSource:      fieldString(fields, "area_source"),
-		AreaBy:          fieldString(fields, "area_by"),
-		AreaAt:          fieldString(fields, "area_at"),
-		Description:     n.Body,
-		ID:              n.ID,
-		Assignee:        fieldString(fields, "assignee"),
-		Tags:            fieldStrings(fields, "tags"),
-		Comments:        comments,
+		IssueKey:            n.Key,
+		Title:               n.Title,
+		Type:                kinds.slug(n.KindID),
+		Status:              n.State,
+		Priority:            fieldString(fields, "priority"),
+		RouteRole:           fieldString(fields, "route_role"),
+		RouteRoleSource:     fieldString(fields, "route_role_source"),
+		RouteRoleBy:         fieldString(fields, "route_role_by"),
+		RouteRoleAt:         fieldString(fields, "route_role_at"),
+		Area:                fieldString(fields, "area"),
+		AreaSource:          fieldString(fields, "area_source"),
+		AreaBy:              fieldString(fields, "area_by"),
+		AreaAt:              fieldString(fields, "area_at"),
+		RouteRoleConfirmed:  fieldBoolPointer(fields, "route_role_confirmed"),
+		AreaConfirmed:       fieldBoolPointer(fields, "area_confirmed"),
+		Complexity:          fieldString(fields, "complexity"),
+		ComplexitySource:    fieldString(fields, "complexity_source"),
+		ComplexityBy:        fieldString(fields, "complexity_by"),
+		ComplexityAt:        fieldString(fields, "complexity_at"),
+		ComplexityConfirmed: fieldBoolPointer(fields, "complexity_confirmed"),
+		Description:         n.Body,
+		ID:                  n.ID,
+		Assignee:            fieldString(fields, "assignee"),
+		Tags:                fieldStrings(fields, "tags"),
+		Comments:            comments,
 	}
 }
 
@@ -119,6 +137,9 @@ func (rt *runtime) printIssue(v issueView) error {
 	}
 	if v.Area != "" {
 		fmt.Fprintf(rt.stdout, "  area:     %s\n", routeProvenance(v.Area, v.AreaSource))
+	}
+	if v.Complexity != "" {
+		fmt.Fprintf(rt.stdout, "  complexity: %s\n", routeProvenance(v.Complexity, v.ComplexitySource))
 	}
 	if v.Description != "" {
 		desc := clipRunes(v.Description, 160, "…")
@@ -334,6 +355,15 @@ func (rt *runtime) createIssue(in issueInput) error {
 	if err := rt.do(http.MethodPost, "/api/nodes", body, &created); err != nil {
 		return err
 	}
+	if (kindName == "ticket" || kindName == "task") && in.Estimate == "" && !validEstimate(fieldMap(created.Fields)["estimate_hours"]) {
+		found := false
+		for _, warning := range created.Warnings {
+			found = found || strings.Contains(warning, "fields.estimate_hours")
+		}
+		if !found {
+			created.Warnings = append(created.Warnings, "add an agent-hours estimate in fields.estimate_hours")
+		}
+	}
 	created.Warnings = withEstimateHints(created.Warnings)
 	kinds, err := rt.loadKinds()
 	if err != nil {
@@ -370,14 +400,38 @@ type issuePatch struct {
 	RemoveTag      []string
 	RouteRole      string
 	Area           string
+	Complexity     string
+}
+
+// noteKindUpdate refuses a different kind before any write. The same kind is a
+// no-op and is reported; the caller must not send the kind to the API.
+func (rt *runtime) noteKindUpdate(ref, requested string) error {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return nil
+	}
+	n, err := rt.nodeByKey(ref)
+	if err != nil {
+		return err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return err
+	}
+	current := kinds.slug(n.KindID)
+	if current == requested {
+		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
+		return nil
+	}
+	return rt.fail(fmt.Errorf("kind_change_not_allowed: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
 }
 
 func (rt *runtime) updateIssue(in issuePatch) error {
 	if strings.HasPrefix(strings.TrimSpace(in.Ref), "id:") {
 		return usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
-	if strings.TrimSpace(in.Type) != "" && !issueKinds[in.Type] {
-		return usagef("unknown issue type %q (kind is immutable; create a node of that kind)", in.Type)
+	if err := rt.noteKindUpdate(in.Ref, in.Type); err != nil {
+		return err
 	}
 	n, err := rt.nodeByKey(in.Ref)
 	if err != nil {
@@ -390,9 +444,9 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	if !issueKinds[kinds.slug(n.KindID)] {
 		return rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
 	}
-	if in.RouteRole != "" || in.Area != "" {
+	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
 		if slug := kinds.slug(n.KindID); slug != "ticket" && slug != "task" {
-			return usagef("--role and --area apply to tickets and tasks")
+			return usagef("--role, --area and --complexity apply to tickets and tasks")
 		}
 	}
 	fields := fieldMap(n.Fields)
@@ -412,8 +466,8 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		fields["priority"] = p
 		changedFields = true
 	}
-	if in.RouteRole != "" || in.Area != "" {
-		applyRouteFields(fields, in.RouteRole, in.Area)
+	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
+		applyRouteFields(fields, in.RouteRole, in.Area, in.Complexity)
 		changedFields = true
 	}
 	if a := strings.TrimSpace(in.Assignee); a != "" {
@@ -472,13 +526,7 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		if n.UpdatedAt.IsZero() {
-			return usagef("%s has no revision timestamp; nothing was written", n.Key)
-		}
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
-			if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
-				stale.msg += "; nothing was written"
-			}
+		if err := rt.patchNode(n, patch, &n); err != nil {
 			return err
 		}
 	}
@@ -522,6 +570,35 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		return nil
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s\n", view.IssueKey)
+	return nil
+}
+
+// convertIssue never converts. The CLI holds an agent key, and kind conversion
+// is a person action in the web app. Lookups are read-only and only build the
+// link and check that --to is an issue-family kind.
+func (rt *runtime) convertIssue(ref, to string) error {
+	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
+		return usagef("id:<n> is a classic numeric id; pass the issue key")
+	}
+	n, nodeErr := rt.nodeByKey(ref)
+	kinds, kindsErr := rt.loadKinds()
+	if kindsErr == nil {
+		if err := requireIssueFamilyTarget(kinds, to); err != nil {
+			return err
+		}
+	}
+	key := strings.TrimSpace(ref)
+	if nodeErr == nil && n.Key != "" {
+		key = n.Key
+	}
+	return &exitError{code: 3, msg: fmt.Sprintf("Converting a kind needs a person. Open %s, then ⋯ → Convert to %s.", rt.ticketWebURL(key), to)}
+}
+
+func requireIssueFamilyTarget(kinds kindTable, to string) error {
+	kind, ok := kinds.bySlug[to]
+	if !ok || !issueFamilyKind(kind) {
+		return usagef("--to %q is not an issue kind", to)
+	}
 	return nil
 }
 
@@ -811,7 +888,7 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	if len(patch) == 0 {
 		return usagef("nothing to update")
 	}
-	if err := rt.do(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n); err != nil {
+	if err := rt.patchNode(n, patch, &n); err != nil {
 		return err
 	}
 	view := viewKnowledge(n, kinds)
@@ -820,6 +897,19 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s/%s (%s)\n", view.Type, view.Slug, view.Key)
 	return nil
+}
+
+// patchNode guards every read/merge/write with the exact snapshot revision.
+// Callers that already created other records must report that partial result.
+func (rt *runtime) patchNode(n apiNode, patch map[string]any, out any) error {
+	if n.UpdatedAt.IsZero() {
+		return usagef("%s has no revision timestamp; nothing was written", n.Key)
+	}
+	err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, out, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)})
+	if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
+		stale.msg += "; nothing was written by this patch"
+	}
+	return err
 }
 
 func (rt *runtime) searchIssues(query, project, typ string, limit int) error {
@@ -898,4 +988,11 @@ func firstLine(s string) string {
 func htmlEscape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
 	return r.Replace(s)
+}
+
+func fieldBoolPointer(fields map[string]any, key string) *bool {
+	if value, ok := fields[key].(bool); ok {
+		return &value
+	}
+	return nil
 }

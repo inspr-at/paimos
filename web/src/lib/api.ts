@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export interface Identity {
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
-  tenant: { id: string; name: string }
+  // brand: the workspace's own header brand (AEON-431), absent when unset.
+  tenant: { id: string; name: string; brand?: import('./tenantBrand').TenantBrand }
   // The signed-in person's external identity; absent for agent keys.
   identity?: { email?: string; display_name?: string } | null
 }
@@ -15,16 +16,19 @@ export function accountEmail(identity: Identity) {
 }
 
 import { learnPictures } from './avatar.ts'
+import { noteWrite, parsePosition, stampAt, tick } from './position.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
+import type { TicketPlanning } from './planning.ts'
+import { rowStore } from './rowStore.ts'
 
-export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
+export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {
   readonly kind: 'timeout' | 'network'
-  constructor(kind: 'timeout' | 'network') {
-    super(kind === 'timeout' ? 'The server did not answer within 10 s' : 'No connection')
+  constructor(kind: 'timeout' | 'network', timeoutMs = 10_000) {
+    super(kind === 'timeout' ? `The server did not answer within ${timeoutMs / 1000} s` : 'No connection')
     this.kind = kind
   }
 }
@@ -40,22 +44,23 @@ const pause = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
 })
 
 // Public reads can use this without adding cookies or weakening their referrer policy.
-export async function resilientFetch(url: string, init: RequestInit = {}) {
+export async function resilientFetch(url: string, init: RequestInit = {}, timeoutMs = 10_000) {
   const method = init.method ?? 'GET'
   const invocationStarted = Date.now()
+  const gapLimit = Math.max(30_000, timeoutMs + 5_000)
   for (let attempt = 0; ; attempt++) {
-    if (Date.now() - invocationStarted > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+    if (Date.now() - invocationStarted > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
     const started = Date.now()
-    const timeout = AbortSignal.timeout(10_000)
+    const timeout = AbortSignal.timeout(timeoutMs)
     const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout
     try {
       const response = await fetch(url, { ...init, signal })
-      if (Date.now() - started > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+      if (Date.now() - started > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
       return response
     } catch (error) {
-      if (Date.now() - started > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+      if (Date.now() - started > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
       if (init.signal?.aborted) throw error
-      const failure = new RequestFailure(timeout.aborted ? 'timeout' : 'network')
+      const failure = new RequestFailure(timeout.aborted ? 'timeout' : 'network', timeoutMs)
       if (!retryable(method, failure) || attempt >= 2 || error instanceof StaleRequestError) {
         throw error instanceof StaleRequestError ? error : failure
       }
@@ -64,7 +69,7 @@ export async function resilientFetch(url: string, init: RequestInit = {}) {
   }
 }
 
-export async function api(path: string, init: RequestInit = {}) {
+export async function api(path: string, init: RequestInit = {}, timeoutMs = 10_000) {
   // A revoked tab stays readable, but must not send another protected request.
   // Sign-in and public resources remain available to recover in a new tab.
   if (sessionEnded.blocked && path !== '/auth/dev-login' && !path.startsWith('/public/') && path !== '/version') {
@@ -73,14 +78,17 @@ export async function api(path: string, init: RequestInit = {}) {
   const response = await resilientFetch(`/api${path}`, {
     credentials: 'same-origin', cache: 'no-store', ...init,
     headers: { Accept: 'application/json', ...init.headers },
-  })
+  }, timeoutMs)
   // Every caller, including those that handle Response themselves, revokes on 401.
   if (response.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(path) }
+  // Every accepted write, from any component, raises the floor a read must reach
+  // to be newer than it (AEON-449); no write path can skip it.
+  if (response.ok && !['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase())) noteWrite(response)
   return response
 }
 
 // Keep the P0.3 auth wire contract here, separate from view components.
-export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean }> {
+export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean; oidcDisplayName?: string }> {
   const response = await api('/me')
   if (!response.ok && response.status !== 401) throw new Error('Session unavailable')
   // A 401 may have no JSON body; it still means sign-in is required.
@@ -89,12 +97,13 @@ export async function getSession(): Promise<{ identity: Identity | null; devMode
     throw new Error('Invalid session response')
   })
   const devMode = body.dev_mode === true
-  if (response.status === 401) return { identity: null, devMode }
+  const provider = typeof body.oidc_display_name === 'string' ? { oidcDisplayName: body.oidc_display_name.trim() } : {}
+  if (response.status === 401) return { identity: null, devMode, ...provider }
   if (typeof body.principal?.id !== 'string' || typeof body.principal?.name !== 'string'
     || typeof body.tenant?.id !== 'string' || typeof body.tenant?.name !== 'string') {
     throw new Error('Invalid session response')
   }
-  return { identity: body as Identity, devMode }
+  return { identity: body as Identity, devMode, ...provider }
 }
 
 // R1 wire types mirror api/openapi.yaml. All workspace HTTP calls stay here.
@@ -103,6 +112,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
   fields: Record<string, unknown>; state: string; parent_id: string | null
@@ -111,10 +121,11 @@ export interface WorkNode {
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface SearchHit { node: WorkNode; score: number }
 export interface NodeCreate {
+  human_check?: string | null
   kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
   state?: string; parent_id?: string | null; before_id?: string | null; key_prefix?: string
 }
-export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state'>>
+export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state' | 'human_check'>>
 
 export class APIError extends Error {
   readonly status: number
@@ -122,7 +133,7 @@ export class APIError extends Error {
   readonly body: Record<string, unknown>
   constructor(status: number, message: string, body: Record<string, unknown> = {}) { super(message); this.status = status; this.body = body }
 }
-async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
+async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal, answered?: (response: Response) => void): Promise<T> {
   const response = await api(path, {
     method,
     ...(signal ? { signal } : {}),
@@ -136,6 +147,7 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
     const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
     throw new APIError(response.status, reason, data && typeof data === 'object' ? data : {})
   }
+  answered?.(response)
   return response.status === 204 ? undefined as T : response.json()
 }
 // The router registers what happens when a request finds the session ended.
@@ -149,16 +161,36 @@ function query(values: object): string {
   return encoded ? `?${encoded}` : ''
 }
 const idPath = (id: string) => encodeURIComponent(id)
-export const getKinds = () => json<{ items: Kind[] }>('/kinds')
+// Node writes of this tab go to the row store with the exact revision the
+// server answered: live views know those events, and only those, as already
+// on screen (AEON-326). sent: when the request left, for causal order.
+function writing<T>(send: () => Promise<T>, record: (result: T, sent: number) => void): Promise<T> {
+  const sent = rowStore.mark()
+  return send().then(result => { record(result, sent); return result })
+}
+const wroteNode = (node: WorkNode, sent: number) => { rowStore.wrote(node, sent) }
+export const getKinds = () => json<{ items: Kind[] }>('/kinds').then(result => { rowStore.learnKinds(result.items); return result })
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
-export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body)
+export const createNode = (body: NodeCreate) => writing(() => json<WorkNode>('/nodes', 'POST', body), wroteNode)
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
 export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
 // ifUnmodifiedSince: the node's updated_at as read; the move answers 412 with the current node when it changed.
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
-export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
+export const convertNode = (id: string, to_kind: string, options: { ifUnmodifiedSince?: string } = {}) =>
+  writing(() => json<WorkNode>(`/nodes/${idPath(id)}/convert`, 'POST', { to_kind }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}), wroteNode)
+// A delete answers the revision of its node.deleted event in the revision
+// header (null from an older server: then nothing proves the event is this
+// tab's). Header names are case-insensitive; this is the wire form.
+const REVISION_HEADER = 'aeon-revision'
+export function deleteNode(id: string): Promise<{ revision: string | null }> {
+  let revision: string | null = null
+  return writing(
+    () => json<void>(`/nodes/${idPath(id)}`, 'DELETE', undefined, {}, undefined, response => { revision = response.headers.get(REVISION_HEADER) || null }).then(() => ({ revision })),
+    (result, sent) => { rowStore.deleted(id, result.revision, sent) },
+  )
+}
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
   json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
@@ -175,14 +207,19 @@ export interface ListItem extends WorkNode {
   eta?: TicketEta
   // The live worker the Assignee cell leads with. Absent when none is bound.
   lead_worker?: LeadWorker | null
+  // Model, tokens and (with harness.read) cost for the planning columns (AEON-329).
+  planning?: TicketPlanning
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
+  human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  // Only these nodes (at most 200), every other filter still applied (AEON-326).
+  ids?: string[]
 }
 // Work (ticket, task, epic) counts. A kind's state category wins when one is set.
 // Otherwise open is every state that is not in progress, done, cancelled or archived
@@ -203,8 +240,13 @@ function listQuery(params: ListQuery): string {
   }
   return query(values)
 }
-export const listNodes = (params: ListQuery, options: { signal?: AbortSignal } = {}) => json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal)
-  .then(page => { learnPictures(page.items.map(item => item.assignee)); return page })
+export const listNodes = async (params: ListQuery, options: { signal?: AbortSignal } = {}) => {
+  const start = tick()
+  let position: number | undefined
+  const page = await json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal, response => { position = parsePosition(response) })
+  learnPictures(page.items.map(item => item.assignee))
+  return stampAt(page, { position, start }, 2)
+}
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string
@@ -221,10 +263,13 @@ export const restoreView = (id: string) => json<SavedView>(`/views/${idPath(id)}
 export interface BulkChange {
   ids: string[]; state?: string; priority?: string | null; assignee?: string | null
   tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string
+  // Per node, the updated_at the list showed: a node changed since is skipped with code conflict.
+  if_unmodified_since?: Record<string, string>
 }
 export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
-export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
+export const bulkChange = (body: BulkChange) => writing(() => json<BulkResult>('/nodes/bulk', 'POST', body), (result, sent) => { for (const node of result.items ?? []) rowStore.wrote(node, sent) })
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
+export const getStatusHelp = (projectId?: string, signal?: AbortSignal) => json<import('./statusDefinitions').StatusHelp>(`/status/help${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`, 'GET', undefined, {}, signal)
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
   .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })
 // Shared project groups (AEON-136): everyone reads them; admins write, and every
@@ -238,11 +283,12 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind' | 'human_check'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
   author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
+  automatic_change?: import('./statusAutopilot').AutomaticChange
   body_markdown?: string; changes?: ActivityChange[]
 }
 const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }

@@ -28,7 +28,7 @@ export function agentData(world: AgentWorld) {
     [agent(1)]: 'claude:camy', [agent(2)]: 'codex:nova', [agent(3)]: 'pi:pixel', [agent(4)]: 'cursor:kite',
     [agent(5)]: 'grok:amy', [agent(6)]: 'claude:sable', [agent(7)]: 'codex:orbit',
   }
-  const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null }
+  const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null, finished: false }
   const summary = (nodeId: unknown) => typeof nodeId === 'string' && world.nodes?.[nodeId] ? { id: nodeId, ...world.nodes[nodeId] } : null
   const session = (n: number, fields: Record<string, unknown>) => ({ ...base, id: id('5e', n), ...fields, project: summary(fields.project_id) ?? { id: fields.project_id, key: '', title: '' }, ticket: summary(fields.ticket_node_id) })
   const sessions = world.empty ? [] : [
@@ -66,7 +66,7 @@ export function agentData(world: AgentWorld) {
     approval(6, { agent_principal_id: agent(4), scope: 'inbox.send', resource_kind: 'node', resource_id: pai, rationale: 'Message the coordinator about the release lock.', expires_at: ago(20), proposed_at: ago(60), decision: 'approved', decided_by_principal_id: world.me }),
     approval(7, { agent_principal_id: agent(5), scope: 'work_orders.write', resource_kind: 'node', resource_id: pharos, rationale: 'Record scout findings on the work order.', expires_at: ago(30), proposed_at: ago(90) }),
   ]
-  const window = (unit: string, allowance: number, used: number, started: number, length: number, pace = 'steady') => ({ id: `${unit}-${allowance}`, starts_at: ago(started), ends_at: ahead(length - started), unit, allowance, used, reserved: 0, pace_model: pace, burst_ratio: 0.05 })
+  const window = (unit: string, allowance: number, used: number, started: number, length: number, pace = 'steady') => ({ id: `${unit}-${allowance}`, starts_at: ago(started), ends_at: ahead(length - started), unit, allowance, used, reserved: 0, pace_model: pace, burst_ratio: 0.05, set_by_you: true })
   const acct = (key: keyof typeof account, label: string, state: string, windows: unknown[], plan = '') => ({ id: account[key], account_key: `${key}-studio`, harness: key, daemon_id: 'imac0', label, plan, host_label: 'imac0', registered_by_principal_id: world.me, state, max_parallel_runs: 2, last_probe_at: ago(2), last_probe_ok: state !== 'unavailable', created_at: ago(60 * 24 * 30), windows })
   const accounts = [
     acct('claude', 'Claude Max', 'available', [window('tokens', 5_000_000, 3_600_000, 150, 300)], 'Team'),
@@ -94,7 +94,10 @@ export function agentData(world: AgentWorld) {
 }
 export type AgentData = ReturnType<typeof agentData>
 
+export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
+export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
   accountsForbidden?: boolean
@@ -104,11 +107,15 @@ export interface AgentMockOptions {
   failReadMarks?: number
   capacity?: CapacityWorld
   capacityForbidden?: boolean
+  groups?: MockAccountGroup[]
+  pins?: MockTicketPin[]
 }
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
 export async function mockAgents(page: Page, data: AgentData, options: AgentMockOptions = {}) {
   const calls: { path: string; method: string; body: unknown; query?: URLSearchParams }[] = []
+  const groups: MockAccountGroup[] = options.groups ? options.groups.map(group => ({ ...group, account_ids: [...group.account_ids], project_ids: [...group.project_ids] })) : []
+  const pins: MockTicketPin[] = options.pins ? options.pins.map(pin => ({ ...pin })) : []
   const readMarkers = new Map<string, { last_read_message_id: string; last_read_event_id: number; read_at: string }>()
   if (options.readMark) {
     readMarkers.set(options.readMark.sessionId, { last_read_message_id: options.readMark.id, last_read_event_id: options.readMark.event, read_at: '2026-09-29T05:00:00.000Z' })
@@ -117,12 +124,18 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
+    if (path === '/api/agents/plan' && method === 'GET') {
+      const stored = options.workingPreference?.()
+      const running: Record<string, number> = {}
+      for (const session of data.sessions) if (!session.stopped_at && session.phase !== 'stopped') running[session.harness] = (running[session.harness] ?? 0) + 1
+      return route.fulfill({ json: { total: stored?.total ?? stored?.cap ?? 15, limits: stored?.limits ?? {}, principal_id: data.me, running, running_total: Object.values(running).reduce((n, x) => n + x, 0), source: stored?.total !== undefined ? 'plan' : stored ? 'legacy' : 'default', updated_at: null } })
+    }
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
     if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
@@ -196,7 +209,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (what === 'message-targets') return route.fulfill({ json: data.targets })
       if (method === 'POST') {
         const input = body as { to: string; body: string; delivery_level: string; reply_to?: string; recipient_session_id?: string }
-        const sent = { recipient_session_id: input.recipient_session_id, sender_label: 'Markus', created_at: new Date().toISOString(), human_resolution_outcome: null, id: `5e${String(data.sent.length + 1).padStart(6, '0')}-0000-4000-8000-000000000000`, project, sender_principal_id: data.me, recipient_principal_id: data.targets.find(t => t.address === input.to)?.principal_id ?? '', to: input.to, body: input.body, reply_to: input.reply_to ?? null, sent_event_id: 1000 + data.sent.length, is_action_request: false, expects_reply: false, delivery_level: input.delivery_level, status: 'accepted', reply_obligation: 'none' }
+        const recipient = data.targets.find(t => t.address === input.to)?.principal_id ?? data.sessions.find(s => s.agent_principal_id === input.to)?.agent_principal_id ?? ''
+        const sent = { recipient_session_id: input.recipient_session_id, sender_label: 'Markus', created_at: new Date().toISOString(), human_resolution_outcome: null, id: `5e${String(data.sent.length + 1).padStart(6, '0')}-0000-4000-8000-000000000000`, project, sender_principal_id: data.me, recipient_principal_id: recipient, to: input.to, body: input.body, reply_to: input.reply_to ?? null, sent_event_id: 1000 + data.sent.length, is_action_request: false, expects_reply: false, delivery_level: input.delivery_level, status: 'accepted', reply_obligation: 'none' }
         data.sent.push(sent)
         return route.fulfill({ status: 201, json: sent })
       }
@@ -217,6 +231,19 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       const page = all.slice(0, limit)
       return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
     }
+    if (path === '/api/decision-desk/projection') {
+      const now = Date.now()
+      const items = [
+        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/agents?needs=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
+        ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/agents?needs=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
+      ].sort((a, b) => {
+        const bucket = (i: typeof a) => i.held ? i.kind === 'approval' ? 0 : 1 : 2
+        return bucket(a) - bucket(b) || Date.parse(String(a.held && a.kind === 'approval' ? a.expires_at : a.created_at)) - Date.parse(String(b.held && b.kind === 'approval' ? b.expires_at : b.created_at)) || a.id.localeCompare(b.id)
+      })
+      const offset = Number(q.get('cursor') ?? 0), limit = Number(q.get('limit') ?? 100)
+      const hasMore = offset + limit < items.length
+      return route.fulfill({ json: { items: items.slice(offset, offset + limit), counts: { open: items.length, held: items.filter(i => i.held).length, chores: 0 }, has_more: hasMore, ...(hasMore ? { next_cursor: String(offset + limit) } : {}), as_of: new Date(now).toISOString() } })
+    }
     if (path === '/api/approvals') return route.fulfill({ json: data.approvals })
     const decision = /^\/api\/approvals\/([^/]+)\/(decision|revoke)$/.exec(path)
     if (decision) {
@@ -232,9 +259,64 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (answer) return answer.status === 204 ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ status: answer.status ?? 200, json: answer.json })
       // Without a capacity world: accounts without readings and the default schedule.
       if (path === '/api/agent-accounts/capacity' || path === '/api/agent-accounts/capacity/preview') return route.fulfill({ json: data.accounts.map(a => ({ account_id: a.id, schedule: defaultSchedule(), windows: [] })) })
-      if (path === '/api/agent-accounts/capacity/schedule') return method === 'PUT' ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ json: [] })
+      // Keep for you is confirmed (Auto), so the one-time plan card stays out of unrelated specs.
+      if (path === '/api/agent-accounts/capacity/schedule') return method === 'PUT' ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ json: [{ scope: 'user', schedule: { ...defaultSchedule(), reserve: 'auto' } }] })
+    }
+    // Per-account settings (AEON-384) live in the capacity world.
+    if (options.capacity && path.startsWith('/api/agent-accounts/')) {
+      const answer = options.capacity.handle(path, method, body)
+      if (answer) return answer.status === 204 ? route.fulfill({ status: 204, body: '' }) : route.fulfill({ status: answer.status ?? 200, json: answer.json })
     }
     if (path === '/api/agent-accounts') return options.accountsForbidden ? route.fulfill({ status: 403, json: { error: 'admin session required' } }) : route.fulfill({ json: data.accounts })
+    if (path === '/api/agent-accounts/groups' && method === 'GET') return route.fulfill({ json: groups })
+    if (path === '/api/agent-accounts/groups' && method === 'POST') {
+      const input = body as { harness?: string; name?: string; exclusive?: boolean; account_ids?: string[]; project_ids?: string[] }
+      const group: MockAccountGroup = {
+        id: `g1000000-0000-4000-8000-${String(groups.length + 1).padStart(12, '0')}`,
+        harness: input.harness ?? '', name: input.name ?? '', exclusive: !!input.exclusive,
+        account_ids: input.account_ids ?? [], project_ids: input.project_ids ?? [],
+      }
+      groups.push(group)
+      for (const accountId of group.account_ids) {
+        const found = data.accounts.find(account => account.id === accountId)
+        if (found) Object.assign(found, { group_id: group.id, group_name: group.name })
+      }
+      return route.fulfill({ status: 201, json: group })
+    }
+    const groupPath = /^\/api\/agent-accounts\/groups\/([^/]+)$/.exec(path)
+    if (groupPath && method === 'DELETE') {
+      const index = groups.findIndex(group => group.id === groupPath[1])
+      if (index >= 0) groups.splice(index, 1)
+      for (const account of data.accounts) {
+        const grouped = account as typeof account & { group_id?: string; group_name?: string }
+        if (grouped.group_id === groupPath[1]) { delete grouped.group_id; delete grouped.group_name }
+      }
+      return route.fulfill({ status: 204, body: '' })
+    }
+    if (path === '/api/agent-accounts/pins' && method === 'GET') {
+      const ticket = q.get('ticket_id')
+      return route.fulfill({ json: pins.filter(pin => !ticket || pin.ticket_id === ticket) })
+    }
+    if (path === '/api/agent-accounts/pins' && method === 'PUT') {
+      const input = body as MockTicketPin
+      const index = pins.findIndex(pin => pin.ticket_id === input.ticket_id && pin.harness === input.harness)
+      if (index >= 0) pins[index] = input
+      else pins.push(input)
+      return route.fulfill({ status: 204, body: '' })
+    }
+    if (path === '/api/agent-accounts/pins' && method === 'DELETE') {
+      const index = pins.findIndex(pin => pin.ticket_id === q.get('ticket_id') && pin.harness === q.get('harness'))
+      if (index >= 0) pins.splice(index, 1)
+      return route.fulfill({ status: 204, body: '' })
+    }
+    const target = /^\/api\/agent-accounts\/runs\/([^/]+)\/target$/.exec(path)
+    if (target && method === 'POST') {
+      const found = data.runs.find(run => run.id === target[1]) as (typeof data.runs)[number] & { requested_account_id?: string; requested_group_id?: string }
+      const input = body as { account_id?: string; group_id?: string }
+      if (found && input.account_id) found.requested_account_id = input.account_id
+      if (found && input.group_id) found.requested_group_id = input.group_id
+      return route.fulfill({ status: 204, body: '' })
+    }
     const account = /^\/api\/agent-accounts\/([^/]+)$/.exec(path)
     if (account && method === 'PATCH') {
       const found = data.accounts.find(a => a.id === account[1])!
@@ -251,3 +333,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
   await page.route('**/api/**', handler)
   return calls
 }
+// Reads of the tenant-wide session list the Agents page keeps fresh. Every accepted
+// write on the page reads it again (AEON-449): compare the count before and after.
+export const sessionListReads = (calls: { path: string; method: string; query?: URLSearchParams }[]) =>
+  calls.filter(call => call.method === 'GET' && call.path === '/api/harness-sessions' && call.query?.get('view') === 'current').length

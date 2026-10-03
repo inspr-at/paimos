@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand, pageName } from '../lib/brand'
+import { fitLogo, headerBrand } from '../lib/tenantBrand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
@@ -16,6 +17,8 @@ import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
 import { usePoller } from '../lib/usePolledData'
+import { pollDoctrineInbox, resetDoctrineInbox } from '../lib/doctrineInbox'
+import { toast } from '../lib/toast'
 import { placeOf, releaseChordOpen, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
@@ -36,6 +39,15 @@ const route = useRoute()
 const router = useRouter()
 const palette = ref<InstanceType<typeof CommandPalette>>()
 const writable = computed(() => can('nodes.write', project.value?.id))
+// AEON-431: the workspace's logo and short name replace the product mark when
+// set. A logo that fails to load falls back to the name, or to the product mark.
+const failedLogo = ref('')
+const tenantMark = computed(() => {
+  const mark = headerBrand(session.identity?.tenant.brand, dark.value)
+  if (mark?.logo && mark.logo.url === failedLogo.value) return mark.name ? { ...mark, logo: null, plate: false } : null
+  return mark
+})
+const lockupName = computed(() => tenantMark.value ? tenantMark.value.name || session.identity?.tenant.name || brand.value.wordmark : brand.value.wordmark)
 
 // The legacy workspace view keeps its own search; everywhere else search is global.
 const globalSearch = computed(() => !!session.identity)
@@ -80,7 +92,17 @@ function typing(target: EventTarget | null) {
 const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open(); return }
+  const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && isK) {
+    // Capture runs before the focused control. Ctrl+K in the open palette moves
+    // the highlight; Cmd+K still selects the query.
+    const paletteInput = document.querySelector('dialog.palette[open] input')
+    if (event.ctrlKey && !event.metaKey && paletteInput && event.target === paletteInput) return
+    event.preventDefault()
+    event.stopPropagation()
+    palette.value?.open()
+    return
+  }
   if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || typing(event.target) || document.querySelector('dialog[open], .floating')) return
   if (event.key === '/' && !pageOwnsSlash.value) { event.preventDefault(); palette.value?.open() }
   else if (event.key === '?') { event.preventDefault(); run({ name: 'shortcuts' }) }
@@ -126,6 +148,21 @@ function chordPointer(event: PointerEvent) {
 function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
 // The Agents badge: permission requests and held action requests, checked each minute.
 const needsPoll = usePoller(() => agents.loadNeeds(true), 60_000, { enabled: () => !!session.identity && !agentsPage.value, invalidate: agents.invalidatePolls })
+// The doctrine inbox (AEON-444): people who can send a proposal to git see a dot
+// while proposals wait, and one toast per new proposal.
+const doctrineReviewer = () => session.identity?.principal.kind === 'person' && can('rules.write')
+async function doctrinePoll() {
+  const principal = session.identity?.principal.id
+  if (!principal || !doctrineReviewer()) return
+  const text = await pollDoctrineInbox(principal)
+  if (text) toast(text, { key: 'doctrine-inbox', timeout: 9000, action: { label: 'Review', run: () => void router.push('/settings/agent-rules#doctrine-inbox') } })
+}
+const doctrinePoller = usePoller(doctrinePoll, 30_000, { enabled: () => !!session.identity && doctrineReviewer() })
+// Permissions arrive after the identity: the first read follows them.
+watch(() => [session.identity?.principal.id, doctrineReviewer()] as const, ([id, reviewer], before) => {
+  if (id !== before?.[0] || !reviewer) resetDoctrineInbox()
+  if (id && reviewer) void doctrinePoll().catch(() => { /* the next tick retries */ })
+}, { immediate: true })
 watch(() => session.identity?.principal.id, id => {
   if (!id) { business.reset(); customers.reset(); quotes.reset(); profile.reset(); return }
   void profile.load(true)
@@ -172,18 +209,27 @@ onMounted(() => {
   fonts?.addEventListener('loadingdone', remeasure)
   void fonts?.ready.then(remeasure)
   refit()
-  window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
+  window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
   window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
+  doctrinePoller.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
 </script>
 
 <template>
   <header ref="header" class="app-header">
-    <RouterLink class="lockup" to="/" :aria-label="`${brand.wordmark} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0 }">
-      <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
-      <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
+    <RouterLink class="lockup" to="/" :aria-label="`${lockupName} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0, tenant: !!tenantMark, 'has-logo': !!tenantMark?.logo, squarish: !!tenantMark?.logo && tenantMark.logo.width <= tenantMark.logo.height * 1.5 }">
+      <template v-if="tenantMark">
+        <span v-if="tenantMark.logo" class="tenant-logo" :class="{ plate: tenantMark.plate }">
+          <img :src="tenantMark.logo.url" v-bind="fitLogo(tenantMark.logo, tenantMark.plate ? 24 : 28, tenantMark.plate ? 116 : 132)" alt="" @error="failedLogo = tenantMark?.logo?.url ?? ''" />
+        </span>
+        <span v-if="tenantMark.name" class="tenant-name">{{ tenantMark.name }}</span>
+      </template>
+      <template v-else>
+        <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
+        <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
+      </template>
     </RouterLink>
     <nav v-if="places.length && !fatal && navReady" class="places" aria-label="Places">
       <RouterLink
@@ -269,6 +315,12 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .mark-backing img { display: block; }
 .wordmark { font: 600 13px/1 var(--mono); letter-spacing: .28em; white-space: nowrap; font-variant-ligatures: none; }
 .wordmark sup { position: relative; top: -.15em; margin-left: 2px; font: 600 8px/1 var(--mono); letter-spacing: .16em; color: var(--teal-ink); }
+/* A workspace's own lockup: its logo at the mark's height, fitted, never cropped. */
+.tenant-logo { display: grid; place-items: center; flex-shrink: 0; height: 32px; }
+.tenant-logo img { display: block; object-fit: contain; }
+/* Dark mode without a dark logo: the logo keeps its colours on a light plate, like the product mark. */
+.tenant-logo.plate { padding: 0 8px; border-radius: 9px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim); }
+.tenant-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.2 var(--font); letter-spacing: -.005em; color: var(--ink); }
 /* Places: a quiet segmented group; the active place is the raised segment. */
 .places { display: flex; align-items: center; gap: 2px; flex-shrink: 0; padding: 3px; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
 .place {
@@ -318,7 +370,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .pill-text { flex: 1; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
-@media (max-width: 1180px) { .lockup.compact .wordmark { display: none; } }
+@media (max-width: 1180px) { .lockup.compact .wordmark, .lockup.compact.has-logo .tenant-name { display: none; } }
 @media (max-width: 980px) {
   .place { width: 36px; padding: 0; justify-content: center; }
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -339,6 +391,9 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .app-header:has(.places) .lockup { display: none; }
   .lockup.compact .wordmark { display: none; }
   .wordmark { font-size: 11.5px; letter-spacing: .22em; }
+  /* Phones show a workspace's logo only, and only a square one, where it fits beside the places. */
+  .lockup.tenant.has-logo .tenant-name { display: none; }
+  .tenant-logo.plate { padding: 0 4px; }
   /* Phones: the places are round header buttons like search and the avatar. */
   .places { gap: 2px; padding: 0; background: none; box-shadow: none; }
   .place { width: 44px; height: 44px; }
@@ -363,4 +418,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
    key keeps its room. The moon steps aside only when measured room runs out. */
 @media (max-width: 430px) { .app-header { gap: 2px; padding: 0 8px; } }
 @media (max-width: 600px) { .theme-btn.away { display: none; } }
+/* A square workspace logo leads the places at a place's root; wide logos and inner pages leave the room to them. */
+@media (min-width: 380px) and (max-width: 600px) {
+  .app-header:has(.places) .lockup.tenant.squarish:not(.compact) { display: inline-flex; min-width: 40px; }
+}
 </style>

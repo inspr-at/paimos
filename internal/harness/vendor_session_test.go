@@ -5,6 +5,7 @@ package harness_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -34,6 +35,9 @@ func TestVendorSessionBinding(t *testing.T) {
 	if strings.Contains(w.Body.String(), vendor) || strings.Contains(w.Body.String(), ref) || strings.Contains(w.Body.String(), lease) || strings.Contains(w.Body.String(), "vendor_ref") {
 		t.Fatal("registration response exposed a session reference")
 	}
+	if decode(t, w)["has_vendor_session_ref"] != true {
+		t.Fatal("vendor binding omitted has_vendor_session_ref")
+	}
 	sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
 	if !bytes.Equal(vendorDigest(t, f, id), sum[:]) {
 		t.Fatal("vendor digest does not match the harness ref domain")
@@ -60,6 +64,10 @@ func TestVendorSessionBinding(t *testing.T) {
 	body["vendor_session_ref"] = other
 	w = f.call(f.person, "POST", base, body, "")
 	expect(t, w, 409)
+	otherSum := sha256.Sum256([]byte("aeon.harness.ref\x00" + other))
+	if decode(t, w)["error"] != fmt.Sprintf("vendor_session_ref differs from this active generation's existing binding (sha256:%x)", otherSum[:8]) {
+		t.Fatal("changed vendor binding diagnostic did not name the conflict")
+	}
 	if strings.Contains(w.Body.String(), other) || strings.Contains(w.Body.String(), vendor) {
 		t.Fatal("conflict response exposed a session reference")
 	}
@@ -82,6 +90,32 @@ func TestVendorSessionBinding(t *testing.T) {
 	second["worker_lease"] = "vendor-lease-000000000000000000000003"
 	w = f.call(f.person, "POST", base, second, "")
 	expect(t, w, 409)
+	if decode(t, w)["error"] != fmt.Sprintf("vendor_session_ref is already bound to an active generation for this agent (sha256:%x)", otherSum[:8]) {
+		t.Fatal("duplicate vendor diagnostic did not name the conflict")
+	}
+	if strings.Contains(w.Body.String(), other) || strings.Contains(w.Body.String(), second["harness_session_ref"].(string)) || strings.Contains(w.Body.String(), second["worker_lease"].(string)) {
+		t.Fatal("duplicate vendor diagnostic exposed a private reference or lease")
+	}
+
+	// Filling a vendor binding on an exact replay uses the same diagnostic as
+	// inserting a new generation, and a rejected replay remains unbound.
+	replay := map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "claude", "host": "build-host",
+		"harness_session_ref": "private-ref-replay-00000000000001", "worker_lease": "vendor-lease-replay-000000000000000001",
+		"management_mode": "unmanaged", "role": "worker",
+	}
+	w = f.call(f.person, "POST", base, replay, "")
+	expect(t, w, 201)
+	replayID := decode(t, w)["id"].(string)
+	replay["vendor_session_ref"] = other
+	w = f.call(f.person, "POST", base, replay, "")
+	expect(t, w, 409)
+	if decode(t, w)["error"] != fmt.Sprintf("vendor_session_ref is already bound to an active generation for this agent (sha256:%x)", otherSum[:8]) || vendorDigest(t, f, replayID) != nil {
+		t.Fatal("replay vendor collision changed the binding or diagnostic")
+	}
+	if bindSession(t, f, f.agent, replay["harness_session_ref"].(string)) != replayID || bindSession(t, f, f.agent, other) != secondID {
+		t.Fatal("rejected replay changed a session binding")
+	}
 
 	if bindSession(t, f, f.person, vendor) != "" || bindSession(t, f, f.foreign, vendor) != "" {
 		t.Fatal("lookup was not limited to the caller")
@@ -104,6 +138,9 @@ func TestVendorSessionBinding(t *testing.T) {
 	wrapperID := decode(t, w)["id"].(string)
 	if vendorDigest(t, f, wrapperID) != nil || bindSession(t, f, f.agent, shared) != wrapperID {
 		t.Fatal("private ref was not resolved")
+	}
+	if _, ok := decode(t, w)["has_vendor_session_ref"]; ok {
+		t.Fatal("session without a vendor digest reported one")
 	}
 	wrapper["vendor_session_ref"] = shared
 	w = f.call(f.person, "POST", base, wrapper, "")
@@ -153,11 +190,14 @@ func TestVendorRefFillsOnReplay(t *testing.T) {
 	if vendorDigest(t, f, id) != nil {
 		t.Fatal("omitted vendor ref was stored")
 	}
+	if _, ok := decode(t, w)["has_vendor_session_ref"]; ok {
+		t.Fatal("omitted vendor ref reported a vendor session ref")
+	}
 	body["vendor_session_ref"] = vendor
 	w = f.call(f.person, "POST", base, body, "")
 	expect(t, w, 201)
 	sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
-	if decode(t, w)["id"] != id || !bytes.Equal(vendorDigest(t, f, id), sum[:]) || strings.Contains(w.Body.String(), vendor) {
+	if decode(t, w)["id"] != id || decode(t, w)["has_vendor_session_ref"] != true || !bytes.Equal(vendorDigest(t, f, id), sum[:]) || strings.Contains(w.Body.String(), vendor) || strings.Contains(w.Body.String(), "vendor_ref") {
 		t.Fatal("replay did not fill the vendor digest quietly")
 	}
 	delete(body, "vendor_session_ref")

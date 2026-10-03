@@ -9,7 +9,8 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 const [, , sdkPath, claudePath, workspace] = process.argv;
-const MAX_INPUT_FRAME_BYTES = 2 * 1024 * 1024;
+// Rules and prompts can expand sixfold when JSON-escaped by the Go sender.
+const MAX_INPUT_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
 const MAX_PENDING_STEERS = 256;
@@ -19,7 +20,7 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 // ownership. All file access goes through the run-bound daemon MCP proxy.
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
-  "aeon_edit", "aeon_glob", "aeon_grep"];
+  "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"];
 
 function managedToolHook(allowedTools) {
   return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
@@ -179,7 +180,7 @@ try {
   process.exit(1);
 }
 if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) || start.capabilities.some(c => typeof c !== "string"))) ||
-    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 64000)) ||
+    (start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 512000)) ||
     (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
     (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
     start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
@@ -202,6 +203,7 @@ let stopping = false;
 let verificationSucceeded = false;
 let sessionStarted = false;
 let sessionID = "";
+let effectiveServiceTier = "default";
 let effectiveModel = "";
 let effectiveEffort = start.effort || "";
 let modelEvidenceStatus = "";
@@ -246,14 +248,42 @@ function observeTurnActivity(message) {
   if (message?.type === "assistant" || message?.type === "stream_event") turnActive = true;
 }
 
-function observeTool(message) {
-  if (message?.type === "assistant" && Array.isArray(message.message?.content) &&
-      message.message.content.some((block) => block?.type === "tool_use")) {
-    emit({ kind: "tool_started" });
-    return;
+function toolActivity(name, input = {}) {
+  name = String(name).replace(/^mcp__aeon__/, '').replace(/^aeon_/, '').toLowerCase();
+  if (name === 'terminal') { name = 'bash'; input = { command: [input.command, ...(Array.isArray(input.args) ? input.args : [])].join(' ') }; }
+  switch (name) {
+    case 'edit': case 'write': case 'multiedit': {
+      const path = input.file_path ?? input.path ?? '';
+      const base = typeof path === 'string' ? path.split('/').at(-1) : '';
+      if (typeof path === 'string' && path.length <= 1024 && !/[\x00\r\n\\:@?=$%]/.test(path) && !path.toLowerCase().includes('.env') &&
+          /^[A-Za-z][A-Za-z0-9_.-]{0,39}\.(go|ts|tsx|js|mjs|vue|css|html|sql|yaml|yml|json|md|sh|py|rs)$/.test(base) &&
+          !/(secret|token|credential|password|id_|private|_rsa|_ed25519)/i.test(base) &&
+          !/[A-Za-z0-9+/_=-]{24,}/.test(base)) return `Editing ${base}`;
+      return 'Editing code';
+    }
+    case 'read': case 'glob': case 'grep': return 'Reading code';
+    case 'bash': {
+      const shell = typeof input.command === 'string' ? input.command : '';
+      const verb = shell.match(/(?:^|[;&|]\s*|\s)(go\s+test|npm\s+(?:run\s+)?test(?::[a-z-]+)?|npx\s+playwright|playwright|git\s+commit|git\s+push|gh\s+pr\s+checks|git\s+worktree\s+(?:remove|prune))\b/)?.[1]?.replace(/\s+/g, ' ');
+      if (verb?.includes('playwright')) return 'Running browser tests';
+      if (verb?.startsWith('go test')) return 'Running Go tests';
+      if (verb?.startsWith('npm ')) return 'Running web tests';
+      if (verb === 'git commit') return 'Committing';
+      if (verb === 'git push') return 'Pushing';
+      if (verb === 'gh pr checks') return 'Waiting for CI';
+      if (verb?.startsWith('git worktree ')) return 'Cleaning up';
+    }
   }
-  if (message?.type === "stream_event" && message.event?.type === "content_block_start" &&
-      message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
+  return 'Working';
+}
+
+function observeTool(message) {
+  const blocks = message?.type === 'assistant' ? message.message?.content :
+    message?.type === 'stream_event' && message.event?.type === 'content_block_start' ? [message.event.content_block] : [];
+  if (!Array.isArray(blocks)) return;
+  for (const block of blocks) if (block?.type === 'tool_use') {
+    emit({ kind: 'tool_started', activity_text: toolActivity(block.name, block.input) });
+  }
 }
 
 // Project only the documented quota fields. Never forward arbitrary SDK data.
@@ -313,7 +343,7 @@ try {
   const physicalWorkspace = realpathSync(workspace);
   if (!isAbsolute(workspace) || physicalWorkspace !== workspace) throw new Error("workspace is not physical");
   const { query } = await import(pathToFileURL(sdkPath));
-  const verification = start.purpose === "pairing_verification";
+  const verification = start.purpose === "pairing_verification" || start.read_only_review === true;
   if (verification && start.tools != null) throw new Error("verification cannot have tools");
   const toolBinding = start.tools ?? undefined;
   if (toolBinding !== undefined &&
@@ -332,6 +362,7 @@ try {
     pathToClaudeCodeExecutable: claudePath,
     persistSession: false,
     settingSources: [],
+    extraArgs: { settings: JSON.stringify({fastMode:false}) },
     strictMcpConfig: true,
     mcpServers,
     plugins: [],
@@ -400,7 +431,7 @@ const handleControlLine = (line) => {
     let fatal = false;
     let failureReason = "control_failed";
     try {
-      if (start.purpose === "pairing_verification" && request.op !== "stop") {
+      if ((start.purpose === "pairing_verification" || start.read_only_review === true) && request.op !== "stop") {
         fail("app_server_protocol", correlationID, "verification_control_forbidden");
         return;
       }
@@ -450,6 +481,30 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID, vendor_message_id: uuid });
         if (state.reacted) deleteCorrelation(uuid);
         controlUUID = "";
+      } else if (request.op === "tier") {
+        failureReason = "setting_rejected";
+        if (!sessionStarted || turnActive || !["default", "fast"].includes(request.value) ||
+            (request.value === "fast" && !["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(effectiveModel)) ||
+            typeof queryHandle.applyFlagSettings !== "function" ||
+            typeof queryHandle.reinitialize !== "function") throw new Error("unavailable");
+        try {
+          await queryHandle.applyFlagSettings({ fastMode: request.value === "fast" });
+          // A setter acknowledgement can hide a cooldown or account block.
+          const confirmed = await queryHandle.reinitialize();
+          if (confirmed?.fast_mode_state !== (request.value === "fast" ? "on" : "off")) throw new Error("tier unconfirmed");
+        } catch {
+          // Restore the last confirmed tier before any next turn. An uncertain
+          // rollback closes the Query instead of running with an unknown price.
+          try {
+            await queryHandle.applyFlagSettings({ fastMode: effectiveServiceTier === "fast" });
+            const restored = await queryHandle.reinitialize();
+            if (restored?.fast_mode_state !== (effectiveServiceTier === "fast" ? "on" : "off")) throw new Error("restore unconfirmed");
+          } catch { fatal = true; }
+          throw new Error("tier rejected");
+        }
+        effectiveServiceTier = request.value;
+        emit({ kind: "settings_changed", service_tier: request.value });
+        emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "model" || request.op === "effort") {
         failureReason = "setting_rejected";
         if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");
@@ -579,8 +634,15 @@ try {
         break;
       }
       emit({ kind: "turn_completed" });
-      if (start.purpose === "pairing_verification") {
+      if (start.purpose === "pairing_verification" || start.read_only_review === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
+        if (start.read_only_review === true && verificationSucceeded) {
+          if (typeof message.result !== "string" || Buffer.byteLength(message.result) > 65536) {
+            verificationSucceeded = false;
+          } else {
+            emit({ kind: "review_result", answer: message.result });
+          }
+        }
         controlInput.close(); input.close(); queryHandle.close();
         break;
       }

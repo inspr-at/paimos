@@ -17,6 +17,7 @@ type claimFaultAPI struct {
 	claimErr, getErr, reportErr error
 	claimCommitted              bool
 	routes, profiles            int
+	routeReservation            string
 	claimIDs                    [][]string
 	claimGeneration             string
 	accepted                    map[int64]Telemetry
@@ -52,7 +53,16 @@ func (a *claimFaultAPI) Route(ctx context.Context, id, daemon string, accounts [
 	a.lock.Lock()
 	a.routes++
 	a.lock.Unlock()
-	return a.fakeAPI.Route(ctx, id, daemon, accounts, estimates)
+	route, err := a.fakeAPI.Route(ctx, id, daemon, accounts, estimates)
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	if err == nil {
+		a.server.AccountID = route.AccountID
+		if a.routeReservation != "" {
+			route.Reservations = []Reservation{{ID: a.routeReservation}}
+		}
+	}
+	return route, err
 }
 func (a *claimFaultAPI) GetRun(context.Context, string) (Run, error) {
 	a.lock.Lock()
@@ -145,6 +155,34 @@ func TestClaimRejectedQueuedRetriesSameReservation(t *testing.T) {
 	}
 	if adapter.starts != 1 || api.routes != 1 || len(api.claimIDs) != 2 || !reflect.DeepEqual(api.claimIDs[0], api.claimIDs[1]) {
 		t.Fatal("claim retry routed/reserved again or skipped the same run")
+	}
+}
+
+func TestJournaledClaimReroutesAfterServerReleasesObsoleteHold(t *testing.T) {
+	s, api, adapter := claimFixture(t)
+	api.run.Purpose = "managed"
+	api.server = api.run
+	s.prepareScratch = func(string) (string, error) { return t.TempDir(), nil }
+	api.claimErr = errors.New("quota pool changed; reservation released")
+	if err := s.PollOnce(t.Context()); err == nil {
+		t.Fatal("claim conflict hidden")
+	}
+	if api.routes != 1 || adapter.starts != 0 {
+		t.Fatal("fixture did not journal the original ClaimRoute")
+	}
+	// The server commits release before its 409. Recovery observes the queued,
+	// unreserved run and must route again instead of replaying ClaimRoute forever.
+	api.server.AccountID = ""
+	api.routeReservation = "replacement-reservation"
+	api.claimErr = nil
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if api.routes != 2 || len(api.claimIDs) != 2 || adapter.starts != 1 {
+		t.Fatal("journaled route was not replaced before launch")
+	}
+	if reflect.DeepEqual(api.claimIDs[0], api.claimIDs[1]) {
+		t.Fatal("retried the obsolete reservation IDs")
 	}
 }
 
@@ -309,12 +347,12 @@ func TestLaunchErrorCannotProveNoFork(t *testing.T) {
 	}
 }
 
-func TestVerificationRefusalPersistsAndDoesNotPollAgain(t *testing.T) {
+func TestVerificationRefusalPersistsAndDoesNotLaunchAgain(t *testing.T) {
 	s, api, adapter := claimFixture(t)
 	api.run.Purpose = VerificationPurpose
 	api.server = api.run
 	s.adapters[Codex] = &fakeAdapter{proc: adapter.proc}
-	if err := s.PollOnce(t.Context()); !errors.Is(err, ErrVerificationUnavailable) {
+	if err := s.PollOnce(t.Context()); err != nil {
 		t.Fatal("missing typed verification refusal")
 	}
 	if err := s.PollOnce(t.Context()); err != nil || api.profiles != 1 || api.routes != 0 || len(api.claimIDs) != 0 {
@@ -381,4 +419,17 @@ func TestOfflineNoForkEvidenceRequiresExplicitMarker(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (a *claimFaultAPI) RefuseVerification(_ context.Context, _, _, _, reason string) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	if reason == "" {
+		return errors.New("missing refusal cause")
+	}
+	if a.reportErr != nil {
+		return a.reportErr
+	}
+	a.server.Status = "failed"
+	return nil
 }

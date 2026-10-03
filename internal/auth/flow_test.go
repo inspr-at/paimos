@@ -61,6 +61,10 @@ func TestOIDCTenantSelection(t *testing.T) {
 	if me.Tenant.Slug != "augmentoring" || len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "customer" {
 		t.Fatalf("wrong tenant membership: %+v", me)
 	}
+	// AEON-431: a workspace without a brand answers exactly as before (me/1.0 readers).
+	if me.Tenant.Brand != nil || bytes.Contains(body, []byte(`"brand"`)) {
+		t.Fatalf("unset brand present: %s", body)
+	}
 	for _, path := range []string{"/api/nodes", "/api/events", "/api/search?q=customer", "/api/relations", "/api/imports"} {
 		if status, _, _ := do(t, c, http.MethodGet, app.URL+path, "", nil); status != http.StatusForbidden {
 			t.Fatalf("customer reached %s: %d", path, status)
@@ -478,8 +482,14 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 
 	prod := newMod(t, Config{Env: "prod", SessionKey: bytes.Repeat([]byte{8}, 32), BootstrapTenantSlug: "inspr"})
 	prodApp := startApp(t, prod)
-	if status, _, _ = do(t, newHTTPClient(), http.MethodPost, prodApp.URL+"/api/auth/dev-login", `{"email":"admin@example.com"}`, nil); status != http.StatusNotFound {
-		t.Fatalf("prod dev-login %d", status)
+	for _, path := range []string{"/api/auth/dev-login", "/api/auth/%64ev-login"} {
+		status, _, res := do(t, newHTTPClient(), http.MethodPost, prodApp.URL+path, `{"email":"admin@example.com"}`, nil)
+		if status != http.StatusNotFound {
+			t.Fatalf("prod dev-login %s %d", path, status)
+		}
+		if cookies := res.Header.Values("Set-Cookie"); len(cookies) != 0 {
+			t.Fatalf("prod dev-login %s set a cookie", path)
+		}
 	}
 }
 

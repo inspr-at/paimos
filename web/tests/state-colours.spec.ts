@@ -9,7 +9,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`${theme}: every state agrees across /agents, detail, cards and list rows`, async ({ page }) => {
     const { agents } = await mockStateColours(page, theme)
     await page.goto('/agents')
-    await page.getByRole('button', { name: /^Stopped/ }).click()
+    await page.getByRole('button', { name: /^Ended/ }).click()
     for (const [index, state] of states.entries()) {
       const row = page.locator(`[data-row="s:${agents.sessions[index]!.id}"]`)
       await expect(row).toHaveAttribute('data-state', state)
@@ -102,7 +102,7 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   const colours = await page.locator('.state-preview .agent-state-label').evaluateAll(labels => labels.slice(0, 4).map(label => getComputedStyle(label).color))
   expect(new Set(colours).size).toBe(1)
   await page.goto('/agents')
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(page.locator('.row[data-state="stopped"]')).toHaveCSS('opacity', '1')
 })
 
@@ -162,7 +162,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(Math.abs(main.width - layout.width)).toBeLessThan(2)
     // Accounts sit above the sessions now (AEON-299); account management is in Settings.
     const sessions = (await page.locator('.sessions').boundingBox())!
-    const accounts = (await page.locator('.cap').boundingBox())!
+    const accounts = (await page.locator('.ac').boundingBox())!
     expect(accounts.y + accounts.height).toBeLessThanOrEqual(sessions.y)
     await page.locator('h1').scrollIntoViewIfNeeded()
     await page.mouse.move(0, 0)

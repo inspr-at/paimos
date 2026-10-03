@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -66,7 +67,7 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
+	cmd := exec.Command(c.Path, c.Args...)
 	cmd.Stdin = bytes.NewReader(c.Input)
 	cmd.Env = c.Env
 	if c.Dir != "" {
@@ -94,7 +95,10 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	if c.StatusStderr {
 		cmd.Stderr = io.MultiWriter(stderr, snippet)
 	}
-	if err := cmd.Run(); err != nil {
+	if err := ownedprocess.Run(ctx, cmd); err != nil {
+		if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+			return nil, errors.New("local command cleanup unconfirmed")
+		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return nil, &CommandError{ExitCode: exit.ExitCode(), stderr: capturedProbeLine(snippet.buf.Bytes(), snippet.truncated), command: probeCommandName(c.Path)}
@@ -154,6 +158,7 @@ func (c Candidate) Interpreter() harnesslaunch.Node {
 }
 
 type Discovery struct {
+	PiHome        string // Explicit private per-account pi profile; never uploaded.
 	Executor      Executor
 	LookPath      func(string) (string, error)
 	Home          string
@@ -167,11 +172,11 @@ type Discovery struct {
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
 var safeVersion = regexp.MustCompile(`(?:^|[[:space:]])v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+.][a-zA-Z0-9.-]+)?)(?:$|[[:space:]])`)
 
-// Available offers only accounts identified by the vendor's read-only status
-// command. A failed or missing sign-in never becomes an enrollment candidate.
+// Available offers vendor-confirmed accounts and explicitly labelled local
+// profiles. Gemini/OpenCode authentication is checked when the session starts.
 func (d Discovery) Available(ctx context.Context, accountContext string) []Candidate {
 	var candidates []Candidate
-	for _, harness := range []string{"claude", "codex", "cursor", "grok"} {
+	for _, harness := range []string{"claude", "codex", "cursor", "grok", "gemini", "opencode"} {
 		if ctx.Err() != nil {
 			break
 		}
@@ -195,10 +200,15 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	case "cursor":
 		name = "cursor-agent"
 		authArgs = []string{"status", "--format", "json"}
+	case "gemini", "opencode":
+		c.Home = d.Home // The vendor profile retains its own .gemini/XDG layout.
 	case "grok":
 		return d.detectGrok(ctx, accountContext)
 	case "pi":
 		c.Home = filepath.Join(d.Home, ".pi", "agent")
+		if d.PiHome != "" {
+			c.Home = d.PiHome
+		}
 	default:
 		return c, errors.New("unsupported guided harness")
 	}
@@ -231,12 +241,36 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return c, err
 	}
 	childEnv := harnesslaunch.Environment(os.Environ(), c.Node.Path)
+	if harness == "gemini" || harness == "opencode" {
+		childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
+	}
 	versionCommand := Command{Path: physical, Args: []string{"--version"}, Env: childEnv, Dir: probeDir}
 	if harness == "pi" {
 		c.PiNode, c.Node = c.Node, harnesslaunch.Node{}
 		versionCommand.Env = piprobe.Environment(c.Home, c.PiNode.Path)
 	}
 	raw, err := d.Executor.Run(ctx, versionCommand)
+	// A shell guard around npm Codex hides its env-node shebang. If the
+	// service PATH cannot start it, retry the same guard with a trusted Node
+	// pin; never bypass the guard or inherit the interactive shell's PATH.
+	var exit *CommandError
+	if harness == "codex" && c.Node.Path == "" && d.NodePath == "" && errors.As(err, &exit) && exit.ExitCode == 127 {
+		if node, lookupErr := d.LookPath("node"); lookupErr == nil {
+			retry := d
+			retry.NodePath = node
+			c.Node, err = retry.ResolveNode(ctx, physical)
+			if err != nil {
+				return c, err
+			}
+			if harness == "gemini" || harness == "opencode" {
+				childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
+			} else {
+				childEnv = harnesslaunch.Environment(os.Environ(), c.Node.Path)
+			}
+			versionCommand.Env = childEnv
+			raw, err = d.Executor.Run(ctx, versionCommand)
+		}
+	}
 	if err != nil {
 		return c, annotateProbe(fmt.Errorf("%w; the launcher must also work with the service PATH", harnesslaunch.ErrStart), err, d.Home, d.Workspace)
 	}
@@ -245,6 +279,20 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return c, fmt.Errorf("%w; harness version not recognized", harnesslaunch.ErrStart)
 	}
 	c.Version = string(match[1])
+	if harness == "gemini" || harness == "opencode" {
+		// Neither CLI has a quota-neutral person-identity status command.
+		// Identify the local profile, never claim sign-in or read credentials.
+		profile, err := openDirectory(c.Home, false, true)
+		if err != nil {
+			return c, err
+		}
+		profile.Close()
+		if accountContext != "" && accountContext != "local-profile" {
+			return c, errors.New("select the vendor local profile, not a person identity")
+		}
+		c.Identity, c.Label, c.Login = "local-profile", harness+" (local profile; sign-in unverified)", "unverified"
+		return c, nil
+	}
 	if harness == "pi" {
 		probe := d.PiProvider
 		if probe == nil {
@@ -288,6 +336,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		identity, err := inspect(ctx, physical, c.Home)
 		if err != nil {
 			return c, errors.New("Codex account identity unavailable; use normal vendor login and resume")
+		}
+		// A confirmed ChatGPT account need not disclose an email. Keep explicit
+		// account-context matching strict: an unnamed account cannot prove it.
+		if identity == "" && accountContext == "" {
+			identity = CodexChatGPTLogin
 		}
 		if !safeLabel.MatchString(identity) || accountContext != "" && !strings.EqualFold(accountContext, identity) {
 			return c, errors.New("Codex signed-in identity differs from the selected account context")
@@ -348,7 +401,10 @@ func (d Discovery) ResolveNode(ctx context.Context, path string) (harnesslaunch.
 		}
 	}
 	physical, err := pinnedRegular(node, d.Workspace, true)
-	if err != nil || filepath.Base(physical) != "node" {
+	if err != nil {
+		return harnesslaunch.Node{}, fmt.Errorf("%w; %w", action, err)
+	}
+	if filepath.Base(physical) != "node" {
 		return harnesslaunch.Node{}, action
 	}
 	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, physical), Dir: commandDir(d.Workspace, d.Home)})

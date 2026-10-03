@@ -4,9 +4,11 @@ package harness
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -17,6 +19,9 @@ import (
 // requests remain shared inbox attention; neither age nor labels imply ownership.
 // All queries use the caller's tenant transaction and project visibility.
 type StateEvidence struct {
+	VendorLimited    bool               `json:"vendor_limited,omitempty"`
+	LimitWindow      string             `json:"limit_window,omitempty"`
+	LimitResetsAt    *time.Time         `json:"limit_resets_at,omitempty"`
 	RunStatus        *string            `json:"run_status,omitempty"`
 	NeedsAttention   *bool              `json:"needs_attention,omitempty"`
 	HasProblem       *bool              `json:"has_problem,omitempty"`
@@ -100,11 +105,12 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
     ) SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,s.phase,r.status,
       (s.stopped_at IS NULL AND (coalesce(r.status='waiting',false)
         OR EXISTS(SELECT 1 FROM approvals a WHERE a.id=s.id AND a.scope='run'))),
-      (coalesce(r.status IN ('failed','ownership_lost'),false)
+      (coalesce(r.status IN ('failed','ownership_lost') AND coalesce(vl.error_code,'')<>'vendor_limit',false)
         OR coalesce(s.stop_reason<>'heartbeat_lost' AND replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
       coalesce(q.kind,''),coalesce(q.scope,''),coalesce(q.actor,''),coalesce(q.blocking,false),
-      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0)
+      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0), coalesce(r.status='failed' AND vl.error_code='vendor_limit',false),coalesce(vl.limit_window,''),vl.limit_resets_at,coalesce(r.account_id::text,'')
     FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
+    LEFT JOIN LATERAL (SELECT error_code,limit_window,limit_resets_at FROM run_telemetry t WHERE t.tenant_id=s.tenant_id AND t.run_id=s.run_id AND t.error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1) vl ON true
     LEFT JOIN grouped q ON q.id=s.id
     WHERE s.id=ANY($1::uuid[])
     ORDER BY s.id,q.scope,q.kind,q.actor,q.permission_project`, ids)
@@ -112,13 +118,21 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 		return nil, err
 	}
 	defer rows.Close()
+	accounts := map[string]string{}
+	accountIDs := []string{}
+	seen := map[string]bool{}
 	for rows.Next() {
-		var id, project, principal, phase, permissionProject string
+		var id, project, principal, phase, permissionProject, account string
 		var evidence StateEvidence
 		var reason AttentionReason
 		if err := rows.Scan(&id, &project, &principal, &phase, &evidence.RunStatus, &evidence.NeedsAttention, &evidence.HasProblem,
-			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count); err != nil {
+			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count, &evidence.VendorLimited, &evidence.LimitWindow, &evidence.LimitResetsAt, &account); err != nil {
 			return nil, err
+		}
+		accounts[id] = account
+		if account != "" && !seen[account] {
+			seen[account] = true
+			accountIDs = append(accountIDs, account)
 		}
 		if existing, found := out[id]; found {
 			evidence = existing
@@ -161,5 +175,21 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 			*evidence.AttentionReasons = append(*evidence.AttentionReasons, reason)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	policy, err := accountprivacy.Load(ctx, tx, p, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	for id, evidence := range out {
+		// Unbound legacy sessions cannot establish account ownership or opt-in.
+		if !policy[accounts[id]] {
+			evidence.LimitWindow = ""
+			evidence.LimitResetsAt = nil
+			out[id] = evidence
+		}
+	}
+	return out, nil
 }

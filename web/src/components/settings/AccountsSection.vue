@@ -5,15 +5,17 @@ import { useRoute, useRouter } from 'vue-router'
 import { machinesForAdd, type AddMachine } from '../../lib/addAccount'
 import { listPairingComputers, type PairingView } from '../../lib/agentPairing'
 import { accountName } from '../../lib/accountCascade'
-import type { AgentAccount } from '../../lib/agents'
+import { approveAccountCapacity, type AgentAccount } from '../../lib/agents'
 import { can } from '../../lib/authz'
 import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { usePoller } from '../../lib/usePolledData'
+import { useCapacity } from '../../stores/capacity'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AccountsCard from '../agents/AccountsCard.vue'
+import LinkedAccounts from '../agents/LinkedAccounts.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
 import SettingsCard from './SettingsCard.vue'
 
@@ -21,6 +23,7 @@ import SettingsCard from './SettingsCard.vue'
 // Pausing an account and limits set by hand live here; sign-ins happen on the
 // computer itself, and credentials never reach Aeon.
 const agents = useAgents()
+const capacity = useCapacity()
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +59,7 @@ function onFocus() { void refresh() }
 const poller = usePoller(() => refresh(), 20_000)
 
 onMounted(() => {
+  void capacity.load()
   poller.start(true)
   window.addEventListener('focus', onFocus)
 })
@@ -85,16 +89,14 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
     if (!ok) return
   }
+  if (state === 'available') await approveAccountCapacity(account.id)
   await agents.setAccount(account, state)
-}
-async function refreshAfterAllowance() {
-  await agents.refreshAccounts()
-  await agents.refreshAccounts()
 }
 </script>
 
 <template>
   <div id="add-account" class="add-account">
+    <p v-if="session.identity?.principal.kind === 'person' && can('profile.write')" class="add-hint"><RouterLink class="btn sm" to="/link"><AppIcon name="link" :size="14" />Link an account</RouterLink>Enter the code from your agent window.</p>
     <SettingsCard title="Accounts" icon="gauge" anchor="agent-accounts">
       <template #lead>The vendor accounts agents run on. Sign in on the computer itself; the password never leaves it.</template>
       <template v-if="mayManage && computersState === 'ready'" #aside>
@@ -106,9 +108,10 @@ async function refreshAfterAllowance() {
       <AddAccountPanel v-if="open && machines.length" :machines="machines" />
       <AccountsCard
         :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'"
-        :set="setAccount" @allowance-created="refreshAfterAllowance()"
+        :set="setAccount"
       />
     </SettingsCard>
+    <LinkedAccounts />
   </div>
 </template>
 

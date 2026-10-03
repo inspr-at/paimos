@@ -55,10 +55,16 @@ var seedModels = []seedModel{
 	{"cursor", "grok-4.7-medium-fast", "xai", "frontier", []string{"medium"}},
 	{"cursor", "grok-4.7-high-fast", "xai", "frontier", []string{"high"}},
 	{"cursor", "grok-4.7-xhigh-fast", "xai", "frontier", []string{"xhigh"}},
+	// Fixed thinking-budget pins, compatible with AEON-511C's Google buckets.
+	// Gemini 2.5 Pro cannot disable thinking; Flash has a lower maximum.
+	{"gemini", "gemini-2.5-flash", "google", "fast", []string{"0", "1024", "4096", "16384", "24576"}},
+	{"gemini", "gemini-2.5-pro", "google", "strong", []string{"1024", "4096", "16384", "32768"}},
+	{"opencode", "google/gemini-2.5-pro", "google", "strong", []string{"default"}},
+	{"opencode", "ollama/qwen3-coder", "local", "standard", []string{"default"}},
 }
 
 func catalogProfiles() []seedProfile {
-	var out []seedProfile
+	out := []seedProfile{{Slug: "pi-openrouter-space-bunny-alpha-off", Version: CatalogVersion, Harness: "pi", Family: "unknown", Model: "openrouter/stealth/space-bunny-alpha", Effort: "off", Tier: "standard"}}
 	for _, model := range seedModels {
 		for _, effort := range model.Efforts {
 			out = append(out, seedProfile{
@@ -93,6 +99,7 @@ func catalogSlug(model seedModel, effort string) string {
 			id = "cursor-grok-xhigh"
 		}
 	}
+	id = strings.ReplaceAll(id, "/", "-")
 	return strings.ReplaceAll(id, ".", "-")
 }
 
@@ -131,6 +138,7 @@ func defaultRoutes(profiles []seedProfile) []seedRoute {
 		var slugs []string
 		if role.cross {
 			slugs = append(slugs, role.ladder...)
+			slugs = append(slugs, "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default")
 		} else {
 			for _, harness := range []string{"codex", "claude", "pi", "cursor"} {
 				for _, profile := range sorted {
@@ -138,6 +146,18 @@ func defaultRoutes(profiles []seedProfile) []seedRoute {
 						slugs = append(slugs, profile.Slug)
 					}
 				}
+			}
+			// Numeric Google budgets use AEON-511c's provider mapping, never
+			// Anthropic/OpenAI names sent to the vendor. Existing order stays first.
+			switch role.name {
+			case "scout":
+				slugs = append(slugs, "gemini-gemini-2-5-flash-4096")
+			case "mechanical":
+				slugs = append(slugs, "gemini-gemini-2-5-flash-16384")
+			case "build":
+				slugs = append(slugs, "gemini-gemini-2-5-pro-16384", "opencode-ollama-qwen3-coder-default")
+			case "build-hard":
+				slugs = append(slugs, "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default")
 			}
 		}
 		for i, slug := range slugs {

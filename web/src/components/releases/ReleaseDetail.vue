@@ -1,23 +1,26 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { generationLabel } from '../../lib/brand'
+import { clockSince } from '../../lib/releaseStats'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import CalendarVersion from '../CalendarVersion.vue'
 import LangBadge from './LangBadge.vue'
+import ReleaseCodename from './ReleaseCodename.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
 
-// One release: when it shipped, its name when it has one, what it brings, and
-// the evidence behind it. Every release reads the same (AEON-305): backfilled
+// One release: its codename as the heading (AEON-488), when it went live and
+// shipped in one line, its features, fixes and tickets as counts, what it
+// brings, and the evidence behind it. Details adds the technical line. Every release reads the same (AEON-305): backfilled
 // notes and linked tickets both become blocks under Features and Fixes.
 // Highlights tells the benefits; Details lists the commits and shows the
 // evidence open (AEON-323).
 const props = defineProps<{
   release: Release; repository: string; current: boolean; rollback: boolean; fresh: boolean
   liveSince: string | null; now: number; query: string; evidence: boolean
-  lang: ReleaseLang; view: ReleaseView
+  lang: ReleaseLang; view: ReleaseView; hiddenInHistory?: boolean
 }>()
 const locale = computed(() => props.lang)
 const details = computed(() => props.view === 'details')
@@ -26,6 +29,8 @@ const emit = defineEmits<{ evidence: [open: boolean] }>()
 
 const at = computed(() => releasedAt(props.release))
 const reserved = computed(() => props.release.state === 'reserved')
+const candidate = computed(() => props.release.state === 'candidate')
+const pendingLabels: Record<string, string> = { tag_message: 'Tag message', tagged_at: 'Tag time', published_at: 'Publication time', image: 'Image digest', ci: 'CI run', release_run: 'Release run', release_url: 'GitHub release' }
 const lines = computed(() => presentRelease(props.release, locale.value))
 const tickets = computed(() => ticketsOf(props.release))
 const counted = computed(() => lines.value.features.length + lines.value.fixes.length + lines.value.other.length)
@@ -40,12 +45,18 @@ const copyText = computed(() => releaseCopy(locale.value))
 // A ticket already heading a block needs no chip.
 const lined = computed(() => new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key)))
 const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(key)))
-const live = computed(() => {
-  if (!props.current || !props.liveSince) return ''
-  const t = Date.parse(props.liveSince)
-  return Number.isNaN(t) ? '' : `Live on this server since ${absoluteTime(props.liveSince)}`
+// "Live here since Thu 12:15 · published 09:56, 3 hours ago" for the release this server runs.
+const liveLine = computed(() => {
+  const live = props.current && props.liveSince ? Date.parse(props.liveSince) : NaN
+  if (Number.isNaN(live) || !at.value) return ''
+  return `Live here since ${clockSince(live, props.now)} · ${candidate.value ? 'reserved' : props.release.published_at ? 'published' : 'tagged'} ${clockSince(Date.parse(at.value), props.now)}, ${relativeTime(at.value, { now: props.now, long: true })}`
 })
-const liveFor = computed(() => props.liveSince ? span(Math.max(60_000, props.now - Date.parse(props.liveSince))) : '')
+const channel = computed(() => props.release.release_channel ? `${props.release.release_channel.charAt(0).toUpperCase()}${props.release.release_channel.slice(1)} release` : 'Release')
+// Details: the numbers behind the name in one quiet line.
+const techLine = computed(() => [
+  generationLabel.value, props.release.release_sequence > 0 ? `Release ${props.release.release_sequence}` : '', props.release.release_channel, props.release.version,
+  ev.value?.image?.digest ? `image ${digestShort(ev.value.image.digest)}` : '', props.release.tag ? `tag ${props.release.tag}` : '',
+].filter(Boolean).join(' · '))
 // Changes name their ticket only when the release has more than one.
 const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] : '')
 
@@ -58,7 +69,7 @@ const summary = computed(() => {
   if (ev.value.source_commit) bits.push(`commit ${shortCommit(ev.value.source_commit)}`)
   return bits.join(' · ') || (ev.value.unavailable.length ? 'Partly unavailable' : 'None recorded')
 })
-const digestShort = (d: string) => d.length > 30 ? `${d.slice(0, 19)}…${d.slice(-8)}` : d
+function digestShort(d: string) { return d.length > 30 ? `${d.slice(0, 19)}…${d.slice(-8)}` : d }
 const copied = ref('')
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 async function copy(what: string, text: string) {
@@ -76,29 +87,37 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
 <template>
   <article class="detail" :class="{ reserved }" aria-labelledby="release-detail-title">
-    <p class="eyebrow top">
-      <span>{{ reserved ? 'Reserved version' : `Release ${release.release_sequence}` }}</span>
-      <span v-if="!reserved && release.release_channel" class="dot-sep">{{ release.release_channel }}</span>
-    </p>
-    <h2 id="release-detail-title" ref="heading" class="version" tabindex="-1"><CalendarVersion :value="release.version" /></h2>
-    <div class="badges">
-      <span v-if="current && !live" class="chip teal"><span class="live-dot" aria-hidden="true" />Current</span>
-      <span v-if="fresh" class="chip new">New since your last visit</span>
-      <span v-if="rollback" class="chip"><AppIcon name="rollback" :size="11" />Rollback target</span>
-      <span v-if="reserved" class="chip">Reserved, never published</span>
+    <div class="top-row">
+      <p class="eyebrow top">{{ reserved ? 'Reserved version' : candidate ? 'Candidate release' : channel }}</p>
+      <div class="badges">
+        <span v-if="current" class="chip live-chip"><span class="live-dot" aria-hidden="true" />{{ liveLine ? 'Live here' : 'Current' }}</span>
+        <span v-if="fresh" class="chip new">New since your last visit</span>
+        <span v-if="rollback" class="chip"><AppIcon name="rollback" :size="11" />Rollback target</span>
+        <span v-if="reserved" class="chip">Reserved, never published</span>
+        <span v-if="candidate" class="chip">Publication pending</span>
+      </div>
     </div>
-    <p v-if="live" class="when live-line"><span class="live-dot" aria-hidden="true" />{{ live }}<span class="for"> · {{ liveFor }}</span></p>
-    <p v-if="at" class="when">
+    <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseCodename :version="release.version" :name="release.codename" :quiet="reserved"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseCodename></h2>
+    <p v-if="reserved && hiddenInHistory" class="none hidden-history">Hidden in the history. Show reserved versions in Developer settings.</p>
+    <p v-if="liveLine" class="when live-line" :data-tip="liveSince ? `Live on this server since ${absoluteTime(liveSince)}` : undefined">{{ liveLine }}</p>
+    <p v-else-if="at" class="when">
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
+      <template v-else-if="candidate">Reserved {{ absoluteTime(at) }} · publication pending</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
+    <div v-if="!reserved && (lines.features.length || lines.fixes.length || tickets.length)" class="counts">
+      <span v-if="lines.features.length" class="count-chip"><strong>{{ lines.features.length }}</strong> {{ lines.features.length === 1 ? 'feature' : 'features' }}</span>
+      <span v-if="lines.fixes.length" class="count-chip"><strong>{{ lines.fixes.length }}</strong> {{ lines.fixes.length === 1 ? 'fix' : 'fixes' }}</span>
+      <span v-if="tickets.length" class="count-chip"><strong>{{ tickets.length }}</strong> {{ tickets.length === 1 ? 'ticket' : 'tickets' }}</span>
+    </div>
+    <p v-if="details" class="tech mono">{{ techLine }}</p>
     <section class="notes" aria-label="Release notes">
       <div v-if="!reserved && presented" class="summary">
         <p v-if="presented.theme" class="kicker" :lang="presented.themeLang"><template v-for="(p, i) in parts(presented.theme)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.themeLang)" :lang="presented.themeLang" /></p>
         <p class="headline" :lang="presented.headlineLang"><template v-for="(p, i) in parts(presented.headline)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.headlineLang, true)" :lang="presented.headlineLang" /></p>
         <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.introLang)" :lang="presented.introLang" /></p>
       </div>
-      <p v-if="noted && !noted.items.length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
+      <p v-if="noted && !(noted.public_items ?? noted.items).length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
       <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
       <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
       <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
@@ -112,7 +131,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
     <!-- Details shows it open; Highlights keeps it behind a toggle. -->
-    <section v-if="release.tag" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
+    <section v-if="release.tag || candidate" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
       <h3 v-if="details" id="release-evidence-title" class="ev-toggle ev-head">
         <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
         <span class="ev-title">Evidence</span>
@@ -129,6 +148,9 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
         <template v-if="release.notes">
           <p class="none">Note source: {{ release.notes.source }}</p>
           <p v-if="release.notes.snapshot_sha256" class="mono wrap">Snapshot SHA-256: {{ release.notes.snapshot_sha256 }}</p>
+          <ul v-if="release.notes.corrections?.length" class="unavailable" :aria-label="lang === 'de' ? 'Geprüfte Korrekturen' : 'Reviewed corrections'">
+            <li v-for="correction in release.notes.corrections" :key="correction.key"><span><b>{{ correction.key }}</b>: {{ correction.reason }}</span></li>
+          </ul>
         </template>
         <dl>
           <div>
@@ -141,11 +163,11 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
             <dd><a v-if="ev.source_url" class="mono ext" :href="ev.source_url" target="_blank" rel="noopener">{{ shortCommit(ev.source_commit) }}<AppIcon name="external" :size="11" /></a><span v-else class="mono">{{ shortCommit(ev.source_commit) }}</span>
               <button type="button" class="copy" :aria-label="`Copy commit ${ev.source_commit}`" @click="copy('commit', ev.source_commit)"><AppIcon :name="copied === 'commit' ? 'check' : 'copy'" :size="12" />{{ copyLabel('commit', 'Copy') }}</button></dd>
           </div>
-          <div v-if="ev.ci">
+          <div v-if="ev.ci?.url">
             <dt>CI run</dt>
             <dd><a class="ext" :href="ev.ci.url" target="_blank" rel="noopener"><span class="run" :class="ev.ci.conclusion">{{ runWord(ev.ci) }}</span>{{ ev.ci.name }}<AppIcon name="external" :size="11" /></a></dd>
           </div>
-          <div v-if="ev.release_run">
+          <div v-if="ev.release_run?.url">
             <dt>Release run</dt>
             <dd><a class="ext" :href="ev.release_run.url" target="_blank" rel="noopener"><span class="run" :class="ev.release_run.conclusion">{{ runWord(ev.release_run) }}</span>{{ ev.release_run.name }}<AppIcon name="external" :size="11" /></a></dd>
           </div>
@@ -163,6 +185,9 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
             <dd><a class="ext" :href="ev.release_url" target="_blank" rel="noopener">{{ release.tag }}<AppIcon name="external" :size="11" /></a></dd>
           </div>
         </dl>
+        <ul v-if="ev.pending?.length" class="unavailable" aria-label="Pending evidence">
+          <li v-for="field in ev.pending" :key="field"><AppIcon name="info" :size="12" />{{ pendingLabels[field] ?? field }}: pending</li>
+        </ul>
         <ul v-if="ev.unavailable.length" class="unavailable" aria-label="Not available">
           <li v-for="note in ev.unavailable" :key="note"><AppIcon name="info" :size="12" />{{ note }}</li>
         </ul>
@@ -177,19 +202,25 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
 <style scoped>
 .detail { display: grid; align-content: start; gap: 10px; max-width: 820px; }
-.top { display: flex; gap: 8px; margin: 0; }
-.dot-sep::before { content: '·'; margin-right: 8px; }
+.top-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.top { margin: 0; }
+/* The codename (AEON-430) is the heading, as the hero in the history's title; its version chip replaces it on hover. */
 .version { font: 500 clamp(24px, 2.2vw, 30px)/1.25 var(--mono); letter-spacing: 0; color: var(--ink); outline: none; }
+.version.named { justify-self: start; max-width: 100%; font: 300 clamp(30px, 3.4vw, 54px)/1.1 var(--serif); }
+.tech { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.6; color: var(--ink-3); overflow-wrap: anywhere; }
 .version:focus-visible { box-shadow: var(--focus-ring); border-radius: 8px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .badges:empty { display: none; }
 .chip { height: 24px; font-size: 11.5px; letter-spacing: .02em; }
+.live-chip { height: 22px; gap: 6px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.live-chip .live-dot { width: 6px; height: 6px; box-shadow: none; }
+.counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.count-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: 13.5px; color: var(--ink); }
+.count-chip strong { font-weight: 650; font-variant-numeric: tabular-nums; }
 .chip.new { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: color-mix(in oklab, var(--gold-ink), var(--ink) 35%); }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
 .when { font-size: 13px; color: var(--ink-2); }
-.live-line { color: var(--ink); }
-.live-line .live-dot { display: inline-block; margin-right: 7px; vertical-align: 1px; }
-.live-line .for { white-space: nowrap; color: var(--ink-2); }
+.live-line { font-size: 15px; line-height: 1.5; color: var(--ink-2); }
 .reserved .version { color: var(--ink-2); }
 /* AEON-305: a compact header for a named release; the blocks below stay the main content. */
 .notes { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }

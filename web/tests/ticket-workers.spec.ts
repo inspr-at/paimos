@@ -3,7 +3,14 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, liveAgent, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
 
-test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
+test.beforeEach(async ({ page }) => {
+  await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
+  // These fixtures exercise polling; an unmocked stream failure races with the first read.
+  await page.addInitScript(() => {
+    class Quiet { addEventListener() {} close() {} }
+    Object.assign(window, { EventSource: Quiet })
+  })
+})
 
 const at = Date.parse('2026-09-23T12:00:00Z')
 const ticket = (id: string, key: string, title: string, project_id = 'p-pharos') => ({ id, key, title, project_id })
@@ -74,9 +81,9 @@ test('several workers disclose each state, and the control does not open the tic
   await expect(dialog.getByText('Session details are withheld')).toBeVisible()
   await expect(dialog.getByText('retired')).toHaveCount(0)
   await expect(dialog.getByText('Some live sessions are not shown.')).toBeVisible()
+  expect(liveCalls(calls)).toHaveLength(1)
   await dialog.getByRole('link', { name: /wren/ }).click()
   await expect(page).toHaveURL(/\/agents\/s-wren$/)
-  expect(liveCalls(calls)).toHaveLength(1)
 })
 
 test('keyboard opens each worker link and Escape returns to the trigger', async ({ page }) => {
@@ -180,14 +187,58 @@ test('a narrow list keeps a compact worker cue in the title', async ({ page }) =
   await expect(page).toHaveURL(/\/agents\/s-nova$/)
 })
 
+test('the compact worker name stays fully visible and clear of Copy', async ({ page }) => {
+  const data = withWorkers()
+  // Assignee hidden, so the cue stays in the title at every width, including 1600.
+  data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'updated'] }
+  await mockWork(page, data)
+  for (const width of [390, 721, 770, 800, 1600]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.goto('/p/PHAROS')
+    const sample = row(page, 'PHAROS-14')
+    const worker = sample.locator('.title-workers').getByRole('link', { name: /nova/ })
+    const name = sample.locator('.title-workers .worker-name')
+    await expect(worker).toBeVisible()
+    await expect(name).toHaveText('nova')
+    expect(await name.evaluate(el => {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const text = range.getBoundingClientRect()
+      const box = el.getBoundingClientRect()
+      const clip = el.closest('td')?.getBoundingClientRect()
+      const covers = text.width > 8 && box.left <= text.left + 0.5 && box.right + 0.5 >= text.right
+      const inside = !clip || (text.left >= clip.left - 0.5 && text.right <= clip.right + 0.5)
+      return covers && inside
+    })).toBe(true)
+    await sample.hover()
+    const nameBox = await name.boundingBox()
+    // Hidden on a phone (display: none), so it is not a role until the row is wide enough to hover.
+    const copy = sample.locator('.row-actions .q-btn')
+    const copyBox = await copy.boundingBox()
+    expect(nameBox).toBeTruthy()
+    if (width === 390) {
+      expect(copyBox).toBeNull()
+    } else if (nameBox && copyBox) {
+      const overlapsY = nameBox.y < copyBox.y + copyBox.height && copyBox.y < nameBox.y + nameBox.height
+      const gap = copyBox.x - (nameBox.x + nameBox.width)
+      expect(overlapsY).toBe(true)
+      expect(gap).toBeGreaterThanOrEqual(12)
+    } else {
+      expect(copyBox).toBeTruthy()
+    }
+  }
+})
+
 test('rebinding follows the next poll, and leaving the list stops it', async ({ page }) => {
   const data = withWorkers()
   const calls = await mockWork(page, data)
   await page.goto('/p/PHAROS')
-  await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('nova')
+  await expect(row(page, 'PHAROS-14').locator('.c-assignee').getByRole('link', { name: /nova/ })).toBeVisible()
   const nova = data.live.find(agent => agent.session_id === 's-nova')!
   nova.ticket = ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning')
-  await page.clock.fastForward(21_000)
+  // Run each timer normally: skipping them simulates display sleep and triggers a stream resync.
+  await page.clock.runFor(21_000)
+  await expect.poll(() => liveCalls(calls).length).toBe(2)
   // AEON-316: the list snapshot owns the assignee lead, so a live poll alone does
   // not move it; the next list load does.
   await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('nova')

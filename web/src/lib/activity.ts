@@ -3,12 +3,13 @@
 // chronological timeline: comments stay as they are; field changes by the same
 // person within a few minutes collapse into one line.
 import type { ActivityChange, ActivityItem } from './api.ts'
-import { normaliseState, priorityLabel, statusMeta } from './work.ts'
+import { kindLabel, normaliseState, priorityLabel, statusMeta } from './work.ts'
 
 export const COLLAPSE_MS = 5 * 60_000
 export const EDIT_WINDOW_MS = 15 * 60_000
 
 export type TimelineEntry =
+  | { kind: 'automatic'; id: string; at: string; author: ActivityItem['author']; change: NonNullable<ActivityItem['automatic_change']> }
   | { kind: 'comment'; id: string; at: string; author: ActivityItem['author']; body: string }
   | { kind: 'changes'; id: string; at: string; author: ActivityItem['author']; changes: ActivityChange[] }
   | { kind: 'created'; id: string; at: string; author: ActivityItem['author'] }
@@ -33,11 +34,12 @@ function merge(into: ActivityChange[], next: ActivityChange[]): ActivityChange[]
 export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): TimelineEntry[] {
   const out: TimelineEntry[] = []
   for (const item of [...items].reverse()) {
+    if (item.automatic_change) { out.push({ kind: 'automatic', id: item.id, at: item.at, author: item.author, change: item.automatic_change }); continue }
     if (item.type === 'comment') { out.push({ kind: 'comment', id: item.id, at: item.at, author: item.author, body: item.body_markdown ?? '' }); continue }
     if (item.type === 'created') { out.push({ kind: 'created', id: item.id, at: item.at, author: item.author }); continue }
     const changes = item.changes ?? []
     const last = out[out.length - 1]
-    if (last?.kind === 'changes' && sameAuthor(last.author, item.author) && Date.parse(item.at) - Date.parse(last.at) <= windowMs) {
+    if (last?.kind === 'changes' && sameAuthor(last.author, item.author) && !last.author.automatic && !item.author.automatic && Date.parse(item.at) - Date.parse(last.at) <= windowMs) {
       last.changes = merge(last.changes, changes)
       last.at = item.at
       if (!last.changes.length) out.pop()
@@ -49,7 +51,7 @@ export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): Ti
   return out
 }
 
-const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels' }
+const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels', kind: 'the type', human_check: 'the human check' }
 export function changeValue(field: ActivityChange['field'], value: string | null): string {
   if (field === 'status') return value ? statusMeta(value).label : '—'
   if (field === 'priority') return priorityLabel(value)
@@ -59,6 +61,9 @@ export function changeValue(field: ActivityChange['field'], value: string | null
   return value ?? '—'
 }
 export function describeChange(change: ActivityChange): { label: string; from?: string; to?: string } {
+  if (change.field === 'human_check' && !change.from) return { label: 'added a human check', to: change.to ?? '—' }
+  if (change.field === 'human_check' && !change.to) return { label: 'completed the human check', to: change.from ?? '—' }
+  if (change.field === 'kind') return { label: 'changed the type', from: change.from ? kindLabel(change.from) : '—', to: change.to ? kindLabel(change.to) : '—' }
   if (change.field === 'parent') return { label: 'moved it to another parent' }
   if (change.field === 'assignee' && !change.from) return { label: 'assigned it to', to: changeValue('assignee', change.to) }
   if (change.field === 'assignee' && !change.to) return { label: 'unassigned', from: changeValue('assignee', change.from) }

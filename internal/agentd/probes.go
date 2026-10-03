@@ -16,7 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/openrouter"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -48,7 +51,7 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	}
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(op, path, args...)
+	cmd := exec.Command(path, args...)
 	if env != nil {
 		cmd.Env = env
 	}
@@ -56,7 +59,7 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	code := 0
-	err = cmd.Run()
+	err = ownedprocess.Run(op, cmd)
 	// Oversized output is unavailable whatever the exit: its kept prefix is not
 	// the whole answer and must never be parsed.
 	if stdout.overflow || stderr.overflow {
@@ -64,10 +67,10 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	}
 	if err != nil {
 		var exit *exec.ExitError
-		if !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
+		if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) || !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
 			// AEON-341: a launcher that cannot run or never answers failed to
 			// start; callers without start semantics still read it as unavailable.
-			return nil, 0, harnesslaunch.ErrStart
+			return nil, 0, errors.Join(harnesslaunch.ErrStart, op.Err())
 		}
 		code = exit.ExitCode()
 		if code == 126 || code == 127 {
@@ -218,7 +221,7 @@ func codexStatus(raw []byte, code int) ProbeStatus {
 	switch strings.TrimSpace(string(raw)) {
 	case "Logged in using ChatGPT":
 		if code == 0 {
-			return probeOK
+			return ProbeStatus{OK: true, BillingMode: "subscription"}
 		}
 	case "Not logged in":
 		return probeAuthFailed
@@ -281,7 +284,18 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 		if !fresh && ok && time.Now().Before(cached.expires) && cached.path == a.Path && cached.home == home && cached.provider == expected && cached.node == node {
 			return cached.available, cached.err
 		}
-		provider, err := piprobe.Provider(ctx, a.Path, home, expected, node.Path)
+		var credits *openrouter.Credits
+		provider := expected
+		var err error
+		if expected == "openrouter" {
+			// No prompt or completion. The key stays inside the local profile reader.
+			err = launcherReady(ctx, a.Path, node.Path, piprobe.Environment(home, node.Path))
+			if err == nil {
+				credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+			}
+		} else {
+			provider, err = piprobe.Provider(ctx, a.Path, home, expected, node.Path)
+		}
 		available := err == nil && provider == expected
 		if errors.Is(err, piprobe.ErrProviderUnavailable) {
 			err = nil
@@ -290,7 +304,7 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 		if a.probes == nil {
 			a.probes = map[string]piProbeResult{}
 		}
-		a.probes[key] = piProbeResult{path: a.Path, home: home, provider: expected, node: node, expires: time.Now().Add(time.Minute), available: available, err: err}
+		a.probes[key] = piProbeResult{credits: credits, path: a.Path, home: home, provider: expected, node: node, expires: time.Now().Add(time.Minute), available: available, err: err}
 		a.probeMu.Unlock()
 		return available, err
 	}
@@ -457,6 +471,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		return probeUnavailable
 	}
 	var status struct {
+		AccountID  string `json:"accountId"`
 		LoggedIn   *bool  `json:"loggedIn"`
 		Email      string `json:"email"`
 		AuthMethod string `json:"authMethod"`
@@ -485,6 +500,17 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	}
 	if code != 0 {
 		return probeUnavailable
+	}
+	if status.AccountID != "" {
+		a.quotaIdentities().Store(key, status.AccountID)
+	}
+	switch status.AuthMethod {
+	case "claude.ai":
+		return ProbeStatus{OK: true, BillingMode: "subscription"}
+	case "api_key":
+		// Only an unfenced adapter reaches this case. Email-fenced API-key
+		// logins fail authentication above and never establish billing.
+		return ProbeStatus{OK: true, BillingMode: "api"}
 	}
 	return probeOK
 }

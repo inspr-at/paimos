@@ -12,7 +12,15 @@
 // has passed.
 //
 // Resolve walks the stored ladder. review-gate requires author_family and
-// skips that family. A harness query skips other harnesses and is rejected
+// skips that family.
+// Author families accept claude, codex and grok as aliases for anthropic,
+// openai and xai; pi is ambiguous and requires an explicit family. Resolution
+// responses echo the normalised author_family (empty when omitted).
+// Responses also include the starter's residency trace; optional project_id
+// selects that project's override. The trace retains every loosened lock.
+// This endpoint keeps its role-dispatch ladder; qualified review requests use
+// ResolveReviewFor and persist the complete preference trace with the review.
+// A harness query skips other harnesses and is rejected
 // when the ladder has none of that harness. When the tenant already has an
 // account for a harness, candidates of that harness are also skipped for a
 // stale or missing probe, a full parallel slot, or no pace headroom. The

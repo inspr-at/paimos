@@ -54,6 +54,7 @@ var fenceKinds = []struct {
 	{"grok", harnessGrokUsage, "grok/sessions/%2Fwork/abcdefgh/usage.json"},
 	{"cursor", harnessCursorUsage, "state/cursor.jsonl"},
 	{"agent-status", harnessAgentStatus, "work/.agent-status.json"},
+	{"explicit-status", harnessExplicitStatus, "work/progress.json"},
 }
 
 func TestHarnessFenceAdversarial(t *testing.T) {
@@ -143,7 +144,10 @@ func TestHarnessFenceKindsDoNotCross(t *testing.T) {
 		path := fenceWrite(t, filepath.Join(home, from.name, from.rel), fenceSentinel)
 		for _, to := range fenceKinds {
 			_, ok := resolveHarnessPath(to.kind, path)
-			if ok != (from.kind == to.kind) {
+			// Explicit JSON status reads intentionally accept JSON vendor names
+			// too, while implicit readers keep their exact allowlists.
+			expected := from.kind == to.kind || to.kind == harnessExplicitStatus && strings.HasSuffix(path, ".json")
+			if ok != expected {
 				t.Errorf("%s file under kind %s: allowed=%t", from.name, to.name, ok)
 			}
 		}

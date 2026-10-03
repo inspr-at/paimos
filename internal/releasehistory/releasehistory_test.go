@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/releasehistory/codename"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -151,6 +152,91 @@ func TestBuildFromGit(t *testing.T) {
 	if never.Tag != "" || never.ReservedAt == nil || never.ReservedAt.Format(time.RFC3339) != "2026-09-23T14:00:00Z" || len(never.Evidence.Unavailable) != 1 {
 		t.Fatalf("untagged reservation %+v", never)
 	}
+	// Codenames come from the sequence (AEON-430). The published release 1 owns
+	// its name; the reservation it replaced and the untagged one have none.
+	names := []string{}
+	for _, r := range h.Releases {
+		names = append(names, r.Codename)
+	}
+	if strings.Join(names, "|") != "Blue Bot||Avid Axle|" {
+		t.Fatalf("codenames %q", names)
+	}
+}
+
+func TestBuildLightweightReleaseTags(t *testing.T) {
+	const version = "260923150000.0.0"
+	for _, tc := range []struct {
+		name, metadata string
+		reservedAtHead bool
+		published      bool
+	}{
+		{name: "matching", metadata: `{"version":"260923150000.0.0","release_channel":"preview","release_sequence":42}`, published: true},
+		{name: "mismatching", metadata: `{"version":"260923143005.0.0","release_channel":"stable","release_sequence":2}`},
+		{name: "missing"},
+		{name: "malformed", metadata: `{`},
+		{name: "reserved at tag", metadata: `{"version":"260923150000.0.0","unpublished_reservations":["v260923150000.0.0"]}`},
+		{name: "reserved at head", metadata: `{"version":"260923150000.0.0"}`, reservedAtHead: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			run := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+				cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+					"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+					"GIT_AUTHOR_DATE=2026-09-23T14:00:00Z", "GIT_COMMITTER_DATE=2026-09-23T17:01:02+02:00")
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			write := func(metadata string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "version.json"), []byte(metadata), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run("init", "-q", "-b", "main")
+			if tc.metadata != "" {
+				write(tc.metadata)
+				run("add", "version.json")
+			}
+			// A commit message is not release metadata, even if it looks like an
+			// annotated tag. Neither its sequence nor the author's date may win.
+			run("commit", "--allow-empty", "-qm", "PAIMOS AEON v"+version+" · inspr-calendar-v2 · stable · release_sequence 99 · AEON-367")
+			commit := run("rev-parse", "HEAD")
+			run("tag", "v"+version)
+			head := versionFile{Product: "PAIMOS AEON", Version: version, VersionScheme: SchemeCalVer2}
+			if tc.reservedAtHead {
+				head.UnpublishedReservations = []string{version}
+			}
+			raw, _ := json.Marshal(head)
+			write(string(raw))
+			h, err := Build(context.Background(), Options{Repo: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.published {
+				for _, release := range h.Releases {
+					if release.State == StatePublished || release.Tag != "" {
+						t.Fatalf("accepted unverified lightweight tag: %+v", release)
+					}
+				}
+				return
+			}
+			if len(h.Releases) != 1 {
+				t.Fatalf("releases: %+v", h.Releases)
+			}
+			r := h.Releases[0]
+			if r.Version != version || r.State != StatePublished || r.ReleaseChannel != "preview" || r.ReleaseSequence != 42 || r.Evidence.SourceCommit != commit {
+				t.Fatalf("lightweight release: %+v", r)
+			}
+			if r.TaggedAt == nil || r.TaggedAt.Format(time.RFC3339) != "2026-09-23T15:01:02Z" || len(r.Changes) != 1 || strings.Join(r.Changes[0].Tickets, ",") != "AEON-367" {
+				t.Fatalf("lightweight release time or changes: %+v", r)
+			}
+		})
+	}
 }
 
 func TestBuildWithGitHubEvidence(t *testing.T) {
@@ -206,7 +292,7 @@ func TestBuildWithGitHubEvidence(t *testing.T) {
 }
 
 func TestHTTP(t *testing.T) {
-	h := History{Schema: Schema, Product: "PAIMOS AEON", Releases: []Release{{Version: "260923143005.0.0", Tag: "v260923143005.0.0", State: StatePublished, Tickets: []string{}, Changes: []Change{}}}}
+	h := History{Schema: Schema, Product: "PAIMOS AEON", Releases: []Release{{Version: "260923143005.0.0", Tag: "v260923143005.0.0", ReleaseSequence: 2, State: StatePublished, Tickets: []string{}, Changes: []Change{}}}}
 	mux := http.NewServeMux()
 	NewWith(h, "260923143005.0.0").Mount(mux)
 	get := func(path string, signedIn bool) *httptest.ResponseRecorder {
@@ -234,8 +320,119 @@ func TestHTTP(t *testing.T) {
 	if w := get("/api/releases/260923143005.0.0", false); w.Code != 401 {
 		t.Fatalf("anonymous one %d", w.Code)
 	}
+	// Every served release carries its codename, also from a manifest without one.
+	var named struct {
+		Releases []map[string]any `json:"releases"`
+	}
+	if json.Unmarshal(get("/api/releases", true).Body.Bytes(), &named) != nil || named.Releases[0]["codename"] != "Blue Bot" {
+		t.Fatalf("list codename %+v", named.Releases)
+	}
+	var one map[string]any
+	if json.Unmarshal(get("/api/releases/260923143005.0.0", true).Body.Bytes(), &one) != nil || one["codename"] != "Blue Bot" || one["release_sequence"] != float64(2) {
+		t.Fatalf("one codename %+v", one)
+	}
+	if h.Releases[0].Codename != "" {
+		t.Fatal("serving must not change the module's history in place")
+	}
 	// The committed empty manifest loads.
 	if e, err := Embedded(); err != nil || e.Schema != Schema || e.Releases == nil {
 		t.Fatalf("embedded %v %+v", err, e)
+	}
+}
+
+func TestWithCodenames(t *testing.T) {
+	h := History{Releases: []Release{
+		{Version: "260930074921.0.0", ReleaseSequence: 111, State: StatePublished, Codename: "Stale Name"},
+		{Version: "260925231350.0.0", ReleaseSequence: 54, State: StateReserved},
+		{Version: "260923134631.0.0", ReleaseSequence: 1, State: StatePublished},
+		{Version: "260923134337.0.0", ReleaseSequence: 1, State: StateReserved},
+		{Version: "260923140000.0.0", State: StateReserved},
+	}}
+	got := WithCodenames(h)
+	names := []string{}
+	for _, r := range got.Releases {
+		names = append(names, r.Codename)
+	}
+	// The function wins over any stored name; a reservation keeps its own slot.
+	if strings.Join(names, "|") != "Fresh Flyby|Inner Iota|Avid Axle||" {
+		t.Fatalf("codenames %q", names)
+	}
+	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {
+		t.Fatal("WithCodenames must copy the releases")
+	}
+}
+
+// CodenameOf names a version by its sequence for /api/version and the portal
+// (AEON-430): the published names, nothing for an unknown version or sequence.
+func TestCodenameOf(t *testing.T) {
+	h := History{Releases: []Release{
+		{Version: "260930074921.0.0", ReleaseSequence: 111, State: StatePublished},
+		{Version: "260930094206.0.0", ReleaseSequence: 112, State: StatePublished},
+		{Version: "260930115354.0.0", ReleaseSequence: 113, State: StatePublished},
+		{Version: "260923140000.0.0", State: StateReserved},
+	}}
+	for version, want := range map[string]string{
+		"260930074921.0.0": "Fresh Flyby",
+		"260930094206.0.0": "Glossy Glint",
+		"260930115354.0.0": "Hinged Hangar",
+		"260923140000.0.0": "", // no sequence, no name
+		"260101000000.0.0": "", // not in this history
+		"dev":              "",
+	} {
+		if got := CodenameOf(h, version); got != want {
+			t.Errorf("CodenameOf(%q) = %q, want %q", version, got, want)
+		}
+	}
+	if got := NewWith(h, "260930115354.0.0").CodenameOf("260930115354.0.0"); got != "Hinged Hangar" {
+		t.Errorf("module CodenameOf = %q", got)
+	}
+}
+
+// Build refuses a history whose version.json recorded a codename the lists no
+// longer give its sequence, so `just release-history` fails before a rename.
+func TestBuildRefusesRenamedCodename(t *testing.T) {
+	dir := repo(t)
+	path := filepath.Join(dir, "version.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(name string) {
+		t.Helper()
+		out := strings.Replace(string(raw), `"release_sequence":2,`, `"release_sequence":2,"codename":"`+name+`",`, 1)
+		if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp(codename.Codename(2))
+	if _, err := Build(context.Background(), Options{Repo: dir}); err != nil {
+		t.Fatalf("recorded name: %v", err)
+	}
+	stamp("Renamed Release")
+	if _, err := Build(context.Background(), Options{Repo: dir}); err == nil || !strings.Contains(err.Error(), "Renamed Release") {
+		t.Fatalf("renamed codename: err %v", err)
+	}
+}
+
+// The lists this binary names releases with keep every name already shown:
+// the embedded manifest's and the reservation's in version.json (AEON-430).
+func TestRepositoryCodenames(t *testing.T) {
+	h, err := Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var named []codename.Named
+	for _, r := range h.Releases {
+		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: r.Codename})
+	}
+	if raw, err := os.ReadFile("../../version.json"); err == nil {
+		var v versionFile
+		if err := json.Unmarshal(raw, &v); err != nil {
+			t.Fatal(err)
+		}
+		named = append(named, codename.Named{Sequence: v.ReleaseSequence, Name: v.Codename})
+	}
+	if err := codename.Guard(named); err != nil {
+		t.Fatal(err)
 	}
 }

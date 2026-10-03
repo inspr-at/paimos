@@ -81,6 +81,45 @@ func TestZitadelExistingUserIsUntouched(t *testing.T) {
 	}
 }
 
+func TestZitadelExistingUserRequiresASCIIMailboxMatch(t *testing.T) {
+	for _, tc := range []struct {
+		invited, returned string
+		match             bool
+	}{
+		{"mark@example.test", "marK@example.test", false},
+		{"sam@example.test", "ſam@example.test", false},
+		{"admin@example.test", "admİn@example.test", false},
+		{"mark@example.test", "MARK@EXAMPLE.TEST", true},
+		{"marK@example.test", "MARK@EXAMPLE.TEST", true},
+	} {
+		t.Run(tc.returned, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path != "/v2/users" {
+					t.Errorf("mismatched/existing user caused a mutation: %s", r.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{
+					"userId": "existing", "details": map[string]string{"resourceOwner": "org-1"},
+					"human": map[string]any{"email": map[string]string{"email": tc.returned}},
+				}}})
+			}))
+			defer server.Close()
+			result, err := newZitadel(server.URL, "org-1", "test-token", "tenant-1").EnsureUser(t.Context(), tc.invited, "Person")
+			if tc.match {
+				if err != nil || result.Status != "exists" || result.Subject != "existing" {
+					t.Fatalf("matching IdP mailbox refused: %+v %v", result, err)
+				}
+			} else if err == nil || result.Subject != "" || result.Status != "" {
+				t.Fatalf("different IdP mailbox accepted: %+v %v", result, err)
+			}
+			if calls != 1 {
+				t.Fatalf("unexpected provisioning/invite call: %d", calls)
+			}
+		})
+	}
+}
+
 func TestZitadelFailedInviteCarriesOnlyCreatedSubjectForRetry(t *testing.T) {
 	sends := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

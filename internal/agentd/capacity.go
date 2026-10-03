@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
 )
@@ -144,6 +145,19 @@ func (s *Supervisor) observeCapacity(e *owned, readings []capacity.Reading) {
 		e.mu.Unlock()
 		return
 	}
+	// A final pre-exit snapshot must not lower the limit we just observed.
+	readings = append([]capacity.Reading(nil), readings...)
+	if e.vendorLimit != nil {
+		for i, r := range readings {
+			for _, hit := range e.vendorLimit.Readings {
+				if hit.WindowKind == r.WindowKind && hit.Bucket == r.Bucket && hit.ResetsAt.Equal(r.ResetsAt) {
+					readings[i].UsedPercent = 100
+					no := false
+					readings[i].OrdinaryUsageAllowed = &no
+				}
+			}
+		}
+	}
 	// Replace the pending snapshot for each phase/source, preserving start/end
 	// attribution but not buckets omitted from a subsequent capture.
 	for _, r := range readings {
@@ -225,12 +239,57 @@ func (p *codexProcess) readCapacity(ctx context.Context, phase string) {
 		return
 	}
 	defer p.eventMu.Unlock()
-	p.emitCapacityReadings(p.capacityParser.CodexSnapshot(raw, time.Now().UTC()), phase)
+	at := time.Now().UTC()
+	readings := p.capacityParser.CodexSnapshot(raw, at)
+	if hit := capacity.CodexLimit(raw, readings, at, p.capacityModel); hit != nil {
+		p.emitLimitCapacity(readings, phase, hit)
+		return
+	}
+	p.emitCapacityReadings(readings, phase)
 }
 func (p *codexProcess) emitCapacity(raw []byte, phase string) {
-	p.emitCapacityReadings(p.capacityParser.Codex(raw, time.Now().UTC()), phase)
+	at := time.Now().UTC()
+	readings := p.capacityParser.Codex(raw, at)
+	if hit := capacity.CodexLimit(raw, readings, at, p.capacityModel); hit != nil {
+		p.emitLimitCapacity(readings, phase, hit)
+		return
+	}
+	p.emitCapacityReadings(readings, phase)
+}
+func (p *codexProcess) emitLimitCapacity(readings []capacity.Reading, phase string, hit *capacity.LimitHit) {
+	// An unnamed stop must not replace the percentages the vendor actually sent.
+	p.lastCapacity = append([]capacity.Reading(nil), readings...)
+	if len(hit.Readings) == 0 {
+		p.emitCapacityReadings(readings, phase)
+	} else {
+		hit.Readings = overlayNamedReadings(readings, hit.Readings)
+		for i := range hit.Readings {
+			hit.Readings[i].Phase = phase
+		}
+	}
+	p.emitVendorLimit(hit)
+}
+func overlayNamedReadings(base, named []capacity.Reading) []capacity.Reading {
+	out := append([]capacity.Reading(nil), base...)
+	for _, n := range named {
+		replaced := false
+		for i, r := range out {
+			if r.WindowKind == n.WindowKind && r.Bucket == n.Bucket {
+				out[i] = n
+				replaced = true
+			}
+		}
+		if !replaced {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return append([]capacity.Reading(nil), named...)
+	}
+	return out
 }
 func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase string) {
+	p.lastCapacity = append([]capacity.Reading(nil), readings...)
 	for i := range readings {
 		readings[i].Phase = phase
 	}
@@ -243,11 +302,19 @@ func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase s
 // run. The vendor owns authentication; identity is checked on the same process
 // before reading quota. No credential files or auth response are published.
 func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capacity.Reading {
+	return a.captureCapacity(ctx, key, func(home string) (*wireProcess, error) {
+		return launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
+	})
+}
+
+// A per-call launcher lets tests block transport writes without a real clock or
+// replacing the process launcher globally.
+func (a *CodexAdapter) captureCapacity(ctx context.Context, key string, launch func(string) (*wireProcess, error)) []capacity.Reading {
 	home, err := localHome(a.Homes, key)
 	if err != nil || strings.TrimSpace(a.Emails[key]) == "" {
 		return nil
 	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
+	p, err := launch(home)
 	if err != nil {
 		return nil
 	}
@@ -262,18 +329,22 @@ func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capaci
 	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-capacity", "version": "1"}}); err != nil {
 		return nil
 	}
-	if p.send(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
+	if p.sendContext(op, map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
 		return nil
 	}
 	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
 	var identity struct {
 		Account *struct {
+			ID    string `json:"id"`
 			Type  string `json:"type"`
 			Email string `json:"email"`
 		} `json:"account"`
 	}
-	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !strings.EqualFold(strings.TrimSpace(identity.Account.Email), strings.TrimSpace(a.Emails[key])) {
+	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !agentsetup.CodexAccountMatches(a.Emails[key], identity.Account.Email) {
 		return nil
+	}
+	if identity.Account.ID != "" {
+		a.quotaIDs.Store(key, identity.Account.ID)
 	}
 	raw, err = p.request(op, "jsonrpc", "account/rateLimits/read", map[string]any{})
 	if err != nil {
@@ -297,6 +368,8 @@ func (s *Supervisor) RunCapacityCaptures(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.syncStatuslines(ctx, time.Now())
+			s.publishSignals(ctx)
 			s.captureIdleCapacity(ctx, time.Now())
 		}
 	}
@@ -349,6 +422,8 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		}
 		s.mu.Lock()
 		s.capacityCapturing = true
+		s.capacityStartedAt = time.Now()
+		s.capacityAccountID = a.ID
 		s.capacityAttempt[a.ID] = now
 		s.mu.Unlock()
 		s.dispatchMu.Unlock()
@@ -388,6 +463,8 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		cancel()
 		s.mu.Lock()
 		s.capacityCapturing = false
+		s.capacityAccountID = ""
+		s.capacityStartedAt = time.Time{}
 		s.mu.Unlock()
 	}
 }

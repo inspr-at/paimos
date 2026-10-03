@@ -30,7 +30,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if err := rt.replayPendingUsage(ctx, projectID, session); err != nil {
 		return err
 	}
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil {
 		return err
 	}
@@ -88,6 +88,16 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 				continue
 			}
 		}
+		if source == "codex" {
+			// Cache growth can exceed the input delta while fitting this
+			// model's cumulative input. Limit only the prepared report, and
+			// preserve any uncached input the server has already accepted.
+			maxCached := input
+			if prev != nil {
+				maxCached = input - (prev.Input - prev.Cached)
+			}
+			cached = min(cached, maxCached)
+		}
 		reasoning, reasoningKnown = holdReasoning(prev, reasoning, reasoningKnown)
 		var valid bool
 		if reasoning, reasoningKnown, valid = fitUsageReport(prev, input, output, cached, reasoning, reasoningKnown); !valid {
@@ -110,7 +120,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 			Reasoning: reasoningPointer(reasoning, reasoningKnown),
 			ReportID:  usageReportID(session.id, model, seq, input, output, cached, reasoningPointer(reasoning, reasoningKnown)),
 			Offset:    next, Recent: recent, Discard: discarding, Codex: codex,
-			BillingMode: mode, SubscriptionLabel: label,
+			BillingMode: mode, SubscriptionLabel: label, AccountID: usageAccount(o),
 		})
 	}
 	if len(created) == 0 {
@@ -198,6 +208,9 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 		"cached_input_tokens": pending.Cached,
 		"provisional":         provisional,
 		"billing_mode":        pendingBilling(pending),
+	}
+	if pending.AccountID != "" {
+		body["account_id"] = pending.AccountID
 	}
 	if pending.Reasoning != nil {
 		body["reasoning_tokens"] = *pending.Reasoning

@@ -9,17 +9,22 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 const (
-	Codex  = "codex"
-	Claude = "claude"
-	Pi     = "pi"
-	Cursor = "cursor"
-	Grok   = "grok"
+	Codex    = "codex"
+	Claude   = "claude"
+	Pi       = "pi"
+	Cursor   = "cursor"
+	Grok     = "grok"
+	Gemini   = "gemini"
+	OpenCode = "opencode"
 )
 
 var (
@@ -40,6 +45,9 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	ReadOnlyReview            bool   `json:"read_only_review,omitempty"`
+	RetryOfRunID              string `json:"retry_of_run_id"`
+	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
 	Purpose                   string `json:"purpose,omitempty"`
 	VerificationTask          string `json:"verification_task,omitempty"`
 	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
@@ -64,6 +72,7 @@ func (r Run) requestedAccount() string {
 }
 
 type Profile struct {
+	Family  string `json:"family"`
 	ID      string `json:"id"`
 	Harness string `json:"harness"`
 	Model   string `json:"model"`
@@ -80,19 +89,27 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
-	Activity         string                 `json:"-"`
-	Ownership        *ownedprocess.Identity `json:"-"`
-	ActivitySequence int64                  `json:"-"`
-	ID               string                 `json:"id"`
-	ProjectID        string                 `json:"project_id"`
-	Lease            string                 `json:"-"`
-	Harness          string                 `json:"-"`
-	Model            string                 `json:"model,omitempty"`
-	ReasoningEffort  string                 `json:"reasoning_effort,omitempty"`
-	AccountLabel     string                 `json:"account_label,omitempty"`
+	ServiceTier      string                  `json:"service_tier,omitempty"`
+	Doing            string                  `json:"-"`
+	DoingAt          time.Time               `json:"-"`
+	ToolActivity     *agentactivity.Activity `json:"-"`
+	Activity         string                  `json:"-"`
+	Ownership        *ownedprocess.Identity  `json:"-"`
+	ActivitySequence int64                   `json:"-"`
+	ID               string                  `json:"id"`
+	ProjectID        string                  `json:"project_id"`
+	Lease            string                  `json:"-"`
+	Harness          string                  `json:"-"`
+	Model            string                  `json:"model,omitempty"`
+	ReasoningEffort  string                  `json:"reasoning_effort,omitempty"`
+	AccountLabel     string                  `json:"account_label,omitempty"`
 }
 
 type HarnessControl struct {
+	ExpectedGeneration string `json:"expected_generation"`
+	RequestPayload     *struct {
+		StopNow bool `json:"stop_now"`
+	} `json:"request_payload,omitempty"`
 	// deadline is local, monotonic, and never serialized or persisted.
 	deadline          time.Time
 	ExpiresInMS       int64                  `json:"expires_in_ms"`
@@ -115,11 +132,13 @@ type HarnessDelivery struct {
 }
 
 type WorkOrder struct {
-	NodeID             string          `json:"node_id"`
-	Status             string          `json:"status"`
-	Revision           int64           `json:"revision"`
-	Criteria           []WorkCriterion `json:"criteria"`
-	MaxDurationSeconds *int64          `json:"max_duration_seconds"`
+	Kind               string              `json:"kind"`
+	Review             *reviewgate.Binding `json:"review,omitempty"`
+	NodeID             string              `json:"node_id"`
+	Status             string              `json:"status"`
+	Revision           int64               `json:"revision"`
+	Criteria           []WorkCriterion     `json:"criteria"`
+	MaxDurationSeconds *int64              `json:"max_duration_seconds"`
 }
 
 type WorkCriterion struct {
@@ -131,19 +150,23 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
-	Sequence               int64       `json:"sequence"`
-	Kind                   string      `json:"kind"`
-	Status                 string      `json:"status,omitempty"`
-	InputTokensDelta       int64       `json:"input_tokens_delta,omitempty"`
-	OutputTokensDelta      int64       `json:"output_tokens_delta,omitempty"`
-	CachedInputTokensDelta int64       `json:"cached_input_tokens_delta,omitempty"`
-	ReasoningTokensDelta   int64       `json:"reasoning_tokens_delta,omitempty"`
-	CostMicrosDelta        int64       `json:"cost_micros_delta,omitempty"`
-	TurnCountDelta         int64       `json:"turn_count_delta,omitempty"`
-	EffectiveModel         string      `json:"effective_model,omitempty"`
-	ModelEvidence          string      `json:"model_evidence,omitempty"`
-	ErrorCode              string      `json:"error_code,omitempty"`
-	GitCommits             []GitCommit `json:"git_commits,omitempty"`
+	ServiceTier            string                  `json:"service_tier,omitempty"`
+	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
+	LimitWindow            string                  `json:"limit_window,omitempty"`
+	LimitResetsAt          *time.Time              `json:"limit_resets_at,omitempty"`
+	Sequence               int64                   `json:"sequence"`
+	Kind                   string                  `json:"kind"`
+	Status                 string                  `json:"status,omitempty"`
+	InputTokensDelta       int64                   `json:"input_tokens_delta,omitempty"`
+	OutputTokensDelta      int64                   `json:"output_tokens_delta,omitempty"`
+	CachedInputTokensDelta int64                   `json:"cached_input_tokens_delta,omitempty"`
+	ReasoningTokensDelta   int64                   `json:"reasoning_tokens_delta,omitempty"`
+	CostMicrosDelta        int64                   `json:"cost_micros_delta,omitempty"`
+	TurnCountDelta         int64                   `json:"turn_count_delta,omitempty"`
+	EffectiveModel         string                  `json:"effective_model,omitempty"`
+	ModelEvidence          string                  `json:"model_evidence,omitempty"`
+	ErrorCode              string                  `json:"error_code,omitempty"`
+	GitCommits             []GitCommit             `json:"git_commits,omitempty"`
 }
 
 // GitCommit is one commit introduced after the run's launch revision.
@@ -170,11 +193,13 @@ type Reservation struct {
 	ID string `json:"reservation_id"`
 }
 type Route struct {
-	AccountID    string        `json:"account_id"`
-	AccountKey   string        `json:"account_key"`
-	AccountLabel string        `json:"account_label"`
-	DaemonID     string        `json:"daemon_id"`
-	Reservations []Reservation `json:"reservations"`
+	BillingMode       string        `json:"billing_mode"`
+	SubscriptionLabel string        `json:"subscription_label,omitempty"`
+	AccountID         string        `json:"account_id"`
+	AccountKey        string        `json:"account_key"`
+	AccountLabel      string        `json:"account_label"`
+	DaemonID          string        `json:"daemon_id"`
+	Reservations      []Reservation `json:"reservations"`
 }
 
 // API is the narrow authenticated AEON boundary. Implementations must use
@@ -204,6 +229,11 @@ type API interface {
 }
 
 type StartRequest struct {
+	ServiceTier string
+	// Lifetime is the accepted run budget rooted in the supervisor lifetime.
+	// The Start call's context only covers dispatch/startup and may end as soon
+	// as polling finishes. Adapters without a supervisor use the caller context.
+	Lifetime      context.Context
 	ManagedPolicy bool
 	Capabilities  []string // Exact capabilities advertised for this session.
 	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
@@ -230,6 +260,11 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	HarnessTier  string
+	Doing        string
+	ToolActivity *agentactivity.Activity
+	VendorLimit  *capacity.LimitHit
+
 	Activity               string // busy or idle, independent of the run process lifetime.
 	Capacity               []capacity.Reading
 	BudgetExhausted        string
@@ -284,18 +319,27 @@ type AccountProber interface {
 	Probe(context.Context, string) bool
 }
 
-// ProbeStatus is an account probe with its cause. Failure is ProbeAuthFailed
-// only when the vendor's own status command ran and said this account is
-// signed out or signed in as someone else; errors, timeouts and unreadable
-// output are ProbeUnavailable. Vendor output never leaves the daemon.
+// ProbeStatus is an account probe with its bounded cause. Only ProbeAuthFailed
+// and ProbeIdentityMismatch describe confirmed authentication failures. Local
+// measurement failures never imply sign-out. The historical account-probe API
+// retains auth_failed/unavailable; lifecycle details can retain finer causes.
+// Vendor identity and output never leave the daemon.
 type ProbeStatus struct {
-	OK      bool
-	Failure string
+	BillingMode       string
+	OpenRouterCredits *openrouter.Credits
+	OK                bool
+	Failure           string
 }
 
 const (
-	ProbeAuthFailed  = "auth_failed"
-	ProbeUnavailable = "unavailable"
+	ProbeAuthFailed       = "auth_failed"
+	ProbeUnavailable      = "unavailable"
+	ProbeIdentityMismatch = "identity_mismatch"
+	ProbeTimeout          = "timeout"
+	ProbeProtocol         = "protocol"
+	ProbeLaunchFailed     = "launch_failed"
+	// ProbeUnverified is local evidence, not a confirmed vendor sign-out.
+	ProbeUnverified = "sign_in_unverified"
 )
 
 // AccountStatusProber is the optional richer prober; adapters without it
@@ -326,6 +370,13 @@ type AccountMetadata struct {
 type EnrolledAccount struct {
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
+	// DependencyBlocked means this enrollment's interpreter pin is missing,
+	// partial, drifted, invalid, or unsafe. It stays enrolled and unlaunchable.
+	// PinReason is the shared reason code and PinFix the fix kind; the exact
+	// command comes from agentsetup.RecoveryFix.
+	DependencyBlocked bool
+	PinReason         string
+	PinFix            string
 }
 
 type ControlRequest struct {

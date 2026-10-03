@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
+import { withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, stats, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, visibleReleases, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -9,6 +10,47 @@ const rel = (version: string, at: string, extra: Partial<Release> = {}): Release
   evidence: { source_commit: 'abc1234def', source_url: '', image: null, ci: null, release_run: null, release_url: '', unavailable: [] }, ...extra,
 })
 const change = (commit: string, type: Release['changes'][number]['type'], subject: string, tickets: string[] = []) => ({ commit, type, subject, scope: '', tickets, at: '' })
+
+test('portable public notes retain captured groups and language fallback without tenant IDs (AEON-372)', () => {
+  const raw = rel('260929120000.0.0', '2026-09-29T12:00:00Z', {
+    notes: { source: 'embedded-product-notes', snapshot_sha256: 'a'.repeat(64), captured_at: null, release_revision: 1, items: [], gaps: [], hidden: 0,
+      public_items: [
+        { key: 'AEON-7', group: 'fixes', pill_en: 'Frozen repair', pill_de: '', benefit_en: 'It works again.', benefit_de: '' },
+        { key: 'AEON-8', group: 'other', pill_en: 'Internal maintenance', pill_de: '', benefit_en: '', benefit_de: '' },
+      ],
+    },
+    changes: [change('a', 'other', 'AEON-7: repair', ['AEON-7']), change('b', 'other', 'AEON-8: maintenance', ['AEON-8'])],
+  })
+  const normalized = withPublicNoteItems(raw)
+  const shown = presentRelease(normalized, 'de')
+  assert.equal(shown.fixes[0]?.pill, 'Frozen repair')
+  assert.equal(shown.fixes[0]?.pillLang, 'en')
+  assert.deepEqual(shown.other.map(c => c.commit), ['b'])
+  assert.equal(shown.features.length, 0)
+  assert.equal(raw.notes?.items.length, 0)
+  assert.equal(normalized.notes?.items[0]?.id, '')
+  const emptyTenant = { ...raw, notes: { ...raw.notes!, source: 'database-snapshot', public_items: undefined, items: [] } }
+  assert.equal(presentRelease(withPublicNoteItems(emptyTenant)).fixes.length, 0)
+})
+
+test('a capture without a group plus a bug ticket is a fix (AEON-372)', () => {
+  const item = { id: '44444444-4444-4444-8444-444444444444', key: 'AEON-7', pill_en: 'Frozen repair', pill_de: '', benefit_en: 'Captured benefit.', benefit_de: '' }
+  const notes = {
+    source: 'database-snapshot', snapshot_sha256: 'a'.repeat(64), captured_at: '2026-09-28T12:00:00Z', release_revision: 1, gaps: [], hidden: 0,
+    items: [item],
+  }
+  const live = { key: 'AEON-7', group: 'fixes' as const, pill_en: 'Live text', pill_de: '', benefit_en: 'Not the snapshot.', benefit_de: '' }
+  const bug = { ...change('a', 'other', 'AEON-7: repair the release', ['AEON-7']), group: 'fixes' as const, linked_tickets: [live] }
+  const shown = presentRelease(rel('260928120000.0.0', '2026-09-28T12:00:00Z', { notes, changes: [bug] }))
+  assert.equal(shown.features.length, 0)
+  assert.deepEqual(shown.fixes.map(line => [line.key, line.pill, line.benefit]), [['AEON-7', 'Frozen repair', 'Captured benefit.']])
+  const recorded = presentRelease(rel('260928120000.0.0', '2026-09-28T12:00:00Z', {
+    notes: { ...notes, items: [{ ...item, group: 'fixes' as const }] },
+    changes: [change('a', 'other', 'AEON-7: repair the release', ['AEON-7'])],
+  }))
+  assert.equal(recorded.features.length, 0)
+  assert.deepEqual(recorded.fixes.map(line => [line.key, line.pill]), [['AEON-7', 'Frozen repair']])
+})
 
 test('days group newest first with Today and Yesterday labels', () => {
   const now = new Date(2026, 8, 24, 16, 0).getTime()
@@ -132,6 +174,53 @@ test('each ticket is a feature or a fix of its own, also when one commit names s
   assert.deepEqual([prefixed.features.map(line => line.key), prefixed.fixes.map(line => line.key)], [['AEON-273'], ['AEON-274']])
 })
 
+test('compare follows the server group without note text, and a shared commit stays there (AEON-386)', () => {
+  const frozen = (key: string, group: 'features' | 'fixes', pill: string, benefit: string) => ({ key, group, pill_en: pill, pill_de: '', benefit_en: benefit, benefit_de: '' })
+  const changes = [
+    { ...change('g', 'other', 'AEON-20: frozen group', ['AEON-20']), group: 'fixes' as const, linked_tickets: [frozen('AEON-20', 'fixes', 'Frozen kept', 'Stays a fix.')] },
+    { ...change('h', 'other', 'AEON-99: outside a grouped capture', ['AEON-99']), group: 'fixes' as const },
+    { ...change('i', 'other', 'AEON-97: benefit outside a grouped capture', ['AEON-97']), group: 'features' as const },
+    { ...change('j', 'other', 'AEON-98: hidden member of a grouped capture', ['AEON-98']), group: 'fixes' as const },
+    { ...change('k', 'other', 'AEON-21: shared with a hidden bug', ['AEON-21', 'AEON-98']), group: 'fixes' as const, linked_tickets: [frozen('AEON-21', 'features', 'Frozen feature', 'Stays a feature.')] },
+    change('z', 'release', 'release: v1'),
+  ]
+  const shown = presentCompare(changes)
+  assert.deepEqual(shown.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-97', '', ['i']]])
+  assert.deepEqual(shown.fixes.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [
+    ['AEON-20', 'Frozen kept', ['g']],
+    ['AEON-99', '', ['h']],
+    ['AEON-98', '', ['j', 'k']],
+    ['AEON-21', 'Frozen feature', ['k']],
+  ])
+  assert.equal(shown.fixes.find(line => line.key === 'AEON-21')?.benefit, 'Stays a feature.')
+  assert.deepEqual(shown.other, [])
+  assert.equal(JSON.stringify(shown).includes('LIVE'), false)
+  // German is not invented for frozen English text.
+  const de = presentCompare(changes, 'de-AT')
+  assert.equal(de.fixes.find(line => line.key === 'AEON-21')?.pillLang, 'en')
+  // Highlights still require told text, so the same payload does not move.
+  const highlights = presentChanges(changes)
+  assert.deepEqual(highlights.features.map(line => line.key), ['AEON-21'])
+  assert.deepEqual(highlights.fixes.map(line => line.key), ['AEON-20'])
+  assert.deepEqual(highlights.other.map(c => c.commit), ['h', 'i', 'j'])
+  const notes = {
+    source: 'database-snapshot', snapshot_sha256: 'ab', captured_at: '2026-09-26T12:00:00Z', release_revision: 1, gaps: [], hidden: 1,
+    items: [
+      { id: '20', key: 'AEON-20', group: 'fixes' as const, pill_en: 'Frozen kept', pill_de: '', benefit_en: 'Stays a fix.', benefit_de: '' },
+      { id: '21', key: 'AEON-21', group: 'features' as const, pill_en: 'Frozen feature', pill_de: '', benefit_en: 'Stays a feature.', benefit_de: '' },
+    ],
+  }
+  const detail = presentRelease(rel('260926120000.0.0', '2026-09-26T12:00:00Z', { notes, changes }))
+  assert.deepEqual(detail.features.map(line => [line.key, line.pill, line.commits.map(c => c.commit)]), [['AEON-21', 'Frozen feature', ['k']]])
+  assert.deepEqual(detail.other.map(c => c.commit), ['h', 'i', 'j'])
+  // No server group: Compare still reads told tickets, and a bare feat stays Other.
+  const legacy = [
+    { ...change('1', 'other', 'P0.x: session chat (AEON-273)', ['AEON-273']), linked_tickets: [{ key: 'AEON-273', pill_en: 'Session chat', pill_de: '', benefit_en: 'The chat stays put.', benefit_de: '' }] },
+    change('2', 'feat', 'feat: plain'),
+  ]
+  assert.deepEqual(presentCompare(legacy), presentChanges(legacy))
+})
+
 test('a server group wins over the commit type, and a version bump stays out', () => {
   const grouped = groupChanges([
     { ...change('1', 'other', 'P0.x: session chat (AEON-273)', ['AEON-273']), group: 'features' },
@@ -146,16 +235,8 @@ test('a server group wins over the commit type, and a version bump stays out', (
   assert.deepEqual(grouped.other.map(c => c.commit), ['3'])
 })
 
-test('stats count today and this week, the gap since the last release and the median gap', () => {
-  const now = new Date(2026, 8, 24, 16, 0).getTime() // a Thursday
-  const at = (d: number, h: number) => new Date(2026, 8, d, h).toISOString()
-  const releases = [rel('1', at(24, 14)), rel('2', at(24, 10)), rel('3', at(23, 12)), rel('4', at(20, 12)), rel('5', at(24, 15), { state: 'reserved' })]
-  const s = stats(releases, now, 7)
-  assert.equal(s.today, 2)
-  assert.equal(s.week, 3) // Monday 21 onwards
-  assert.equal(s.last, Date.parse(at(24, 14)))
-  assert.equal(s.median, 22 * 3_600_000) // gaps 72h, 22h, 4h
-  assert.deepEqual(s.cadence, [0, 0, 1, 0, 0, 1, 2]) // 18 to 24 September
+// The header's stats live in releaseStats (AEON-488, release-stats.unit.test.ts).
+test('spans read in minutes, hours and days', () => {
   assert.equal(span(45 * 60_000), '45 min')
   assert.equal(span(192 * 60_000), '3 h 12 min')
   assert.equal(span(3 * 86_400_000), '3 days')
@@ -195,6 +276,15 @@ test('search and filters look at headlines, changes and ticket keys', () => {
   assert.deepEqual(ticketsOf(r), ['AEON-77', 'AEON-78'])
 })
 
+test('search finds a release by its codename in either language (AEON-430)', () => {
+  const r = rel('260930074921.0.0', '', { release_sequence: 111, codename: 'Fresh Flyby' })
+  const f = { q: '', features: false, fixes: false, tickets: false }
+  assert.ok(matches(r, { ...f, q: 'fresh fl' }))
+  assert.ok(matches(r, { ...f, q: 'FLYBY' }, 'de', 'details'))
+  assert.ok(!matches(r, { ...f, q: 'aqua' }))
+  assert.ok(!matches({ ...r, codename: undefined }, { ...f, q: 'flyby' }))
+})
+
 test('feature and fix filters follow the visible ticket lines, in the viewer locale', () => {
   const f = { q: '', features: false, fixes: false, tickets: false }
   const bare = rel('260924000010.0.0', '', { changes: [{ ...change('a', 'feat', 'feat: no visible ticket', ['AEON-9']), group: 'features' as const }] })
@@ -216,6 +306,19 @@ test('new since the last visit: newer published releases, nothing on a first vis
   const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
+  assert.deepEqual([...newSince(releases, '1', true)].sort(), ['2', '2.5', '3'])
+  assert.equal(newSince(releases, null, true).size, 0)
+  assert.equal(newSince([releases[2]], '1').size, 0)
+})
+
+test('reserved versions are opt-in without changing the full history or result counts', () => {
+  const releases = [rel('3', ''), rel('2', '', { state: 'reserved', published_at: null }), rel('1', '', { published_at: null })]
+  const before = structuredClone(releases)
+  assert.deepEqual(visibleReleases(releases).map(r => r.version), ['3', '1'])
+  assert.deepEqual(visibleReleases(releases, true), releases)
+  // A tagged published version without a publication timestamp remains visible.
+  assert.deepEqual(releases, before)
+  assert.equal(releases.filter(r => matches(r, { q: '', features: false, fixes: false, tickets: false })).length, 3)
 })
 
 test('regenerated missing snapshots preserve the v1 archive headline, tickets and filters with an honest gap', () => {

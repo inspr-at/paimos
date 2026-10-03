@@ -523,7 +523,7 @@ const shots: Shot[] = [
   } },
   { screen: 'start-agent', state: 'accounts-card', setup: async page => { await mockStartAgent(page, { catalog: 'two-hosts' }) }, act: async page => {
     await page.goto('/settings/accounts')
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
+    await expect(page.locator('#agent-accounts').locator('.account').first()).toBeVisible()
   } },
   // 5. Connected computers and pairing
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
@@ -568,11 +568,12 @@ const shots: Shot[] = [
     await page.waitForTimeout(300)
   } },
   { screen: 'pairing', state: 'review', setup: pairingSetup, act: pairingReview },
-  { screen: 'pairing', state: 'ongoing-limits', setup: pairingSetup, act: async page => {
+  { screen: 'pairing', state: 'ongoing-use', setup: pairingSetup, act: async page => {
     await pairingReview(page)
     await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()
-    await page.getByRole('radio', { name: /Set ongoing limits/ }).check()
-    await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toBeVisible()
+    await expect(page.getByRole('radio', { name: /Let agents use these accounts/ })).toBeChecked()
+    await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Connect computer', exact: true }).scrollIntoViewIfNeeded()
   } },
   { screen: 'pairing', state: 'setting-up', setup: pairingSetup, act: async page => {
     await pairingReview(page)
@@ -688,6 +689,33 @@ const shots: Shot[] = [
   }, act: async page => {
     await page.goto(`/releases/${releaseHistory().current}`)
     await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+  } },
+  // AEON-430: the list with codenames as row titles and beside a brief; a long
+  // codename next to the Current tag; a reservation that keeps its slot's name.
+  { screen: 'releases', state: 'history-codenames', setup: async page => {
+    await mockWork(page, fixtures())
+    const history = presentedHistory(PRESENTED_NOW)
+    history.releases[0].codename = 'Trailblazing Thermosphere'
+    Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Inner Iota' })
+    await mockReleases(page, history)
+  }, act: async page => {
+    await page.goto('/releases/all')
+    await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+    await expect(page.getByRole('option').first()).toBeVisible()
+  } },
+  // AEON-430: a comparison names each release in the range, by brief or codename.
+  { screen: 'releases', state: 'history-compare', setup: async page => {
+    await mockWork(page, fixtures())
+    await mockReleases(page, presentedHistory(PRESENTED_NOW))
+  }, act: async page => {
+    await page.goto(`/releases/${presentedHistory(PRESENTED_NOW).releases[0].version}`)
+    const back = page.getByRole('button', { name: 'All releases' })
+    await expect(page.getByRole('option').first().or(back)).toBeVisible()
+    if (await back.isVisible()) await back.click() // phones open the release first
+    await expect(page.getByRole('option').first()).toBeVisible()
+    await page.getByRole('button', { name: 'Compare' }).click()
+    await page.getByRole('option').nth(4).click()
+    await expect(page.getByRole('heading', { name: 'Releases in this range' })).toBeVisible()
   } },
   // AEON-305: a presented release, one with benefits only, one with internal changes only.
   ...([['history-presented', 0], ['history-benefits-only', 1], ['history-internal', 3]] as const).map(([state, index]) => ({ screen: 'releases', state, setup: async (page: Page) => {

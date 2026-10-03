@@ -12,6 +12,7 @@ import (
 // required by the offline Parse API. It is called serially by the wire reader.
 // The caller must bind the requested exact model before starting the first turn.
 type ManagedCodex struct {
+	billingMode               string
 	thread, model, requested  string
 	turn                      string
 	rerouteModel, rerouteTurn string
@@ -21,12 +22,16 @@ type ManagedCodex struct {
 	failed, ended             bool
 }
 
-func NewManagedCodex(thread, model string) (*ManagedCodex, error) {
+func NewManagedCodex(thread, model string, billing ...string) (*ManagedCodex, error) {
 	model, err := canonicalModel(model)
 	if err != nil || !validSourceID(thread) {
 		return nil, fmt.Errorf("%w: managed thread/model binding", ErrRejected)
 	}
-	return &ManagedCodex{thread: thread, model: model, requested: model, previous: snapshot{cachedKnown: true}, models: map[string]UsageReport{}}, nil
+	mode := "unknown"
+	if len(billing) == 1 {
+		mode = BillingMode(billing[0])
+	}
+	return &ManagedCodex{billingMode: mode, thread: thread, model: model, requested: model, previous: snapshot{cachedKnown: true}, models: map[string]UsageReport{}}, nil
 }
 
 // BindTurn checks any pre-ack usage identity against the acknowledged turn.
@@ -194,7 +199,7 @@ func (c *ManagedCodex) Observe(raw []byte) (report *UsageReport, err error) {
 	if input > maxToken || output > maxToken || cached > maxToken || reasoning > maxToken {
 		return nil, ErrRejected
 	}
-	out := UsageReport{Model: model, InputTokens: &input, OutputTokens: &output, Provisional: true, BillingMode: "unknown"}
+	out := UsageReport{Model: model, InputTokens: &input, OutputTokens: &output, Provisional: true, BillingMode: BillingMode(c.billingMode)}
 	if delta.cachedKnown && (!exists || old.CachedInputTokens != nil) {
 		out.CachedInputTokens = &cached
 	}

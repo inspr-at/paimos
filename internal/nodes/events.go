@@ -18,6 +18,7 @@ const (
 	evNodeCreated      = "node.created"
 	evNodeUpdated      = "node.updated"
 	evNodeMoved        = "node.moved"
+	evNodeKindChanged  = "node.kind_changed"
 	evNodeProjectMoved = "node.project_moved"
 	evNodeDeleted      = "node.deleted"
 	evKindCreated      = "kind.created"
@@ -33,6 +34,7 @@ type Event struct {
 	Type             string
 	Before           json.RawMessage
 	After            json.RawMessage
+	Metadata         json.RawMessage
 }
 
 // Writer records one event inside the caller's tenant transaction.
@@ -47,11 +49,11 @@ type SQLWriter struct{}
 
 func (SQLWriter) WriteEvent(ctx context.Context, tx pgx.Tx, e Event) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO events (tenant_id, actor_principal_id, node_id, type, before, after)
+		INSERT INTO events (tenant_id, actor_principal_id, node_id, type, before, after, metadata)
 		VALUES (
 			NULLIF(current_setting('aeon.tenant_id', true), '')::uuid,
-			$1::uuid, $2::uuid, $3, $4::jsonb, $5::jsonb
-		)`, e.ActorPrincipalID, e.NodeID, e.Type, jsonbArg(e.Before), jsonbArg(e.After))
+			$1::uuid, $2::uuid, $3, $4::jsonb, $5::jsonb, $6::jsonb
+		)`, e.ActorPrincipalID, e.NodeID, e.Type, jsonbArg(e.Before), jsonbArg(e.After), jsonbArg(e.Metadata))
 	return err
 }
 
@@ -92,5 +94,5 @@ func (m *Module) writeEvent(ctx context.Context, tx pgx.Tx, e Event) error {
 	if err := m.events.WriteEvent(ctx, tx, e); err != nil {
 		return err
 	}
-	return nil
+	return snapshotNodeChange(ctx, tx, e)
 }

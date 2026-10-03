@@ -133,8 +133,9 @@
         "install_available": "boolean",
         "platform_qualification": "candidate; consult exact release service qualification evidence",
         "setup_command": "verified absolute binary path pair --url configured origin; confirms current folder and detected signed-in harnesses, creates default private state, waits for person approval; default tenant slug from guide",
-        "homebrew_command": "present only when homebrew_formula_current is true: brew install inspr-at/tap/aeon-agentd, then env \"$(brew --prefix)/bin/aeon-agentd\" pair --url configured origin",
-        "homebrew_formula_current": "true when the tap formula version matches this server, false when the formula was read and differs, null when the tap could not be read; clients then use the direct download and do not call GitHub",
+        "homebrew_command": "always offered: brew install inspr-at/tap/aeon-agentd, then env \"$(brew --prefix)/bin/aeon-agentd\" pair --url configured origin; installs the latest INSPR release; the server-pinned checksum-verified direct download is first and aeon-agentd status tells you if this server needs a different version",
+        "homebrew_formula_current": "deprecated legacy schema field; new servers omit it and never fetch the tap; new clients ignore it",
+        "agent_compatibility": "additive server-owned pairing protocol and inclusive minimum/optional maximum agent version window with its declared version scheme; aeon-agentd status checks the invoked helper against this policy instead of exact release equality",
         "managed_setup": {
           "command": "env \"$HOME/.nix-profile/bin/aeon-agentd\" pair --url configured origin",
           "service_option": "actual owning Home Manager option",
@@ -218,6 +219,12 @@
         "expected_revision": "required integer from reviewed PairingView; stale scope 409, identical completed retry succeeds"
       },
       "response": "PairingView"
+    },
+    "POST /api/agent-pairing/computers/{computerId}/remove": {
+      "permission": "person account.manage; same-origin Origin required",
+      "request": {},
+      "response": "PairingView",
+      "notes": "revoked or never-confirmed computers only; archives the computer and its account bindings, keeps rows, runs and events"
     }
   },
   "runtime_endpoints": {

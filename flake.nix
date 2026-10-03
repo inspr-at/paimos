@@ -22,7 +22,7 @@
       each = f: nixpkgs.lib.genAttrs systems (system: f system (import nixpkgs { inherit system; }));
       version = (builtins.fromJSON (builtins.readFile ./version.json)).version;
       # Pinned by building. proxyVendor avoids a case-insensitive darwin vendor tree.
-      vendorHash = "sha256-l51oiAPBvwH1JFAYriWHgLwkidBB+BjFAluRv2qfABk=";
+      vendorHash = "sha256-J60vwwsAGRGx0tMWiOWaWtqnOQYBrb3KI9sxAhmWzfU=";
     in
     {
       packages = each (

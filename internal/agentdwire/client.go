@@ -13,11 +13,52 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/stepup"
 )
+
+// Fixed attach refusal codes admitted over the owner-only socket. Keep the
+// English and German inventories in sync; callers receive a copy.
+var attachRefusalCodes = []string{
+	"attach_live_limit",
+	"attach_pairing_revoked",
+	"attach_version_mismatch",
+	"attach_ticket_not_visible",
+	"attach_code_expired",
+	"attach_draining",
+	"attach_enrollment_unavailable",
+	"attach_registration_lost",
+	"attach_pairing_unavailable",
+	"attach_scope_changed",
+	"attach_computer_limit",
+	"attach_attempt_limit",
+	"attach_registration_limit",
+	"attach_poll_limit",
+	"attach_rate_limit",
+	"attach_snapshot_changed",
+	"attach_consent_required",
+	"attach_ended",
+	"attach_invalid_request",
+	"attach_offline",
+	"attach_server_unavailable",
+	"attach_unknown",
+	"attach_local_unavailable",
+	"attach_pairing_mismatch",
+}
+
+// AttachRefusalCodes lists the socket's attach refusal allowlist for parity.
+func AttachRefusalCodes() []string {
+	codes := slices.Clone(attachRefusalCodes)
+	slices.Sort(codes)
+	return codes
+}
 
 type Client struct {
 	Socket    string
@@ -64,9 +105,15 @@ func (c Client) token() (string, error) {
 	return string(raw), nil
 }
 
+func (c Client) AccountLink(ctx context.Context, req agentd.AccountLinkRequest) (agentsetup.AccountLinkView, error) {
+	var out agentsetup.AccountLinkView
+	err := c.lifecycleRequest(ctx, "POST", "/v1/account-link", req, &out)
+	return out, err
+}
+
 func (c Client) Lifecycle(ctx context.Context, accountID string) (agentd.LifecycleStatus, error) {
 	var out agentd.LifecycleStatus
-	err := c.lifecycleRequest(ctx, "GET", "/v1/lifecycle?account_id="+url.QueryEscape(accountID), nil, &out)
+	err := c.lifecycleRequest(ctx, "GET", "/v1/lifecycle?include_readiness=1&account_id="+url.QueryEscape(accountID), nil, &out)
 	return out, err
 }
 
@@ -110,6 +157,9 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}}
 	defer transport.CloseIdleConnections()
 	hc := &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if path == "/v1/step-up" && method == "POST" {
+		hc.Timeout = stepup.ConfirmTimeout + 5*time.Second
+	}
 	r, err := http.NewRequestWithContext(ctx, method, "http://agentd"+path, bytes.NewReader(raw))
 	if err != nil {
 		return errors.New("invalid local request")
@@ -118,10 +168,38 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	r.Header.Set("Content-Type", "application/json")
 	res, err := hc.Do(r)
 	if err != nil {
+		if path == "/v1/step-up" {
+			return errors.New("local Touch ID confirmation unavailable, cancelled or timed out")
+		}
 		return errors.New("local agentd unavailable")
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if path == "/v1/step-up" {
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 769))
+			hint := strings.TrimSpace(string(raw))
+			if readErr == nil && len(raw) <= 768 && validAttachDiagnostic(hint) {
+				return errors.New("Touch ID: " + hint)
+			}
+			return errors.New("local Touch ID confirmation refused")
+		}
+		if path == "/v1/attach" && res.StatusCode == http.StatusConflict {
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 1025))
+			if readErr == nil && len(raw) <= 1024 {
+				var detail agentd.AttachLocalError
+				if json.Unmarshal(raw, &detail) == nil && validAttachDiagnostic(detail.Hint) {
+					switch detail.Code {
+					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported":
+						return &detail
+					}
+					if slices.Contains(attachRefusalCodes, detail.Code) {
+						return &detail
+					}
+				} else if hint := strings.TrimSpace(string(raw)); !strings.HasPrefix(hint, "{") && validAttachDiagnostic(hint) {
+					return errors.New("attach rejected: " + hint)
+				}
+			}
+		}
 		return errors.New("local lifecycle request rejected")
 	}
 	d := json.NewDecoder(io.LimitReader(res.Body, 64<<10))
@@ -171,4 +249,35 @@ func (c Client) Control(ctx context.Context, req agentd.ControlRequest) (agentd.
 		return agentd.Receipt{}, errors.New("local agentd returned an invalid receipt")
 	}
 	return receipt, nil
+}
+
+// Statusline sends only normalized quota observations over the private socket.
+func (c Client) Statusline(ctx context.Context, req agentd.StatuslineRequest) (agentd.StatuslineResponse, error) {
+	var out agentd.StatuslineResponse
+	err := c.lifecycleRequest(ctx, "POST", "/v1/statusline", req, &out)
+	return out, err
+}
+
+// AccountEnvironment never dials TCP. Config homes stay on the account's host.
+func (c Client) AccountEnvironment(ctx context.Context, accountID, daemonID, harness string) (agentd.AccountEnvironment, error) {
+	var out agentd.AccountEnvironment
+	err := c.lifecycleRequest(ctx, "GET", "/v1/account-environment?account_id="+url.QueryEscape(accountID)+"&daemon_id="+url.QueryEscape(daemonID)+"&harness="+url.QueryEscape(harness), nil, &out)
+	if err == nil && (out.AccountID != accountID || out.DaemonID != daemonID || out.Harness != harness) {
+		return agentd.AccountEnvironment{}, errors.New("local account ownership mismatch")
+	}
+	return out, err
+}
+
+// Attach errors come only from the authenticated local socket. Bound output
+// and reject terminal controls; other lifecycle/remote errors stay unchanged.
+func validAttachDiagnostic(text string) bool {
+	if text == "" || len(text) > 768 || !utf8.ValidString(text) {
+		return false
+	}
+	for _, r := range text {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -48,12 +49,13 @@ type FieldChange struct {
 }
 
 type Item struct {
-	ID           string        `json:"id"`
-	At           time.Time     `json:"at"`
-	Type         string        `json:"type"`
-	Author       Author        `json:"author"`
-	BodyMarkdown *string       `json:"body_markdown,omitempty"`
-	Changes      []FieldChange `json:"changes,omitempty"`
+	AutomaticChange *statusautopilot.Change `json:"automatic_change,omitempty"`
+	ID              string                  `json:"id"`
+	At              time.Time               `json:"at"`
+	Type            string                  `json:"type"`
+	Author          Author                  `json:"author"`
+	BodyMarkdown    *string                 `json:"body_markdown,omitempty"`
+	Changes         []FieldChange           `json:"changes,omitempty"`
 }
 
 type Page struct {
@@ -83,11 +85,12 @@ func decodeCursor(raw, tenantID, node string) (*cursor, error) {
 
 type record map[string]any
 type activityEvent struct {
-	id            int64
-	at            time.Time
-	typ, actor    string
-	job, reason   string
-	before, after record
+	id               int64
+	at               time.Time
+	typ, actor       string
+	job, reason      string
+	kindFrom, kindTo string
+	before, after    record
 }
 
 func decodeRecord(raw []byte) (record, error) {
@@ -117,7 +120,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 		}
 		rows, err := tx.Query(ctx, `SELECT id,at,type,actor_principal_id::text,before,after,metadata FROM events
 		 WHERE tenant_id=$1 AND node_id=$2 AND ($3::bigint=0 OR id<=$3)
-		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','comment.created','comment.updated','comment.deleted')
+		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','comment.updated','comment.deleted','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped')
 		 ORDER BY id`, p.TenantID, node, watermark)
 		if err != nil {
 			return err
@@ -131,6 +134,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 				return err
 			}
 			e.job, e.reason = jobReason(meta)
+			e.kindFrom, e.kindTo = kindChange(meta)
 			e.before, err = decodeRecord(before)
 			if err == nil {
 				e.after, err = decodeRecord(after)
@@ -153,6 +157,20 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 			return err
 		}
 		items := project(evs, people)
+		automatic, err := statusautopilot.ChangesTx(ctx, tx, p, node, false, 0)
+		if err != nil {
+			return err
+		}
+		automaticByID := map[int64]statusautopilot.Change{}
+		for _, change := range automatic {
+			automaticByID[change.EventID] = change
+		}
+		for i := range items {
+			id, _ := strconv.ParseInt(items[i].ID, 10, 64)
+			if change, ok := automaticByID[id]; ok {
+				items[i].AutomaticChange = &change
+			}
+		}
 		for _, item := range items {
 			id, _ := strconv.ParseInt(item.ID, 10, 64)
 			if c != nil && (item.At.After(c.At) || (item.At.Equal(c.At) && id >= c.ID)) {
@@ -252,6 +270,20 @@ func jobReason(raw []byte) (string, string) {
 	return strings.TrimSpace(doc.Job), strings.TrimSpace(doc.Reason)
 }
 
+func kindChange(raw []byte) (string, string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var doc struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(doc.From), strings.TrimSpace(doc.To)
+}
+
 func sourceOf(e activityEvent) string {
 	if ref, ok := e.after["classic_ref"].(string); ok {
 		source, _, found := strings.Cut(ref, ":"+e.typ+":")
@@ -323,7 +355,19 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 				}
 			}
 			items = append(items, item)
-		case "node.updated", "node.moved":
+		case "node.kind_changed":
+			if e.kindFrom == "" || e.kindTo == "" || e.kindFrom == e.kindTo {
+				break
+			}
+			from, to := e.kindFrom, e.kindTo
+			item.Type = "change"
+			item.Changes = []FieldChange{{Field: "kind", From: &from, To: &to}}
+			items = append(items, item)
+		case "status_autopilot.changed", "status_autopilot.skipped":
+			item.Type = "change"
+			item.Changes = diff(nativeFields(e.before, people), nativeFields(e.after, people))
+			items = append(items, item)
+		case "node.updated", "node.moved", "status_autopilot.undone":
 			item.Type = "change"
 			item.Changes = diff(nativeFields(e.before, people), nativeFields(e.after, people))
 			if len(item.Changes) > 0 {
@@ -417,7 +461,7 @@ func tagNames(v any) []string {
 
 func nativeFields(r record, people map[string]Author) record {
 	f := object(r["fields"])
-	return record{"status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"], "tags": tagLabel(f["tags"])}
+	return record{"human_check": r["human_check"], "status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"], "tags": tagLabel(f["tags"])}
 }
 
 func classicFields(r record, source string, people map[string]Author) record {
@@ -441,7 +485,7 @@ func personName(v any, source string, people map[string]Author) any {
 
 func diff(before, after record) []FieldChange {
 	var changes []FieldChange
-	for _, field := range []string{"status", "priority", "assignee", "title", "parent", "tags"} {
+	for _, field := range []string{"status", "priority", "assignee", "title", "parent", "tags", "human_check"} {
 		a, b := scalar(before[field]), scalar(after[field])
 		if (a == nil && b == nil) || (a != nil && b != nil && *a == *b) {
 			continue

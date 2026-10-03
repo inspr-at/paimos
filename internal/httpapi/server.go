@@ -6,8 +6,10 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -36,9 +38,21 @@ type Server struct {
 	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
 	// Nil serves a placeholder page.
 	Web fs.FS
+	// PublicURL is this installation's origin, including the Classic API tombstone.
+	// Empty uses a relative root instead of another operator's installation.
+	PublicURL string
 	// Brand is the product's names from AEON_BRAND_FILE (brand.Load at startup);
 	// nil serves the embedded brand.json.
 	Brand *brand.Brand
+	// Codename names a release version (AEON-430); nil, or "", serves no name.
+	Codename func(version string) string
+	// AithemaOrigin enables browser microphone/WS policy on application
+	// documents, including documents that later navigate to the journey in
+	// Vue. Empty preserves the default policy everywhere.
+	AithemaOrigin string
+	// AttachmentSandboxOrigin is validated by attachments.NewSandbox. Only
+	// application documents may embed it; public portal policy stays unchanged.
+	AttachmentSandboxOrigin string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
@@ -115,19 +129,33 @@ func (s *Server) build() {
 	// Old classic API paths that used to be proxied from pm.barta.cm and
 	// flow.inspr.at/paimos land here (AEON-175). They moved for good: answer
 	// every method with 410 and the new location, without auth and without data.
-	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(handleClassicAPIGone)))
+	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(s.handleClassicAPIGone)))
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
+	// The catalog and roadmap HTML patterns are the public declarations for those pages.
+	view := attachmentViewPolicy(s.AttachmentSandboxOrigin, spaHandler(s.Web, s.brand()))
+	if s.AithemaOrigin != "" {
+		view = aithemaViewPolicy(s.AithemaOrigin, view)
+	}
+	spa := commonMiddleware(view)
 	if publicMounted {
+		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/roadmap.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/roadmap", spa)
+		root.Handle("GET /portal/{tenantSlug}", spa)
 	}
-	root.Handle("/", commonMiddleware(spaHandler(s.Web, s.brand())))
+	root.Handle("/", spa)
 	s.handler = root
 }
 
-func handleClassicAPIGone(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleClassicAPIGone(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusGone)
-	_, _ = w.Write([]byte(`{"error":"moved","location":"https://aeon.barta.cm"}` + "\n"))
+	location := strings.TrimRight(s.PublicURL, "/")
+	if location == "" {
+		location = "/"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "moved", "location": location})
 }

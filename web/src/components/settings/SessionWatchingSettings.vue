@@ -8,6 +8,7 @@ import AppIcon from '../AppIcon.vue'
 import type { LocalAuthCapability, LocalAuthComputer, WatchConsentMode } from '../../lib/attachWatch'
 
 const saved = ref<WatchConsentMode | null>(null)
+const persisted = ref(false)
 const choice = ref<WatchConsentMode>('aeon')
 const computers = ref<LocalAuthComputer[]>([])
 const busy = ref(false)
@@ -23,28 +24,41 @@ function readComputers(value: unknown): LocalAuthComputer[] {
     const row = item as Partial<LocalAuthComputer>
     const capability = known.find(code => code === row.capability) ?? 'unreported'
     const name = typeof row.name === 'string' && row.name.trim() ? row.name : 'Paired computer'
-    return [{ computer_id: typeof row.computer_id === 'string' ? row.computer_id : name, name, capability }]
+    return [{ computer_id: typeof row.computer_id === 'string' ? row.computer_id : name, name, capability, pairing_upgraded: row.pairing_upgraded === true }]
   })
 }
 function limitation(computer: LocalAuthComputer): string | null {
   const name = computer.name || 'Paired computer'
+  if (!computer.pairing_upgraded && computer.capability !== 'unsupported') return `${name}: upgrade this computer’s pairing to enable Touch ID`
   switch (computer.capability) {
     case 'available': return null
     case 'unsupported': return `${name} cannot confirm on the Mac`
     case 'unsigned': return `${name} needs a signed daemon`
     case 'no_gui': return `${name} has no graphical session`
-    case 'policy': return `${name} cannot use Touch ID or the Mac password`
+    case 'policy': return `${name} cannot use Touch ID`
     default: return `${name} has not reported Touch ID support`
   }
 }
-const canPickLocal = computed(() => computers.value.some(computer => computer.capability === 'available'))
-// Watches stay off only while Mac confirmation is the selected or saved mode.
-const macConfirmation = computed(() => choice.value === 'local_auth' || saved.value === 'local_auth')
+const canPickLocal = computed(() => computers.value.some(computer => computer.capability === 'available' && computer.pairing_upgraded))
+const upgradedDefault = computed(() => computers.value.some(computer => computer.pairing_upgraded))
+const savedUnavailable = computed(() => persisted.value && saved.value === 'local_auth' && !canPickLocal.value && computers.value.some(computer => computer.pairing_upgraded))
+// "Stay off" is a saved Mac confirmation. Before Save stores that choice, say what saving does on each computer.
+const storedLocal = computed(() => persisted.value && saved.value === 'local_auth' && choice.value === 'local_auth')
+const savingLocal = computed(() => choice.value === 'local_auth' && canPickLocal.value && !storedLocal.value)
 const blocked = computed(() => computers.value.flatMap(computer => {
   const line = limitation(computer)
   if (!line) return []
-  return [macConfirmation.value ? `${line}, so watches there stay off.` : `${line}.`]
+  if (!computer.pairing_upgraded) return [`${line}. Approval stays in ${brand.value.short_name}.`]
+  if (storedLocal.value) return [`${line}, so watches there stay off.`]
+  if (savingLocal.value) return [`${line}. Saving turns watches off there.`]
+  if (!persisted.value) return [`${line}. Watches do not start until you save approval in ${brand.value.short_name}.`]
+  return [`${line}, so approval stays in ${brand.value.short_name}.`]
 }))
+const unsavedDefault = computed(() => !persisted.value && choice.value === 'local_auth' && canPickLocal.value && blocked.value.length === 0)
+const canSave = computed(() => {
+  if (choice.value === 'local_auth' && !canPickLocal.value) return false
+  return choice.value !== saved.value || (!persisted.value && choice.value === 'local_auth' && canPickLocal.value)
+})
 
 async function request(save = false) {
   if (save && (!can('profile.write') || (choice.value === 'local_auth' && !canPickLocal.value))) return
@@ -57,17 +71,18 @@ async function request(save = false) {
       ...(save ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_mode: choice.value }) } : {}),
     })
     if (!response.ok) throw new Error('request failed')
-    const result = await response.json() as { consent_mode?: WatchConsentMode; local_auth_computers?: unknown }
+    const result = await response.json() as { consent_mode?: WatchConsentMode; consent_saved?: boolean | null; local_auth_computers?: unknown }
     if (result.consent_mode !== 'aeon' && result.consent_mode !== 'local_auth') throw new Error('invalid mode')
     if (controller.signal.aborted || operation !== controller) return
     computers.value = readComputers(result.local_auth_computers)
+    persisted.value = result.consent_saved === true || (result.consent_saved == null && result.consent_mode === 'local_auth')
     saved.value = choice.value = result.consent_mode
     if (save) notice.value = 'Saved for future approvals.'
   } catch {
     if (!controller.signal.aborted) error.value = save ? 'Your setting was not saved. Try again.' : 'Your setting could not be loaded.'
   } finally { if (operation === controller) busy.value = false }
 }
-const stopAccess = onAccessChange(() => { if (!can('profile.read')) { operation?.abort(); saved.value = null; busy.value = false } })
+const stopAccess = onAccessChange(() => { if (!can('profile.read')) { operation?.abort(); saved.value = null; persisted.value = false; busy.value = false } })
 onMounted(() => void request())
 onBeforeUnmount(() => { operation?.abort(); stopAccess() })
 </script>
@@ -82,13 +97,13 @@ onBeforeUnmount(() => { operation?.abort(); stopAccess() })
         <legend class="sr-only">Session watching consent</legend>
         <label :class="{ selected: choice === 'aeon' }">
           <input v-model="choice" type="radio" name="watch-consent" value="aeon" />
-          <span><strong>Approve in {{ brand.short_name }} <small>Default</small></strong><span>Review the process and allow each watch here.</span></span>
+          <span><strong>Approve in {{ brand.short_name }} <small v-if="!upgradedDefault">Default</small></strong><span>Review the process and allow each watch here.</span></span>
         </label>
         <label :class="{ selected: choice === 'local_auth', unavailable: !canPickLocal }">
           <input v-model="choice" type="radio" name="watch-consent" value="local_auth" :disabled="!canPickLocal" />
           <span>
-            <strong>Also confirm on the Mac</strong>
-            <span v-if="canPickLocal">After approval here, confirm with Touch ID or your Mac password.</span>
+            <strong>Also confirm on the Mac <small v-if="upgradedDefault">Default</small></strong>
+            <span v-if="canPickLocal">After approval here, confirm with Touch ID.</span>
           </span>
         </label>
       </fieldset>
@@ -96,12 +111,14 @@ onBeforeUnmount(() => { operation?.abort(); stopAccess() })
       <ul v-else-if="blocked.length" class="reasons">
         <li v-for="line in blocked" :key="line">{{ line }}</li>
       </ul>
-      <p v-if="saved === 'local_auth' && !canPickLocal" class="reasons" role="status">Mac confirmation is saved, but no paired computer can run it. New watches stay off until you choose approval in {{ brand.short_name }}.</p>
+      <p v-if="unsavedDefault" class="reasons">This default asks for Touch ID on a Mac that can use it.</p>
+      <p v-if="canPickLocal && choice === 'aeon'" class="reasons">Approval in {{ brand.short_name }} does not ask for Touch ID, and a program running as you can open a terminal to request it.</p>
+      <p v-if="savedUnavailable" class="reasons" role="status">Mac confirmation is saved, but no paired computer can run it. New watches on upgraded computers stay off until you choose approval in {{ brand.short_name }}.</p>
       <p class="footnote">Applies to your paired computers; active watches keep their current approval.</p>
-      <footer><span role="status">{{ notice }}</span><button class="btn primary" type="submit" :disabled="busy || choice === saved || !can('profile.write') || (choice === 'local_auth' && !canPickLocal)">{{ busy ? 'Saving…' : 'Save setting' }}</button></footer>
+      <footer><span role="status">{{ notice }}</span><button class="btn primary" type="submit" :disabled="busy || !canSave || !can('profile.write')">{{ busy ? 'Saving…' : 'Save setting' }}</button></footer>
     </form>
     <p v-if="error" class="error" role="alert">{{ error }} <button v-if="!saved" class="btn sm" type="button" @click="request()">Try again</button></p>
-    <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />About local confirmation</summary><p>The terminal WATCH prompt is a best-effort check that same-user processes can imitate.</p><p>Mac confirmation needs a signed daemon and an interactive login; an unavailable or cancelled prompt never activates a watch.</p></details>
+    <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />About local confirmation</summary><p>The terminal WATCH prompt is a best-effort check that same-user processes can imitate.</p><p>Touch ID needs a person at the Mac, an upgraded pairing, a signed daemon and a graphical login; confirmation is signed by the key approved at pairing.</p><p>Before you save a choice, an upgraded pairing still requires its Mac signature, including when Touch ID cannot run.</p><p>Saving Mac confirmation turns watches off on upgraded computers that cannot use Touch ID; older pairings keep approval here until re-paired.</p><p>An unavailable or cancelled Touch ID prompt never activates a watch in Mac confirmation mode.</p></details>
   </div>
 </template>
 

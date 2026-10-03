@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
@@ -30,10 +31,37 @@ type Module struct {
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	// Delegated is an optional exact-route authentication handoff. It must
+	// verify and authorize its credential before serving next, returning true
+	// only when it has handled the request. Ordinary sessions/keys keep their
+	// existing path; no protected route becomes public.
+	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
 
-	mu       sync.Mutex
+	mu        sync.Mutex
+	provider  *oidc.Provider
+	oauth     oauth2.Config
+	discovery *oidcDiscovery
+}
+
+type oidcDiscovery struct {
+	done     chan struct{}
 	provider *oidc.Provider
 	oauth    oauth2.Config
+	err      error
+}
+
+const oidcDiscoveryTimeout = 5 * time.Second
+
+// Discovery and JWKS are small documents. Enforce the byte bound before the
+// OIDC library's ReadAll, including for chunked responses with no length.
+type oidcBoundedTransport struct{ base http.RoundTripper }
+
+func (t oidcBoundedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(r)
+	if err == nil && response.Body != nil {
+		response.Body = http.MaxBytesReader(nil, response.Body, 1<<20)
+	}
+	return response, err
 }
 
 type credKind int
@@ -71,27 +99,29 @@ func Attach(srv *httpapi.Server, cfg Config) (*Module, error) {
 }
 
 // Mount adds the auth and agent-key routes. POST /api/auth/dev-login is
-// registered only when AEON_ENV=dev.
+// always registered so the matched pattern stays the public declaration.
+// The handler returns 404 unless AEON_ENV=dev, and it never mints a session then.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/login", m.handleLogin)
 	mux.HandleFunc("GET /api/auth/callback", m.handleCallback)
 	mux.HandleFunc("POST /api/auth/logout", m.handleLogout)
+	mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
-	if m.cfg.Dev() {
-		mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
-	}
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
-// request context. Unauthenticated /api requests, other than health, readiness,
-// version, /api/auth/*, /api/public/quotes/* and the public portal routes, get 401 JSON.
+// request context. Unauthenticated /api requests get 401 JSON unless the
+// matched pattern is a public declaration (authz.PatternIsPublic).
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.Delegated != nil && m.Delegated(w, r, next) {
+			return
+		}
 		p, kind, err := m.authenticate(r)
 		if err != nil && !publicRequest(r) {
 			writeInternal(w)
@@ -102,11 +132,13 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		switch kind {
 		case credStale:
-			if r.URL.Path != "/api/auth/logout" {
+			// Public responses can be cached. A Set-Cookie there would store
+			// the session clear next to the page. Auth handlers clear their own.
+			if !publicRequest(r) {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
-			if r.URL.Path != "/api/auth/logout" {
+			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
 				}
@@ -128,7 +160,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				agentpairing.WriteError(w, err)
 				return
 			}
-			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || r.URL.Path == "/api/me" && !agentHasScope(p.Scopes, scope) {
+			if scope, controlled := coreAgentScope(r); !controlled || scope == "" {
 				if receiptRoute(r) {
 					writeReceiptNotFound(w)
 				} else {
@@ -140,47 +172,45 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		if (kind == credSession || kind == credAgent) && protectedRequest(r) {
 			// SEC4's route table remains the outer agent allowlist. The binding
 			// and the exact route permission are checked inside the tenant.
-			if kind != credAgent || r.Method != http.MethodGet || r.URL.Path != "/api/me" {
-				ctx := authz.BindPool(r.Context(), m.pool)
-				scope := projectScope(r)
-				permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
-				// The workspace binding decides first; it is the whole answer for
-				// every workspace member. A caller without it may still act through
-				// a project binding, in the project the route targets (ADR-003 P2).
-				if errors.Is(permissionErr, authz.ErrForbidden) && scope.ProjectID == "" {
-					resolved, ok, err := authz.ResolveRouteScope(ctx, m.pool, r.Pattern, r.URL.Path)
-					if err != nil {
-						permissionErr = err
-					} else if ok {
-						scope = resolved
-						// A failed project retry must keep the original denial:
-						// its diagnostic must not reveal that the target exists.
-						if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
-							permissionErr = resolvedErr
-						}
+			ctx := authz.BindPool(r.Context(), m.pool)
+			scope := projectScope(r)
+			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
+			// The workspace binding decides first; it is the whole answer for
+			// every workspace member. A caller without it may still act through
+			// a project binding, in the project the route targets (ADR-003 P2).
+			if errors.Is(permissionErr, authz.ErrForbidden) && scope.ProjectID == "" {
+				resolved, ok, err := authz.ResolveRouteScope(ctx, m.pool, r.Pattern, r.URL.Path)
+				if err != nil {
+					permissionErr = err
+				} else if ok {
+					scope = resolved
+					// A failed project retry must keep the original denial:
+					// its diagnostic must not reveal that the target exists.
+					if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
+						permissionErr = resolvedErr
 					}
 				}
-				ctx = authz.WithRouteScope(ctx, scope)
-				if permissionErr != nil && r.Pattern == "GET /api/people/{principalId}/avatar/{size}" && p.Kind == tenant.Person {
-					parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-					if len(parts) == 5 && parts[2] == p.ID {
-						permissionErr = authz.Require(ctx, "profile.portal_read", authz.Scope{})
-					}
-				}
-				if err := permissionErr; err != nil {
-					if errors.Is(err, authz.ErrForbidden) {
-						if receiptRoute(r) {
-							writeReceiptNotFound(w)
-						} else {
-							authz.WriteForbidden(w, err)
-						}
-					} else {
-						writeInternal(w)
-					}
-					return
-				}
-				r = r.WithContext(ctx)
 			}
+			ctx = authz.WithRouteScope(ctx, scope)
+			if permissionErr != nil && r.Pattern == "GET /api/people/{principalId}/avatar/{size}" && p.Kind == tenant.Person {
+				parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+				if len(parts) == 5 && parts[2] == p.ID {
+					permissionErr = authz.Require(ctx, "profile.portal_read", authz.Scope{})
+				}
+			}
+			if err := permissionErr; err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					if receiptRoute(r) {
+						writeReceiptNotFound(w)
+					} else {
+						authz.WriteForbidden(w, err)
+					}
+				} else {
+					writeInternal(w)
+				}
+				return
+			}
+			r = r.WithContext(ctx)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -261,6 +291,23 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "agents":
+		if len(parts) == 2 && parts[1] == "plan" && read {
+			return "agents.plan.read", true
+		}
+	case "decision-desk":
+		if len(parts) == 1 && read {
+			return "questions.read", true
+		}
+	case "questions":
+		if read && (len(parts) == 2 || len(parts) == 3 && parts[2] == "status") {
+			return "questions.read", true
+		}
+	case "releases":
+		// Build history is readable by agents. Presentation writes remain person-only.
+		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] != "") {
+			return "releases.read", true
+		}
 	case "rules":
 		// Dedicated rules routes are an explicit agent allowlist. Publishing and
 		// restoring remain person-only regardless of any key's supplied scopes.
@@ -296,6 +343,13 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "questions":
+			if len(parts) == 3 && read {
+				return "questions.read", true
+			}
+			if len(parts) == 3 && r.Method == http.MethodPost {
+				return "questions.ask", true
+			}
 		case "instruction-provenance":
 			if len(parts) == 3 && read {
 				return "harness.read", true
@@ -436,6 +490,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.create", true
 		}
 		return scope("work_orders")
+	case "queue":
+		if read {
+			return "nodes.read", true
+		}
+		return "work_orders.read", true
 	case "runs":
 		if read {
 			return "run.read", true
@@ -454,6 +513,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return harnessScope(parts[1:], read), true
 	case "agent-pairing":
+		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
+			return "account.probe", true
+		}
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}
@@ -461,8 +523,27 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
-		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
-			return "account.probe", true
+		if len(parts) == 3 {
+			switch parts[2] {
+			case "readings":
+				if r.Method == http.MethodGet || r.Method == http.MethodPost {
+					return "account.probe", true
+				}
+			case "signals":
+				if r.Method == http.MethodPut {
+					return "account.probe", true
+				}
+			case "quota-key":
+				if r.Method == http.MethodPost {
+					return "account.probe", true
+				}
+			case "statusline":
+				// People opt in. A paired agent may only read the decision.
+				if r.Method == http.MethodGet {
+					return "account.probe", true
+				}
+				return "", false
+			}
 		}
 		if read {
 			return "account.read", true
@@ -470,7 +551,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
 			return "account.route", true
 		}
-		if r.Method == "POST" && len(parts) == 3 && (parts[2] == "probe" || parts[2] == "readings") {
+		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
 			return "account.probe", true
 		}
 		return "account.manage", true
@@ -535,16 +616,21 @@ func agentHasScope(have []string, want string) bool {
 	return hasScope(have, want) || authz.CoordinatorCeiling(have, want)
 }
 
+// publicRequest is true only for a route the router matched to a public
+// declaration. Percent-encoding, dot segments and repeated slashes are not
+// consulted: when the router accepts them, they carry that same pattern.
 func publicRequest(r *http.Request) bool {
-	return isPublicAPI(r.URL.Path) || publicPortalRequest(r) || agentpairing.PublicRoute(r.Method, r.URL.Path)
+	return r != nil && authz.PatternIsPublic(r.Pattern)
 }
 func protectedRequest(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/") && !publicRequest(r)
+	return r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, "/api/") && !publicRequest(r)
 }
 
+// isPublicAPI is the path list for readiness checks and the customer allow
+// helper. It is not the session gate; that is publicRequest.
 func isPublicAPI(path string) bool {
 	switch path {
-	case "/api/health", "/api/ready", "/api/version":
+	case "/api/health", "/api/ready", "/api/version", "/api/aithema/jwks":
 		return true
 	default:
 		return strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/public/quotes/")
@@ -606,16 +692,53 @@ func parseBearer(h string) (prefix, secret string, ok bool) {
 }
 
 func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Config, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, oauth2.Config{}, err
+	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.provider != nil {
+		defer m.mu.Unlock()
 		return m.provider, m.oauth, nil
 	}
 	if m.cfg.OIDCIssuer == "" || m.cfg.OIDCClientID == "" || m.cfg.PublicURL == "" {
+		m.mu.Unlock()
 		return nil, oauth2.Config{}, errOIDCNotConfigured
 	}
-	p, err := oidc.NewProvider(ctx, m.cfg.OIDCIssuer)
+	if pending := m.discovery; pending != nil {
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, oauth2.Config{}, ctx.Err()
+		case <-pending.done:
+			return pending.provider, pending.oauth, pending.err
+		}
+	}
+	pending := &oidcDiscovery{done: make(chan struct{})}
+	m.discovery = pending
+	m.mu.Unlock()
+	// No network operation holds the sign-in mutex. Preserve an injected
+	// transport but bound both discovery's context and its HTTP client.
+	op, cancel := context.WithTimeout(ctx, oidcDiscoveryTimeout)
+	defer cancel()
+	httpClient := *http.DefaultClient
+	if supplied, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok && supplied != nil {
+		httpClient = *supplied
+	}
+	if httpClient.Timeout <= 0 || httpClient.Timeout > oidcDiscoveryTimeout {
+		httpClient.Timeout = oidcDiscoveryTimeout
+	}
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpClient.Transport = oidcBoundedTransport{base: transport}
+	p, err := oidc.NewProvider(oidc.ClientContext(op, &httpClient), m.cfg.OIDCIssuer)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer close(pending.done)
+	m.discovery = nil // failures remain retryable by the next request
 	if err != nil {
+		pending.err = err
 		return nil, oauth2.Config{}, err
 	}
 	ep := p.Endpoint()
@@ -629,6 +752,7 @@ func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Confi
 	}
 	m.provider = p
 	m.oauth = oc
+	pending.provider, pending.oauth = p, oc
 	return p, oc, nil
 }
 

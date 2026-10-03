@@ -78,7 +78,7 @@ func billingFixture(t *testing.T, home string) *GrokAdapter {
 	}
 	a := NewGrokAdapter(map[string]GrokBinding{"a": {BinaryPath: path, PrincipalSHA256: "fixture-principal"}})
 	a.Homes = map[string]string{"a": home}
-	a.billing = &grokBillingCapability{binaryPath: path, decode: func(raw json.RawMessage, now time.Time, identity string) []capacity.Reading {
+	a.billing = &grokBillingCapability{binaryPath: path, binarySHA256: sha256Hex([]byte(script)), version: "fixture-1", decode: func(raw json.RawMessage, now time.Time, identity string) []capacity.Reading {
 		var v struct {
 			Identity string   `json:"fixture_identity"`
 			Used     *float64 `json:"fixture_used"`

@@ -3,6 +3,7 @@
 package intake
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,17 +18,22 @@ import (
 )
 
 type draftRow struct {
-	ID              string
-	Kind            string
-	RequirementKind *string
-	TargetNodeID    *string
-	Title           string
-	Body            string
-	BaseEventID     int64
-	IdempotencyKey  string
-	ProposedAt      time.Time
-	Citations       []citationWrite
-	Suggestions     []suggestionView
+	SupersedesDraftID    *string
+	Superseded           bool
+	RequesterPrincipalID *string
+	ID                   string
+	Kind                 string
+	RequirementKind      *string
+	TargetNodeID         *string
+	Title                string
+	Body                 string
+	Extensions           json.RawMessage
+	DocumentBytes        *string
+	BaseEventID          int64
+	IdempotencyKey       string
+	ProposedAt           time.Time
+	Citations            []citationWrite
+	Suggestions          []suggestionView
 }
 
 func (m *Module) getIntake(w http.ResponseWriter, r *http.Request) {
@@ -39,16 +45,33 @@ func (m *Module) getIntake(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	nodeID := r.URL.Query().Get("node_id")
+	if nodeID != "" && !uuidPattern.MatchString(nodeID) {
+		writeError(w, http.StatusBadRequest, "invalid node id")
+		return
+	}
 	var out snapshot
-	err := m.tx(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if _, err := authorize(r.Context(), r, tx, p, false); err != nil {
-			return err
-		}
-		if err := projectVisible(r.Context(), tx, projectID); err != nil {
-			return err
-		}
+	err := m.intakeTx(r, p, projectID, false, func(tx pgx.Tx, _ []string) error {
 		var err error
-		out, err = loadSnapshot(r.Context(), tx, projectID)
+		if nodeID == "" {
+			out, err = loadSnapshot(r.Context(), tx, projectID)
+		} else {
+			if _, err := nodeInProject(r.Context(), tx, nodeID, projectID); err != nil {
+				return err
+			}
+			out = snapshot{Sources: []sourceView{}, Turns: []turnView{}, Drafts: []draftView{}}
+			rows, loadErr := loadDrafts(r.Context(), tx, projectID, "", nodeID)
+			if loadErr != nil {
+				return loadErr
+			}
+			for _, row := range rows {
+				view, presentErr := presentDraft(r.Context(), tx, projectID, row)
+				if presentErr != nil {
+					return presentErr
+				}
+				out.Drafts = append(out.Drafts, view)
+			}
+		}
 		return err
 	})
 	writeResult(w, http.StatusOK, out, err)
@@ -113,18 +136,22 @@ func loadSnapshot(ctx context.Context, tx pgx.Tx, projectID string) (snapshot, e
 
 func presentDraft(ctx context.Context, tx pgx.Tx, projectID string, row draftRow) (draftView, error) {
 	view := draftView{
-		Kind:            row.Kind,
-		RequirementKind: row.RequirementKind,
-		TargetNodeID:    row.TargetNodeID,
-		Title:           row.Title,
-		Body:            row.Body,
-		BaseEventID:     row.BaseEventID,
-		Citations:       row.Citations,
-		Suggestions:     row.Suggestions,
-		IdempotencyKey:  row.IdempotencyKey,
-		ID:              row.ID,
-		Status:          "proposed",
-		ProposedAt:      row.ProposedAt,
+		RequesterPrincipalID: row.RequesterPrincipalID,
+		SupersedesDraftID:    row.SupersedesDraftID,
+		Kind:                 row.Kind,
+		RequirementKind:      row.RequirementKind,
+		TargetNodeID:         row.TargetNodeID,
+		Title:                row.Title,
+		Body:                 row.Body,
+		Extensions:           row.Extensions,
+		DocumentBytes:        row.DocumentBytes,
+		BaseEventID:          row.BaseEventID,
+		Citations:            row.Citations,
+		Suggestions:          row.Suggestions,
+		IdempotencyKey:       row.IdempotencyKey,
+		ID:                   row.ID,
+		Status:               "proposed",
+		ProposedAt:           row.ProposedAt,
 	}
 	if view.Citations == nil {
 		view.Citations = []citationWrite{}
@@ -132,6 +159,11 @@ func presentDraft(ctx context.Context, tx pgx.Tx, projectID string, row draftRow
 	if view.Suggestions == nil {
 		view.Suggestions = []suggestionView{}
 	}
+	if row.Superseded {
+		view.Status = "superseded"
+		return view, nil
+	}
+
 	target, at, ok, err := acceptedTarget(ctx, tx, row.ID)
 	if err != nil {
 		return draftView{}, err
@@ -230,16 +262,32 @@ func findDraftByID(ctx context.Context, tx pgx.Tx, projectID, id string) (draftR
 	return draftRow{}, fail(http.StatusNotFound, "draft not found")
 }
 
-func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string) ([]draftRow, error) {
+func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ...string) ([]draftRow, error) {
 	q := `
 		SELECT id::text, kind, requirement_kind, target_node_id::text, title, body,
-		       base_event_id, idempotency_key, proposed_at
+		       base_event_id, idempotency_key, proposed_at, extensions, document_bytes, requester_principal_id::text,
+               (SELECT r.old_draft_id::text FROM intake_draft_replacements r
+                WHERE r.tenant_id=intake_drafts.tenant_id AND r.project_node_id=intake_drafts.project_node_id AND r.new_draft_id=intake_drafts.id),
+               EXISTS(SELECT 1 FROM intake_draft_replacements r
+                WHERE r.tenant_id=intake_drafts.tenant_id AND r.project_node_id=intake_drafts.project_node_id AND r.old_draft_id=intake_drafts.id)
 		FROM intake_drafts
 		WHERE project_node_id = $1::uuid`
 	args := []any{projectID}
 	if key != "" {
 		q += ` AND idempotency_key = $2`
 		args = append(args, key)
+	}
+	if len(nodeID) > 0 {
+		q += ` AND EXISTS (
+			SELECT 1 FROM intake_draft_acceptances a
+			WHERE a.tenant_id = intake_drafts.tenant_id AND a.draft_id = intake_drafts.id
+			  AND (a.target_node_id = $2::uuid OR EXISTS (
+				SELECT 1 FROM journey_features f JOIN journey_tickets t
+				  ON t.tenant_id = f.tenant_id AND t.project_node_id = f.project_node_id AND t.feature_node_id = f.feature_node_id
+				WHERE f.tenant_id = a.tenant_id AND f.project_node_id = a.project_node_id
+				  AND f.requirement_node_id = a.target_node_id AND t.ticket_node_id = $2::uuid AND t.source = 'requirements'
+			  )))`
+		args = append(args, nodeID[0])
 	}
 	q += ` ORDER BY proposed_at DESC, id`
 	rows, err := tx.Query(ctx, q, args...)
@@ -250,7 +298,7 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string) ([]draftR
 	var drafts []draftRow
 	for rows.Next() {
 		var row draftRow
-		if err := rows.Scan(&row.ID, &row.Kind, &row.RequirementKind, &row.TargetNodeID, &row.Title, &row.Body, &row.BaseEventID, &row.IdempotencyKey, &row.ProposedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.Kind, &row.RequirementKind, &row.TargetNodeID, &row.Title, &row.Body, &row.BaseEventID, &row.IdempotencyKey, &row.ProposedAt, &row.Extensions, &row.DocumentBytes, &row.RequesterPrincipalID, &row.SupersedesDraftID, &row.Superseded); err != nil {
 			return nil, err
 		}
 		row.Citations = []citationWrite{}
@@ -313,7 +361,8 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string) ([]draftR
 }
 
 func sameDraft(got draftRow, in draftWrite) bool {
-	if got.Kind != in.Kind || !sameString(got.RequirementKind, in.RequirementKind) || !sameString(got.TargetNodeID, in.TargetNodeID) ||
+	if !sameString(got.RequesterPrincipalID, in.RequesterPrincipalID) || got.Kind != in.Kind || !sameString(got.RequirementKind, in.RequirementKind) || !sameString(got.TargetNodeID, in.TargetNodeID) ||
+		!bytes.Equal(got.Extensions, in.Extensions) || !sameString(got.DocumentBytes, in.DocumentBytes) ||
 		got.Title != in.Title || got.Body != in.Body || got.BaseEventID != *in.BaseEventID || len(got.Citations) != len(in.Citations) ||
 		len(got.Suggestions) != len(in.Suggestions) {
 		return false

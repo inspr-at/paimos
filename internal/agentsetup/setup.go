@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsecurity"
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/hookcap"
@@ -70,22 +72,25 @@ type RuntimeAccount struct {
 	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
-	Schema        string           `json:"schema"`
-	Origin        string           `json:"origin"`
-	TenantID      string           `json:"tenant_id"`
-	PrincipalID   string           `json:"principal_id"`
-	DaemonID      string           `json:"daemon_id"`
-	ComputerID    string           `json:"computer_id"`
-	Workspace     string           `json:"workspace"`
-	Accounts      []RuntimeAccount `json:"accounts"`
-	NodePath      string           `json:"node_path,omitempty"`
-	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
-	ClaudeRepinID string           `json:"claude_repin_id,omitempty"`
+	LocalAuthKeyID   string                    `json:"local_auth_key_id,omitempty"`
+	AttachIdentities map[string]AttachIdentity `json:"attach_identities,omitempty"`
+	Schema           string                    `json:"schema"`
+	Origin           string                    `json:"origin"`
+	TenantID         string                    `json:"tenant_id"`
+	PrincipalID      string                    `json:"principal_id"`
+	DaemonID         string                    `json:"daemon_id"`
+	ComputerID       string                    `json:"computer_id"`
+	Workspace        string                    `json:"workspace"`
+	Accounts         []RuntimeAccount          `json:"accounts"`
+	NodePath         string                    `json:"node_path,omitempty"`
+	ClaudeSDKPath    string                    `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID    string                    `json:"claude_repin_id,omitempty"`
 }
 
 type snapshot struct {
 	HookHome           string                `json:"hook_home,omitempty"`
 	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
+	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
 	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
@@ -116,31 +121,41 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
-	HookCapabilities  []hookcap.Capability `json:"hook_capabilities,omitempty"`
-	VersionStatus     string               `json:"version_status,omitempty"`
-	AccountingState   string               `json:"accounting_state,omitempty"`
-	Schema            string               `json:"schema"`
-	Stage             string               `json:"stage"`
-	RequestID         string               `json:"request_id,omitempty"`
-	ComputerID        string               `json:"computer_id,omitempty"`
-	UserCode          string               `json:"user_code,omitempty"`
-	VerificationURI   string               `json:"verification_uri,omitempty"`
-	Accounts          []Enrollment         `json:"accounts,omitempty"`
-	LocalProcesses    string               `json:"local_processes"`
-	ServerRevocation  string               `json:"server_revocation,omitempty"`
-	Action            string               `json:"action,omitempty"`
-	RetryAfterSeconds int                  `json:"retry_after_seconds,omitempty"`
+	HookCapabilities      []hookcap.Capability     `json:"hook_capabilities,omitempty"`
+	TouchIDConfirmation   string                   `json:"touch_id_confirmation,omitempty"`
+	TouchIDUpgradeCommand string                   `json:"touch_id_upgrade_command,omitempty"`
+	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
+	HarnessDetails        map[string]HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses       map[string]string        `json:"harness_statuses,omitempty"`
+	VersionStatus         string                   `json:"version_status,omitempty"`
+	AccountingState       string                   `json:"accounting_state,omitempty"`
+	Schema                string                   `json:"schema"`
+	Stage                 string                   `json:"stage"`
+	RequestID             string                   `json:"request_id,omitempty"`
+	ComputerID            string                   `json:"computer_id,omitempty"`
+	UserCode              string                   `json:"user_code,omitempty"`
+	VerificationURI       string                   `json:"verification_uri,omitempty"`
+	Accounts              []Enrollment             `json:"accounts,omitempty"`
+	LocalProcesses        string                   `json:"local_processes"`
+	ServerRevocation      string                   `json:"server_revocation,omitempty"`
+	Action                string                   `json:"action,omitempty"`
+	RetryAfterSeconds     int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
-	HarnessErrors                          map[string]string
+	VerificationReasons                    map[string]string
+	AccountStatuses                        map[string]HarnessDetail
 	ProfilePermissions                     bool
 	HarnessFailed                          bool
+	HarnessDetails                         map[string]HarnessDetail
+	HarnessStatuses                        map[string]string
+	HarnessErrors                          map[string]string
 	LoginRequired                          bool
 	VerificationUnavailable                []string
 	Ready                                  bool
 	DaemonID, State                        string
 	Active, Unconfirmed, SettlementPending []string
 	VerificationResults                    map[string]string
+	BlockedAccounts                        []BlockedAccount
 }
 
 // SavedOptions exposes only noncredential choices to resume the local command.
@@ -157,6 +172,9 @@ func (e *Engine) SavedOptions() (Options, error) {
 		v.Identity = c.Identity
 		v.Version = c.Version
 		v.Login = "signed_in"
+		if v.Harness == "gemini" || v.Harness == "opencode" {
+			v.Login = "unverified"
+		}
 		v.Grok = c.Candidate.Grok
 		o.Candidates = append(o.Candidates, v)
 	}
@@ -169,6 +187,7 @@ type LocalDaemon interface {
 }
 type Engine struct {
 	Hooks              *HookInstaller
+	Enclave            agentsecurity.Signer
 	Store              *Store
 	API                PairingAPI
 	Services           *ServiceManager
@@ -200,8 +219,16 @@ func uuid() (string, error) {
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
-func (e *Engine) load() (*snapshot, error) {
-	raw, err := e.Store.Read(snapshotName, 1<<20)
+func (e *Engine) load() (*snapshot, error) { return e.loadSnapshot(false) }
+
+func (e *Engine) loadSnapshot(readOnly bool) (*snapshot, error) {
+	var raw []byte
+	var err error
+	if readOnly {
+		raw, err = e.Store.readSnapshot()
+	} else {
+		raw, err = e.Store.Read(snapshotName, 1<<20)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +251,22 @@ func (e *Engine) save(s *snapshot, first bool) error {
 func (e *Engine) progress(s *snapshot) Progress {
 	refreshHookCapabilities(s)
 	p := Progress{HookCapabilities: s.HookCapabilities, Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	if s.View.ComputerID != "" {
+		p.TouchIDConfirmation = "needs pairing upgrade"
+		if s.Request.Platform != "darwin" {
+			p.TouchIDConfirmation = "unsupported on this platform"
+		} else if s.View.LocalAuthPinned == nil {
+			p.TouchIDConfirmation = "unknown (server pin not reported)"
+		} else if *s.View.LocalAuthPinned && s.LocalAuthKeyID != "" && attachwatch.LocalAuthPublicKey(s.Request.LocalAuthPublicKey) != nil {
+			p.TouchIDConfirmation = "ready (pairing key pinned)"
+		} else if e.Store != nil {
+			p.TouchIDUpgradeCommand = "aeon-agentd pair --url " + touchIDQuote(s.Origin) + " --state-root " + touchIDQuote(e.Store.Path()+"-touch-id") + " --workspace " + touchIDQuote(s.Request.Workspace)
+		}
+		if s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState == "revoked" {
+			p.TouchIDConfirmation = "unavailable (pairing disconnected)"
+			p.TouchIDUpgradeCommand = ""
+		}
+	}
 	if s.Phase == "awaiting_approval" {
 		p.UserCode = s.Response.UserCode
 		p.VerificationURI = s.Response.VerificationURI
@@ -255,13 +298,13 @@ func validateOptions(o Options) error {
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		return ErrUnsafePath
 	}
-	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 5 {
-		return errors.New("select one to five signed-in harness accounts and a computer name")
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 7 {
+		return errors.New("select one to seven harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
-		if seen[c.Harness] || c.Login != "signed_in" || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
-			return errors.New("one explicitly identified signed-in account is required per harness")
+		if seen[c.Harness] || !candidateEnrollable(c) || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
+			return errors.New("one explicitly identified signed-in account or supported local profile is required per harness")
 		}
 		seen[c.Harness] = true
 		// Nix-owned vendor executables can be pinned and used without changing
@@ -325,7 +368,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, ErrUnsafePath
 	}
 	for _, entry := range entries {
-		if entry.Name() != "setup.lock" {
+		if entry.Name() != "setup.lock" && !(e.Store.vault != nil && entry.Name() == "keychain-migration.lock") {
 			return Progress{}, ErrCollision
 		}
 	}
@@ -390,7 +433,21 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, err
 	}
 	s := &snapshot{Schema: "aeon.agent-setup.private.v1", Origin: strings.TrimRight(o.Origin, "/"), Device: device, Runtime: runtimeSecret, Lifecycle: life, LifecycleRequestID: id, StartService: o.StartService, NodePath: o.NodePath, ClaudeSDKPath: o.ClaudeSDKPath, Phase: "requesting", Removed: map[string]bool{}}
-	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	signer := e.Enclave
+	if signer == nil {
+		signer = agentsecurity.DefaultSigner()
+	}
+	publicKey, keyErr := signer.Create(ctx, Hash([]byte(e.Store.Path()))+"/"+id)
+	if keyErr != nil && !errors.Is(keyErr, agentsecurity.ErrUnavailable) {
+		return Progress{}, keyErr
+	}
+	if publicKey != "" && (o.Platform.OS != "darwin" || attachwatch.LocalAuthPublicKey(publicKey) == nil) {
+		return Progress{}, errors.New("invalid enclave public key")
+	}
+	if publicKey != "" {
+		s.LocalAuthKeyID = Hash([]byte(e.Store.Path())) + "/" + id
+	}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
 	for _, c := range o.Candidates {
 		key, err := uuid()
 		if err != nil {
@@ -588,11 +645,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			code = "private_storage_failed"
 		}
 		proof := e.proof(s)
-		proof.Progress = &SetupProgress{State: state, ErrorCode: code}
+		proof.Progress = reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code})
 		_, _ = e.API.Reconcile(ctx, proof)
 	}()
 	proof := e.proof(s)
-	proof.Progress = &SetupProgress{State: "provisioning"}
+	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
 	observed, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return e.progress(s), err
@@ -610,7 +667,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.save(s, false); err != nil {
 		return e.progress(s), err
 	}
-	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
+	config := RuntimeConfig{LocalAuthKeyID: s.LocalAuthKeyID, Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, ClaudeRepinID: s.ClaudeRepinID, Accounts: []RuntimeAccount{}}
 	seen := map[string]bool{}
 	for _, a := range s.View.Enrollments {
 		if a.State != "connected" || s.Removed[a.AccountID] {
@@ -652,6 +709,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			return e.progress(s), ErrCollision
 		}
 	}
+	var previous RuntimeConfig
+	if saved, err := e.Store.Read(RuntimeName, 128<<10); err == nil && json.Unmarshal(saved, &previous) == nil {
+		config.preserveAttachIdentities(previous)
+	}
+	config.RecordAttachIdentities()
 	raw, _ := json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err
@@ -688,14 +750,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		p.Action = "Start the approved daemon to verify connectivity."
 		return p, nil
 	}
-	local, err := e.Local.Status(ctx, "")
-	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
-		p.Stage = "provisioning"
-		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
-		return p, nil
-	}
-	p.LocalProcesses = local.State
-	return p, nil
+	return e.connectionProgress(ctx, s), nil
 }
 
 func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
@@ -704,6 +759,10 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 		return RuntimeConfig{}, err
 	}
 	defer s.Close()
+	return readRuntimeConfig(s)
+}
+
+func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 	raw, err := s.Read(RuntimeName, 128<<10)
 	if err != nil {
 		return RuntimeConfig{}, err
@@ -712,76 +771,54 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
 		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
 	}
+	if s.vault != nil {
+		// Public disk state cannot redirect the signed daemon into disclosing a
+		// protected lifecycle proof or bearer. This runs before cold-start
+		// preflight, and migrates the pairing snapshot on first daemon start.
+		engine := Engine{Store: s}
+		paired, err := engine.load()
+		if err != nil {
+			return RuntimeConfig{}, err
+		}
+		if paired.ComputerCleaned || c.Origin != paired.Origin || c.TenantID != paired.View.TenantID || c.ComputerID != paired.View.ComputerID || c.PrincipalID != paired.View.PrincipalID || c.DaemonID != paired.View.DaemonID || c.Workspace != paired.Request.Workspace || c.LocalAuthKeyID != paired.LocalAuthKeyID {
+			return RuntimeConfig{}, errors.New("runtime configuration differs from protected pairing")
+		}
+	}
 	return c, nil
 }
 
-// ValidateRuntimeDependencies gates execution, never access to recovery metadata
-// or the credential needed to revoke this computer. Removed harnesses do not
-// block the remaining accounts merely because their old dependency pins remain.
-func ValidateRuntimeDependencies(c RuntimeConfig) error {
-	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
-		return err
+// UnpinnedEnrollment reports an older npm Codex, Cursor or pi account whose
+// env-node launcher has no interpreter pin. A native wrapper is not unpinned.
+func UnpinnedEnrollment(a RuntimeAccount) bool {
+	switch a.Harness {
+	case "codex", "cursor", "pi", "gemini", "opencode":
+	default:
+		return false
 	}
-	return ValidateClaudeRuntimeDependencies(c)
+	node := a.Node
+	if a.Harness == "pi" {
+		node = a.PiNode
+	}
+	if node != (harnesslaunch.Node{}) {
+		return false
+	}
+	needed, err := harnesslaunch.NeedsNode(a.Path)
+	return err == nil && needed
 }
 
-// ValidateHarnessRuntimeDependencies checks the pinned interpreters of every
-// npm-launched harness except Claude (AEON-334, AEON-341). A failure still
-// stops execution on this computer; Claude's dependencies are checked on their
-// own so that a Claude repin or repair holds only Claude (AEON-342).
-func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
+// LaunchableRuntime removes unpinned enrollments so a whole-config check can
+// still see the other accounts. The paired daemon does not use it to ignore
+// partial, drifted, invalid, or unsafe pins; AccountPinBlocks isolates every
+// pin problem to that account.
+func LaunchableRuntime(c RuntimeConfig) RuntimeConfig {
+	kept := make([]RuntimeAccount, 0, len(c.Accounts))
 	for _, a := range c.Accounts {
-		if a.Harness == "grok" || a.Harness == "claude" {
-			continue
-		}
-		node := a.Node
-		if a.Harness == "pi" {
-			node = a.PiNode
-		}
-		if err := validateNode(a.Path, c.Workspace, node); err != nil {
-			return err
-		}
-		if node.Path != "" {
-			raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path), Dir: commandDir(c.Workspace, userHome())})
-			match := safeVersion.FindSubmatch(raw)
-			if err != nil || len(match) != 2 || string(match[1]) != node.Version {
-				return piprobe.ErrStart
-			}
+		if !UnpinnedEnrollment(a) {
+			kept = append(kept, a)
 		}
 	}
-	return nil
-}
-
-// ValidateClaudeRuntimeDependencies checks the approved Claude CLI and its
-// pinned Node/SDK links (AEON-342). An npm-launched Claude CLI runs on Claude's
-// own pinned Node (AEON-341), which after a repin is the repinned one, so it is
-// checked against the resolved Claude Node rather than a saved copy.
-func ValidateClaudeRuntimeDependencies(c RuntimeConfig) error {
-	claude := false
-	for _, a := range c.Accounts {
-		if a.Harness != "claude" {
-			continue
-		}
-		claude = true
-		if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
-			return err
-		}
-	}
-	if !claude {
-		return nil
-	}
-	deps, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
-	if err != nil {
-		return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
-	}
-	for _, a := range c.Accounts {
-		if a.Harness == "claude" && a.Node != (harnesslaunch.Node{}) {
-			if err := harnesslaunch.Validate(a.Path, deps.NodePath); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	c.Accounts = kept
+	return c
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)
@@ -832,10 +869,31 @@ func within(root, path string) bool {
 	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 func repositoryPath(path string) bool {
+	return repositoryPathWithLstat(path, os.Lstat)
+}
+
+// Private state rejects every repository ancestor, including package-manager
+// prefixes. The Homebrew exception belongs only to executable/dependency pins.
+func repositoryPathWithLstat(path string, lstat func(string) (os.FileInfo, error)) bool {
 	for p := path; p != "/" && p != "."; p = filepath.Dir(p) {
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+		if _, err := lstat(filepath.Join(p, ".git")); err == nil {
 			return true
 		}
 	}
 	return false
 }
+
+// Discovery must establish sign-in before a candidate can be ready.
+func candidateReady(c Candidate) bool {
+	return c.Login == "signed_in"
+}
+
+// Enrollment can bind an explicitly selected Gemini/OpenCode local profile
+// without claiming sign-in. The daemon's account probe still decides readiness.
+func candidateEnrollable(c Candidate) bool {
+	return candidateReady(c) ||
+		((c.Harness == "gemini" || c.Harness == "opencode") && c.Login == "unverified" && c.Identity == "local-profile")
+}
+
+// Quote every saved choice; status emits a command, never interprets it.
+func touchIDQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }

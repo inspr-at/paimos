@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
 import DoneGateHost from './components/DoneGateHost.vue'
@@ -11,6 +11,7 @@ import AppFooter from './components/AppFooter.vue'
 import ErrorPage from './components/ErrorPage.vue'
 import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
+import StatusHelpSheet from './components/work/StatusHelpSheet.vue'
 import AppIcon from './components/AppIcon.vue'
 import TicketPeekHost from './components/TicketPeekHost.vue'
 import { command, consume } from './lib/commands'
@@ -21,6 +22,7 @@ import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { getRelease, releaseTitle } from './lib/releases'
+import { updateToast } from './lib/codenames'
 import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
@@ -87,6 +89,9 @@ function openRunningRelease() { openReleases(releases.current || 'current') }
 // filter hides the selected release moves the selection) both land: each
 // replace carries what is still on its way, until the address has it.
 const releasesNext = reactive<{ version?: string; query: Record<string, string> }>({ query: {} })
+const releasesSheet = ref<{ navigationSettled: (version: string | undefined, failure: unknown) => void } | null>(null)
+// A newer replace supersedes an older one still waiting on the session.
+let releasesNav = 0
 watch(() => route.fullPath, () => {
   if (releasesNext.version === releasesTarget.value) delete releasesNext.version
   for (const [key, value] of Object.entries(releasesNext.query)) if (route.query[key] === value) delete releasesNext.query[key]
@@ -96,8 +101,19 @@ function replaceReleases() {
   // Keep the history's language and view (and any other query) across versions.
   const query = { ...route.query, ...releasesNext.query }
   const version = releasesNext.version
-  if (releasesRoute.value) void router.replace({ path: version ? `/releases/${version}` : route.path, query, hash: route.hash })
-  else void router.replace({ path: route.path, query: version ? { ...query, releases: version } : query, hash: route.hash })
+  const token = ++releasesNav
+  const location = releasesRoute.value
+    ? { path: version ? `/releases/${version}` : route.path, query, hash: route.hash }
+    : { path: route.path, query: version ? { ...query, releases: version } : query, hash: route.hash }
+  // Cancelled, duplicated and rejected replaces never change the address.
+  // Only the latest request can drop its echo; an older failure must not.
+  void router.replace(location).then(failure => {
+    if (token !== releasesNav) return
+    releasesSheet.value?.navigationSettled(version, isNavigationFailure(failure) ? failure : null)
+  }, error => {
+    if (token !== releasesNav) return
+    releasesSheet.value?.navigationSettled(version, error)
+  })
 }
 function selectRelease(version: string) {
   if ((releasesNext.version ?? releasesTarget.value) === version) return
@@ -145,8 +161,10 @@ watch(() => releases.available, async version => {
   if (version !== releases.available) return
   const title = release ? releaseTitle(release, profile.profile?.locale) : ''
   const about = title ? `: ${title}` : ''
-  toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
-    sticky: true, key: 'update',
+  // The marketing name leads; the calendar version shows on hover, and stands in only for a release with no known name.
+  const { message, release: named } = updateToast(brand.value.wordmark, version, release?.codename, about)
+  toast(message, {
+    sticky: true, key: 'update', release: named,
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
   })
 })
@@ -218,12 +236,13 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" @pill="onFlowPill" />
-    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
+    <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <ToastHost />
     <ConfirmHost />
     <DoneGateHost />
     <ShortcutSheet ref="shortcuts" />
+    <StatusHelpSheet />
     <TooltipHost />
   </div>
 </template>

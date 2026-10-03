@@ -6,7 +6,11 @@ import { brand } from '../../lib/brand'
 import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import BrandCard from './BrandCard.vue'
+import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
+import StatusAutopilot from './StatusAutopilot.vue'
+import AgentActivityCard from './AgentActivityCard.vue'
 
 // The workspace itself: its name and my role in it. Who is in it, their roles,
 // invites and agent keys live under Access.
@@ -62,6 +66,8 @@ async function saveInterval() {
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
     </SettingsCard>
+    <BrandCard v-if="can('settings.manage')" />
+    <ModelProviderCard v-if="can('settings.manage')" />
     <SettingsCard v-if="intervalReady" title="Estimates" icon="clock" anchor="estimates">
       <template #lead>How often a working agent reports when a ticket will be ready, and when it will be live.</template>
       <label class="interval" for="eta-minutes">Minutes between estimates</label>
@@ -72,6 +78,8 @@ async function saveInterval() {
       <label class="interval" for="lost-minutes">Minutes without a heartbeat</label>
       <input id="lost-minutes" v-model.number="lostMinutes" class="minutes" type="number" min="5" max="1440" inputmode="numeric" @change="saveLost" />
     </SettingsCard>
+    <AgentActivityCard v-if="can('settings.manage')" />
+    <StatusAutopilot v-if="can('settings.manage')" />
     <SettingsCard v-if="can('members.read')" title="People and agents" icon="users" anchor="members">
       <template #lead>Members, invites, roles, project access and agent keys have their own place.</template>
       <template #aside><RouterLink class="btn sm" to="/settings/access">Open Access<AppIcon name="arrow" :size="13" /></RouterLink></template>

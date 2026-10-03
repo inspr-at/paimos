@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { dispatchHint, launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
 import { APIError } from '../src/lib/api'
 import type { AgentAccount, AgentRun, ModelProfile } from '../src/lib/agents'
+import type { AgentRunRow } from '../src/lib/agentRows'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAgents } from '../src/stores/agents'
+import { resetPositions } from '../src/lib/position'
+import { wired } from './wire-fixtures'
 import type { WorkNode } from '../src/lib/api'
 
 const ticket = { id: 'ticket', key: 'AEON-181', title: 'Start agent', body: 'Build the launch flow.', fields: { acceptance_criteria: 'Queue, then show a managed session.' } } as unknown as WorkNode
@@ -10,11 +15,18 @@ const profile = { id: 'model', harness: 'codex', enabled: true } as ModelProfile
 const order = { node_id: 'order', status: 'draft', revision: 3, assignee_principal_id: 'agent', criteria: [] } as WorkOrder
 const queued = { id: 'run', work_order_id: 'order', agent_principal_id: 'agent', model_profile_id: 'model', status: 'queued' } as AgentRun
 const selection = { ticket, agentId: 'agent', profileId: 'model' }
+// The page's run ledger: what startAgent reads and launches is judged by it before it is used (AEON-449).
+vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ byId: () => undefined, load: async () => {} }) }))
+beforeEach(() => { setActivePinia(createPinia()); resetPositions() })
+function admission() {
+  const agents = useAgents()
+  return { run: agents.admitRun, runs: agents.admitRuns }
+}
 const now = Date.parse('2026-09-26T14:00:00Z')
 function account(overrides: Partial<AgentAccount> = {}): AgentAccount {
   return { id: 'account', account_key: 'local', harness: 'codex', daemon_id: 'mac', label: 'Work account', registered_by_principal_id: 'agent', state: 'available', last_probe_at: new Date(now - 30_000).toISOString(), last_probe_ok: true, created_at: '', windows: [{ id: 'window', account_id: 'account', starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now + 60_000).toISOString(), unit: 'requests', allowance: 10, used: 0, reserved: 0, pace_model: 'unrestricted', burst_ratio: 0 }], ...overrides }
 }
-function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch?: boolean; lostRunResponse?: boolean } = {}) {
+function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch?: boolean; lostRunResponse?: boolean; whileLaunching?: () => void; whileReadingRuns?: () => void } = {}) {
   const orders = [...(options.existing ?? [])], runs = [...(options.runs ?? [])]
   const calls: { path: string; method: string; body?: Record<string, unknown> }[] = []
   let loseResponse = options.lostRunResponse
@@ -26,7 +38,7 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
     if (url.pathname === '/api/nodes/ticket') return json(ticket)
     if (url.pathname === '/api/nodes') { expect(url.searchParams.get('parent_id')).toBe('ticket'); expect(url.searchParams.get('kind')).toBe('work_order'); return json({ items: orders.map(o => ({ id: o.node_id })), next_cursor: null }) }
-    if (url.pathname === '/api/runs') return json({ items: runs, next_cursor: null })
+    if (url.pathname === '/api/runs') { options.whileReadingRuns?.(); return json({ items: runs, next_cursor: null }) }
     if (url.pathname === '/api/work-orders' && method === 'POST') { orders.push({ ...order }); return json(order, 201) }
     if (url.pathname === '/api/work-orders/order') {
       if (method === 'PATCH') {
@@ -37,6 +49,7 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
     }
     if (url.pathname === '/api/work-orders/order/runs' && method === 'POST') {
       runs.push({ ...queued })
+      options.whileLaunching?.()
       if (loseResponse) { loseResponse = false; throw new TypeError('Network connection lost') }
       return json(queued, 201)
     }
@@ -49,7 +62,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('work-order launch', () => {
   it('copies ticket content and criteria, readies with revision, then queues the selected agent/profile', async () => {
     const calls = backend()
-    expect(await startAgent(selection)).toEqual({ run: queued, reused: false })
+    expect(await startAgent(selection, admission())).toEqual({ run: queued, reused: false })
     expect(calls.filter(c => c.method !== 'GET')).toEqual([
       { path: '/api/work-orders', method: 'POST', body: { title: 'AEON-181: Start agent', parent_id: 'ticket', assignee_principal_id: 'agent', body: 'Build the launch flow.\n\n## Acceptance criteria\n\nQueue, then show a managed session.', criteria: ['Queue, then show a managed session.'] } },
       { path: '/api/work-orders/order', method: 'PATCH', body: { expected_revision: 3, assignee_principal_id: 'agent', status: 'ready' } },
@@ -58,35 +71,52 @@ describe('work-order launch', () => {
   })
   it('reuses a ready order without resetting its status or budgets', async () => {
     const calls = backend({ existing: [{ ...order, status: 'ready' }] })
-    await startAgent(selection)
+    await startAgent(selection, admission())
     expect(calls.filter(c => c.method !== 'GET')).toHaveLength(1)
   })
   it('pins an optional account and refuses to reuse a run pinned elsewhere', async () => {
     const calls = backend()
-    await startAgent({ ...selection, accountId: 'chosen' })
+    await startAgent({ ...selection, accountId: 'chosen' }, admission())
     expect(calls.find(c => c.method === 'POST' && c.path.endsWith('/runs'))?.body?.requested_account_id).toBe('chosen')
     backend({ existing: [order], runs: [{ ...queued, requested_account_id: 'elsewhere' }] })
-    await expect(startAgent({ ...selection, accountId: 'chosen' })).rejects.toThrow('already has an active run')
+    await expect(startAgent({ ...selection, accountId: 'chosen' }, admission())).rejects.toThrow('already has an active run')
     backend({ existing: [order], runs: [{ ...queued, account_id: 'chosen' }] })
-    await expect(startAgent({ ...selection, accountId: 'chosen' })).rejects.toThrow('already has an active run')
+    await expect(startAgent({ ...selection, accountId: 'chosen' }, admission())).rejects.toThrow('already has an active run')
   })
   it('recovers an accepted run after the POST response was lost', async () => {
     const calls = backend({ lostRunResponse: true })
-    await expect(startAgent(selection)).rejects.toThrow('No connection')
-    expect(await startAgent(selection)).toEqual({ run: queued, reused: true })
+    await expect(startAgent(selection, admission())).rejects.toThrow('No connection')
+    expect(await startAgent(selection, admission())).toEqual({ run: queued, reused: true })
     expect(calls.filter(c => c.path === '/api/work-orders' && c.method === 'POST')).toHaveLength(1)
     expect(calls.filter(c => c.path.endsWith('/runs') && c.method === 'POST')).toHaveLength(1)
   })
+  // Review of AEON-449 round 2, P1: the launch result was returned unstamped, so a delayed
+  // answer could rewind a run a newer read had already moved forward.
+  it('judges the launch result by the run ledger: a newer row that landed while the POST was in flight stands', async () => {
+    const page = admission()
+    backend({ whileLaunching: () => { page.run(wired({ ...queued, status: 'running' as const, row_version: 2 } as AgentRunRow)) } })
+    const result = await startAgent(selection, page)
+    expect(result.run.status).toBe('running')
+    expect(result.run.row_version).toBe(2)
+    expect(result.reused).toBe(false)
+  })
+  it('reads an existing run through the ledger too, so a reused run is the newest copy', async () => {
+    const page = admission()
+    // A newer copy of the run lands while the read of the work order's runs is in flight.
+    backend({ existing: [{ ...order, status: 'ready' }], runs: [{ ...queued, row_version: 4 } as AgentRun], whileReadingRuns: () => { page.run(wired({ ...queued, status: 'running' as const, row_version: 5 } as AgentRunRow)) } })
+    const result = await startAgent(selection, page)
+    expect(result).toMatchObject({ reused: true, run: { status: 'running', row_version: 5 } })
+  })
   it('does not queue after a revision conflict or unblock an order implicitly', async () => {
     const calls = backend({ existing: [order], failPatch: true })
-    await expect(startAgent(selection)).rejects.toThrow('revision conflict')
+    await expect(startAgent(selection, admission())).rejects.toThrow('revision conflict')
     expect(calls.some(c => c.method === 'POST')).toBe(false)
     backend({ existing: [{ ...order, status: 'blocked' }] })
-    await expect(startAgent(selection)).rejects.toThrow('blocked')
+    await expect(startAgent(selection, admission())).rejects.toThrow('blocked')
   })
   it('refuses a second model while another run is active', async () => {
     const calls = backend({ existing: [order], runs: [{ ...queued, model_profile_id: 'other' }] })
-    await expect(startAgent(selection)).rejects.toThrow('already has an active run')
+    await expect(startAgent(selection, admission())).rejects.toThrow('already has an active run')
     expect(calls.some(c => c.method !== 'GET')).toBe(false)
   })
 })
@@ -120,5 +150,17 @@ describe('honest launch state', () => {
     expect(staleGrantRejection(new APIError(409, 'work order is not ready for dispatch'))).toBe(false)
     expect(staleGrantRejection(new APIError(404, 'not found'))).toBe(false)
     expect(staleGrantRejection(new Error('allow the model profile'))).toBe(false)
+  })
+})
+
+
+describe('run now once', () => {
+  it('only sends the override when the person chooses it', async () => {
+    const calls = backend()
+    await startAgent({ ...selection, runNow: true }, admission())
+    expect(calls.find(c => c.method === 'POST' && c.path.endsWith('/runs'))?.body?.capacity_override).toBe('now')
+  })
+  it('uses the server wait reason on a queued run', () => {
+    expect(launchState({ ...queued, wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Waiting', detail: 'Waiting for the vendor to allow work again' })
   })
 })

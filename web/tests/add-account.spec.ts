@@ -89,7 +89,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await setup(page)
   await page.goto('/settings/accounts')
-  const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
+  const accounts = page.getByRole('region', { name: 'Accounts', exact: true })
   await expect(accounts).toContainText('Claude Max')
   await expect(page.getByText(CALM)).toHaveCount(0)
   const open = page.getByRole('button', { name: 'Add an account' })
@@ -153,7 +153,7 @@ test('Add an account on the agents card opens the steps; Manage accounts does no
   await expect(cap.getByRole('link', { name: /Manage/ })).toHaveAttribute('href', '/settings/accounts')
   const add = cap.getByRole('link', { name: 'Add an account' })
   await expect(add).toHaveAttribute('href', '/settings/accounts#add-account')
-  await shoot(page, 'agents', cap.locator('.cap-head'))
+  await shoot(page, 'agents', cap.locator('.ac-head'))
   await add.click()
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
@@ -164,7 +164,7 @@ test('Add an account on the agents card opens the steps; Manage accounts does no
 test('without account.manage the action is gone and the hint stays', async ({ page }) => {
   await setup(page, { manage: false })
   await page.goto('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('Claude Max')
+  await expect(page.getByRole('region', { name: 'Accounts', exact: true })).toContainText('Claude Max')
   await expect(page.getByText(CALM)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
@@ -179,7 +179,7 @@ test('no paired machine links to Connect your machine, including from the hash',
   const { release } = await setup(page, { computers: 'hold' })
   try {
     await page.goto('/settings/accounts')
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('Claude Max')
+    await expect(page.getByRole('region', { name: 'Accounts', exact: true })).toContainText('Claude Max')
     await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
   } finally { release() }

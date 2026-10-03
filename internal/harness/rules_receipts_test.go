@@ -172,6 +172,7 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer blocker.Rollback(context.Background())
+	blockerPID := int(blocker.Conn().PgConn().PID())
 	if _, err = blocker.Exec(t.Context(), `SELECT id FROM harness_sessions WHERE id=$1 FOR UPDATE`, strings.TrimPrefix(session, "/api/projects/"+f.project+"/harness-sessions/")); err != nil {
 		t.Fatal(err)
 	}
@@ -181,10 +182,17 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 	for _, request := range []harness.RulesReceiptWrite{in, other} {
 		go func() { results <- f.call(f.agent, "POST", path, request, lease) }()
 	}
-	// pg_stat_activity sees separate connections blocked by the row lock.
+	// Follow the blocker chain: the second waiter can queue behind the first.
+	// Query text is truncated at PostgreSQL's
+	// track_activity_query_size, so widening the session projection must not
+	// hide a real waiter or turn this concurrent CAS assertion into a timeout.
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM harness_sessions%FOR UPDATE%'`).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `WITH RECURSIVE waiting(pid) AS (
+ SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::integer=ANY(pg_blocking_pids(pid))
+ UNION
+ SELECT a.pid FROM pg_stat_activity a JOIN waiting w ON w.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()
+) SELECT count(*) FROM waiting`, blockerPID).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}
@@ -340,7 +348,7 @@ func TestRulesReceiptContextCredentialAndGenerationFencing(t *testing.T) {
 	}
 }
 
-// Receipts accept the upgraded 64,000-byte ceiling and reject one byte more.
+// Receipts accept the upgraded 512,000-byte ceiling and reject one byte more.
 func TestRulesReceiptByteSizeBoundary(t *testing.T) {
 	f, session, lease, in := receiptFixture(t)
 	path := session + "/rules-receipts"
@@ -351,7 +359,7 @@ func TestRulesReceiptByteSizeBoundary(t *testing.T) {
 	next := in
 	next.RequestID, next.ExpectedRevision, next.ByteSize = uid(), &rev, &over
 	expect(t, f.call(f.agent, "POST", path, next, lease), 400)
-	if rules.MaxBytes != 64000 {
+	if rules.MaxBytes != 512000 {
 		t.Fatalf("unexpected upgraded session file ceiling %d", rules.MaxBytes)
 	}
 }

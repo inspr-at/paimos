@@ -8,11 +8,12 @@
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
 import { estimateHours } from './estimates.ts'
+import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery } from './api.ts'
-import { COLUMN_BY_ID, PINNED, type ColumnId } from './columns.ts'
+import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
-export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release'
+export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check'
 export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
@@ -30,6 +31,7 @@ export interface ListFilters {
   epic: string[]
   cost: string[]
   release: string[]
+  human_check: string[]
   date: DateFilter | null
   showClosed: boolean
   sort: SortKey[]
@@ -46,6 +48,7 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
   { key: 'type', title: 'Type', facet: 'kind', primary: true, none: '' },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
+  { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
   { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native journey membership.
@@ -110,7 +113,7 @@ export function serializeDate(date: DateFilter): string {
 }
 function parseCols(raw: unknown): ColumnId[] | null {
   if (typeof raw !== 'string') return null
-  const ids = list(raw).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
+  const ids = normalizeColumnIds(list(raw)).filter(id => !PINNED.includes(id))
   return ids.length ? ids : null
 }
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -126,6 +129,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
     release: list(query.release),
+    human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
     sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
@@ -156,7 +160,7 @@ export function hasFilters(filters: ListFilters): boolean {
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
-  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], date: null }
+  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], date: null }
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
@@ -288,6 +292,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     epic: take('epic'),
     cost_unit: take('cost'),
     release: take('release'),
+    ...(take('human_check').length ? { human_check: take('human_check') } : {}),
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
@@ -324,6 +329,7 @@ function labelOptions(dimension: Dimension, counts: Record<string, number>, sele
 }
 export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
   const selected = selectedValues.map(bare)
+  if (dimension === 'human_check') return [{ value: 'pending', label: 'Needs a human check', count: counts.pending ?? 0 }, { value: 'none', label: 'No human check', count: counts.none ?? 0 }]
   if (dimension === 'status') {
     const byKey = new Map<string, FacetOption>()
     const seen = new Set<string>()
@@ -373,7 +379,8 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
   if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
   switch (dimension) {
-    case 'status': return statusMeta(value).label
+    case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
+    case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
     case 'type': return kindLabel(value)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
@@ -386,8 +393,14 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
 // Client-side ordering with the same keys as the list API, for siblings in the Outline
 // that come from different requests (matches and their ancestors).
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
+function lessThan(x: string | number | bigint, y: string | number | bigint): boolean {
+  if (typeof x === 'bigint' && typeof y === 'bigint') return x < y
+  if (typeof x === 'number' && typeof y === 'number') return x < y
+  if (typeof x === 'string' && typeof y === 'string') return x < y
+  return false
+}
 export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => number {
-  const value = (row: ListItem, field: SortKey['field']): string | number => {
+  const value = (row: ListItem, field: SortKey['field']): string | number | bigint => {
     switch (field) {
       case 'state': return statusMeta(row.state).order
       case 'priority': return PRIORITY_RANK[row.priority ?? ''] ?? 3
@@ -400,11 +413,18 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       case 'estimate': return estimateHours(row) ?? 0
       case 'eta_ready': return row.eta?.eta_ready_at ? Date.parse(row.eta.eta_ready_at) : 0
       case 'progress': return typeof row.eta?.progress_pct === 'number' ? row.eta.progress_pct : 0
+      case 'model': case 'tokens': case 'list_cost': case 'paid': return planningSortValue(row, field) ?? 0
     }
   }
-  const missing = (row: ListItem, field: SortKey['field']) => field === 'estimate' ? estimateHours(row) === null : field === 'eta_ready' ? !row.eta?.eta_ready_at : field === 'progress' ? typeof row.eta?.progress_pct !== 'number' : false
+  const missing = (row: ListItem, field: SortKey['field']) => field === 'estimate' ? estimateHours(row) === null : field === 'eta_ready' ? !row.eta?.eta_ready_at : field === 'progress' ? typeof row.eta?.progress_pct !== 'number'
+    : field === 'model' || field === 'tokens' || field === 'list_cost' || field === 'paid' ? planningSortValue(row, field) === null : false
   return (a, b) => {
     for (const key of keys) {
+      if (key.field === 'model') {
+        const delta = compareModelSort(a, b, key.desc)
+        if (delta !== 0) return delta
+        continue
+      }
       // Unassigned work, estimates nobody reported, and unknown states come last in both directions.
       if (key.field === 'assignee' && !a.assignee !== !b.assignee) return a.assignee ? -1 : 1
       if (key.field === 'state') {
@@ -414,17 +434,18 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       }
       if (missing(a, key.field) !== missing(b, key.field)) return missing(a, key.field) ? 1 : -1
       const x = value(a, key.field), y = value(b, key.field)
-      if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
+      if (x !== y) return (lessThan(x, y) ? -1 : 1) * (key.desc ? -1 : 1)
     }
-    return a.id < b.id ? -1 : 1
+    return a.id === b.id ? 0 : a.id < b.id ? -1 : 1
   }
 }
 
 // Stable status ordering by workflow. An unknown spelling stays after that
-// workflow in both directions, matching the list API.
-export function orderByStatus(rows: ListItem[], desc = false): ListItem[] {
+// workflow in both directions, matching the list API. layout gives the values
+// a row is placed by (a live list holds them while an update waits).
+export function orderByStatus(rows: ListItem[], desc = false, layout: (row: ListItem) => ListItem = row => row): ListItem[] {
   return rows
-    .map((row, index) => ({ row, index, meta: statusMeta(row.state) }))
+    .map((row, index) => ({ row, index, meta: statusMeta(layout(row).state) }))
     .sort((a, b) => {
       if ((a.meta.key === 'other') !== (b.meta.key === 'other')) return a.meta.key === 'other' ? 1 : -1
       return (desc ? b.meta.order - a.meta.order : a.meta.order - b.meta.order) || a.index - b.index
@@ -465,14 +486,18 @@ export interface RowGroup {
 }
 // Counts are the list API's facet for the grouped dimension (state, assignee,
 // priority, kind or tag), so a group shows its whole size while pages load.
-export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string } = {}): RowGroup[] {
+// layout gives the values a row is grouped by (a live list holds them while an
+// update waits); the group still lists the row itself.
+export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem } = {}): RowGroup[] {
   if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
+  const layout = options.layout ?? (row => row)
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()
     for (const row of rows) {
-      const meta = statusMeta(row.state)
-      const key = meta.key === 'other' ? normaliseState(row.state) : meta.key
-      if (!groups.has(key)) groups.set(key, { key, label: meta.label, state: row.state, rows: [], total: 0 })
+      const state = layout(row).state
+      const meta = statusMeta(state)
+      const key = meta.key === 'other' ? normaliseState(state) : meta.key
+      if (!groups.has(key)) groups.set(key, { key, label: meta.label, state, rows: [], total: 0 })
       groups.get(key)!.rows.push(row)
     }
     for (const entry of groups.values()) {
@@ -489,10 +514,11 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     const groups = new Map<string, RowGroup>()
     const none: RowGroup = { key: 'none', label: 'No epic', rows: [], total: 0 }
     for (const row of rows) {
-      const epic = epicOf(row, byId)
+      const placed = layout(row)
+      const epic = epicOf(placed, byId)
       if (!epic) { none.rows.push(row); continue }
       if (!groups.has(epic.id)) groups.set(epic.id, { key: epic.id, label: epic.title, epic, rows: [], total: 0 })
-      if (row.kind_slug !== 'epic') groups.get(epic.id)!.rows.push(row)
+      if (placed.kind_slug !== 'epic') groups.get(epic.id)!.rows.push(row)
     }
     const out = [...groups.values(), ...(none.rows.length ? [none] : [])]
     for (const entry of out) entry.total = entry.rows.length
@@ -504,18 +530,19 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     groups.get(key)!.rows.push(row)
   }
   for (const row of rows) {
+    const placed = layout(row)
     if (group === 'assignee') {
-      const person = row.assignee
+      const person = placed.assignee
       if (person) put(person.id, () => ({ key: person.id, label: person.name, person }), row)
       else put('none', () => ({ key: 'none', label: 'Unassigned' }), row)
     } else if (group === 'priority') {
-      const value = row.priority && row.priority !== 'none' ? row.priority : 'none'
+      const value = placed.priority && placed.priority !== 'none' ? placed.priority : 'none'
       put(value, () => ({ key: value, label: priorityLabel(value), priority: value }), row)
     } else if (group === 'type') {
-      put(row.kind_slug, () => ({ key: row.kind_slug, label: kindLabel(row.kind_slug), kind: row.kind_slug }), row)
+      put(placed.kind_slug, () => ({ key: placed.kind_slug, label: kindLabel(placed.kind_slug), kind: placed.kind_slug }), row)
     } else {
       // A ticket with several labels shows under each of them.
-      const tags = rowTags(row)
+      const tags = rowTags(placed)
       if (!tags.length) put('none', () => ({ key: 'none', label: 'No labels' }), row)
       for (const tag of new Map(tags.map(t => [t.name.toLowerCase(), t])).values()) put(tag.name.toLowerCase(), () => ({ key: tag.name.toLowerCase(), label: tag.name, tag }), row)
     }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -18,12 +19,15 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -37,6 +41,42 @@ import (
 
 const origin = "https://pairing.test"
 
+func TestComputerCompatibilityUsesItsReportedAgent(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	policy := agentcompat.Supported()
+	for _, tc := range []struct {
+		name    string
+		release *agentcompat.Release
+		status  string
+	}{
+		{"inside", &agentcompat.Release{Protocol: policy.Protocol, Version: "261002072608.0.0", VersionScheme: policy.VersionScheme}, "compatible"},
+		{"below minimum", &agentcompat.Release{Protocol: policy.Protocol, Version: "260930072608.0.0", VersionScheme: policy.VersionScheme}, "update_required"},
+		{"wrong protocol", &agentcompat.Release{Protocol: "pairing-v2", Version: policy.MinVersion, VersionScheme: policy.VersionScheme}, "protocol_mismatch"},
+		{"legacy downgrade clears report", nil, "unknown"},
+		{"invalid report is advisory", &agentcompat.Release{Protocol: policy.Protocol, Version: strings.Repeat("x", 65), VersionScheme: policy.VersionScheme}, "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			progress := agentpairing.SetupProgress{State: "connected", AgentRelease: tc.release}
+			var report agentpairing.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}, false, "", 200), &report)
+			if report.AgentCompatibility.Status != tc.status || report.SetupState != "connected" || *report.ComputerState != "connected" {
+				t.Fatalf("incorrect advisory or enrollment changed: %+v", report.AgentCompatibility)
+			}
+			var listed agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+			if listed.AgentCompatibility != report.AgentCompatibility || listed.AgentRelease != report.AgentRelease {
+				t.Fatal("person view and lifecycle response disagree")
+			}
+			if strings.Contains(listed.AgentCompatibility.Action, "Update aeon-agentd to at least "+policy.MinVersion) != (tc.status == "update_required" || tc.status == "protocol_mismatch") {
+				t.Fatal("update advice missing or invented")
+			}
+		})
+	}
+}
+
 func nixGuideFixture() *config.PairingNixGuide {
 	return &config.PairingNixGuide{
 		ModuleURL: "https://example.test/instance/module.nix", ServiceOption: "services.aeon.enable",
@@ -45,13 +85,15 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
-	t        *testing.T
-	db       *dbtest.DB
-	h        http.Handler
-	tenantID string
-	person   string
-	cookie   *http.Cookie
-	profiles map[string]string
+	pairing    *agentpairing.Module
+	t          *testing.T
+	db         *dbtest.DB
+	h          http.Handler
+	tenantID   string
+	person     string
+	cookie     *http.Cookie
+	profiles   map[string]string
+	sessionKey []byte
 }
 type proposal struct {
 	id, device, runtime, lifecycle string
@@ -83,14 +125,9 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: []byte(nonce()), BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, d.App)
-	if err != nil {
-		t.Fatal(err)
-	}
-	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, agentpairing.New(d.App, origin, "pairtest"), agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, r.ID)
-	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
-	f := &fixture{t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}}
+	sessionKey := []byte(nonce())
+	f := &fixture{t: t, db: d, tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
+	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
 	if len(cookies) == 0 {
@@ -105,13 +142,21 @@ func newFixture(t *testing.T) *fixture {
 	decodeResult(t, login, &me)
 	f.person = me.Principal.ID
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
-		for _, h := range []string{"codex", "cursor", "claude", "grok", "pi"} {
+		// Catalogs validate provider identity. Native harnesses pin their family;
+		// multi-provider harnesses need a model namespace that identifies it.
+		for _, p := range []struct{ harness, family, model string }{
+			{"codex", "openai", "test-model"},
+			{"cursor", "openai", "gpt-test"},
+			{"claude", "anthropic", "test-model"},
+			{"grok", "xai", "test-model"},
+			{"pi", "openai", "openai/test-model"},
+		} {
 			var profile string
-			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,'openai','test-model','low','fast') RETURNING id::text`, id, h).Scan(&profile)
+			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,$3,$4,'low','fast') RETURNING id::text`, id, p.harness, p.family, p.model).Scan(&profile)
 			if err != nil {
 				return err
 			}
-			f.profiles[h] = profile
+			f.profiles[p.harness] = profile
 		}
 		return nil
 	})
@@ -120,6 +165,25 @@ func newFixture(t *testing.T) *fixture {
 	}
 	return f
 }
+
+// Reuse the complete production-like fixture on restart; only process memory
+// changes. Database rows, signing configuration and modules remain identical.
+func (f *fixture) rebuildHandler() {
+	f.t.Helper()
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	pairing := agentpairing.New(f.db.App, origin, "pairtest")
+	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
+		f.t.Fatal(err)
+	}
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
+		return agentaccounts.Settle(ctx, tx, p, r.ID)
+	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	f.pairing, f.h = pairing, api.Handler()
+}
+
 func (f *fixture) request(method, path string, body any, person bool, key string) *http.Request {
 	if person && method == "POST" && strings.HasSuffix(path, "/disconnect") && strings.Contains(path, "/computers/") {
 		b, _ := json.Marshal(body)
@@ -165,6 +229,9 @@ func (f *fixture) propose(harnesses ...string) *proposal {
 	return f.proposePlatform("darwin", "arm64", harnesses...)
 }
 func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *proposal {
+	return f.proposePlatformKey(platform, arch, "", harnesses...)
+}
+func (f *fixture) proposePlatformKey(platform, arch, publicKey string, harnesses ...string) *proposal {
 	f.t.Helper()
 	p := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: nonce(), lifecycle: nonce()}
 	accounts := []map[string]string{}
@@ -172,6 +239,9 @@ func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *p
 		accounts = append(accounts, map[string]string{"account_key": h + "-local", "harness": h, "label": h + " personal test", "model_profile_id": f.profiles[h]})
 	}
 	p.request = map[string]any{"request_id": p.id, "tenant_id": f.tenantID, "device_hash": hash(p.device), "runtime_hash": hash(p.runtime), "lifecycle_hash": hash(p.lifecycle), "computer_name": "Test workstation", "platform": platform, "arch": arch, "workspace_path": "/tmp/pairing-fixture", "capabilities": []string{"managed_runs"}, "accounts": accounts}
+	if publicKey != "" {
+		p.request["local_auth_public_key"] = publicKey
+	}
 	f.submit(p)
 	return p
 }
@@ -419,6 +489,65 @@ func TestPairingAddHarnessAndFreshRepair(t *testing.T) {
 	}
 }
 
+// AEON-470: re-pairing a computer must not pile up runtime identities. A fresh
+// pairing retires the identity of a revoked computer with the same name; a
+// computer that is still connected, or one with another name, is never touched.
+func TestPairingFreshRepairRetiresTheReplacedRuntimeIdentity(t *testing.T) {
+	f := newFixture(t)
+	status := func(principal string) string {
+		t.Helper()
+		var s string
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT status FROM principals WHERE id=$1::uuid`, principal).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	pair := func() agentpairing.View {
+		t.Helper()
+		p := f.propose("claude")
+		f.approve(p, "connect_only")
+		return f.redeem(p)
+	}
+	disconnect := func(v agentpairing.View) {
+		t.Helper()
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+	}
+	old, other := pair(), pair()
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET name='Other workstation' WHERE id=$1::uuid`, *other.PrincipalID); err != nil {
+		t.Fatal(err)
+	}
+	disconnect(old)
+	disconnect(other)
+	if status(*old.PrincipalID) != "active" {
+		t.Fatal("revoking a computer alone changed its identity; only a fresh pairing retires it")
+	}
+
+	fresh := pair()
+	if got := status(*old.PrincipalID); got != "deactivated" {
+		t.Fatalf("the replaced identity is %q, want deactivated", got)
+	}
+	if status(*other.PrincipalID) != "active" || status(*fresh.PrincipalID) != "active" {
+		t.Fatal("a computer with another name, or the new pairing, was retired")
+	}
+	var keys, events int
+	var replacedBy, actor string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_keys WHERE principal_id=$1::uuid AND revoked_at IS NULL`, *old.PrincipalID).Scan(&keys); err != nil || keys != 0 {
+		t.Fatalf("the retired identity keeps %d keys: %v", keys, err)
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),coalesce(max(after->>'replaced_by'),''),coalesce(max(actor_principal_id::text),'') FROM events WHERE type='principal.deactivated' AND after->>'principal_id'=$1`, *old.PrincipalID).Scan(&events, &replacedBy, &actor); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || replacedBy != *fresh.PrincipalID || actor != f.person {
+		t.Fatalf("retirement audit: %d events, replaced_by %q, actor %q", events, replacedBy, actor)
+	}
+
+	// A second pairing while the first is still connected keeps it.
+	next := pair()
+	if status(*fresh.PrincipalID) != "active" || status(*next.PrincipalID) != "active" {
+		t.Fatal("a connected computer's identity was retired by another pairing")
+	}
+}
+
 func TestPairingExpiryAttemptsAndRateLimit(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude")
@@ -618,6 +747,56 @@ func TestPairingClaimDisconnectRaceAndVerificationExpiry(t *testing.T) {
 	}
 }
 
+// Disconnect releases queued reservations but retains launched-work accounting.
+// Both committed outcomes must report enrollment revocation on the next claim,
+// rather than let released holds hide the cleanup instruction behind a 409.
+func TestPairingRevokedClaimReportsEnrollmentBeforeReservations(t *testing.T) {
+	for _, claimedFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("claimed_first_%v", claimedFirst), func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			f.probe(v, e, key, 200)
+			ids := f.reserve(v, e, key, 200)
+			if claimedFirst {
+				f.claim(v, e, key, ids, 200)
+			}
+			f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/enrollments/"+e.AccountID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+			wantStatus, wantReservation, wantHeld := "cancelled", "released", int64(0)
+			if claimedFirst {
+				wantStatus, wantReservation, wantHeld = "starting", "active", 1
+			}
+			checkAccounting := func() {
+				t.Helper()
+				var status, reservation, enrollment string
+				var held int64
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,res.state,e.state,w.reserved
+ FROM agent_runs r JOIN agent_pairing_enrollments e ON e.verification_run_id=r.id
+ JOIN account_reservations res ON res.run_id=r.id
+ JOIN account_allowance_windows w ON w.id=res.window_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &reservation, &enrollment, &held); err != nil {
+					t.Fatal(err)
+				}
+				if status != wantStatus || reservation != wantReservation || enrollment != "revoked" || held != wantHeld {
+					t.Fatalf("disconnect accounting: run=%s reservation=%s enrollment=%s held=%d", status, reservation, enrollment, held)
+				}
+			}
+			checkAccounting()
+			w := f.call("POST", "/api/runs/"+*e.VerificationRunID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": ids}, false, key, 410)
+			var failure struct {
+				Error string `json:"error"`
+			}
+			decodeResult(t, w, &failure)
+			if failure.Error != "enrollment_revoked" {
+				t.Fatalf("claim lost enrollment cleanup reason: %s", failure.Error)
+			}
+			checkAccounting()
+		})
+	}
+}
+
 func TestPairingZeroUsageCannotRefillOrSubstituteAccount(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude")
@@ -793,21 +972,10 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 
 func (f *fixture) twoQualifiedEnrollments() (*proposal, agentpairing.View) {
 	f.t.Helper()
-	p := f.propose("claude")
+	// Both verifications belong to one approval. A later Add harness approval
+	// intentionally supersedes older queued verification (AEON-401).
+	p := f.propose("claude", "grok")
 	f.approve(p, "one_per_harness")
-	v := f.redeem(p)
-	q := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle, request: map[string]any{}}
-	for k, x := range p.request {
-		q.request[k] = x
-	}
-	q.request["request_id"] = q.id
-	q.request["device_hash"] = hash(q.device)
-	q.request["existing_computer_id"] = *v.ComputerID
-	q.request["existing_lifecycle_secret"] = p.lifecycle
-	q.request["accounts"] = []map[string]string{{"account_key": "claude-second", "harness": "claude", "label": "Second selected account", "model_profile_id": f.profiles["claude"]}}
-	f.submit(q)
-	f.approve(q, "one_per_harness")
-	f.redeem(q)
 	return p, f.redeem(p)
 }
 
@@ -871,6 +1039,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/windows", map[string]any{"starts_at": time.Now(), "ends_at": time.Now().Add(time.Hour), "unit": "requests", "allowance": 2, "pace_model": "unrestricted"}, true, "", 201)
+	fixtureWorkHours(t, f, e.AccountID)
 	var old, ongoing agentruns.Run
 	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &old)
 	decodeResult(t, f.call("POST", "/api/work-orders/"+old.OrderID+"/runs", map[string]string{"agent_principal_id": *v.PrincipalID, "model_profile_id": e.ProfileID, "requested_account_id": e.AccountID}, true, "", 201), &ongoing)
@@ -1139,4 +1308,372 @@ func TestPairingLegacyUnsupportedVerificationRemainsPairedUntilExpiry(t *testing
 	if status != "cancelled" {
 		t.Fatal("unavailable legacy verification never expires")
 	}
+}
+
+func TestPairingHarnessStatusesStayScopedAndRecover(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude", "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	reconcile := func(statuses map[string]string, status int) agentpairing.View {
+		t.Helper()
+		var result agentpairing.View
+		w := f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: statuses}}, false, "", status)
+		if status == 200 {
+			decodeResult(t, w, &result)
+		}
+		return result
+	}
+	for _, statuses := range []map[string]string{
+		{"claude": "blocked", "codex": "ready"},
+		{"claude": "ready", "codex": "ready"},
+		{"claude": "blocked", "codex": "blocked"},
+	} {
+		reported := reconcile(statuses, 200)
+		if reported.SetupState != "connected" || reported.SetupError != "" || reported.RuntimePrefix != "" || reported.HarnessStatuses["claude"] != statuses["claude"] || reported.HarnessStatuses["codex"] != statuses["codex"] {
+			t.Fatal("reconcile lost typed harness status or leaked authority")
+		}
+		var listed struct {
+			Computers []agentpairing.View `json:"computers"`
+		}
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers", nil, true, "", 200), &listed)
+		if len(listed.Computers) != 1 || listed.Computers[0].HarnessStatuses["claude"] != statuses["claude"] || listed.Computers[0].HarnessStatuses["codex"] != statuses["codex"] {
+			t.Fatal("computer list lost per-harness status")
+		}
+		var detail agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &detail)
+		if detail.HarnessStatuses["claude"] != statuses["claude"] {
+			t.Fatal("computer detail lost status")
+		}
+	}
+	for _, unsupported := range []map[string]string{
+		{"claude": "local diagnostic text", "codex": "ready"},
+		{"arbitrary-local-path": "ready", "codex": "ready"},
+		{"cursor": "ready", "codex": "ready"},
+		{"pi": "future_state", "codex": "ready"},
+	} {
+		result := reconcile(unsupported, 200)
+		if len(result.HarnessStatuses) != 1 || result.HarnessStatuses["codex"] != "ready" {
+			t.Fatal("unsupported telemetry was persisted or hid a valid report")
+		}
+	}
+	for _, malformed := range []any{[]string{"ready"}, map[string]any{"claude": 4}} {
+		f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": map[string]any{"state": "connected", "harness_statuses": malformed}}, false, "", 400)
+	}
+	if result := reconcile(nil, 200); len(result.HarnessStatuses) != 0 || result.SetupState != "connected" {
+		t.Fatal("legacy progress retained stale harness status")
+	}
+	// Another computer's report cannot overwrite this one.
+	other := f.propose("cursor")
+	f.approve(other, "connect_only")
+	f.redeem(other)
+	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": other.id, "lifecycle_secret": other.lifecycle, "progress": agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}}}, false, "", 200)
+}
+
+func TestPairingProgressPublishesOneEventPerChange(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	f.redeem(p)
+	if f.events("agent_pairing.reported") != 0 {
+		t.Fatal("approval published a setup report")
+	}
+	report := func(state string, statuses map[string]string) {
+		t.Helper()
+		f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: state, HarnessStatuses: statuses}}, false, "", 200)
+	}
+	report("connected", nil)
+	if f.events("agent_pairing.reported") != 1 {
+		t.Fatal("daemon connect did not publish agent_pairing.reported")
+	}
+	report("connected", nil)
+	if f.events("agent_pairing.reported") != 1 {
+		t.Fatal("unchanged heartbeat published another report")
+	}
+	report("connected", map[string]string{"claude": "ready"})
+	if f.events("agent_pairing.reported") != 2 {
+		t.Fatal("harness report did not publish")
+	}
+}
+
+func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude", "codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "blocked", "codex": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
+		"claude": {State: "blocked", Reason: "dependency_invalid", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "arbitrary local diagnostic"}},
+		"codex":  {State: "ready"},
+		"pi":     {State: "blocked", Reason: "pin_missing"},
+	}}
+	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
+	var report agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if len(report.HarnessDetails) != 2 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" || report.HarnessDetails["claude"].Reason != "dependency_invalid" {
+		t.Fatal("details leaked untrusted data or lost the canonical repair command")
+	}
+	var listed struct {
+		Computers []agentpairing.View `json:"computers"`
+	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers", nil, true, "", 200), &listed)
+	report = agentpairing.View{}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &report)
+	if len(listed.Computers) != 1 || !reflect.DeepEqual(listed.Computers[0].HarnessDetails["claude"], report.HarnessDetails["claude"]) {
+		t.Fatal("list/detail lost harness repair details")
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "repin_pending", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "must not be retained"}}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if report.HarnessDetails["claude"].Reason != "repin_pending" || report.HarnessDetails["claude"].Fix.Command != "" {
+		t.Fatal("pending repin requires a repair")
+	}
+	// Every per-account pin reason from AEON-347 is one shared code with the
+	// canonical fix; a drifted Claude pin leaves a ready Codex computer connected.
+	for _, reason := range []string{"pin_missing", "pin_partial", "pin_drifted", "pin_invalid", "pin_unsafe", "harness_failed", "cli_unavailable"} {
+		progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: reason, Fix: agentsetup.HarnessFix{Kind: "restart", Command: "untrusted"}}
+		proof["progress"] = progress
+		report = agentpairing.View{}
+		decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+		want := agentsetup.RecoveryFix("claude", reason)
+		if got := report.HarnessDetails["claude"]; got.Reason != reason || got.Fix != want || want.Command == "" || report.SetupState != "connected" || report.HarnessStatuses["codex"] != "ready" {
+			t.Fatalf("%s lost its canonical fix or the ready computer: %+v %s", reason, got, report.SetupState)
+		}
+	}
+	// Codes from a newer daemon stay visible without a guessed fix; only
+	// malformed or inconsistent reports are ignored.
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "future_reason"}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if got := report.HarnessDetails["claude"]; got.Reason != "future_reason" || got.Fix != (agentsetup.HarnessFix{}) || report.HarnessStatuses["claude"] != "blocked" {
+		t.Fatalf("unknown reason dropped or given a fix: %+v", got)
+	}
+	progress.HarnessStatuses["claude"] = "future_state"
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "future_state", Reason: "future_reason"}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if got := report.HarnessDetails["claude"]; got.State != "future_state" || got.Reason != "future_reason" || got.Fix.Command != "" {
+		t.Fatalf("unknown state dropped: %+v", got)
+	}
+	if _, legacy := report.HarnessStatuses["claude"]; legacy || report.HarnessStatuses["codex"] != "ready" {
+		t.Fatalf("unknown state entered the closed legacy map: %+v", report.HarnessStatuses)
+	}
+	progress.HarnessStatuses["claude"] = "blocked"
+	for _, detail := range []agentsetup.HarnessDetail{{State: "ready"}, {State: "blocked", Reason: "local diagnostic text"}, {State: "ready", Reason: "pin_drifted"}} {
+		progress.HarnessDetails["claude"] = detail
+		proof["progress"] = progress
+		report = agentpairing.View{}
+		decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+		if _, ok := report.HarnessDetails["claude"]; ok {
+			t.Fatal("invalid or inconsistent detail persisted")
+		}
+	}
+	for _, e := range v.Enrollments {
+		if e.Harness != "claude" {
+			continue
+		}
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/enrollments/"+e.AccountID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+		proof["cleanup_confirmed_account_ids"] = []string{e.AccountID}
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "dependency_invalid"}
+	progress.HarnessStatuses["pi"] = "future_state"
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if len(report.HarnessStatuses) != 1 || report.HarnessStatuses["codex"] != "ready" || len(report.HarnessDetails) != 1 {
+		t.Fatal("revoked or unknown enrollment counted as enrolled")
+	}
+	for _, e := range report.Enrollments {
+		if e.Harness == "claude" && (e.State != "revoked" || e.Cleanup != "confirmed") {
+			t.Fatal("unknown telemetry prevented fence/cleanup acknowledgement")
+		}
+	}
+	proof["progress"] = agentpairing.SetupProgress{State: "connected"}
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if len(report.HarnessDetails) != 0 || len(report.HarnessStatuses) != 0 {
+		t.Fatal("legacy report retained stale details")
+	}
+}
+
+func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	q := &proposal{id: uuid(t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle}
+	q.request = map[string]any{}
+	for k, x := range p.request {
+		q.request[k] = x
+	}
+	q.request["request_id"] = q.id
+	q.request["device_hash"] = hash(q.device)
+	q.request["existing_computer_id"] = *v.ComputerID
+	q.request["existing_lifecycle_secret"] = p.lifecycle
+	q.request["accounts"] = []map[string]string{{"account_key": "claude-add", "harness": "claude", "label": "Second chosen account", "model_profile_id": f.profiles["claude"]}}
+	f.submit(q)
+	f.approve(q, "one_per_harness")
+	added := f.redeem(q)
+	var ids []string
+	for _, enrollment := range added.Enrollments {
+		if enrollment.Harness == "claude" && enrollment.State != "revoked" {
+			ids = append(ids, enrollment.AccountID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected two claude enrollments, got %+v", added.Enrollments)
+	}
+	slices.Sort(ids)
+	blocked, healthy := ids[0], ids[1]
+	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
+		"claude": {State: "ready", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "untrusted"}, Attention: []agentsetup.AccountAttention{
+			{AccountID: blocked, Reason: "pin_drifted"},
+			{AccountID: "not-an-id", Reason: "pin_drifted"},
+			{AccountID: healthy, Reason: ""},
+		}},
+	}}
+	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
+	var report agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	got := report.HarnessDetails["claude"]
+	if report.SetupState != "connected" || report.HarnessStatuses["claude"] != "ready" || got.State != "ready" || got.Reason != "" || got.Fix.Command != "" || len(got.Attention) != 1 || got.Attention[0].AccountID != blocked || got.Attention[0].Reason != "pin_drifted" || got.AttentionCount != 1 || got.AttentionTruncated {
+		t.Fatalf("partial attention lost or leaked a command: %+v %s", got, report.SetupState)
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "ready", Attention: []agentsetup.AccountAttention{
+		{AccountID: blocked, Reason: "pin_drifted"},
+		{AccountID: healthy, Reason: "login_required"},
+	}}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if report.HarnessDetails["claude"].State != "ready" || len(report.HarnessDetails["claude"].Attention) != 0 {
+		t.Fatalf("full-harness attention stayed: %+v", report.HarnessDetails["claude"])
+	}
+	progress.HarnessStatuses["claude"] = "blocked"
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "pin_drifted", Attention: []agentsetup.AccountAttention{{AccountID: blocked, Reason: "login_required"}}, Fix: agentsetup.HarnessFix{Kind: "restart", Command: "untrusted"}}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
+	}
+}
+
+func TestPartialAttentionCountsSixOfSeven(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	latest := v
+	for i := 2; i <= 7; i++ {
+		latest = f.addClaude(p, *v.ComputerID, fmt.Sprintf("claude-%d", i))
+	}
+	var ids []string
+	for _, enrollment := range latest.Enrollments {
+		if enrollment.Harness == "claude" && enrollment.State != "revoked" {
+			ids = append(ids, enrollment.AccountID)
+		}
+	}
+	if len(ids) != 7 {
+		t.Fatalf("expected seven claude enrollments, got %+v", latest.Enrollments)
+	}
+	slices.Sort(ids)
+	healthy := ids[0]
+	blocked := ids[1:]
+	attention := make([]agentsetup.AccountAttention, 0, len(blocked))
+	for _, id := range blocked {
+		attention = append(attention, agentsetup.AccountAttention{AccountID: id, Reason: "pin_drifted"})
+	}
+	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
+		"claude": {State: "ready", Attention: attention, AttentionCount: len(blocked)},
+	}}
+	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
+	w := f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200)
+	if !strings.Contains(w.Body.String(), `"attention_count":6`) || strings.Contains(w.Body.String(), `"attention_truncated"`) {
+		t.Fatalf("full count missing: %s", w.Body.String())
+	}
+	var report agentpairing.View
+	decodeResult(t, w, &report)
+	got := report.HarnessDetails["claude"]
+	if got.State != "ready" || got.AttentionCount != 6 || got.AttentionTruncated || len(got.Attention) != 6 {
+		t.Fatalf("six of seven lost: %+v", got)
+	}
+	seen := map[string]bool{}
+	for _, item := range got.Attention {
+		if item.AccountID == healthy || item.Reason != "pin_drifted" {
+			t.Fatalf("blocked set %+v", got.Attention)
+		}
+		seen[item.AccountID] = true
+	}
+	if len(seen) != 6 {
+		t.Fatalf("blocked set %+v", got.Attention)
+	}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{
+		State: "ready", Attention: attention[:5], AttentionCount: 6, AttentionTruncated: true,
+	}
+	proof["progress"] = progress
+	w = f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200)
+	if !strings.Contains(w.Body.String(), `"attention_count":6`) || !strings.Contains(w.Body.String(), `"attention_truncated":true`) {
+		t.Fatalf("truncated count missing: %s", w.Body.String())
+	}
+	report = agentpairing.View{}
+	decodeResult(t, w, &report)
+	got = report.HarnessDetails["claude"]
+	if got.AttentionCount != 6 || !got.AttentionTruncated || len(got.Attention) != 5 {
+		t.Fatalf("truncated attention collapsed: %+v", got)
+	}
+	for _, item := range got.Attention {
+		if item.AccountID == blocked[5] {
+			t.Fatal("omitted account was stored in the capped list")
+		}
+	}
+	// A legacy five-name list, a count without the flag, and a flag without
+	// the count must not reconcile as a complete set of five.
+	for _, tc := range []struct {
+		name      string
+		detail    agentsetup.HarnessDetail
+		count     int
+		truncated bool
+	}{
+		{name: "legacy", detail: agentsetup.HarnessDetail{State: "ready", Attention: attention[:5]}, count: 5, truncated: true},
+		{name: "count-only", detail: agentsetup.HarnessDetail{State: "ready", Attention: attention[:5], AttentionCount: 6}, count: 6, truncated: true},
+		{name: "flag-only", detail: agentsetup.HarnessDetail{State: "ready", Attention: attention[:5], AttentionTruncated: true}, count: 5, truncated: true},
+	} {
+		progress.HarnessDetails["claude"] = tc.detail
+		proof["progress"] = progress
+		w = f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200)
+		if !strings.Contains(w.Body.String(), `"attention_truncated":true`) || !strings.Contains(w.Body.String(), fmt.Sprintf(`"attention_count":%d`, tc.count)) {
+			t.Fatalf("%s body: %s", tc.name, w.Body.String())
+		}
+		report = agentpairing.View{}
+		decodeResult(t, w, &report)
+		got = report.HarnessDetails["claude"]
+		if got.AttentionCount != tc.count || !got.AttentionTruncated || len(got.Attention) != 5 {
+			t.Fatalf("%s: %+v", tc.name, got)
+		}
+		for _, item := range got.Attention {
+			if item.AccountID == blocked[5] {
+				t.Fatalf("%s stored the omitted account", tc.name)
+			}
+		}
+	}
+}
+
+func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.View {
+	f.t.Helper()
+	q := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle}
+	q.request = map[string]any{}
+	for k, x := range p.request {
+		q.request[k] = x
+	}
+	q.request["request_id"] = q.id
+	q.request["device_hash"] = hash(q.device)
+	q.request["existing_computer_id"] = computerID
+	q.request["existing_lifecycle_secret"] = p.lifecycle
+	q.request["accounts"] = []map[string]string{{"account_key": key, "harness": "claude", "label": key, "model_profile_id": f.profiles["claude"]}}
+	f.submit(q)
+	f.approve(q, "connect_only")
+	return f.redeem(q)
 }

@@ -1,0 +1,484 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# AEON-459 four Mac shards. Same measured weights and inventory as go-shards.txt; these are hosted estimates, not Mac measurements.
+# Regenerate with: go run ./scripts/ci-go-shards generate -count 4 -log <job.log> -json <tests.json>
+# Whole-package times are go test elapsed milliseconds from ubuntu-latest run 36695656920.
+# Packages over 140000ms are split by test. Harness, nodes, and agentpairing keep their five-shard proportions.
+# Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.
+# A package added after that run is listed at 0ms until the next measurement.
+# A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.
+# TestList6000Performance, TestList6000FiltersPerformance and TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, in the hosted go-timing job.
+# Columns: shard milliseconds import-path [TestName]
+1 45276 github.com/inspr-at/paimos/internal/activity
+1 53121 github.com/inspr-at/paimos/internal/agentd
+1 1695 github.com/inspr-at/paimos/internal/agentpairing TestAllFiveGuidedHarnesses
+1 6303 github.com/inspr-at/paimos/internal/agentpairing TestAttachLeaseApprovalSingleUseAndActivationAtomic
+1 1801 github.com/inspr-at/paimos/internal/agentpairing TestAttachProofScopeAndDefaultOff
+1 406 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerIPv6Origin
+1 52 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerPreservesExistingAeonAndNix
+1 2966 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRejectsUnsafeAncestors
+1 264 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRequiresExactChecksumFilename
+1 2065 github.com/inspr-at/paimos/internal/agentpairing TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup
+1 3372 github.com/inspr-at/paimos/internal/agentpairing TestPairingAddHarnessAndFreshRepair
+1 2136 github.com/inspr-at/paimos/internal/agentpairing TestPairingDisconnectRequiresFreshScopePreview
+1 1854 github.com/inspr-at/paimos/internal/agentpairing TestPairingLegacyUnsupportedVerificationRemainsPairedUntilExpiry
+1 3602 github.com/inspr-at/paimos/internal/agentpairing TestPairingVerificationCannotSubstituteAnotherPairingWindow
+1 1730 github.com/inspr-at/paimos/internal/agentpairing TestStrictWatchRequiresBoundDaemonConfirmation
+1 7116 github.com/inspr-at/paimos/internal/agentpairing TestVerificationRefusalReleasesOnlyOwnedUnclaimedRun
+1 1765 github.com/inspr-at/paimos/internal/agentpairing TestWatchSettingChangeDoesNotAffectActiveModeA
+1 4191 github.com/inspr-at/paimos/internal/agentsetup
+1 6095 github.com/inspr-at/paimos/internal/attachments
+1 7 github.com/inspr-at/paimos/internal/attachwatch
+1 5 github.com/inspr-at/paimos/internal/brand
+1 26536 github.com/inspr-at/paimos/internal/business/costunits
+1 63631 github.com/inspr-at/paimos/internal/business/crm
+1 56791 github.com/inspr-at/paimos/internal/business/hours
+1 30885 github.com/inspr-at/paimos/internal/business/quotes
+1 16601 github.com/inspr-at/paimos/internal/business/quotes/collaboration
+1 68602 github.com/inspr-at/paimos/internal/db
+1 7178 github.com/inspr-at/paimos/internal/deliveryvote
+1 2878 github.com/inspr-at/paimos/internal/harness TestActivityNotesValidationHistoryAndIsolation
+1 2611 github.com/inspr-at/paimos/internal/harness TestDrainLeaseHoldsOffTheSweeper
+1 3036 github.com/inspr-at/paimos/internal/harness TestEtaHeartbeatValidationStaleAndRollup
+1 2502 github.com/inspr-at/paimos/internal/harness TestHistoricalSubscriptionUsageIsNeverPriced
+1 16 github.com/inspr-at/paimos/internal/harness TestInstructionDescriptorChecksBeforeRead
+1 2093 github.com/inspr-at/paimos/internal/harness TestListCursorKeepsLegacyFingerprintOutsideCurrentView
+1 2035 github.com/inspr-at/paimos/internal/harness TestLiveDisplayLabelIsNotThePrincipalName
+1 2235 github.com/inspr-at/paimos/internal/harness TestLiveEtaTimestampsArePerTicket
+1 2686 github.com/inspr-at/paimos/internal/harness TestLiveEtaWaitsOutAProjectMove
+1 2177 github.com/inspr-at/paimos/internal/harness TestLostContactSweepClosesOnlySilentUnmanagedSessions
+1 1810 github.com/inspr-at/paimos/internal/harness TestLostContactSweepIsSingleRunner
+1 1785 github.com/inspr-at/paimos/internal/harness TestLostContactWorkerStopReplacesReason
+1 2752 github.com/inspr-at/paimos/internal/harness TestProvenanceVisibilityIdempotencyAndTamper
+1 3186 github.com/inspr-at/paimos/internal/harness TestReceiptRecordsSixtyFourServedSetsWithoutRollback
+1 1434 github.com/inspr-at/paimos/internal/harness TestRegistrationLabelValidation
+1 3161 github.com/inspr-at/paimos/internal/harness TestRegistrationRequiresHeartbeatAndStopAuthority
+1 41 github.com/inspr-at/paimos/internal/harness TestRemoveOpenAPIResponsesAgree
+1 2160 github.com/inspr-at/paimos/internal/harness TestRemoveRevokesRulesReceiptReplay
+1 33 github.com/inspr-at/paimos/internal/harness TestRulesReceiptOpenAPIAndRoutePermissionsAgree
+1 2586 github.com/inspr-at/paimos/internal/harness TestSessionAttentionReplyLifecycleAndExplicitDelivery
+1 2427 github.com/inspr-at/paimos/internal/harness TestSessionBoundAttentionStaysWithItsGeneration
+1 1868 github.com/inspr-at/paimos/internal/harness TestSessionReadMarkerAcceptsLinkedUnboundReplies
+1 1960 github.com/inspr-at/paimos/internal/harness TestSessionReadMarkerIsolationAndMonotonic
+1 2644 github.com/inspr-at/paimos/internal/harness TestSessionReadMarkerRejectsForeignAndMissingEvents
+1 2377 github.com/inspr-at/paimos/internal/harness TestStateViewRetainsAgingAndInactiveSessions
+1 2686 github.com/inspr-at/paimos/internal/harness TestTenantHarnessList
+1 2569 github.com/inspr-at/paimos/internal/harness TestThrottledHeartbeatAndStateEvidence
+1 2477 github.com/inspr-at/paimos/internal/harness TestUsageConcurrentCumulativeReports
+1 2294 github.com/inspr-at/paimos/internal/harness TestUsageRejectsInvalidAndUnauthorized
+1 2511 github.com/inspr-at/paimos/internal/harness TestVendorSessionBinding
+1 2659 github.com/inspr-at/paimos/internal/imports
+1 4147 github.com/inspr-at/paimos/internal/inbox TestAgentScope
+1 10611 github.com/inspr-at/paimos/internal/inbox TestDeliveryLeaseFollowsDatabaseClock
+1 4927 github.com/inspr-at/paimos/internal/inbox TestEndedSessionCannotAcknowledge
+1 2512 github.com/inspr-at/paimos/internal/inbox TestFeedbackRecipient
+1 2585 github.com/inspr-at/paimos/internal/inbox TestManagedDeliveryReroutesToFrozenSimpleFallback
+1 3342 github.com/inspr-at/paimos/internal/inbox TestMessages
+1 2415 github.com/inspr-at/paimos/internal/inbox TestMessagingTargetsEncryptionVersionsAndAuthorization
+1 2610 github.com/inspr-at/paimos/internal/inbox TestPageStampsOnlyReturnedRows
+1 2781 github.com/inspr-at/paimos/internal/inbox TestPullDropsAMessageFailedAfterItWasSelected
+1 2293 github.com/inspr-at/paimos/internal/inbox TestSessionMessageMigrationPreservesUnboundHistory
+1 2512 github.com/inspr-at/paimos/internal/inbox TestSessionThreadIncludesBothDirectionsAndUnboundReplies
+1 4610 github.com/inspr-at/paimos/internal/inbox TestStreamAndPoll
+1 2439 github.com/inspr-at/paimos/internal/inbox TestSystemEventHelperIsHardened
+1 2537 github.com/inspr-at/paimos/internal/inbox TestTwoSessionsAndReplyAfterAck
+1 194 github.com/inspr-at/paimos/internal/nodes TestBulkPreconditionsSkipNodesChangedSince
+1 376 github.com/inspr-at/paimos/internal/nodes TestBulkUndoNeedsTheEditPermission
+1 412 github.com/inspr-at/paimos/internal/nodes TestClassicAssigneeProjectionAndFacets
+1 897 github.com/inspr-at/paimos/internal/nodes TestEstimateSortRollupAndRevision
+1 646 github.com/inspr-at/paimos/internal/nodes TestEstimateValidationAttributionAndPreservation
+1 31182 github.com/inspr-at/paimos/internal/nodes TestList6000FiltersWithStaleKindStatistics
+1 412 github.com/inspr-at/paimos/internal/nodes TestListAssignedLeadUsesTheSameStatement
+1 14271 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortProbesEachUnassignedRowOnce
+1 502 github.com/inspr-at/paimos/internal/nodes TestListLeadRestrictedKeyStaysStable
+1 1041 github.com/inspr-at/paimos/internal/nodes TestListLeadUsesTheViewerHeartbeatThresholds
+1 359 github.com/inspr-at/paimos/internal/nodes TestListNearestEpic
+1 901 github.com/inspr-at/paimos/internal/nodes TestListPlanningColumns
+1 305 github.com/inspr-at/paimos/internal/nodes TestMoveOutOfAnUnseenParentIsRefused
+1 194 github.com/inspr-at/paimos/internal/nodes TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly
+1 653 github.com/inspr-at/paimos/internal/nodes TestPlanningCalibrationSkipsIneligibleAndOtherRoutes
+1 300 github.com/inspr-at/paimos/internal/nodes TestPlanningRoundedCostTie
+1 1274 github.com/inspr-at/paimos/internal/nodes TestPolishedNodeList
+1 1489 github.com/inspr-at/paimos/internal/nodes TestPortalMutationGuard
+1 538 github.com/inspr-at/paimos/internal/nodes TestProjectCountsWorkKindsAndStateGroups
+1 574 github.com/inspr-at/paimos/internal/nodes TestStateSortNormalisesSpellings
+1 1938 github.com/inspr-at/paimos/internal/nodes TestTicketBenefitsCreationCompletionAndHistory
+1 21398 github.com/inspr-at/paimos/internal/nodes TestTicketGraphCap
+1 359 github.com/inspr-at/paimos/internal/nodes TestWorkingAgentConfirmsEstimate
+1 10493 github.com/inspr-at/paimos/internal/outcomes
+1 5141 github.com/inspr-at/paimos/internal/plugins
+1 3 github.com/inspr-at/paimos/internal/plugins/fence
+1 4 github.com/inspr-at/paimos/internal/quotepdf
+1 117518 github.com/inspr-at/paimos/internal/rules
+1 113 github.com/inspr-at/paimos/internal/rulesimport
+1 3 github.com/inspr-at/paimos/internal/tenant
+2 0 github.com/inspr-at/paimos
+2 0 github.com/inspr-at/paimos/internal/agentactivity
+2 527 github.com/inspr-at/paimos/internal/agentdwire
+2 1783 github.com/inspr-at/paimos/internal/agentpairing TestAttachAttemptCap
+2 5191 github.com/inspr-at/paimos/internal/agentpairing TestAttachCannotRenewChangedSession
+2 6339 github.com/inspr-at/paimos/internal/agentpairing TestAttachLeaseTenantIsolationAndConfirmedExit
+2 1836 github.com/inspr-at/paimos/internal/agentpairing TestAttachPairingFileCannotRequestActivateRenewOrUpload
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestCoordinatorScopeSetStaysNarrow
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestFormulaVersionLine
+2 353 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerPrivateSuccess
+2 141 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRefusesExistingDestination
+2 264 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRefusesForeignBin
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestGuideCommandsHaveNoPlaceholders
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFallbackEscapesVersion
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFormulaCancelKeepsKnownFormula
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFormulaGatesGuide
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFormulaMatchMismatchAndFailure
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFormulaURL
+2 35 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFormulaWatchStops
+2 9535 github.com/inspr-at/paimos/internal/agentpairing TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach
+2 1642 github.com/inspr-at/paimos/internal/agentpairing TestLocalPiSetupWithServerSelectedProfile
+2 1801 github.com/inspr-at/paimos/internal/agentpairing TestNativeGrokVerificationQualifiedOnlyOnMacOSArm64
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestNixGuideBelongsToDeploymentOnly
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestPairNextLineRejectsShell
+2 2419 github.com/inspr-at/paimos/internal/agentpairing TestPairedCodexClaimWithoutAllowanceSetup
+2 2507 github.com/inspr-at/paimos/internal/agentpairing TestPairingCustomApproverAndProgress
+2 3249 github.com/inspr-at/paimos/internal/agentpairing TestPairingDrainSelectiveRevocationAndTombstone
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestPairingGuideIsAgentReadableAndPublicRoutesExact
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestPairingGuideReleaseContract
+2 3778 github.com/inspr-at/paimos/internal/agentpairing TestPairingVerificationAndOngoingBudgetsAreIsolated
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestUnqualifiedVerificationNeverAdvertisedAsDispatchTarget
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestVerificationAdvertisementMatchesLocalAdapters
+2 0 github.com/inspr-at/paimos/internal/agentpairing TestWatchRelayNoHistoryIsolationAndBounds
+2 1748 github.com/inspr-at/paimos/internal/agentpairing TestWatchSecurityCannotBeDowngradedByRequestOrStaleReview
+2 105152 github.com/inspr-at/paimos/internal/agentruns
+2 0 github.com/inspr-at/paimos/internal/agents
+2 0 github.com/inspr-at/paimos/internal/agentverification
+2 41269 github.com/inspr-at/paimos/internal/approvals
+2 76918 github.com/inspr-at/paimos/internal/auth
+2 7973 github.com/inspr-at/paimos/internal/business/directory
+2 0 github.com/inspr-at/paimos/internal/business/quotes/confirmation
+2 0 github.com/inspr-at/paimos/internal/business/quotes/profiletar
+2 52220 github.com/inspr-at/paimos/internal/business/quotes/public
+2 25704 github.com/inspr-at/paimos/internal/business/quoteshowcase
+2 7 github.com/inspr-at/paimos/internal/config
+2 15506 github.com/inspr-at/paimos/internal/demo
+2 4 github.com/inspr-at/paimos/internal/deploytarget
+2 11992 github.com/inspr-at/paimos/internal/embedding
+2 2177 github.com/inspr-at/paimos/internal/harness TestExpiredClaimSettlesAndDoesNotBlockTheNextControl
+2 2569 github.com/inspr-at/paimos/internal/harness TestHarnessGenerationAndOwnedControls
+2 0 github.com/inspr-at/paimos/internal/harness TestHarnessPluginConstructor
+2 1985 github.com/inspr-at/paimos/internal/harness TestHarnessSessionLookup
+2 0 github.com/inspr-at/paimos/internal/harness TestInstructionDarwinSystemAliases
+2 0 github.com/inspr-at/paimos/internal/harness TestInstructionDescriptorReadFailureIsRedactedAndClosed
+2 0 github.com/inspr-at/paimos/internal/harness TestInstructionFilesStayAllowlisted
+2 0 github.com/inspr-at/paimos/internal/harness TestInstructionTraversalDeniesPathsBeforeOpening
+2 1902 github.com/inspr-at/paimos/internal/harness TestLiveAgents
+2 1751 github.com/inspr-at/paimos/internal/harness TestLiveAgentsUseTheLiveIndex
+2 2536 github.com/inspr-at/paimos/internal/harness TestLiveEtaFollowsCurrentProject
+2 1902 github.com/inspr-at/paimos/internal/harness TestLostContactRevivesOnSameWorkerProof
+2 2252 github.com/inspr-at/paimos/internal/harness TestManagedControlsRefuseUnmanagedAndUnknownPolicy
+2 2052 github.com/inspr-at/paimos/internal/harness TestManagedDeliveryFailureNotifiesSenderOnce
+2 3094 github.com/inspr-at/paimos/internal/harness TestManualReparentPermissionsAndUndo
+2 2377 github.com/inspr-at/paimos/internal/harness TestModelPricesThroughProductionAuth
+2 4588 github.com/inspr-at/paimos/internal/harness TestProvenanceReportsReplaceOnlyTheKindsTheyCarry
+2 2577 github.com/inspr-at/paimos/internal/harness TestRebindClearsEstimate
+2 2168 github.com/inspr-at/paimos/internal/harness TestRecoveryAuthorizationFencingHistoryAndRetry
+2 2477 github.com/inspr-at/paimos/internal/harness TestRecoveryClosesControlsAndPreservesOtherGenerations
+2 3512 github.com/inspr-at/paimos/internal/harness TestRecoveryRevokesUsageWithoutErasingStoppedSettlement
+2 2444 github.com/inspr-at/paimos/internal/harness TestRemoveStaleCapsEachRequest
+2 2819 github.com/inspr-at/paimos/internal/harness TestRulesReceiptBoundedHistoryAndOldReplay
+2 2252 github.com/inspr-at/paimos/internal/harness TestSessionAcceptsFullAccountCatalogLabels
+2 6039 github.com/inspr-at/paimos/internal/harness TestSessionAttentionDoesNotSpreadPrincipalObligations
+2 2027 github.com/inspr-at/paimos/internal/harness TestSessionMetadataValidationStorageAndLiveIsolation
+2 4613 github.com/inspr-at/paimos/internal/harness TestSessionMutationsOmitUnloadedStateEvidence
+2 0 github.com/inspr-at/paimos/internal/harness TestStampSessionEtaBoundary
+2 0 github.com/inspr-at/paimos/internal/harness TestUsageExactCost
+2 0 github.com/inspr-at/paimos/internal/harness TestUsageRateValidation
+2 2319 github.com/inspr-at/paimos/internal/harness TestUsageRejectsMalformedJSON
+2 2118 github.com/inspr-at/paimos/internal/harness TestUsageReportingLifecycle
+2 0 github.com/inspr-at/paimos/internal/harness TestUsageTransition
+2 2511 github.com/inspr-at/paimos/internal/harness TestVendorRefFillsOnReplay
+2 67359 github.com/inspr-at/paimos/internal/importer
+2 3098 github.com/inspr-at/paimos/internal/inbox TestAckAndSweepAgreeUnderConcurrency
+2 2585 github.com/inspr-at/paimos/internal/inbox TestAttemptCapAndSettings
+2 2415 github.com/inspr-at/paimos/internal/inbox TestCompatAckResolvesInboxIDAndProject
+2 2537 github.com/inspr-at/paimos/internal/inbox TestExactSessionLeavesOutBroadcasts
+2 2927 github.com/inspr-at/paimos/internal/inbox TestHeldResolutionAuthorizationReplayAndPending
+2 2707 github.com/inspr-at/paimos/internal/inbox TestHeldResolutionEventFailureLeavesPending
+2 2610 github.com/inspr-at/paimos/internal/inbox TestHookPullWinsOverTheFollowingAck
+2 0 github.com/inspr-at/paimos/internal/inbox TestMessagingAdapterValidation
+2 2683 github.com/inspr-at/paimos/internal/inbox TestMessagingAtomicRollbackAndProjectBoundary
+2 2829 github.com/inspr-at/paimos/internal/inbox TestProjectMessagesPagingThreadAndAddress
+2 2756 github.com/inspr-at/paimos/internal/inbox TestSessionBoundSendNeedsNoTarget
+2 2634 github.com/inspr-at/paimos/internal/inbox TestSessionMessagesIsolationAndLegacyWire
+2 2488 github.com/inspr-at/paimos/internal/inbox TestSweeperIsASingleRunner
+2 3317 github.com/inspr-at/paimos/internal/inbox TestTargets
+2 2659 github.com/inspr-at/paimos/internal/inbox TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline
+2 0 github.com/inspr-at/paimos/internal/inbox TestWebhookPolicy
+2 2608 github.com/inspr-at/paimos/internal/intake
+2 16 github.com/inspr-at/paimos/internal/localjournal
+2 6749 github.com/inspr-at/paimos/internal/modelregistry
+2 0 github.com/inspr-at/paimos/internal/nodes TestCanonicalRouteFields
+2 1256 github.com/inspr-at/paimos/internal/nodes TestConcurrentMovesPrecondition
+2 1819 github.com/inspr-at/paimos/internal/nodes TestConvertIssueKindMatrix
+2 230 github.com/inspr-at/paimos/internal/nodes TestConvertWritesOneEventAndUndo
+2 159 github.com/inspr-at/paimos/internal/nodes TestDeleteAnswersTheRevisionOfItsEvent
+2 0 github.com/inspr-at/paimos/internal/nodes TestFieldSchema
+2 305 github.com/inspr-at/paimos/internal/nodes TestKindCRUD
+2 0 github.com/inspr-at/paimos/internal/nodes TestLeadMinutesFollowTheWebRules
+2 466 github.com/inspr-at/paimos/internal/nodes TestLinkedAssigneesListFacetsPickerAndWrites
+2 29638 github.com/inspr-at/paimos/internal/nodes TestList6000WithProjectVisibility
+2 4757 github.com/inspr-at/paimos/internal/nodes TestListAssigneeFacetOverLargeImportedFields
+2 1041 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortPagesStably
+2 1561 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortUsesLiveWorkerName
+2 933 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortUsesTheNameTheViewerSees
+2 300 github.com/inspr-at/paimos/internal/nodes TestListIDsNarrowsTheQueryToTheChangedRows
+2 376 github.com/inspr-at/paimos/internal/nodes TestListLeadExactNamesUseVisibleSessionKey
+2 412 github.com/inspr-at/paimos/internal/nodes TestListLeadKeepsTheSortSnapshot
+2 359 github.com/inspr-at/paimos/internal/nodes TestLookupNodesByKeyResolvesProjectAndEarlierKeys
+2 0 github.com/inspr-at/paimos/internal/nodes TestMicrosFromText
+2 448 github.com/inspr-at/paimos/internal/nodes TestMoveDeleteAndNarrowedKind
+2 646 github.com/inspr-at/paimos/internal/nodes TestMovePreconditionCycleAndTenantIsolation
+2 0 github.com/inspr-at/paimos/internal/nodes TestPlaceRanks
+2 718 github.com/inspr-at/paimos/internal/nodes TestPlainMoveTransfersDescendantJourneyTickets
+2 2119 github.com/inspr-at/paimos/internal/nodes TestPlanningBulkUsagePerformance
+2 0 github.com/inspr-at/paimos/internal/nodes TestPlanningCalibration
+2 0 github.com/inspr-at/paimos/internal/nodes TestPlanningListCost
+2 0 github.com/inspr-at/paimos/internal/nodes TestPlanningListPlanShape
+2 0 github.com/inspr-at/paimos/internal/nodes TestPlanningMedian
+2 0 github.com/inspr-at/paimos/internal/nodes TestPlanningSampleOf
+2 848 github.com/inspr-at/paimos/internal/nodes TestPlanningSortUsesDisplayedNumbersAndCursor
+2 1418 github.com/inspr-at/paimos/internal/nodes TestPortalIndirectWritesFailClosed
+2 556 github.com/inspr-at/paimos/internal/nodes TestProjectMoveAliasAndUndo
+2 394 github.com/inspr-at/paimos/internal/nodes TestProjectMoveRejectsNestedIssues
+2 0 github.com/inspr-at/paimos/internal/nodes TestSafeListPerformancePlan
+2 0 github.com/inspr-at/paimos/internal/nodes TestSortMicrosDecimal
+2 0 github.com/inspr-at/paimos/internal/nodes TestTrimDecimal
+2 0 github.com/inspr-at/paimos/internal/nodes TestUSDFromMicros
+2 0 github.com/inspr-at/paimos/internal/nodes TestUnauthorized
+2 0 github.com/inspr-at/paimos/internal/operatoractor
+2 28 github.com/inspr-at/paimos/internal/perf
+2 3 github.com/inspr-at/paimos/internal/plugins/pharos
+2 0 github.com/inspr-at/paimos/internal/principallink/apply
+2 35806 github.com/inspr-at/paimos/internal/relations
+2 14381 github.com/inspr-at/paimos/internal/releasehistory
+2 0 github.com/inspr-at/paimos/internal/releasehistory/exporthistoric
+2 0 github.com/inspr-at/paimos/internal/releasehistory/generate
+2 0 github.com/inspr-at/paimos/internal/releasehistory/packnotes
+2 58892 github.com/inspr-at/paimos/internal/rules/doctrine
+2 0 github.com/inspr-at/paimos/internal/scopecode
+2 42 github.com/inspr-at/paimos/internal/sessionusage
+2 0 github.com/inspr-at/paimos/internal/statusautopilot
+2 0 github.com/inspr-at/paimos/internal/systemactor
+2 3605 github.com/inspr-at/paimos/internal/tenantbootstrap
+2 22093 github.com/inspr-at/paimos/internal/ticketwork
+2 0 github.com/inspr-at/paimos/internal/version
+2 0 github.com/inspr-at/paimos/internal/workorders
+2 0 github.com/inspr-at/paimos/internal/workqueue
+2 0 github.com/inspr-at/paimos/scripts
+2 0 github.com/inspr-at/paimos/scripts/ci-runner-guard
+2 0 github.com/inspr-at/paimos/scripts/onboarding-platform
+2 4 github.com/inspr-at/paimos/scripts/pdf-visual-diff
+2 0 github.com/inspr-at/paimos/web
+3 60712 github.com/inspr-at/paimos/cmd/aeon
+3 31509 github.com/inspr-at/paimos/cmd/aeon-agentd
+3 98754 github.com/inspr-at/paimos/internal/agentaccounts
+3 2065 github.com/inspr-at/paimos/internal/agentpairing TestAttachApprovalIdentityAndLease
+3 55919 github.com/inspr-at/paimos/internal/agentpairing TestAttachModesProtectionMatrix
+3 812 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerPairLineFollowsPath
+3 17 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRejectsDisguisedHomeLink
+3 300 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRetargetsOwnedLink
+3 70 github.com/inspr-at/paimos/internal/agentpairing TestHomebrewFormulaTimeoutIsUnknown
+3 2507 github.com/inspr-at/paimos/internal/agentpairing TestPairedCapacityReadingsThroughAuthMiddleware
+3 2613 github.com/inspr-at/paimos/internal/agentpairing TestPairingApprovalRedemptionIsolationAndOneShot
+3 3249 github.com/inspr-at/paimos/internal/agentpairing TestPairingClaimDisconnectRaceAndVerificationExpiry
+3 2736 github.com/inspr-at/paimos/internal/agentpairing TestPairingConcurrentApprovalAndRedemption
+3 2913 github.com/inspr-at/paimos/internal/agentpairing TestPairingExpiredReservationReleasesSlotAndAllowsOngoing
+3 5103 github.com/inspr-at/paimos/internal/agentpairing TestPairingExpiryClaimRaceKeepsClaimedAccounting
+3 2931 github.com/inspr-at/paimos/internal/agentpairing TestPairingTenantAndInputValidation
+3 2118 github.com/inspr-at/paimos/internal/agentpairing TestPairingVerificationCapabilitiesEnforcedAndProgressTruthful
+3 3602 github.com/inspr-at/paimos/internal/agentpairing TestPairingZeroUsageCannotRefillOrSubstituteAccount
+3 1624 github.com/inspr-at/paimos/internal/agentpairing TestPiPairingConnectOnly
+3 1606 github.com/inspr-at/paimos/internal/agentpairing TestPiPairingSelectsOnlyTheConfiguredProvider
+3 3372 github.com/inspr-at/paimos/internal/agentpairing TestStrictWatchUnavailableOnLinuxAndLegacyDaemon
+3 1765 github.com/inspr-at/paimos/internal/agentpairing TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped
+3 8555 github.com/inspr-at/paimos/internal/business
+3 6689 github.com/inspr-at/paimos/internal/capacity
+3 6 github.com/inspr-at/paimos/internal/eta
+3 41898 github.com/inspr-at/paimos/internal/events
+3 2692 github.com/inspr-at/paimos/internal/fromclassic
+3 4543 github.com/inspr-at/paimos/internal/greetings
+3 4 github.com/inspr-at/paimos/internal/grokprobe
+3 8 github.com/inspr-at/paimos/internal/harness TestControlRelayUsesDatabaseBudgetAndMonotonicRetention
+3 2235 github.com/inspr-at/paimos/internal/harness TestDrainMarksListeningAndStopFailsBoundMessages
+3 2035 github.com/inspr-at/paimos/internal/harness TestEtaMigrationLockAndValidation
+3 13731 github.com/inspr-at/paimos/internal/harness TestForceStopOwnershipFreshness
+3 9626 github.com/inspr-at/paimos/internal/harness TestHarnessInboxLeaseAndExactAck
+3 2460 github.com/inspr-at/paimos/internal/harness TestHeartbeatLabelAndMetadataHistory
+3 33 github.com/inspr-at/paimos/internal/harness TestInstructionDarwinAliasTargetBoundary
+3 41 github.com/inspr-at/paimos/internal/harness TestInstructionTraversalNameSwaps
+3 1743 github.com/inspr-at/paimos/internal/harness TestLostContactSweepIsTenantScoped
+3 2152 github.com/inspr-at/paimos/internal/harness TestLostContactThresholdIsTenantSetting
+3 3278 github.com/inspr-at/paimos/internal/harness TestManagedForceStopHumanConfirmationAndGenerationFences
+3 2769 github.com/inspr-at/paimos/internal/harness TestManagedRulesRespectRequestAndRegisteredCeilings
+3 2594 github.com/inspr-at/paimos/internal/harness TestReceiptOmitsSetsWhenALowerVersionSetLeavesTheBytesUnchanged
+3 3954 github.com/inspr-at/paimos/internal/harness TestRecoveryProjectPermissionDoesNotReachAnotherProject
+3 1927 github.com/inspr-at/paimos/internal/harness TestRemovalSaysWhetherTheCallerMayUndo
+3 18023 github.com/inspr-at/paimos/internal/harness TestRemoveAnyStateAndFenceGeneration
+3 2352 github.com/inspr-at/paimos/internal/harness TestRulesReceiptByteSizeBoundary
+3 2327 github.com/inspr-at/paimos/internal/harness TestRulesReceiptContextCredentialAndGenerationFencing
+3 3136 github.com/inspr-at/paimos/internal/harness TestRulesReceiptRejectsUnboundedOrAuthorityClaims
+3 2269 github.com/inspr-at/paimos/internal/harness TestSessionAttentionExactRunAndFutureGeneration
+3 1977 github.com/inspr-at/paimos/internal/harness TestSessionAttentionVisibilityAndMessageProjectIsolation
+3 1826 github.com/inspr-at/paimos/internal/harness TestSessionLabelsAndLiveHierarchy
+3 2452 github.com/inspr-at/paimos/internal/harness TestSessionModelRequestUsesAccountGrants
+3 2511 github.com/inspr-at/paimos/internal/harness TestSessionRequestLifecycleAndFences
+3 5305 github.com/inspr-at/paimos/internal/harness TestSettingsCompletionUsesDatabaseClockUnderSkew
+3 2427 github.com/inspr-at/paimos/internal/harness TestStateEvidenceTracksRunOutcomeAndApprovalResolution
+3 1843 github.com/inspr-at/paimos/internal/harness TestThrottledCoordinatorResolution
+3 1801 github.com/inspr-at/paimos/internal/harness TestUsageModelAndAccountLabelLimits
+3 2102 github.com/inspr-at/paimos/internal/harness TestUsagePricingIsolationAndStorageConstraints
+3 2494 github.com/inspr-at/paimos/internal/harness TestUsageUnknownAndLatePricing
+3 22368 github.com/inspr-at/paimos/internal/httpapi
+3 19 github.com/inspr-at/paimos/internal/identity
+3 6218 github.com/inspr-at/paimos/internal/importer/offers
+3 2659 github.com/inspr-at/paimos/internal/inbox TestCoordinatorCopyPrivacy
+3 4683 github.com/inspr-at/paimos/internal/inbox TestInboxReceipt
+3 2561 github.com/inspr-at/paimos/internal/inbox TestLegacyHealIsOneTime
+3 2683 github.com/inspr-at/paimos/internal/inbox TestManagedSettlementUsesTheOneFailurePath
+3 2610 github.com/inspr-at/paimos/internal/inbox TestMessagingAddressAuthSnapshotAndConcurrentSend
+3 3073 github.com/inspr-at/paimos/internal/inbox TestMessagingPaginationHeldFilterAndEvents
+3 2561 github.com/inspr-at/paimos/internal/inbox TestMessagingReplyObligationsHeldIsolationAndReplay
+3 2634 github.com/inspr-at/paimos/internal/inbox TestProjectOnlyCallersCanFailMessages
+3 2585 github.com/inspr-at/paimos/internal/inbox TestReceiverDeliveryClaimCompleteAndCursor
+3 2512 github.com/inspr-at/paimos/internal/inbox TestReplyToHeldParentStaysInvisible
+3 2415 github.com/inspr-at/paimos/internal/inbox TestStreamCarriesSessionMessagesAndMarksListening
+3 3 github.com/inspr-at/paimos/internal/linkvault
+3 1346 github.com/inspr-at/paimos/internal/nodes TestBulkChangeSkipsWithReasonsAndUndoesAsOne
+3 230 github.com/inspr-at/paimos/internal/nodes TestConvertCustomIssueFamily
+3 265 github.com/inspr-at/paimos/internal/nodes TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants
+3 27430 github.com/inspr-at/paimos/internal/nodes TestList6000Performance
+3 628 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortLeadsWithTheAttentionState
+3 1346 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortSkipsLiveLookupForStoredPeople
+3 1866 github.com/inspr-at/paimos/internal/nodes TestListFiltersExclusionsLabelsEpicsAndDates
+3 2208 github.com/inspr-at/paimos/internal/nodes TestListLeadExactPublicTiesIgnoreHiddenRenames
+3 987 github.com/inspr-at/paimos/internal/nodes TestListLeadTieBreakIgnoresWithheldSessionIDs
+3 412 github.com/inspr-at/paimos/internal/nodes TestLookupNodesByKeyHidesProjectsTheCallerCannotSee
+3 448 github.com/inspr-at/paimos/internal/nodes TestMovePreconditions
+3 177 github.com/inspr-at/paimos/internal/nodes TestPatchRefusesDifferentKind
+3 5493 github.com/inspr-at/paimos/internal/nodes TestPeopleSayWhetherTheyHaveAPicture
+3 969 github.com/inspr-at/paimos/internal/nodes TestPlainMoveTransfersJourneyAndUndoRestoresIt
+3 466 github.com/inspr-at/paimos/internal/nodes TestProjectSummaryRecentPeople
+3 394 github.com/inspr-at/paimos/internal/nodes TestRouteRoleAndAreaProvenance
+3 376 github.com/inspr-at/paimos/internal/nodes TestServicePrincipalsCannotBeAssignees
+3 574 github.com/inspr-at/paimos/internal/nodes TestTagAssignmentMutationIsAtomicAndTenantScoped
+3 323 github.com/inspr-at/paimos/internal/nodes TestTagMutationRollsBackAfterEventFailure
+3 323 github.com/inspr-at/paimos/internal/nodes TestTenantIsolation
+3 1777 github.com/inspr-at/paimos/internal/nodes TestTicketBenefitsBulkAndUndo
+3 359 github.com/inspr-at/paimos/internal/nodes TestTicketBenefitsConcurrentFieldsAndCompletion
+3 736 github.com/inspr-at/paimos/internal/nodes TestTicketGraphAgentKeyScope
+3 10521 github.com/inspr-at/paimos/internal/principallink
+3 50566 github.com/inspr-at/paimos/internal/requirements
+3 61 github.com/inspr-at/paimos/internal/rulescompare
+3 30987 github.com/inspr-at/paimos/internal/search
+3 3 github.com/inspr-at/paimos/internal/sessionrequest
+3 94052 github.com/inspr-at/paimos/internal/stagehandoff
+3 523 github.com/inspr-at/paimos/scripts/rules-bootstrap
+4 4432 github.com/inspr-at/paimos/internal/agentpairing TestAddHarnessApprovalSupersedesOnlyQueuedVerification
+4 5368 github.com/inspr-at/paimos/internal/agentpairing TestAttachDaemonRestartInvalidatesEveryApproval
+4 22372 github.com/inspr-at/paimos/internal/agentpairing TestAttachEarlyTextAlwaysDetaches
+4 1765 github.com/inspr-at/paimos/internal/agentpairing TestAttachEnrollmentRemovalEndsApproval
+4 3390 github.com/inspr-at/paimos/internal/agentpairing TestAttachLeaseRejectsTextViewerAndChangedScope
+4 6621 github.com/inspr-at/paimos/internal/agentpairing TestAttachLeaseSessionsRevokeIndependentlyAndExpireOffline
+4 3602 github.com/inspr-at/paimos/internal/agentpairing TestAttachLiveStreamRevokesAndNeverStoresText
+4 1748 github.com/inspr-at/paimos/internal/agentpairing TestAttachRegisteredKeyStillRequiresSnapshotDigest
+4 317 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerRejectsCorruptHash
+4 2507 github.com/inspr-at/paimos/internal/agentpairing TestLaterConnectOnlyApprovalCancelsQueuedVerification
+4 1907 github.com/inspr-at/paimos/internal/agentpairing TestLocalAuthCapabilityFollowsDaemonRegistration
+4 2260 github.com/inspr-at/paimos/internal/agentpairing TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain
+4 2666 github.com/inspr-at/paimos/internal/agentpairing TestObservedCapacityPreservesSeparatePairingApproval
+4 3990 github.com/inspr-at/paimos/internal/agentpairing TestPairingExpiryAttemptsAndRateLimit
+4 2013 github.com/inspr-at/paimos/internal/agentpairing TestPairingHarnessStatusesStayScopedAndRecover
+4 3072 github.com/inspr-at/paimos/internal/agentpairing TestPairingImmediateRevokeRetainsActiveAccounting
+4 2807 github.com/inspr-at/paimos/internal/agentpairing TestPairingRevokedCleanupPreservesUnconfirmedAccounting
+4 4732 github.com/inspr-at/paimos/internal/agentpairing TestPairingSupervisorHTTPVerificationRoutesUnboundQueue
+4 2207 github.com/inspr-at/paimos/internal/agentpairing TestPairingUnsupportedVerificationFailsAndComputerBecomesReady
+4 2542 github.com/inspr-at/paimos/internal/agentpairing TestPartialAttentionCountsSixOfSeven
+4 1765 github.com/inspr-at/paimos/internal/agentpairing TestPartialAttentionStaysOnReadyHarness
+4 1430 github.com/inspr-at/paimos/internal/agentpairing TestPathProofCommandsRunInShells
+4 53460 github.com/inspr-at/paimos/internal/authz
+4 39000 github.com/inspr-at/paimos/internal/cli
+4 269 github.com/inspr-at/paimos/internal/client
+4 6865 github.com/inspr-at/paimos/internal/dbtest
+4 2118 github.com/inspr-at/paimos/internal/harness TestArchivedSessionRejectsProvenanceReplayAndNewRevision
+4 8 github.com/inspr-at/paimos/internal/harness TestAutomaticProvenanceFitsTheRulesBudget
+4 11745 github.com/inspr-at/paimos/internal/harness TestCoordinatorHandover
+4 1860 github.com/inspr-at/paimos/internal/harness TestCurrentViewHidesSessionsEndedADayAgo
+4 2319 github.com/inspr-at/paimos/internal/harness TestDeletingSessionRemovesReadMarkers
+4 2527 github.com/inspr-at/paimos/internal/harness TestHarnessBindingRevisionAndHierarchy
+4 2652 github.com/inspr-at/paimos/internal/harness TestHarnessReporterOmitsUnusedEta
+4 2444 github.com/inspr-at/paimos/internal/harness TestHarnessSessionMessagesNeverMoveToAnotherGeneration
+4 8 github.com/inspr-at/paimos/internal/harness TestInstructionDescriptorBoundsGrowthDuringRead
+4 50 github.com/inspr-at/paimos/internal/harness TestInstructionTraversalRejectsAncestorAndLeafLinks
+4 1509 github.com/inspr-at/paimos/internal/harness TestLabelMigrationPreservesExistingGenerationsAsAppOwner
+4 3361 github.com/inspr-at/paimos/internal/harness TestLateSettingCompletionUnderSkewStillReleasesTheNextControl
+4 2611 github.com/inspr-at/paimos/internal/harness TestLiveEtaUsesTheLeaseProof
+4 1993 github.com/inspr-at/paimos/internal/harness TestLostContactStaysClosedAfterItsReplacementStops
+4 1835 github.com/inspr-at/paimos/internal/harness TestLostContactStaysClosedWhenRemovedOrReplaced
+4 2077 github.com/inspr-at/paimos/internal/harness TestManagedControlFreshnessUsesDatabaseClock
+4 1685 github.com/inspr-at/paimos/internal/harness TestManagedControlsIdentityReplayPrivacyAndExpiry
+4 2435 github.com/inspr-at/paimos/internal/harness TestManagedSettingsCatalogLifecycleAndFencing
+4 2736 github.com/inspr-at/paimos/internal/harness TestPendingApprovalStateRespectsProjectVisibility
+4 2385 github.com/inspr-at/paimos/internal/harness TestReceiptRecordsRuleSourcesWithoutContent
+4 1793 github.com/inspr-at/paimos/internal/harness TestRemovalUndoRestoresTheRecord
+4 2252 github.com/inspr-at/paimos/internal/harness TestRemoveStaleUsesAcceptedHeartbeatAndIsIdempotent
+4 2152 github.com/inspr-at/paimos/internal/harness TestRulesClientReportsAreOptionalLeaseBoundAndDowngradeSafe
+4 2085 github.com/inspr-at/paimos/internal/harness TestRulesReceiptAppendCASPreservesInstructionProvenance
+4 1868 github.com/inspr-at/paimos/internal/harness TestRulesReceiptConcurrentConflictAndReplay
+4 2627 github.com/inspr-at/paimos/internal/harness TestRulesReceiptProductionAuthAndNoAuthorityChange
+4 5372 github.com/inspr-at/paimos/internal/harness TestSessionEtaStalenessUsesDatabaseClock
+4 2494 github.com/inspr-at/paimos/internal/harness TestSessionReadMarkerConcurrentPutsKeepTheMax
+4 2761 github.com/inspr-at/paimos/internal/harness TestUsageMonotonicHTTPAndAccountMetadata
+4 2394 github.com/inspr-at/paimos/internal/harness TestUsageReasoningRoundTrip
+4 6 github.com/inspr-at/paimos/internal/harnesslaunch
+4 2585 github.com/inspr-at/paimos/internal/inbox TestAckWaitsBehindSessionClose
+4 3195 github.com/inspr-at/paimos/internal/inbox TestCompletionBeatsSweeperUnderConcurrency
+4 3146 github.com/inspr-at/paimos/internal/inbox TestDirectSessionSendBindingAndLegacyShape
+4 2561 github.com/inspr-at/paimos/internal/inbox TestLegacyMessagesAreExempt
+4 2951 github.com/inspr-at/paimos/internal/inbox TestReceiptThroughAuthGate
+4 2610 github.com/inspr-at/paimos/internal/inbox TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion
+4 2463 github.com/inspr-at/paimos/internal/inbox TestSessionDeadlineDeliveredThenFailedLoudly
+4 2585 github.com/inspr-at/paimos/internal/inbox TestSessionEndFailsBoundMessagesAndCopiesCoordinator
+4 2829 github.com/inspr-at/paimos/internal/inbox TestSessionMessageHistoryAndLifecycle
+4 2512 github.com/inspr-at/paimos/internal/inbox TestUnboundReceiptsAckHealAndBlockedDeadline
+4 5049 github.com/inspr-at/paimos/internal/inbox TestWakeDelivery
+4 97514 github.com/inspr-at/paimos/internal/journey
+4 97202 github.com/inspr-at/paimos/internal/knowledge
+4 212 github.com/inspr-at/paimos/internal/nodes TestConvertDropsFieldsOutsideAClosedSchema
+4 177 github.com/inspr-at/paimos/internal/nodes TestConvertValidatesRootSchemaConstraints
+4 1130 github.com/inspr-at/paimos/internal/nodes TestHideClosedAgreesWithBuckets
+4 40875 github.com/inspr-at/paimos/internal/nodes TestList6000FiltersPerformance
+4 19118 github.com/inspr-at/paimos/internal/nodes TestListAssigneeSortStoppedOnlyProbesAtMostOnce
+4 610 github.com/inspr-at/paimos/internal/nodes TestListCursorFiltersAndTree
+4 448 github.com/inspr-at/paimos/internal/nodes TestListLeadPermissionProjection
+4 27896 github.com/inspr-at/paimos/internal/nodes TestListWithoutStatistics
+4 359 github.com/inspr-at/paimos/internal/nodes TestLookupNodesIsBoundedAndTenantScoped
+4 376 github.com/inspr-at/paimos/internal/nodes TestNodeKeysFieldsAndEvents
+4 341 github.com/inspr-at/paimos/internal/nodes TestPatchPreconditionAtomic
+4 812 github.com/inspr-at/paimos/internal/nodes TestPlanningCostMicrosAgree
+4 388 github.com/inspr-at/paimos/internal/nodes TestPlanningHugeUsageDoesNotBreakTheList
+4 547 github.com/inspr-at/paimos/internal/nodes TestPlanningSourceProjectCosts
+4 987 github.com/inspr-at/paimos/internal/nodes TestProjectStatusBuckets
+4 412 github.com/inspr-at/paimos/internal/nodes TestSchemaAndTagMutationsRequirePersonAdmin
+4 825 github.com/inspr-at/paimos/internal/nodes TestStateSortFollowsWorkflow
+4 520 github.com/inspr-at/paimos/internal/nodes TestTicketGraphQueryCount
+4 1130 github.com/inspr-at/paimos/internal/nodes TestTicketGraphShapeClosedFilterAndIsolation
+4 287 github.com/inspr-at/paimos/internal/nodes TestWriterSeam
+4 33 github.com/inspr-at/paimos/internal/openrouter
+4 41 github.com/inspr-at/paimos/internal/ownedprocess
+4 126 github.com/inspr-at/paimos/internal/piprobe
+4 3 github.com/inspr-at/paimos/internal/plugins/janus
+4 52685 github.com/inspr-at/paimos/internal/portal
+4 7624 github.com/inspr-at/paimos/internal/profile
+4 13471 github.com/inspr-at/paimos/internal/projectgroups
+4 59811 github.com/inspr-at/paimos/internal/releases
+4 444 github.com/inspr-at/paimos/internal/reportercontract
+4 3 github.com/inspr-at/paimos/internal/ticketbenefits
+4 22407 github.com/inspr-at/paimos/internal/usagedashboard
+4 8973 github.com/inspr-at/paimos/internal/views
+4 4 github.com/inspr-at/paimos/scripts/ci-go-shards

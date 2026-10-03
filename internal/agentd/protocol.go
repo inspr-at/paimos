@@ -18,15 +18,20 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+
+	"github.com/inspr-at/paimos/internal/capacity"
 )
 
 type wireProcess struct {
+	limitVendor   string
+	vendorLimited atomic.Bool
+
 	identity    ownedprocess.Identity
 	lifetime    *ownedprocess.Lifetime
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
 	stdout      io.ReadCloser
-	writeMu     sync.Mutex
+	writeMu     contextMutex
 	mu          sync.Mutex
 	eventMu     sync.Mutex
 	pending     map[string]chan json.RawMessage
@@ -63,6 +68,12 @@ func pinnedExecutable(path string) (string, error) {
 }
 
 func launchWire(path string, args []string, workspace string, environment []string, protocol string, observe func(AdapterEvent)) (*wireProcess, error) {
+	return launchWireChecked(path, args, workspace, environment, protocol, observe, func(p *wireProcess) error { return p.lifetime.Verify() })
+}
+
+// The per-launch check allows lifecycle tests to place an exit precisely
+// between the initial group check and the retained lifetime's verification.
+func launchWireChecked(path string, args []string, workspace string, environment []string, protocol string, observe func(AdapterEvent), check func(*wireProcess) error) (*wireProcess, error) {
 	if !ownedprocess.TrackingSupported() {
 		return nil, errors.New("safe child lifetime observation unsupported")
 	}
@@ -94,6 +105,8 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	cmd.Stdout = childStdout
 	defer childStdout.Close()
 	cmd.Stderr = io.Discard
+	// Bound exec's stderr copier even if a writer survives group cleanup.
+	cmd.WaitDelay = 2 * time.Second
 	configured := ownedprocess.Configure(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
@@ -110,7 +123,17 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	p := &wireProcess{cmd: cmd, stdin: stdin, stdout: stdout, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
 	p.identity = ownedprocess.Identity{ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: time.Now().UTC()}
 	p.lifetime = ownedprocess.Track(cmd)
-	go func() { p.waitErr = p.lifetime.Wait(); close(p.waitDone) }()
+	if err := check(p); err != nil {
+		// Start completed Setpgid and no waiter has reaped the leader yet.
+		// Its reserved PID still identifies this launch's group even when
+		// the leader has exited and verification can no longer observe it.
+		_ = ownedprocess.Signal(cmd, true)
+		_ = p.lifetime.Wait()
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, err
+	}
+	go func() { p.waitErr = p.lifetime.WaitGroup(); _ = stdin.Close(); close(p.waitDone) }()
 	go p.read(stdout)
 	return p, nil
 }
@@ -171,10 +194,19 @@ func (p *wireProcess) finishReader() error {
 // reader itself, including when Stop finds the root already reaped.
 func (p *wireProcess) failStart(err error) (Process, error) {
 	p.closeReader()
-	_ = p.Stop(context.Background())
-	_ = p.finishReader()
-	return nil, err
+	cleanupErr := errors.Join(p.Stop(context.Background()), p.finishReader())
+	// A vendor refusal is a settled run only when the owned child exit is proven.
+	// Return that process to the supervisor for normal vendor_limit telemetry.
+	if cleanupErr == nil && p.vendorLimited.Load() && p.ProcessExited() {
+		return &refusedProcess{p}, nil
+	}
+	return nil, errors.Join(err, cleanupErr)
 }
+
+// A refused startup exposes exit evidence and no controls.
+type refusedProcess struct{ *wireProcess }
+
+func (*refusedProcess) Control(context.Context, string, string) error { return ErrNotOwned }
 
 // discardReader is also available to the supervisor if startup fails after
 // Start succeeds but before a monitor takes ownership of Wait.
@@ -211,7 +243,7 @@ func (p *wireProcess) read(src io.Reader) {
 			break
 		}
 		id := strings.Trim(string(frame.ID), "\"")
-		if id != "" && (p.protocol != "pi" || frame.Type == "response") {
+		if id != "" && (p.protocol == "pi" && frame.Type == "response" || p.protocol != "pi" && frame.Method == "") {
 			p.mu.Lock()
 			ch := p.pending[id]
 			if ch != nil {
@@ -253,14 +285,23 @@ func (p *wireProcess) send(v any) error {
 }
 
 func (p *wireProcess) sendContext(ctx context.Context, v any) error {
+	ctx, cancel := operationContext(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	if len(data) > 2<<20 {
+	// A 512 KB rules file plus a bounded prompt can expand sixfold in JSON.
+	// Keep transport bounded while allowing the decoded launch limits.
+	if len(data) > 8<<20 {
 		return errors.New("adapter request exceeds bound")
 	}
-	p.writeMu.Lock()
+	if err := p.writeMu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer p.writeMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -268,7 +309,42 @@ func (p *wireProcess) sendContext(ctx context.Context, v any) error {
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= 0 {
 		return context.DeadlineExceeded
 	}
+	// Closing the owned pipe interrupts a blocked Write. Never leave an
+	// asynchronous writer that could deliver an expired frame later. A partial
+	// frame poisons the stream, so cancellation also ends the owned child.
+	closed := make(chan struct{})
+	closeInput := func() {
+		_ = p.stdin.Close()
+		p.closeReader()
+		if p.lifetime != nil {
+			_ = p.lifetime.Signal(true)
+		}
+	}
+	stopClose := context.AfterFunc(ctx, func() {
+		closeInput()
+		close(closed)
+	})
 	_, err = p.stdin.Write(append(data, '\n'))
+	stopped := stopClose()
+	if !stopped {
+		<-closed
+	}
+	if ctx.Err() != nil {
+		if stopped {
+			closeInput()
+		}
+		// Await the retained root's cleanup, not a numeric PID lookup. Do not
+		// join the reader here: an event callback may itself be this writer.
+		if p.waitDone != nil {
+			select {
+			case <-p.waitDone:
+				return errors.Join(ctx.Err(), p.cleanupResult())
+			case <-time.After(readerCleanupTimeout):
+				return errors.Join(ctx.Err(), errors.New("adapter child cleanup unconfirmed"))
+			}
+		}
+		return ctx.Err()
+	}
 	if err != nil {
 		return errors.New("adapter input unavailable")
 	}
@@ -312,7 +388,7 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 	} else {
 		frame = map[string]any{"jsonrpc": "2.0", "id": number, "method": method, "params": params}
 	}
-	if err := p.send(frame); err != nil {
+	if err := p.sendContext(ctx, frame); err != nil {
 		return nil, err
 	}
 	var raw json.RawMessage
@@ -338,6 +414,9 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 		return nil, errors.New("adapter protocol rejected request")
 	}
 	if len(response.Error) > 0 && string(response.Error) != "null" {
+		if hit := capacity.VendorLimit(p.limitVendor, raw, nil, time.Now().UTC()); hit != nil {
+			p.emitVendorLimit(hit)
+		}
 		// Only this explicit rejection proves steer did not inject input.
 		// Never expose raw vendor errors or retry transport/malformed responses.
 		var rejection struct {
@@ -389,7 +468,7 @@ func (p *wireProcess) Stop(ctx context.Context) error {
 	if err := p.lifetime.Verify(); err != nil {
 		select {
 		case <-p.waitDone:
-			return nil
+			return p.cleanupResult()
 		default:
 			return ErrNotOwned
 		}
@@ -399,15 +478,29 @@ func (p *wireProcess) Stop(ctx context.Context) error {
 	}
 	select {
 	case <-p.waitDone:
-		return nil
+		return p.cleanupResult()
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(2 * time.Second):
-		if err := p.lifetime.Verify(); err == nil {
-			return p.lifetime.Signal(true)
+		// WaitGroup may already own final signaling. In either case observe
+		// cleanup before reporting that this owned process has stopped.
+		_ = p.lifetime.Signal(true)
+		select {
+		case <-p.waitDone:
+			return p.cleanupResult()
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(readerCleanupTimeout):
+			return ErrForceExitUnconfirmed
 		}
-		return nil
 	}
+}
+
+func (p *wireProcess) cleanupResult() error {
+	if errors.Is(p.waitErr, ownedprocess.ErrCleanupUnconfirmed) {
+		return ownedprocess.ErrCleanupUnconfirmed
+	}
+	return nil
 }
 
 // Ownership is available only while this exact, unreaped group leader is owned.

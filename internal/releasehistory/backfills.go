@@ -52,7 +52,7 @@ func ResolveProject(ctx context.Context, tx pgx.Tx, key string) (string, error) 
 }
 
 // WithBackfills adds a tenant-scoped database overlay for one product project.
-// The build's tag snapshots stay authoritative. No live ticket fields are read.
+// A tenant capture wins over portable public notes. No live ticket fields are read.
 func (m *Module) WithBackfills(pool *pgxpool.Pool, projectKey string) *Module {
 	m.pool, m.projectKey = pool, projectKey
 	return m
@@ -119,9 +119,6 @@ func (m *Module) historyFor(ctx context.Context) (History, error) {
 			if p, ok := presentations[rel.Version]; ok {
 				h.Releases[i].Presentation = &p
 			}
-			if HasSnapshot(rel) {
-				continue
-			}
 			raw, ok := snapshots[rel.Version]
 			if !ok {
 				continue
@@ -131,7 +128,10 @@ func (m *Module) historyFor(ctx context.Context) (History, error) {
 				// A malformed stored capture must not hide every other release.
 				// Log identifiers only: decoder errors can include private field names.
 				slog.WarnContext(ctx, "invalid release note snapshot; using historical fallback", "version", rel.Version, "project_node_id", project)
-				h.Releases[i].Notes = MissingNotes()
+				// Malformed tenant data must not erase valid embedded notes.
+				if !HasSnapshot(rel) {
+					h.Releases[i].Notes = MissingNotes()
+				}
 				continue
 			}
 			h.Releases[i].Notes = notes

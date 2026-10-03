@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { listAccounts, listAllSessions, subscribeAgents, type HarnessSession } from '../src/lib/agents'
+import { listAccounts, subscribeAgents } from '../src/lib/agents'
+import { listAllSessions, type HarnessSessionRow } from '../src/lib/agentRows'
 import { useAgents } from '../src/stores/agents'
+import { wired, wiredPage } from './wire-fixtures'
 
+type HarnessSession = HarnessSessionRow
 vi.mock('../src/lib/agents', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/agents')>(),
-  listAllSessions: vi.fn(),
-  listAccounts: vi.fn().mockResolvedValue([]), listApprovals: async () => [], listRuns: async () => ({ items: [] }),
+  listAccounts: vi.fn().mockResolvedValue([]), listApprovals: async () => [],
   listModels: async () => [], listMessages: async () => ({ items: [] }), listTargets: async () => [],
 }))
+vi.mock('../src/lib/agentRows', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/lib/agentRows')>(),
+  listAllSessions: vi.fn(), listRuns: async () => ({ items: [], next_cursor: null }),
+}))
 vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ byId: () => undefined, load: async () => {} }) }))
-const page = (ids: string[], cursor: string | null = null) => ({ items: ids.map(id => ({ id }) as HarnessSession), next_cursor: cursor })
+const page = (ids: string[], cursor: string | null = null) => wiredPage(ids.map(id => ({ id }) as HarnessSession), cursor)
 beforeEach(() => { setActivePinia(createPinia()); vi.mocked(listAllSessions).mockReset() })
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -61,11 +67,11 @@ it('pulses only when the latest activity entry advances across session polls', a
   const session = (activity_note_id: number, activity_sequence: number, heartbeat_at: string) =>
     ({ id: 'lead', activity_note_id, activity_note: 'Running tests', activity_sequence, heartbeat_at }) as HarnessSession
   const at = '2026-09-26T12:00:00Z'
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [session(7, 3, at)], next_cursor: null })
-    .mockResolvedValueOnce({ items: [session(7, 4, '2026-09-26T12:01:00Z')], next_cursor: null })
-    .mockResolvedValueOnce({ items: [session(8, 4, '2026-09-26T12:01:00Z')], next_cursor: null })
-    .mockResolvedValueOnce({ items: [session(7, 4, at)], next_cursor: null })
-    .mockResolvedValueOnce({ items: [session(8, 4, at)], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValueOnce(wiredPage([session(7, 3, at)]))
+    .mockResolvedValueOnce(wiredPage([session(7, 4, '2026-09-26T12:01:00Z')]))
+    .mockResolvedValueOnce(wiredPage([session(8, 4, '2026-09-26T12:01:00Z')]))
+    .mockResolvedValueOnce(wiredPage([session(7, 4, at)]))
+    .mockResolvedValueOnce(wiredPage([session(8, 4, at)]))
   const store = useAgents()
   await store.refreshSessions()
   expect(store.eventPulseFor('lead')).toBe(0)
@@ -103,7 +109,7 @@ it('consumes registered/stopped signals and refreshes when the existing stream r
   const changed = vi.fn(), connection = vi.fn()
   const stop = subscribeAgents(changed, connection)
   const stream = Stream.current
-  expect(stream.url).toBe('/api/events/stream')
+  expect(stream.url).toBe('/api/events/stream?after=latest')
   stream.onopen!()
   stream.dispatchEvent(new Event('harness.registered'))
   stream.dispatchEvent(new Event('harness.stopped'))
@@ -115,41 +121,63 @@ it('consumes registered/stopped signals and refreshes when the existing stream r
   expect(stream.close).toHaveBeenCalledOnce()
 })
 
+it('tier and completion events wake consumers while heartbeats remain quiet', () => {
+  class Stream extends EventTarget {
+    static current: Stream
+    onopen = null
+    onerror = null
+    close = vi.fn()
+    constructor() { super(); Stream.current = this }
+  }
+  vi.stubGlobal('EventSource', Stream)
+  const changed = vi.fn(), stop = subscribeAgents(changed)
+  const kinds = ['tier_requested', 'tier_declined', 'tier_reported', 'tier_changed', 'tier_cancelled', 'control_completed']
+  for (const kind of kinds) Stream.current.dispatchEvent(new Event(`harness.${kind}`))
+  expect(changed.mock.calls).toEqual(kinds.map(kind => [`harness.${kind}`]))
+  Stream.current.dispatchEvent(new Event('harness.heartbeat'))
+  expect(changed).toHaveBeenCalledTimes(kinds.length)
+  stop()
+})
+
 const currentSession = (fields: Partial<HarnessSession> = {}) => ({
-  id: 's1', project_id: 'p1', agent_principal_id: 'a1', run_id: 'r1', revision: 3, harness: 'codex', host: 'workstation',
+  id: 's1', project_id: 'p1', agent_principal_id: 'a1', run_id: 'r1', revision: 3, row_version: 3, harness: 'codex', host: 'workstation',
   phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(),
   stopped_at: null, stop_reason: null, has_problem: false, needs_attention: false, run_status: null, ...fields,
 }) as HarnessSession
 
 it('retains known false evidence across partial responses and stale run-cache arrivals', async () => {
   const session = currentSession()
-  vi.mocked(listAllSessions).mockResolvedValue({ items: [session], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValue(wiredPage([session]))
   const store = useAgents()
   await store.refreshSessions()
-  store.recordRun({ id: 'r1', status: 'failed' } as never)
+  store.admitRun(wired({ id: 'r1', status: 'failed' } as never))
   expect(store.views[0]?.status.state).toBe('working')
   const { has_problem, needs_attention, run_status, ...partial } = session
-  vi.mocked(listAllSessions).mockResolvedValue({ items: [{ ...partial, revision: 4 } as HarnessSession], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValue(wiredPage([{ ...partial, row_version: 4 } as HarnessSession]))
   await store.refreshSessions()
   expect(store.sessions[0]).toMatchObject({ has_problem: false, needs_attention: false, run_status: null })
   expect(store.views[0]?.status.state).toBe('working')
   // A genuinely new failure reason is allowed through even without projections.
-  vi.mocked(listAllSessions).mockResolvedValue({ items: [{ ...partial, revision: 5, stop_reason: 'worker crashed' } as HarnessSession], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValue(wiredPage([{ ...partial, row_version: 5, stop_reason: 'worker crashed' } as HarnessSession]))
   await store.refreshSessions()
   expect(store.views[0]?.status.state).toBe('problem')
 })
 
 it('an older ticket response and lower revision cannot replace a fresh list projection', async () => {
   const store = useAgents()
-  let finish!: (value: { items: HarnessSession[]; next_cursor: null }) => void
+  let finish!: (value: ReturnType<typeof page>) => void
   vi.mocked(listAllSessions).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   const ticketRead = store.ensureTicket('ticket')
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession()], next_cursor: null })
+  // The ticket's answer is from a request that started before the list read below.
+  const older = wiredPage([currentSession({ has_problem: true })])
+  // A read that also started before the list below landed, and names a lower row version.
+  const lower = wiredPage([currentSession({ row_version: 2, has_problem: true })])
+  vi.mocked(listAllSessions).mockResolvedValueOnce(wiredPage([currentSession()]))
   await store.refreshSessions()
-  finish({ items: [currentSession({ has_problem: true })], next_cursor: null })
+  finish(older)
   await ticketRead
   expect(store.views[0]?.status.state).toBe('working')
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession({ revision: 2, has_problem: true })], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValueOnce(lower)
   await store.refreshSessions()
   expect(store.views[0]?.status.state).toBe('working')
 })
@@ -158,7 +186,7 @@ it('clock correction backwards cannot oscillate a threshold warning', async () =
   vi.useFakeTimers()
   const at = Date.parse('2026-09-27T12:00:00Z')
   vi.setSystemTime(at)
-  vi.mocked(listAllSessions).mockResolvedValue({ items: [currentSession({ heartbeat_at: new Date(at - 599_999).toISOString() })], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValue(wiredPage([currentSession({ heartbeat_at: new Date(at - 599_999).toISOString() })]))
   const store = useAgents()
   await store.refreshSessions()
   expect(store.views[0]?.status.state).toBe('awaiting')
@@ -171,20 +199,21 @@ it('clock correction backwards cannot oscillate a threshold warning', async () =
 it('preserves omitted reasons but clears explicit empty evidence and rejects late attention', async () => {
   const reasons: NonNullable<HarnessSession['attention_reasons']> = [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }]
   const store = useAgents()
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession({ needs_attention: true, attention_reasons: reasons })], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValueOnce(wiredPage([currentSession({ needs_attention: true, attention_reasons: reasons })]))
   await store.refreshSessions()
   expect(store.views[0]?.status.label).toBe('Awaiting approval')
-  const partial = currentSession({ revision: 4 })
+  const partial = currentSession({ row_version: 4 })
   delete partial.needs_attention
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [partial], next_cursor: null })
+  vi.mocked(listAllSessions).mockResolvedValueOnce(wiredPage([partial]))
   await store.refreshSessions()
   expect(store.sessions[0]?.attention_reasons).toEqual(reasons)
-  let finish!: (value: { items: HarnessSession[]; next_cursor: null }) => void
+  let finish!: (value: ReturnType<typeof page>) => void
   vi.mocked(listAllSessions).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   const stale = store.ensureTicket('ticket')
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession({ revision: 4, attention_reasons: [] })], next_cursor: null })
+  const late = wiredPage([currentSession({ row_version: 4, needs_attention: true, attention_reasons: reasons })])
+  vi.mocked(listAllSessions).mockResolvedValueOnce(wiredPage([currentSession({ row_version: 4, attention_reasons: [] })]))
   await store.refreshSessions()
-  finish({ items: [currentSession({ revision: 4, needs_attention: true, attention_reasons: reasons })], next_cursor: null })
+  finish(late)
   await stale
   expect(store.sessions[0]?.attention_reasons).toEqual([])
   expect(store.views[0]?.status.state).toBe('working')
@@ -193,10 +222,10 @@ it('preserves omitted reasons but clears explicit empty evidence and rejects lat
 it('principal requests never borrow a sibling session label or claim its ownership', async () => {
   const store = useAgents()
   const principal = { id: 'a1', name: 'Shared fixture principal' }
-  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [
+  vi.mocked(listAllSessions).mockResolvedValueOnce(wiredPage([
     currentSession({ id: 's1', display_label: 'First worker', agent: principal }),
     currentSession({ id: 's2', display_label: 'Future worker', agent: principal }),
-  ], next_cursor: null })
+  ]))
   await store.refreshSessions()
   expect(store.askerName('a1')).toEqual({ name: 'Shared fixture principal', harness: '', sessionId: '' })
 })

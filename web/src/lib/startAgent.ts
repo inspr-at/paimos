@@ -11,14 +11,22 @@
 // The account's daemon is the host. Unknown JSON fields are rejected, so the
 // five choices are not sent as extra properties.
 import { api, APIError, getNode, listNodes, type WorkNode } from './api.ts'
-import { listRuns, type AgentAccount, type AgentRun, type ModelProfile } from './agents.ts'
+import { capacityWaitText } from './capacityWait.ts'
+import type { AgentAccount, AgentRun, ModelProfile } from './agents.ts'
+import { createRun, listRuns, runNowOnce, type AgentRunRow } from './agentRows.ts'
+import type { Wire } from './wire.ts'
 
 export interface WorkOrder {
+  kind?: 'build' | 'review'
   node_id: string; status: 'draft' | 'ready' | 'running' | 'blocked' | 'done' | 'cancelled'
   revision: number; assignee_principal_id: string | null
   criteria: { id: string; description: string; checked_at: string | null }[]
 }
-export interface StartSelection { ticket: WorkNode; agentId: string; profileId: string; accountId?: string }
+// Every run this reads or launches is judged by the page's run ledger before anything
+// here looks at it or hands it on (AEON-449): the decision to reuse a run, and the
+// result the dialog shows, are the rows that stand, never a copy a later read can outrank.
+export interface RunAdmission { run: (wire: Wire<AgentRunRow>) => AgentRun; runs: (wires: Wire<AgentRunRow>[]) => AgentRun[] }
+export interface StartSelection { ticket: WorkNode; agentId: string; profileId: string; accountId?: string; runNow?: boolean }
 export const activeRun = (run: AgentRun) => ['queued', 'starting', 'running', 'waiting'].includes(run.status)
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -35,7 +43,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 // Re-read on every attempt: a lost POST response must not blindly create another
 // order/run. The UI serializes submissions; the existing APIs do not promise
 // cross-client idempotency, and conflicts are surfaced instead of overwritten.
-export async function startAgent(selection: StartSelection): Promise<{ run: AgentRun; reused: boolean }> {
+export async function startAgent(selection: StartSelection, admission: RunAdmission): Promise<{ run: AgentRun; reused: boolean }> {
   const { agentId, profileId, accountId } = selection
   const ticket = await getNode(selection.ticket.id)
   const orders: WorkOrder[] = []
@@ -48,7 +56,7 @@ export async function startAgent(selection: StartSelection): Promise<{ run: Agen
     }
     cursor = page.next_cursor ?? undefined
   } while (cursor)
-  const candidates = orders.filter(o => !['done', 'cancelled'].includes(o.status) && (!o.assignee_principal_id || o.assignee_principal_id === agentId))
+  const candidates = orders.filter(o => o.kind !== 'review' && !['done', 'cancelled'].includes(o.status) && (!o.assignee_principal_id || o.assignee_principal_id === agentId))
   if (candidates.length > 1) throw new Error('This ticket has several active work orders for this agent. Resolve them before starting another run.')
   let order = candidates[0]
   if (order) {
@@ -56,11 +64,11 @@ export async function startAgent(selection: StartSelection): Promise<{ run: Agen
     let runCursor: string | undefined
     do {
       const page = await listRuns({ work_order: order.node_id, cursor: runCursor, limit: 200 })
-      const live = page.items.filter(activeRun)
+      const live = admission.runs(page.items).filter(activeRun)
       if (live.length) {
         const same = live.find(r => r.agent_principal_id === agentId && r.model_profile_id === profileId
           && (!accountId || r.requested_account_id === accountId))
-        if (same) return { run: same, reused: true }
+        if (same) return { run: selection.runNow && same.status === 'queued' ? admission.run(await runNowOnce(same.id)) : same, reused: true }
         throw new Error('This work order already has an active run. Follow it in Agents before starting another.')
       }
       runCursor = page.next_cursor ?? undefined
@@ -79,9 +87,10 @@ export async function startAgent(selection: StartSelection): Promise<{ run: Agen
       ...(order.status === 'draft' ? { status: 'ready' } : {}),
     })
   }
-  const run = await request<AgentRun>(`/work-orders/${encodeURIComponent(order.node_id)}/runs`, 'POST', {
+  const run = admission.run(await createRun(order.node_id, {
     agent_principal_id: agentId, model_profile_id: profileId, ...(accountId ? { requested_account_id: accountId } : {}),
-  })
+    ...(selection.runNow ? { capacity_override: 'now' as const } : {}),
+  }))
   return { run, reused: false }
 }
 
@@ -112,6 +121,7 @@ export function dispatchHint(accounts: AgentAccount[], agentId: string, profile:
 }
 
 export function launchState(run: AgentRun): { label: string; detail: string } {
+  if (run.status === 'queued' && run.wait) return { label: 'Waiting', detail: capacityWaitText(run.wait) }
   if (run.status === 'queued') return { label: 'Queued', detail: 'Waiting for the daemon to reserve an account and claim this run.' }
   if (run.status === 'starting' || run.status === 'running' || run.status === 'waiting') return { label: 'Claimed', detail: 'The daemon claimed the run. Its managed session appears when registration is reported.' }
   return { label: ({ completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', ownership_lost: 'Ownership lost' })[run.status] ?? run.status, detail: 'This run has ended. Its reported outcome is available in Agents.' }
