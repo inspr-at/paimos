@@ -207,7 +207,7 @@ async function link(personId: string) {
     </section>
 
     <RolePicker
-      v-if="picker" :anchor="picker.anchor" :subject="picker.person.name" :roles="access.roles" :current="picker.person.workspace_role?.id ?? null" :registry="access.registry"
+      v-if="picker" :anchor="picker.anchor" :subject="picker.person.name" :roles="access.roles" :role-details="access.runtimeRoleDetails" :current="picker.person.workspace_role?.id ?? null" :registry="access.registry"
       :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="lastOwner(picker.person)" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
     <RowMenu v-if="menu" :anchor="menu.anchor" :items="actions" :label="`Actions for ${menu.person.name}`" @select="act" @close="menu = null" />

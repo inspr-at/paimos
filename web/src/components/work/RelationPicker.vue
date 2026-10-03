@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem, type WorkNode } from '../../lib/api'
 import { keyPrefixOf, keyQuery, ticketResults, type TicketResult } from '../../lib/palette'
@@ -11,6 +12,7 @@ import { highlight } from '../../lib/work'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
+import ReadName from '../ReadName.vue'
 import StatusIcon from './StatusIcon.vue'
 
 // Link the open ticket to another: choose how they relate, then find the other
@@ -165,17 +167,21 @@ let lastChoice = 'relates'
       <p v-if="refusal" class="refusal" role="alert"><AppIcon name="alert" :size="14" /><span>{{ refusal }}</span></p>
       <div id="relation-options" class="options" role="listbox" :aria-label="query ? 'Tickets found' : 'Recent tickets'" :class="{ stale: loading && !!results.length }">
         <p v-if="!query && results.length" class="group-label eyebrow" aria-hidden="true">Recent</p>
-        <div
-          v-for="(result, index) in results" :id="`relation-option-${index}`" :key="result.id" role="option" class="option"
-          :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
-          @pointermove="active = index" @click="choose(result)"
-        >
-          <StatusIcon :state="result.state" :size="12" />
-          <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
-          <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
-          <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+        <div v-for="(result, index) in results" :key="result.id" class="option-row" role="presentation">
+          <div
+            :id="`relation-option-${index}`" role="option" class="option"
+            :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
+            :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="choose(result)"
+            @pointermove="active = index" @click="choose(result)"
+          >
+            <StatusIcon :state="result.state" :size="12" />
+            <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span v-clip-tip="result.title" class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
+            <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
+            <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+          </div>
+          <ReadName :text="`${result.key} · ${result.title}`" />
         </div>
         <p v-if="failed" class="note error" role="alert">{{ failed }}</p>
         <p v-else-if="query && !loading && !results.length && searched === query" class="note">Nothing matches “{{ query }}”. Try a key like {{ projectKey }}-12 or words from a title.</p>
@@ -207,10 +213,11 @@ let lastChoice = 'relates'
 .refusal { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); font-size: 12.5px; line-height: 1.45; }
 .refusal svg { flex-shrink: 0; margin-top: 2px; }
 .refusal span { color: var(--ink); }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; overflow: auto; transition: opacity .12s ease; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; transition: opacity .12s ease; }
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
 .options.stale { opacity: .6; }
 .group-label { padding: 4px 8px 2px; }
-.option { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
+.option { display: flex; align-items: center; min-width: 0; gap: 9px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .option[aria-disabled="true"] { cursor: default; }
 .option[aria-disabled="true"] .title, .option[aria-disabled="true"] .key { color: var(--ink-3); }
@@ -230,5 +237,11 @@ let lastChoice = 'relates'
   .search .field { height: 44px; font-size: 16px; }
   .option { min-height: 44px; }
   .foot { display: none; }
+}
+
+@media (max-width: 720px) {
+  .option { height: 52px; min-height: 52px; }
+  .title { line-height: 18px; }
+  .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
 }
 </style>

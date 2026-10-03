@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import { MAX_GROUP_NAME, type GroupDef } from '../../lib/projectGroups'
 import { highlight } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import GroupMarker from './GroupMarker.vue'
+import ReadName from '../ReadName.vue'
 
 export interface MoveOption { group: GroupDef; count: number; current: boolean; reason?: string }
 
@@ -54,25 +56,28 @@ const optionId = (index: number) => `${id}-option-${index}`
       :aria-controls="`${id}-options`" aria-expanded="true" aria-autocomplete="list" :aria-activedescendant="count ? optionId(active) : undefined" data-autofocus @keydown="keydown"
     />
     <div :id="`${id}-options`" class="options" role="listbox" :aria-label="`Groups for ${subject}`">
-      <button
-        v-for="(option, index) in shown" :id="optionId(index)" :key="option.group.id" type="button" role="option" class="option" tabindex="-1"
-        :class="{ off: option.current || !!option.reason }" :aria-selected="active === index" :aria-disabled="option.current || !!option.reason ? 'true' : undefined"
-        @click="choose(index)" @pointermove="active = index"
-      >
-        <GroupMarker :group="option.group" />
-        <span class="text">
-          <span class="name"><template v-for="(part, i) in highlight(option.group.name, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span v-if="option.reason" class="reason">{{ option.reason }}</span>
-        </span>
-        <AppIcon v-if="option.group.kind === 'shared'" name="users" :size="13" class="shared" />
-        <span v-if="option.current" class="current">Here now</span>
-        <span v-else class="count mono">{{ option.count }}</span>
-      </button>
+      <div v-for="(option, index) in shown" :key="option.group.id" class="option-row" role="presentation">
+        <button
+          :id="optionId(index)" type="button" role="option" class="option" tabindex="-1"
+          :class="{ off: option.current || !!option.reason }" :aria-selected="active === index" :aria-disabled="option.current || !!option.reason ? 'true' : undefined"
+          @click="choose(index)" @pointermove="active = index"
+        >
+          <GroupMarker :group="option.group" />
+          <span class="text">
+            <span v-clip-tip="option.group.name" class="name"><template v-for="(part, i) in highlight(option.group.name, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span v-if="option.reason" class="reason">{{ option.reason }}</span>
+          </span>
+          <AppIcon v-if="option.group.kind === 'shared'" name="users" :size="13" class="shared" />
+          <span v-if="option.current" class="current">Here now</span>
+          <span v-else class="count mono">{{ option.count }}</span>
+        </button>
+        <ReadName :text="[option.group.name, option.reason].filter(Boolean).join('\n')" />
+      </div>
       <button
         v-if="newName" :id="optionId(shown.length)" type="button" role="option" class="option create" tabindex="-1" :aria-selected="active === shown.length"
         @click="choose(shown.length)" @pointermove="active = shown.length"
       >
-        <AppIcon name="plus" :size="13" /><span class="text"><span class="name">Create group “{{ newName }}”</span></span>
+        <AppIcon name="plus" :size="13" /><span class="text"><span v-clip-tip class="name">Create group “{{ newName }}”</span></span>
       </button>
       <p v-if="!count" class="note">{{ term.trim() ? 'A group name can be up to 60 characters.' : 'No groups yet.' }}</p>
     </div>
@@ -83,8 +88,9 @@ const optionId = (index: number) => `${id}-option-${index}`
 <style scoped>
 .menu-title { padding: 6px 10px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-search { height: 34px; margin: 0 0 6px; font-size: 13.5px; }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 320px; overflow: auto; }
-.option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.option { display: flex; align-items: center; min-width: 0; gap: 10px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .option.off { color: var(--ink-2); cursor: default; }
 .text { flex: 1; display: grid; min-width: 0; }

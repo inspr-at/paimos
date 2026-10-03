@@ -76,17 +76,17 @@ defineExpose({ panel })
 .sheet-ended { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 18px; background: var(--chip-teal-bg); font-size: 12px; }
 .sheet-scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
 .sheet {
-  position: relative; display: flex; flex-direction: column; width: min(520px, 100vw); height: 100%;
+  position: relative; display: flex; flex-direction: column; width: min(clamp(520px, 44vw, 960px), 100vw); height: 100%;
   border-left: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop);
 }
-.sheet.wide { width: min(640px, 100vw); }
-.center .sheet { width: min(480px, 100%); height: auto; max-height: min(680px, calc(100dvh - 112px)); border: 1px solid var(--glass-edge); border-radius: var(--radius); }
-.center .sheet.wide { width: min(580px, 100%); }
+.sheet.wide { width: min(clamp(640px, 52vw, 1120px), 100vw); }
+.center .sheet { width: min(clamp(480px, 50vw, 960px), 100%); height: auto; max-height: min(680px, calc(100dvh - 112px)); border: 1px solid var(--glass-edge); border-radius: var(--radius); }
+.center .sheet.wide { width: min(clamp(580px, 64vw, 1120px), 100%); }
 .sheet-head { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 18px 18px 12px 22px; }
 .sheet-head > :first-child { flex: 1; min-width: 0; }
 .sheet-title { font: 600 17px/1.3 var(--font); letter-spacing: -.005em; color: var(--ink); }
 .sheet-close { margin-top: -2px; }
-.sheet-body { order: 1; flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 22px; overscroll-behavior: contain; }
+.sheet-body { order: 1; flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 22px; overscroll-behavior: contain; container: access-body / inline-size; scrollbar-gutter: stable; }
 .sheet-foot { order: 2; flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
 .center .sheet-foot { order: 0; border-top: 0; border-bottom: 1px solid var(--line); }
 /* Keep the frame and actions at the top; variable content grows below them.

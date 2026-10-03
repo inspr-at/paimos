@@ -39,6 +39,7 @@ function scrolled(event: Event) {
 // Escape closes the popover wherever focus is, before any page shortcut sees it.
 function escape(event: KeyboardEvent) {
   if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return
+  if (panel.value?.querySelector('.read-name-detail:popover-open')) return
   event.preventDefault(); event.stopImmediatePropagation()
   emit('close', true)
 }
