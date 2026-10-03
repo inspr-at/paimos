@@ -18,7 +18,7 @@ func TestKeyScopeUsageRegistrationVersusMoveLockOrder(t *testing.T) {
 		t.Run(first, func(t *testing.T) {
 			f := fixture(t)
 			destination := uid()
-			f.agent.Scopes = []string{"harness.worker", "nodes.move"}
+			f.agent.Scopes = []string{"harness.write", "harness.worker", "nodes.move"}
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id)
 				 SELECT $1,$2,'HTS-3',id,'Destination epic',$3 FROM node_kinds WHERE slug='epic'`, f.person.TenantID, destination, f.project); err != nil {
@@ -63,10 +63,10 @@ func TestKeyScopeUsageRegistrationVersusMoveLockOrder(t *testing.T) {
 			finished := make(chan struct{})
 			go func() { secondDone <- b(); close(finished) }()
 			lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, holder, finished)
-			// Waiting on the tenant row at entry means the second operation has
-			// acquired neither the ticket nor a conflicting usage lock yet.
-			if lock != "transactionid" {
-				t.Errorf("%s first: competing operation waited on %q, want tenant transactionid", first, lock)
+			// The second operation waits on the key admission fence, before
+			// acquiring the ticket. Releasing the first must let both commit.
+			if lock != "advisory" {
+				t.Errorf("%s first: competing operation waited on %q, want key advisory fence", first, lock)
 			}
 			barrier.Release()
 			expect(t, dbtest.Await(t, ctx, firstDone), statusA)
