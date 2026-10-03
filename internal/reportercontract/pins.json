@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.5",
-    "sha256": "9517f236687d7f56fbe453dca10fdd11cd6241f59f7d8b98ccb834572fa5239a",
+    "version": "harness-session/2.7",
+    "sha256": "8b18fc6c728ade84c2ca7e9156f833ea273ae5b30bb38b7e41e70f53cb4fd01c",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1701,6 +1701,143 @@
               "string",
               "null"
             ]
+          },
+          "service_tier": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest"
+            ],
+            "type": "string"
+          },
+          "service_tier_reports": {
+            "items": {
+              "properties": {
+                "adapter_version": {
+                  "type": "string"
+                },
+                "applies": {
+                  "enum": [
+                    "next_run",
+                    "next_turn"
+                  ],
+                  "type": "string"
+                },
+                "change_instructions": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tiers": {
+                  "items": {
+                    "properties": {
+                      "mechanism": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "enum": [
+                          "Default",
+                          "Fast",
+                          "Fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "offered": {
+                        "type": "boolean"
+                      },
+                      "price_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "speed_factor": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "tier": {
+                        "enum": [
+                          "default",
+                          "fast",
+                          "fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "usage_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "name",
+                      "offered",
+                      "speed_factor",
+                      "price_multiplier",
+                      "usage_multiplier",
+                      "mechanism"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "harness",
+                "model",
+                "harness_version",
+                "adapter_version",
+                "checked_at",
+                "source",
+                "applies",
+                "change_instructions",
+                "tiers"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier_revision": {
+            "minimum": 0,
+            "type": "integer"
           },
           "stop_reason": {
             "type": [
@@ -2838,6 +2975,143 @@
               "null"
             ]
           },
+          "service_tier": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest"
+            ],
+            "type": "string"
+          },
+          "service_tier_reports": {
+            "items": {
+              "properties": {
+                "adapter_version": {
+                  "type": "string"
+                },
+                "applies": {
+                  "enum": [
+                    "next_run",
+                    "next_turn"
+                  ],
+                  "type": "string"
+                },
+                "change_instructions": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tiers": {
+                  "items": {
+                    "properties": {
+                      "mechanism": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "enum": [
+                          "Default",
+                          "Fast",
+                          "Fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "offered": {
+                        "type": "boolean"
+                      },
+                      "price_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "speed_factor": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "tier": {
+                        "enum": [
+                          "default",
+                          "fast",
+                          "fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "usage_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "name",
+                      "offered",
+                      "speed_factor",
+                      "price_multiplier",
+                      "usage_multiplier",
+                      "mechanism"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "harness",
+                "model",
+                "harness_version",
+                "adapter_version",
+                "checked_at",
+                "source",
+                "applies",
+                "change_instructions",
+                "tiers"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "stop_reason": {
             "type": [
               "string",
@@ -2989,6 +3263,10 @@
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/level",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/reasoning_effort",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items/properties/tiers/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items/properties/tiers/items/properties/tier",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/supported_pause_levels/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/worktree",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/account_label",
@@ -3004,6 +3282,10 @@
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/level",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/reasoning_effort",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items/properties/tiers/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items/properties/tiers/items/properties/tier",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/supported_pause_levels/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/worktree"
     ]
