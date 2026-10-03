@@ -318,8 +318,9 @@ func TestVerificationRetainsArchiveAfterProjectMoveAndUndo(t *testing.T) {
 	}
 }
 
-func TestVerificationRetainsArchiveAfterAuthorizedTailRemoval(t *testing.T) {
+func TestVerificationRetainsArchiveAfterPlacementUndoReturnsTail(t *testing.T) {
 	f := newFixture(t)
+	target := f.node(t, "project", "DST-1", "", "open")
 	release := f.legacyRelease(t, f.project, "REL-1", "planning", 1)
 	member := f.member(t, f.project, release, "TK-1", 1)
 	j := f.prepare(t, f.project)
@@ -327,9 +328,26 @@ func TestVerificationRetainsArchiveAfterAuthorizedTailRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := delivery.NewStore(f.d.App).WithClock(func() time.Time { return f.clock })
-	if _, err := store.Place(t.Context(), f.p, f.project, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: f.project, ExpectedRevision: 1, Slot: delivery.Slot{Tail: true}}}); err != nil {
+	if _, err := store.Place(t.Context(), f.p, f.project, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: f.project, ExpectedRevision: 1}}); err != nil {
 		t.Fatal(err)
 	}
+	mux := http.NewServeMux()
+	nodes.New(f.d.App, nil).Mount(mux)
+	events.New(f.d.App, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithUndoHandlers(store.UndoHandlers())).Mount(mux)
+	adoptionMutationRequest(t, mux, f.p, "/api/nodes/"+member+"/project-move", `{"project_id":"`+target+`"}`, http.StatusOK)
+	var moveID int64
+	f.exec(t, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id FROM events WHERE node_id=$1 AND type='node.project_moved' ORDER BY id DESC LIMIT 1`, member).Scan(&moveID)
+	})
+	adoptionMutationRequest(t, mux, f.p, fmt.Sprintf("/api/events/%d/undo", moveID), "", http.StatusCreated)
+	if _, err := store.Place(t.Context(), f.p, f.project, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: f.project, ExpectedRevision: 0}}); err != nil {
+		t.Fatal(err)
+	}
+	var placementID int64
+	f.exec(t, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id FROM events WHERE node_id=$1 AND type='ships_in.changed' ORDER BY id DESC LIMIT 1`, f.project).Scan(&placementID)
+	})
+	adoptionMutationRequest(t, mux, f.p, fmt.Sprintf("/api/events/%d/undo", placementID), "", http.StatusCreated)
 	if f.count(t, `SELECT count(*) FROM ships_in WHERE item_node_id=$1`, member) != 0 {
 		t.Fatal("placement API did not remove the row for the unranked tail")
 	}
