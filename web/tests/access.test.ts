@@ -68,7 +68,10 @@ test('client/server scope ceiling parity, including project self-service and per
   const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
   for (const fixture of ceilingParity.cases) {
     const workspace = fixture.workspace === null ? null : role('workspace', fixture.builtin_role ?? (fixture.private_role ? 'agent_parity' : 'workspace'), fixture.workspace, !!fixture.builtin_role)
-    const projects = fixture.projects.map((permissions, i) => role(`project-${i}`, `project-${i}`, permissions, false))
+    const projects = fixture.projects.map((permissions, i) => {
+      const builtin = 'project_builtin_roles' in fixture ? fixture.project_builtin_roles[i] : undefined
+      return role(`project-${i}`, builtin ?? `project-${i}`, permissions, !!builtin)
+    })
     const roles = [...(workspace ? [workspace] : []), ...projects]
     const worker = agent('parity', { workspace_role: workspace, project_roles: projects.map(r => ({ project_id: r.id, project_key: r.id, project_title: r.name, role: r })) })
     for (const mode of ['create', 'existing', 'rotate'] as const) {

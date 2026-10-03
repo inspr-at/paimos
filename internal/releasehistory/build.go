@@ -29,7 +29,11 @@ type Options struct {
 	Repository string
 	// GitHub, when set, adds publication times, image digests and CI runs.
 	GitHub *GitHub
-	Now    func() time.Time
+	// Candidate embeds an untagged version from committed HEAD metadata and notes.
+	Candidate string
+	// CandidateCI records the workflow building the candidate, without assuming success.
+	CandidateCI *Run
+	Now         func() time.Time
 }
 
 // versionFile is the part of version.json the history reads.
@@ -60,6 +64,9 @@ func Build(ctx context.Context, opts Options) (History, error) {
 	git := func(args ...string) (string, error) { return runGit(ctx, opts.Repo, args...) }
 	var head versionFile
 	raw, err := os.ReadFile(filepath.Join(opts.Repo, "version.json"))
+	if opts.Candidate != "" {
+		raw, err = committedFile(git, "version.json", 64<<10)
+	}
 	if err != nil {
 		return History{}, fmt.Errorf("read version.json: %w", err)
 	}
@@ -210,6 +217,12 @@ func Build(ctx context.Context, opts Options) (History, error) {
 	}
 	if err := codename.Guard(named); err != nil {
 		return History{}, err
+	}
+	if opts.Candidate != "" {
+		h, err = withCandidate(h, head, opts, git)
+		if err != nil {
+			return History{}, err
+		}
 	}
 	return WithCodenames(h), nil
 }
