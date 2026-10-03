@@ -9961,7 +9961,7 @@ components:
         qualified_harness_version: {type: string, maxLength: 80}
         message_consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
         message_local_auth_nonce: {type: string, pattern: '^[a-f0-9]{64}$', description: Messaging-specific single-use challenge; never the watch challenge}
-        message_local_auth_signature: {type: string, maxLength: 144, description: P-256 DER signature in base64 over the messaging consent digest, nonce and canonical prompt; verified against the pairing-pinned key}
+        message_local_auth_signature: {type: string, maxLength: 144, description: 'P-256 DER signature in base64 over the messaging consent digest, nonce and canonical prompt; verified against the pairing-pinned key'}
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
         doing: {type: string, maxLength: 60, description: Public summary on an active poll only; collected only in agent_summary mode.}
