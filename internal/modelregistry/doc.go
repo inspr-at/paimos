@@ -15,11 +15,11 @@
 // suppression leaves history intact and simply stops matching once valid_until
 // has passed.
 //
-// Boundary integration: the present checkout has no preference GET or placement
-// HTTP resolver. Their owners must call PrepareCatalog(CatalogRead) before their
-// read snapshot, with an adapter repeating current target/canonical-person
-// restrictions. Existing model list/legacy resolve/profile/whole-tenant replace
-// and both review entries are adapted here; ladder GET never initializes.
+// Boundary integration: model list, legacy and placement resolution, preference
+// GET, profile/whole-tenant replacement and both review entries prepare before
+// their final transaction. Read adapters repeat current target/project/key and
+// canonical-person restrictions. Preference/placement documents use read-only
+// repeatable-read snapshots after preparation; ladder GET never initializes.
 //
 // Resolve walks the stored ladder. review-gate requires author_family and
 // skips that family.

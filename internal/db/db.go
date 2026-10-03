@@ -52,12 +52,25 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // visibility from AllProjects or OnlyProjects, else the visibility of the
 // principal in ctx, else none (fail closed).
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	return inTenant(ctx, pool, tenantID, pgx.TxOptions{}, fn)
+}
+
+// InTenantReadSnapshot reads permissions, canonical identity and response data
+// from one read-only snapshot after any independently committed preparation.
+func InTenantReadSnapshot(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	if HasTransaction(ctx) {
+		return fmt.Errorf("tenant read snapshot requires an independent transaction")
+	}
+	return inTenant(ctx, pool, tenantID, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, fn)
+}
+
+func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options pgx.TxOptions, fn func(pgx.Tx) error) error {
 	var tx pgx.Tx
 	var err error
 	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
 		tx, err = parent.Begin(ctx)
 	} else {
-		tx, err = pool.Begin(ctx)
+		tx, err = pool.BeginTx(ctx, options)
 	}
 	if err != nil {
 		return err

@@ -167,10 +167,23 @@ func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) e
 }
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
-	rows, err := tx.Query(ctx, `
+	return readProfiles(ctx, tx, `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		ORDER BY p.slug, p.version, p.id`)
+}
+
+// listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
+func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
+	return readProfiles(ctx, tx, `
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id)
+		ORDER BY p.slug, p.version, p.id LIMIT 257`)
+}
+
+func readProfiles(ctx context.Context, tx pgx.Tx, query string) ([]Profile, error) {
+	rows, err := tx.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +330,24 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 }
 
 func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
+	out, err := normalizeRouteStructure(incoming)
+	if err != nil {
+		return nil, err
+	}
+	for _, route := range out {
+		if route.State != "available" && !route.ValidUntil.After(now) {
+			return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
+		}
+	}
+	return out, nil
+}
+
+// Structural checks run before standalone setup. Expiry and profile existence
+// remain authoritative in the final transaction.
+func normalizeRouteStructure(incoming []Route) ([]Route, error) {
+	if incoming == nil {
+		return nil, fail(http.StatusBadRequest, "routes must be an array")
+	}
 	seenPriority := map[string]bool{}
 	seenProfile := map[string]bool{}
 	out := make([]Route, 0, len(incoming))
@@ -351,7 +382,7 @@ func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
 			if route.Reason == "" || len(route.Reason) > 512 || strings.ContainsAny(route.Reason, "\x00\r\n") {
 				return nil, fail(http.StatusBadRequest, "suppression requires a reason")
 			}
-			if route.ValidUntil == nil || !route.ValidUntil.After(now) {
+			if route.ValidUntil == nil {
 				return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
 			}
 		}

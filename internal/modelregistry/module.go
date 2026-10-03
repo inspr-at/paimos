@@ -33,6 +33,7 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers model registry routes.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/model-preferences", boundedPreferenceHandler(m.preferences))
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)
@@ -156,12 +157,18 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	var err error
+	in, err = normalizeRouteStructure(in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	var out []Route
 	if err := PrepareCatalog(ctx, m.pool, p, CatalogPreparation{Operation: CatalogManage, Request: r}); err != nil {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
@@ -198,6 +205,12 @@ func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permissi
 }
 
 func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
+	for _, name := range []string{"ticket", "area", "complexity", "project_id", "person_id"} {
+		if r.URL.Query().Has(name) {
+			boundedPreferenceHandler(m.resolvePreferences)(w, r)
+			return
+		}
+	}
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -210,6 +223,12 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		Role:         r.URL.Query().Get("role"),
 		AuthorFamily: r.URL.Query().Get("author_family"),
 		Harness:      r.URL.Query().Get("harness"),
+	}
+	var err error
+	q, err = validateResolveQuery(q)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
 	project := r.URL.Query().Get("project_id")
 	if project != "" && !uuidRE.MatchString(project) {
@@ -231,7 +250,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}

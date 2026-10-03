@@ -44,22 +44,32 @@ type ladderStep struct {
 	Profile Profile
 }
 
-func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) (Resolution, error) {
+// validateResolveQuery checks request structure without reading or preparing a catalog.
+func validateResolveQuery(q resolveQuery) (resolveQuery, error) {
 	role, ok := roleByName(q.Role)
 	if !ok {
-		return Resolution{}, fail(http.StatusBadRequest, "unknown model role")
+		return q, fail(http.StatusBadRequest, "unknown model role")
 	}
 	author, err := NormalizeAuthorFamily(q.AuthorFamily)
 	if err != nil {
-		return Resolution{}, fail(http.StatusBadRequest, err.Error())
+		return q, fail(http.StatusBadRequest, err.Error())
 	}
 	q.AuthorFamily = author
 	if role.cross && q.AuthorFamily == "" {
-		return Resolution{}, fail(http.StatusBadRequest, "review-gate requires author_family")
+		return q, fail(http.StatusBadRequest, "review-gate requires author_family")
 	}
 	if q.Harness != "" && !validHarness(q.Harness) {
-		return Resolution{}, fail(http.StatusBadRequest, "unsupported model harness")
+		return q, fail(http.StatusBadRequest, "unsupported model harness")
 	}
+	return q, nil
+}
+
+func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) (Resolution, error) {
+	q, err := validateResolveQuery(q)
+	if err != nil {
+		return Resolution{}, err
+	}
+	role, _ := roleByName(q.Role)
 	steps, err := loadLadder(ctx, tx, q.Role)
 	if err != nil {
 		return Resolution{}, err

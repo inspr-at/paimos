@@ -6701,19 +6701,40 @@ paths:
       responses:
         '200': {description: Ordered routes, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /model-preferences:
+    get:
+      operationId: getModelPreferences
+      security: *auth
+      description: Sparse Default → You → Project preferences, with canonical caller and edit capabilities in one read-only repeatable-read snapshot. Requires workspace models.read and nodes.read for a supplied live project. Independently authorized catalog preparation precedes the snapshot; no models.manage grant is required. Residency lock loosening is reported as a warning.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
   /models/resolve:
     get:
       operationId: resolveModelRole
       description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
+        - {name: area, in: query, schema: {type: string, maxLength: 48}}
+        - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
+        - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts:
     get:
       operationId: listAgentAccounts
@@ -14294,10 +14315,187 @@ components:
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        residency: {type: string, enum: [any, eu, local], description: Present for placement-aware resolution.}
+        preference: {$ref: '#/components/schemas/ModelPreferenceDecision'}
+    ModelSelector:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
+      oneOf:
+        - properties: {mode: {const: auto}}
+          not: {anyOf: [{required: [profile_id]}, {required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: pinned}}
+          required: [profile_id]
+          not: {anyOf: [{required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: latest}}
+          required: [family, line, effort]
+          not: {required: [profile_id]}
+      properties:
+        mode: {type: string, enum: [auto, latest, pinned]}
+        profile_id: {type: string, format: uuid}
+        family: {type: string, maxLength: 32}
+        line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        effort: {type: string, maxLength: 32}
+        harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    ModelPreferenceRow:
+      type: object
+      required: [kind_id, locked, normal, complex]
+      properties:
+        kind_id: {type: string, format: uuid}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceLevel:
+      type: object
+      required: [revision, residency, residency_locked, prefs_locked, rows, updated_by, updated_at]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+        updated_by: {type: [string, 'null'], format: uuid}
+        updated_at: {type: [string, 'null'], format: date-time}
+    ModelPreferenceEffective:
+      type: object
+      required: [selector, profile, label, brand, follows_latest, pinned, today_version]
+      properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
+        label: {type: string}
+        brand: {type: string}
+        follows_latest: {type: boolean}
+        pinned: {type: boolean}
+        today_version: {type: string}
+        unavailable_reason: {type: string}
+    ModelPreferenceView:
+      type: object
+      required: [residency, rows, changes]
+      properties:
+        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Automatic routing still uses the full registry.}
+        choices:
+          type: array
+          maxItems: 256
+          description: Advisory picker metadata for this level; live routing remains authoritative. Retired versions are hidden, unqualified review harnesses and models without residency routes are disabled.
+          items:
+            type: object
+            required: [profile, line, model_version, retired, review_ladder, review_reason, residency_routes]
+            properties:
+              profile: {$ref: '#/components/schemas/ModelProfile'}
+              line: {type: string}
+              model_version: {type: string}
+              retired: {type: boolean}
+              review_ladder: {type: boolean}
+              review_reason: {type: string}
+              residency_routes: {type: integer, minimum: 0}
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - {type: object, properties: {qualifying_routes: {type: integer, minimum: 0}}}
+        rows:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [kind_id, set_by, locked_by, changed_here, reset_to, warnings, normal, complex]
+            properties:
+              kind_id: {type: string, format: uuid}
+              set_by: {type: string}
+              locked_by: {type: string}
+              changed_here: {type: boolean}
+              reset_to: {type: string}
+              warnings: {type: array, items: {type: string}}
+              normal: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+              complex: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+        changes: {type: integer, minimum: 0}
+    ModelPreferences:
+      description: The document revision sums the included level revisions; writes compare the target level revision.
+      type: object
+      required: [revision, person_id, kinds, levels, views, can, residency_lock_mode]
+      properties:
+        revision: {type: integer, format: int64}
+        person_id: {type: [string, 'null'], format: uuid}
+        kinds: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
+        levels:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            person: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceLevel'}, {type: 'null'}]}
+        views:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceView'}
+            person: {$ref: '#/components/schemas/ModelPreferenceView'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceView'}, {type: 'null'}]}
+        can:
+          type: object
+          required: [edit_default, edit_person, edit_project, add_default_kind, add_project_kind]
+          properties:
+            edit_default: {type: boolean}
+            edit_person: {type: boolean}
+            edit_project: {type: boolean}
+            add_default_kind: {type: boolean}
+            add_project_kind: {type: boolean}
+        residency_lock_mode: {type: string, const: warn}
+    WorkKind:
+      type: object
+      required: [id, slug, label, hint, position]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string, maxLength: 48}
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+        system: {type: string, enum: [review, security, other]}
+        position: {type: integer}
+        archived_at: {type: string, format: date-time}
+    ModelPreferenceDecision:
+      type: object
+      description: Additive resolution evidence returned only when preference placement parameters are supplied.
+      required: [kind, complexity, role, person_id, project_id, cell, residency, fallback, blocked, hard_rules]
+      properties:
+        kind:
+          type: object
+          required: [slug, source]
+          properties: {slug: {type: string}, source: {type: string}}
+        complexity:
+          type: object
+          required: [value, bucket, source]
+          properties: {value: {type: string}, bucket: {type: string, enum: [normal, complex]}, source: {type: string}}
+        role: {type: string}
+        person_id: {type: [string, 'null'], format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        cell:
+          type: object
+          required: [set_by, selector]
+          properties:
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            selector: {$ref: '#/components/schemas/ModelSelector'}
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - type: object
+              required: [ticket_requirement, qualifying_account_ids]
+              properties:
+                ticket_requirement: {type: string, enum: [any, eu, local]}
+                qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
+        blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
+        hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
     ModelPreferenceTrace:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        role: {type: string}
+        project_id: {type: string, format: uuid}
+        ticket_requirement: {type: string, enum: [any, eu, local]}
         person_id: {type: [string, 'null'], format: uuid}
         residency:
           type: object

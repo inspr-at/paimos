@@ -246,6 +246,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/me/profile":                                                    "profile.read|profile.portal_read",
 	"GET /api/members":                                                       "members.read",
 	"GET /api/models":                                                        "models.read",
+	"GET /api/model-preferences":                                             "models.read",
 	"GET /api/models/resolve":                                                "models.read",
 	"GET /api/models/routes":                                                 "models.read",
 	"GET /api/node-keys/{key}":                                               "nodes.read",
