@@ -65,7 +65,12 @@ func (m *Module) handleList(w http.ResponseWriter, r *http.Request) {
 		writeResult(w, 0, nil, err)
 		return
 	}
-	items, err := m.list(r.Context(), p, limit)
+	q := r.URL.Query()
+	if q.Has("pending") && q.Get("pending") != "true" && q.Get("pending") != "false" {
+		writeError(w, http.StatusBadRequest, "pending must be true or false")
+		return
+	}
+	items, err := m.list(r.Context(), p, limit, q.Get("pending") == "true")
 	if err != nil {
 		writeResult(w, 0, nil, err)
 		return

@@ -157,7 +157,7 @@ func genericProbeDetail(cmd string) string {
 
 func knownProbeHarness(name string) bool {
 	switch name {
-	case "claude", "codex", "cursor", "grok", "pi":
+	case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
 		return true
 	default:
 		return false

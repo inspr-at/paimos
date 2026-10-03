@@ -88,7 +88,7 @@ func applyEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session
 		}
 	case "coordinator":
 		if readySet || progressSet {
-			return s, workorders.Fail(400, "coordinators report the live ETA")
+			return s, workorders.Fail(400, "coordinator beats may carry only --eta-live; --progress and --eta-ready are not accepted: progress is derived from the coordinator's workers")
 		}
 		if err := writeTicketLive(ctx, tx, p.TenantID, *s.TicketNodeID, s.ProjectID, p.ID, liveAt); err != nil {
 			return s, err
@@ -187,6 +187,10 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 	}
 	for _, s := range sessions {
 		stampSessionEta(s, interval, now)
+		*s = stampPause(*s, now)
+	}
+	if err := stampCoordinatorProgress(ctx, tx, sessions); err != nil {
+		return err
 	}
 	return stampMoveRights(ctx, tx, sessions)
 }

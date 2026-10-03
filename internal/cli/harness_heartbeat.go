@@ -20,9 +20,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -71,13 +74,18 @@ var (
 
 // heartbeatDeps replaces clocks, liveness and name lookup in tests.
 type heartbeatDeps struct {
-	alive   func(pid int) bool
-	wait    func(ctx context.Context, pid int, interval time.Duration) error
-	commits func(worktree, since string) ([]heartbeatCommit, error)
-	label   func() (string, bool)
+	stopOwned func(context.Context, *harness.Pause, time.Time) error
+	alive     func(pid int) bool
+	wait      func(ctx context.Context, pid int, interval time.Duration) error
+	commits   func(worktree, since string) ([]heartbeatCommit, error)
+	label     func() (string, bool)
 }
 
 type heartbeatOptions struct {
+	OwnedStop         bool
+	LinkAccountID     string
+	LinkSetupRoot     string
+	LinkSocket        string
 	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int
@@ -86,6 +94,8 @@ type heartbeatOptions struct {
 	Project           string
 	Agent             string
 	Harness           string
+	Generator         string
+	CommandLabel      string
 	Host              string
 	Label             string
 	Model             string
@@ -95,6 +105,7 @@ type heartbeatOptions struct {
 	Brief             string
 	Worktree          string
 	Branch            string
+	Doing             string
 	Note              string
 	Phase             string
 	Activity          string
@@ -141,11 +152,13 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
-			fs.string(&o.Harness, "harness", 0, "adapter family")
+			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Host, "host", 0, "non-secret host label")
 			fs.string(&o.Label, "label", 0, "session display label used until a name source has one")
-			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
-			fs.string(&o.Effort, "effort", 0, "reasoning effort, or AEON_EFFORT when omitted")
+			fs.string(&o.Model, "model", 0, "initial model, or AEON_MODEL; session transcript updates it")
+			fs.string(&o.Effort, "effort", 0, "initial reasoning effort, or AEON_EFFORT; session transcript updates it")
 			fs.string(&o.AccountLabel, "account-label", 0, "subscription or account display name (never a credential)")
 			fs.string(&o.HarnessVersion, "harness-version", 0, "harness version (defaults to a bounded local --version probe)")
 			fs.string(&o.Brief, "brief", 0, "short prompt file name or ticket key")
@@ -153,9 +166,10 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
 			fs.string(&o.Branch, "branch", 0, "branch name")
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
+			fs.string(&o.Doing, "doing", 0, "public activity summary, at most 60 characters; agent_summary mode only")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
-			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
+			fs.string(&o.Succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
 			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
@@ -164,8 +178,8 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
-			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
-			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
+			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage, title and current model")
+			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, grok, gemini, or opencode")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
@@ -204,10 +218,10 @@ func (o *heartbeatOptions) normalize() {
 	if o.Activity == "" {
 		o.Activity = "busy"
 	}
-	if strings.TrimSpace(o.Model) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Model) == "" {
 		o.Model = os.Getenv("AEON_MODEL")
 	}
-	if strings.TrimSpace(o.Effort) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Effort) == "" {
 		o.Effort = os.Getenv("AEON_EFFORT")
 	}
 	if o.CodexIndex == "" {
@@ -246,6 +260,11 @@ func (o *heartbeatOptions) applyRuntimeDefaults() {
 }
 
 func (o *heartbeatOptions) prepare() error {
+	if o.Doing != "" {
+		if _, valid := agentactivity.CleanSummary(o.Doing); !valid {
+			return usagef("--doing must be a public summary of at most 60 characters")
+		}
+	}
 	o.normalize()
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
@@ -253,19 +272,36 @@ func (o *heartbeatOptions) prepare() error {
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" || !agentNameRE.MatchString(o.Agent) || !modelHarnesses[o.Harness] {
-		return usagef("--project, --agent and --harness are required")
+	if strings.TrimSpace(o.Project) == "" {
+		return usagef("--project is required")
+	}
+	if !agentNameRE.MatchString(o.Agent) {
+		return usagef("--agent must be a valid agent name")
+	}
+	if err := runkind.Validate(o.Harness, o.Generator, o.CommandLabel); err != nil {
+		return usagef("%s", err)
+	}
+	if runkind.Process(o.Harness) {
+		if o.Parent == "" || o.Ticket == "" {
+			return usagef("--harness %s requires --parent-session and --ticket", o.Harness)
+		}
+		if o.Role != "worker" {
+			return usagef("--role must be worker for media and terminal runs")
+		}
+		if o.Model != "" || o.Effort != "" {
+			return usagef("--model and --effort are for AI agents; use --generator for media or --command for terminal")
+		}
 	}
 	if o.Interval < 1 || o.Interval > 3600 {
 		return usagef("--interval must be 1-3600 seconds")
 	}
 	if !heartbeatPhases[o.Phase] {
-		return usagef("invalid --phase")
+		return usagef("--phase must be starting, working, yielded or stopping")
 	}
 	if heartbeatText(o.Activity, 40) == "" {
 		o.Activity = ""
 	} else if !heartbeatActs[o.Activity] {
-		return usagef("invalid --activity")
+		return usagef("--activity must be busy, idle or throttled")
 	}
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
@@ -277,7 +313,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("invalid parent session")
 	}
 	if o.Management != "managed" && o.Management != "unmanaged" || o.Role != "worker" && o.Role != "coordinator" {
-		return usagef("invalid management or role")
+		return usagef("--management must be managed or unmanaged; --role must be worker or coordinator")
 	}
 	if o.Host == "" {
 		host, err := os.Hostname()
@@ -310,7 +346,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("--subscription-label requires subscription billing")
 	}
 	switch o.UsageSource {
-	case "", "claude", "codex", "cursor", "grok":
+	case "", "claude", "codex", "cursor", "grok", "gemini", "opencode":
 	default:
 		return usagef("invalid --usage-source")
 	}
@@ -391,11 +427,19 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			return waitHeartbeat(ctx, pid, dep.alive, interval)
 		}
 	}
+	finish := func() error {
+		// An owned launcher observes the child's exit and settles its control
+		// before closing the session. A PID observer retains its old cleanup.
+		if dep.stopOwned != nil {
+			return nil
+		}
+		return rt.finishHeartbeat(o, session)
+	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
 		rt.noteHeartbeatSources(ctx, o, session)
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		}
 		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
@@ -408,7 +452,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			releaseSessionIndex(session)
 			return nil
 		case err != nil && ctx.Err() != nil:
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
@@ -416,8 +460,18 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
 		}
-		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
-			return rt.finishHeartbeat(o, session)
+		wait := interval
+		if !session.pauseWakeAt.IsZero() {
+			until := time.Until(session.pauseWakeAt)
+			if until < time.Millisecond {
+				until = time.Millisecond
+			}
+			if until < wait {
+				wait = until
+			}
+		}
+		if err := dep.wait(ctx, o.OwnerPID, wait); err != nil {
+			return finish()
 		}
 	}
 }
@@ -822,6 +876,14 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	if o.PrintControls {
+		body["advertised_capabilities"] = []string{"status", "pause"}
+	}
+	if o.OwnedStop {
+		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
+	}
+	putText(body, "generator", o.Generator, true)
+	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
@@ -907,6 +969,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, errors.New("registration did not return a session id")
 	}
 	disk.SessionID = strings.ToLower(out.ID)
+	disk.ModelSent = true
+	disk.SentModel = heartbeatText(o.Model, 128)
+	disk.SentEffort = heartbeatText(o.Effort, 40)
 	bindHeartbeatWorktree(ctx, o, &disk)
 	if haveLabel {
 		disk.LabelSent = true
@@ -1108,16 +1173,13 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			delete(body, "display_label")
 		}
 	}
-	putText(body, "model", heartbeatText(o.Model, 128), true)
-	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
-	if session.disk.RequestedModel != "" && o.Model == session.disk.ModelFlagAtRequest && o.Effort == session.disk.EffortFlagAtRequest {
-		body["model"] = session.disk.RequestedModel
-		body["reasoning_effort"] = session.disk.RequestedEffort
-	} else {
-		session.disk.RequestedModel = ""
-		session.disk.RequestedEffort = ""
-	}
+	modelUpdate := putHeartbeatModel(ctx, o, session, body)
 
+	if model, ok := body["model"].(string); ok && model != "" {
+		if effort, ok := body["reasoning_effort"].(string); ok && modelreport.ValidTuple(model, effort) {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(session.id + "/advertised/" + model + "/" + effort), Harness: o.Harness, Model: model, Effort: effort, Status: "advertised"}}
+		}
+	}
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
@@ -1154,8 +1216,25 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if note == "" {
 		note = status.Note
 	}
-	if note != "" {
+	if note != "" && (session.disk.ActivityMode == "" || session.disk.ActivityMode == agentactivity.Summary) {
 		body["activity_note"] = note
+	}
+	if session.disk.ActivityMode != agentactivity.Off {
+		if raw, err := session.hold.readFile("activity.json", 512); err == nil {
+			var observed hookActivity
+			if json.Unmarshal(raw, &observed) == nil && observed.Session == session.id && observed.Activity.Source == "auto" && agentactivity.ValidAuto(observed.Activity.Text) && !observed.Activity.At.After(now) && now.Sub(observed.Activity.At) < agentactivity.Fresh {
+				body["tool_activity"] = observed.Activity
+			}
+		}
+	}
+	if session.disk.ActivityMode == agentactivity.Summary {
+		doing, at := status.Doing, status.ModifiedAt
+		if o.Doing != "" {
+			doing, at = o.Doing, session.disk.RegisteredAt
+		}
+		if doing != "" && !at.IsZero() && !at.After(now) && now.Sub(at) < agentactivity.Fresh {
+			body["doing"], body["doing_at"] = doing, at
+		}
 	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
@@ -1167,7 +1246,9 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
+		Mode     string                    `json:"agent_activity_mode"`
 		Warnings []harness.EstimateWarning `json:"warnings"`
+		Pause    *harness.Pause            `json:"pause"`
 	}
 	postBeat := func() error {
 		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
@@ -1182,6 +1263,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		}
 		return err
 	}
+	beatStarted := time.Now()
 	err = postBeat()
 	if heartbeatTerminalStatus(err) {
 		session.disk.Sequence--
@@ -1209,10 +1291,26 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		session.disk.Sequence--
 		return err
 	}
+	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
+		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
+		if err := dep.stopOwned(ctx, response.Pause, deadline); err != nil {
+			return err
+		}
+	}
+	session.pauseWakeAt = time.Time{}
+	if response.Pause != nil && response.Pause.WakeInMS > 0 && response.Pause.WakeInMS <= 86400000 {
+		session.pauseWakeAt = beatStarted.Add(time.Duration(response.Pause.WakeInMS) * time.Millisecond)
+	}
+	if agentactivity.Mode(response.Mode) {
+		session.disk.ActivityMode = response.Mode
+		payload, _ := json.Marshal(map[string]string{"session_id": session.id, "mode": response.Mode})
+		_ = session.hold.writeFile("activity-mode.json", payload)
+	}
 	if label, ok := body["display_label"].(string); ok {
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
 	}
+	acceptHeartbeatModel(session, body, modelUpdate)
 	rt.printEstimateWarnings(response.Warnings, &session.disk.WarningAt, time.Now())
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
@@ -1239,6 +1337,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	} else if reported {
 		session.disk.CapacityStarted = true
 	}
+	rt.printHeartbeatPause(session.id, response.Pause, o.PrintControls)
 	if o.PrintControls {
 		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
 	}
@@ -1482,6 +1581,7 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 			}
 			session.disk.RequestedModel, session.disk.RequestedEffort = model, effort
 			session.disk.ModelFlagAtRequest, session.disk.EffortFlagAtRequest = o.Model, o.Effort
+			session.disk.RequestedModelBaseline = captureHeartbeatModelBaseline(ctx, o, session)
 		}
 	}
 }
@@ -1657,7 +1757,7 @@ func heartbeatText(raw string, max int) string {
 
 func heartbeatNote(raw string) string {
 	clean := heartbeatText(raw, 1<<20)
-	if clean == "" {
+	if clean == "" || !agentactivity.SafeText(clean) {
 		return ""
 	}
 	if utf8.RuneCountInString(clean) <= heartbeatNoteMax {
@@ -1667,6 +1767,7 @@ func heartbeatNote(raw string) string {
 }
 
 type agentStatus struct {
+	Doing      string
 	Note       string
 	Progress   *int
 	Remaining  *float64
@@ -1696,6 +1797,7 @@ func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
 	}
 	var doc struct {
 		Note      string          `json:"note"`
+		Doing     string          `json:"doing"`
 		Pct       json.RawMessage `json:"pct"`
 		Remaining json.RawMessage `json:"remaining_min"`
 	}
@@ -1703,6 +1805,9 @@ func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
 		return agentStatus{}, false
 	}
 	status := agentStatus{Note: heartbeatNote(doc.Note), ModifiedAt: st.ModTime().UTC()}
+	if text, valid := agentactivity.CleanSummary(doc.Doing); valid {
+		status.Doing = text
+	}
 	valid := true
 	if len(doc.Pct) > 0 && string(doc.Pct) != "null" {
 		var n int

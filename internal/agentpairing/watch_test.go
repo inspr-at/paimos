@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -17,14 +18,56 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func TestAttachActivityRequiresActiveApprovalAndHonorsPolicy(t *testing.T) {
+	f, key, in := watchFixture(t)
+	doing := "Implementing activity"
+	in.Doing = &doing
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
+	in.Doing = nil
+	v := activateWatch(t, f, key, &in)
+	if v.AgentActivityMode != agentactivity.Summary {
+		t.Fatal("attach did not return workspace mode")
+	}
+	poll := func(code int) {
+		t.Helper()
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET last_poll=clock_timestamp()-interval '2 seconds' WHERE id=$1`, in.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		in.Sequence++
+		f.call("POST", "/api/agent-pairing/attach", in, false, key, code)
+	}
+	in.Doing = &doing
+	in.ToolActivity = &agentactivity.Activity{Text: "Running Go tests", Source: "auto", At: time.Now().UTC()}
+	poll(200)
+	var summary, observed string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT doing,tool_activity FROM harness_sessions WHERE id=$1`, *v.SessionID).Scan(&summary, &observed); err != nil || summary != doing || observed != "Running Go tests" {
+		t.Fatal("active watch activity not attributed")
+	}
+	in.ToolActivity.Text = "PRIVATE_ARGUMENT"
+	poll(400)
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO harness_settings(tenant_id,agent_activity_mode) VALUES($1,'off') ON CONFLICT (tenant_id) DO UPDATE SET agent_activity_mode='off'`, f.tenantID); err != nil {
+		t.Fatal(err)
+	}
+	doing = "Ignored while off"
+	in.ToolActivity.Text = "Pushing"
+	poll(200)
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT doing,tool_activity FROM harness_sessions WHERE id=$1`, *v.SessionID).Scan(&summary, &observed); err != nil || summary != "Implementing activity" || observed != "Running Go tests" {
+		t.Fatal("Off collected attached activity")
+	}
+}
+
 func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
 	return watchFixtureWithKey(t, "")
 }
 func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
+	return watchFixtureWithHarness(t, publicKey, "codex")
+}
+func watchFixtureWithHarness(t *testing.T, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
 	f := newFixture(t)
-	p := f.proposePlatformKey("darwin", "arm64", publicKey, "codex")
+	p := f.proposePlatformKey("darwin", "arm64", publicKey, harness)
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	project, ticket := uuid(t, f.db), uuid(t, f.db)
@@ -40,6 +83,8 @@ func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, atta
 		t.Fatal(err)
 	}
 	in := attachwatch.DeviceRequest{Operation: "request", RequestID: uuid(t, f.db), ComputerID: *v.ComputerID, DeviceProof: p.lifecycle, Snapshot: attachwatch.Snapshot{ComputerID: *v.ComputerID, ProjectID: project, TicketID: ticket, Host: "Test workstation", Harness: "codex", Process: attachwatch.Process{PID: 123, UID: 501, Started: "fixture-start", Executable: "/usr/local/bin/codex", CWD: "/tmp/pairing-fixture/repo"}, Transcript: "/tmp/fixture/transcript.jsonl", FileID: "1:234"}}
+	in.Snapshot.Harness = harness
+	in.Snapshot.Process.Executable = "/usr/local/bin/" + harness
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()

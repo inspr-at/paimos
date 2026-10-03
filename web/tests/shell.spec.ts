@@ -73,7 +73,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('h1')).toBeVisible()
         // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
         if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
-        else await expect(page.locator('footer.app-footer .footer-name .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
+        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.
@@ -81,11 +81,16 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         else expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(56)
         // Phones get 44px touch targets; a desktop pointer works with the compact rail.
         const min = viewport.width < 600 ? 44 : 20
-        for (const control of await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').all()) {
-          const inSwitch = await control.evaluate(el => !!el.closest('label.switch'))
-          const bounds = await (inSwitch ? control.locator('xpath=ancestor::label[1]') : control).boundingBox()
-          expect(bounds!.height).toBeGreaterThanOrEqual(min)
-          expect(bounds!.width).toBeGreaterThanOrEqual(min)
+        // Visible controls can change as the shell settles. Snapshot their
+        // rectangles together instead of resolving stale nth() locators later.
+        const controls = await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').evaluateAll(elements => elements.map(el => {
+          const target = el.closest('label.switch') ?? el
+          const { height, width } = target.getBoundingClientRect()
+          return { height, width }
+        }))
+        for (const bounds of controls) {
+          expect(bounds.height).toBeGreaterThanOrEqual(min)
+          expect(bounds.width).toBeGreaterThanOrEqual(min)
         }
         await mkdir('/tmp/aeon-p05-shots', { recursive: true })
         await page.screenshot({ path: `/tmp/aeon-p05-shots/${screen}-${viewport.width}-${colorScheme}.png`, fullPage: true })

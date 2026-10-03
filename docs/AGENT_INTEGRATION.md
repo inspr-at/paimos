@@ -22,7 +22,142 @@ The supervisor's `serve` command takes `--url`, `--agent-key-file` (an absolute 
 
 Its `control` command sends a fenced local control. Vendor session ids stay on the daemon. Aeon stores the run id and the agent principal.
 
-The daemon adapts Codex, Claude, Pi, Cursor, and Grok locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+The daemon adapts Codex, Claude, Pi, Cursor, Grok, Gemini CLI, and OpenCode locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+
+### Gemini CLI and OpenCode
+
+Setup accepts `--harness gemini` and `--harness opencode`. Standalone serve accepts
+`--gemini-path` and `--opencode-path`; paired serve uses the approved physical
+installation and interpreter pins. Discovery checks only `--version` and labels
+these candidates as **local profiles**, not authenticated person identities.
+Their explicitly selected HOME must be private and owned. Vendor login remains
+local: run `gemini` or `opencode auth login` normally. Session creation must succeed
+before Aeon sends a prompt; provider authentication can still fail on that prompt.
+Version probes leave discovery **unverified** and daemon accounts blocked with
+`sign_in_unverified`; they never establish sign-in or readiness. Setup cannot
+enroll these candidates as ready until a qualified sign-in probe is available.
+
+Both adapters use ACP version 1 over the existing owned stdio transport, with
+fresh sessions and run-scoped Aeon HTTP MCP tools. Idle inbox delivery starts a
+new turn in the same owned session; a busy turn rejects steer/inbox for retry.
+Interrupt waits for a terminal cancellation receipt. An unapproved permission
+request ends the run; Aeon never chooses a vendor permission option for a person.
+These adapters have no qualified no-tools execution boundary, so pairing
+verification and managed reviews remain unavailable before vendor startup.
+Existing enrollments retain their local profile, but a successful version probe
+does not make them launchable or request another login as if sign-out were proven.
+
+ACP launcher checks retain bounded local failure reasons: `timeout`, `protocol`
+and `launch_failed`. A future qualified sign-in check can distinguish confirmed
+sign-out (`auth_failed`) from `identity_mismatch`; both block dispatch, while only
+confirmed sign-out asks for another login. A fresh qualified success clears prior
+failures and allows dispatch. The historical account-probe request keeps only
+`auth_failed` and `unavailable`: only confirmed sign-out maps to `auth_failed`;
+identity mismatch, measurement failures and unqualified checks map to `unavailable`.
+The bounded lifecycle reason remains `identity_mismatch`. Raw vendor output and
+identity are never uploaded. These classifications do **not** qualify a sign-in
+command.
+
+#### AEON-543 qualification attempt (2026-10-02)
+
+**Blocked; neither harness has a qualified sign-in probe.** No real-account
+sign-in, identity-mismatch, startup-hook or quota-neutral termination qualification
+was completed. Fixture outcomes exercise readiness/dispatch consumers, not vendor
+authentication. Release-note enablement remains with the coordinator after actual
+qualification.
+
+Read-only commands run against the approved offload host (no credential contents
+or resolved environments were read or printed):
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'hostname; command -v gemini; command -v opencode; command -v node; command -v go'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'ls /Users/mba/.local/bin /Users/mba/.nix-profile/bin /opt/homebrew/bin /usr/local/bin 2>/dev/null | rg "^(gemini|opencode|node|npm|go|aeon.*)$"; test -d /Users/mba/.gemini && echo gemini-profile-present; test -d /Users/mba/.local/share/opencode && echo opencode-profile-present; test -d /Users/mba/.config/opencode && echo opencode-config-present; sysctl -n vm.loadavg'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local bash -s <<'REMOTE'
+for vendor_root in /Users/* /Users/mba/.local/share /Users/mba/.config /Users/mba/.nix-profile/lib/node_modules /opt/homebrew/lib/node_modules /usr/local/lib/node_modules /Users/mba/.opencode/bin; do
+  test -d "$vendor_root" && printf 'directory %s\n' "$vendor_root"
+done
+for vendor_profile in /Users/mba/.gemini /Users/mba/.config/opencode /Users/mba/.local/share/opencode /Users/ci/.gemini /Users/ci/.config/opencode /Users/ci/.local/share/opencode; do
+  test -d "$vendor_profile" && printf 'vendor profile directory %s\n' "$vendor_profile"
+done
+for vendor_binary in /Users/mba/.nix-profile/bin/gemini /Users/mba/.nix-profile/bin/opencode /opt/homebrew/bin/gemini /opt/homebrew/bin/opencode /usr/local/bin/gemini /usr/local/bin/opencode /Users/mba/.opencode/bin/opencode; do
+  test -x "$vendor_binary" && printf 'vendor executable %s\n' "$vendor_binary"
+done
+exit 0
+REMOTE
+```
+
+Observed: `mbp2606` answered; Node exists at `/Users/mba/.nix-profile/bin/node`.
+Neither vendor was found on that SSH session's PATH or at the enumerated executable
+paths; none of the enumerated vendor profile directories existed. These checks do
+not inventory every installation or another person's account. No install or login
+was attempted. Qualification needs approved physical vendor/interpreter pins and
+explicitly paired profiles on this host.
+
+Source inspection explains why guessed commands are unsafe. At Gemini commit
+[`fb972b2f`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/config/config.ts),
+the registered commands do not include `auth status`; positional arguments enter
+the prompt path. Its
+[`initialize`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/acp/acpRpcDispatcher.ts)
+calls configuration initialization, and `authenticate` may initiate authentication
+or clear cached credentials when switching methods. Neither was run as a probe.
+OpenCode v1.14.48, commit
+[`4d8ac17c`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/cli/cmd/providers.ts),
+implements `auth list` as stored provider names and credential types, without
+identity/revocation verification. Its
+[`ACP initialize`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/acp/agent.ts)
+returns capabilities; `authenticate` is unimplemented, and session creation provides
+no authenticated identity receipt. Such responses are insufficient to qualify
+dispatch. Keep `sign_in_unverified` until exact-build, real-account evidence proves
+a quota-neutral identity check and bounded cleanup with inherited hooks/config.
+
+Gemini profiles pin the exact model and numeric thinking budget. The qualified
+2.5 Flash range is 0–24576; 2.5 Pro is 128–32768. The registry exposes
+`effort_level` on the common 0–5 scale: off/0, up to 1024, up to 4096, up to 16384,
+up to 32768, then more; dynamic or named budgets stay unknown. A fresh private
+system settings file applies the pin without rewriting vendor or workspace
+configuration. OpenCode profiles require `provider/model`; efforts are actual
+provider variants, with `default` where no variant is selected. ACP startup
+checks the vendor's returned model and effort selections before prompting.
+`paimos harness invoke --harness gemini|opencode --model MODEL --effort EFFORT
+[--review] -- PROMPT` renders the registry's terminal run/review command.
+Its review flag selects vendor plan mode; it does not qualify managed no-tools
+review or override person controls.
+
+Gemini ACP completed-turn counters include cache reads in input and expose
+reasoning separately; the normalized output includes reasoning. Mixed-model
+Gemini turns remain unattributed. OpenCode's pinned ACP implementation returns
+only its last assistant step: tool turns therefore omit throughput instead of
+claiming complete totals. Cumulative USD updates remain available; context
+occupancy (`used`/`size`) is never counted as throughput. Native metadata captures
+can use `session-usage-parse --source gemini|opencode` with the existing complete
+capture/checkpoint contract. Gemini JSON telemetry requires one fixed model;
+OpenCode `step_finish` parts deduplicate by stable part ID and count every step.
+Heartbeat captures are explicitly named `gemini.jsonl` or `opencode.jsonl` in the
+worker state directory; vendor credentials and databases are never read. No
+quota-neutral capacity API has been qualified; missing capacity stays unknown.
+Qualification tests use local protocol fixtures, not paid vendor calls. Real CLI
+installation, login and no-tools qualification remain separate evidence gates.
+Attach recognizes recorded vendor installation roots and native executable pins.
+A generic Node interpreter does not prove a Gemini process's identity, so such
+attachments are refused. Native Gemini attachment remains unqualified.
+
+Skill rendering uses the vendor directories
+[`.gemini/skills`](https://geminicli.com/docs/cli/skills/) and
+[`.opencode/skills`](https://opencode.ai/v2/docs/skills).
+Always-on Gemini previews suggest
+[`GEMINI.md`](https://geminicli.com/docs/cli/gemini-md/); OpenCode uses `AGENTS.md`.
+Rules import accepts both harness selectors while refusing their private vendor
+stores. Rendering preserves exact bytes; installing a preview remains explicit.
+
+The closed reporter harness enum changes the declared status/heartbeat contract
+from `harness-session/1.9` to `harness-session/2.0`. Existing fields and routes keep
+their shape. `Aeon-Contract` is a response header, not a required request header:
+historical registration and heartbeat bodies still work without it. Pharos and
+Janus do not decode the harness-session enum, so no coordinated rollout is
+required for their existing reporters. The worker does not update those
+repositories or deploy this draft.
 
 ### Default worker launch
 
@@ -86,7 +221,7 @@ Run the guide’s complete instance-bound command from the intended project fold
 
 `pair` runs setup, displays the code and waits for browser approval and daemon connectivity. It offers the current physical folder for explicit confirmation and installed, signed-in harness accounts for selection. Bare `pair` asks for the instance origin on first use; a resumed pairing keeps its saved origin and folder. The guide supplies the default tenant. No credentials are requested or printed. JSON automation must supply `--workspace` and `--harness` explicitly instead of answering prompts.
 
-Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs a read-only sign-in check for every supported vendor tool found on PATH before offering choices; explicit `--harness` flags probe only those selections.
+Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs read-only sign-in checks for vendor tools that expose one; Gemini CLI and OpenCode offer an explicitly selected local profile with unverified sign-in. Explicit `--harness` flags probe only those selections.
 
 `--state-root` is optional for `pair`, `setup`, `status`, `disconnect` and `add-harness`. The defaults are `~/Library/Application Support/aeon/paired` on macOS and `$XDG_STATE_HOME/aeon/paired` on Linux (or `~/.local/state/aeon/paired` when unset). Missing directories, including parents, are created with mode `0700`; existing unsafe permissions, symlinks, repository paths and paths inside the working folder are rejected without repair. No manual `mkdir` is needed. Advanced `--workspace`, repeated `--harness`, `--tenant`/`--tenant-id`, and `--state-root` overrides remain available. To maintain multiple pairings, use a distinct private state root for each.
 
@@ -249,6 +384,75 @@ The latest snapshot accompanies live planning; its cost and cost-rate fields are
 omitted without `harness.read` on both the ticket's current project and its saved
 source project, including after project moves (AEON-370).
 
+The ticket list uses that snapshot for Tokens/Cost comparison hovers, preserving
+unknown baselines. Estimates carry `~`; running cells show measured / estimate;
+measured cells show one value with a muted check. Cost is list value, never an
+invoice; only subscription-only usage carries a `plan` marker. Mixed billing
+totals remain unmarked, and their hovers identify the subscription portion. The former Paid
+column maps to Cost in saved preferences and views. Saved ticks always draw,
+including empty cells with hover reasons; only Automatic hides empty planning
+columns. Phones retain their existing card layout.
+
+Planning also returns `models` from visible sessions, including work descendants.
+Profile identity takes precedence over normalized model, raw metadata and usage
+fallbacks. Models are ordered by measured session tokens, with deterministic ties;
+each includes session identity, effort, role, running state and reported tokens.
+The Model cell shows the leading used model plus a count of other models, with
+planned versus used details grouped by model in its hover: effort, session count,
+running state and token totals, without session IDs. The planned comparison uses
+the work-start route, comparing base model keys with embedded effort removed.
+Only a single used model adds “as used” when its harness and base model match
+and every session effort equals the planned effort. A different harness or base
+model adds “a different model ran”; an effort-only mismatch or mixed models
+leave the planned label alone. Usage without a planned route says
+“No model planned: no role set”. Session roles identify workers or coordinators,
+so they do not imply that a run was a review. Running Tokens/Cost hovers put
+measured usage before the snapshot estimate and its percentage. A running token
+session line reads “1 session running”; the Model line retains “1 session, running”.
+Before usage is reported, Tokens names the running session count and the display
+model when a single model ran, without a second unreported-usage warning. The
+running count excludes finished sessions, while measured totals include their
+usage. A session without a usage row counts as unreported tokens, without adding
+an unknown billing mode or setting `list_unpriced`/`paid_unknown`. Its standalone
+Cost hover stays “Billing not reported yet”; beside priced API usage the Cost
+hover stays “API-billed · at list prices”, including a measured zero. Subscription
+usage keeps its plan marker beside an unreported session. Actual usage without
+a list price or known billing still contributes lower-bound and billing warnings
+when a list value was measured. The shared
+`web/tests/fixtures/planning-list.json` is a complete server list response;
+`TestPlanningListHoverFixture` checks its planning fields against the endpoint,
+and unit/browser regressions consume it directly. Calibration appears only on the pre-session
+estimate and names the short model without effort. Column fitting
+measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
+modes still require `harness.read` on both the row and usage source projects.
+
+The Display panel saves Effort meter On/Off (default On), Model names Full/Short
+(default Short) and Version Show/Hide (default Show) per person in `list:display`.
+The Model column defaults to 176px. Registry `display_name`, `short_name` and
+`model_version` are separate from the profile's revision `version`; alias versions
+stay unknown unless a new immutable profile explicitly supplies that metadata.
+Hovers, accessible names and model sorting retain the full name and model version.
+Registered aliases with different declared model versions remain separate used
+models. The planned/used comparison requires equal model versions when either
+side declares one; two omitted or empty versions retain legacy identity matching.
+The hover says “as used” only when every session’s effort also matches the plan.
+Sorting follows the leading actual model, then the work-start route or
+live route when no actual model is known.
+Migration 1074 stores model display metadata and effort levels in the immutable,
+tenant-isolated `model_profile_display` table without rewriting profile pins.
+Existing profiles are backfilled under each tenant’s RLS in the migration
+transaction; an insert trigger covers both current and previous-binary writers.
+The registry’s presentation `provider` is separate from its routing `family`: Pi
+profiles with explicit registered Gemini IDs retain family `unknown` and carry
+Google presentation metadata. Effort is one 0–5 scale: Codex minimal 0 through xhigh 4,
+Claude low 1 through max 5, Grok low 1 through xhigh 4; Gemini budgets use off/0,
+1024, 4096, 16384, 32768 and larger token buckets. A session meter uses its
+registered profile only when reported effort matches; unregistered, missing or
+unsupported effort stays null, hides the meter, and says “Effort not reported” in
+the hover and accessible name, including when the meter setting is Off. Raw
+effort words never imply a level. The largest measured session supplies the leading
+model's meter (session ID breaks ties); the hover describes every session.
+
 Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. Without a vendor id, Codex discovery reads only the first `session_meta` line of allowed rollouts, matches its `payload.cwd` to the registered worktree exactly, and selects the newest `payload.timestamp` after registration. Grok matches the encoded worktree directory and selects the newest session whose fenced `summary.json` has `created_at` after registration; `usage.json.updatedAt` alone cannot prove that a session is new. Both searches are bounded at 4,000 entries and pin the first match in private heartbeat state, retaining the same log and cursor after a helper restart. Sessions missing creation metadata, a bound worktree, or a recorded start remain undiscovered; use an explicit id or file for them and for resumed sessions. Keep one discoverable new vendor session per registered worktree; pass an id/file when concurrent sessions share it. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
 
 Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.
@@ -355,6 +559,20 @@ address bar before anything else runs, so it never reaches a sign-in return addr
 or a report, and keeps it in memory only until the Agents page fills the lookup field
 with it (exactly nine digits, else ignored). A session that ended drops it, and opening
 the link looks up and approves nothing.
+
+The terminal's waiting block names the Decision Desk and the Attach session entry,
+prints the code in three space-separated groups, and makes the validated fragment
+link clickable with OSC 8. Ctrl-C cancels a waiting request; after activation it
+stops sharing. On today's /agents page, attach requests are approvals in **Needs you**,
+ordered with permission requests by expiry. Rows show the ticket, sharing mode and
+waiting terminal, never the code, and offer **Review…** only. Review opens a memo
+with unselected Allow/Decline choices; **Decide** submits the choice. The code entry
+step performs no lookup until **Find request**. Controls stay above the growing
+memo on desktop and in a pinned bottom bar in a full-height phone sheet.
+Single keys work outside text fields; from the code field use Command+Enter on
+macOS or Ctrl+Enter elsewhere. Escape leaves the field before closing the review.
+Allowed, expired and cancelled outcomes stay in place. Because the server combines
+cancellation and decline as detached, only the deciding tab says Declined.
 
 Attach reads and decisions stay with the tenant, person and authentication
 generation that started them. Each continuation checks that scope in the same
@@ -495,6 +713,10 @@ The server verifies possession of the browser-pinned key; this is not remote
 hardware attestation. A new pairing still needs the person to trust the installed
 daemon and review the requested computer. Automated tests use an injectable
 signer and cover server proof verification, migration and unsigned native denial.
+Concurrent submissions of one valid proof must activate exactly one session;
+incomplete proofs and a failed activation transaction must preserve the challenge
+without creating a session or lease. Native tests also check that a cancelled
+context stops key creation and signing before OS access.
 A memory-only SecItem fixture mirrors legacy attribute pruning and checks stored
 item readback, including preservation of the supplied ACL identity; it never
 accesses a real Keychain and does not qualify the native ACL.
@@ -574,10 +796,10 @@ same-user code can still open an independent terminal and request the review.
 Ancestors are identified from kernel metadata only. On Linux that is
 `/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
 ancestor stays acceptable; the target still needs its executable and cwd. On a
-Mac with an upgraded pairing whose daemon reports that Touch ID can run, the
-unsaved default also requires an enclave-signed confirmation before a session
-exists. Type `WATCH`, then open the paired
-instance's Agents page and choose
+Mac with a browser-pinned local confirmation key, the unsaved default requires
+an enclave-signed confirmation before a session exists, regardless of the daemon's
+capability report. If Touch ID cannot run, activation fails closed. Type `WATCH`,
+then open the paired instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
 identity changes, replaced/truncated transcripts, network errors or revocation
@@ -611,17 +833,71 @@ This is a capability inventory, not a claim that a login is valid or quota is
 available; a missing observation stays missing. Older daemons without the
 inventory report unavailable rather than an empty successful discovery.
 
-Idle capture follows fresh harness readings and never interrupts a live managed
-run. The default interval is five minutes (`serve --capacity-interval`); failures
-never become a zero-percent reading. Existing Codex app-server readings and
-Claude in-run stream readings remain the source paths from AEON-297.
+Idle checks run at startup, every five minutes (`serve --capacity-interval`), on
+fact expiry/reset, reconnect and Check now. One capture owns the local slot at
+a time and never interrupts a live managed run. Operations have a ten-second
+deadline and bounded owned-process cleanup; unconfirmed cleanup retains the
+local dispatch fence. Measurement failures retry after 1, 2 and 4 minutes, then
+every 30 minutes; the retry deadline survives restart. Check now can request one
+capture before that deadline. Every completion is persisted before delivery.
+Lost automatic observations replay unchanged after restart while their binding
+and resource membership remain current, including after outages longer than 24
+hours. Replay preserves the original observation and reading times, so old room
+stays stale, unresolved hard stops remain recorded and newer facts win.
+A replay acknowledgement lets the next automatic refresh or Check now capture
+new evidence.
+Manual completions retain the 24-hour observation bound and keep their original
+generation, revision and check ID and are dropped when expired or invalidated.
+A restarted daemon sends a generation heartbeat with `measurement_only: true`
+before handling checks. Measurement reports and this heartbeat preserve the health probe's
+timestamp, availability, failure and legacy credit snapshot under the server's
+account write fence, so delayed observations cannot clear a newer health failure.
+Consent and binding are checked again after capture; the final server write enforces
+revocation. Unknown usage never introduces a start limit; identity mismatch
+remains a hard failure. Recovery execution belongs to admission, not this loop.
+
+Codex idle launch is disabled until release-owned qualification covers the exact
+executable, pinned Node, startup hooks, inherited configuration/tools and process
+termination. A successful fake protocol does not qualify a live executable.
+Qualified captures use only initialize → initialized → account/read →
+account/rateLimits/read, with identity matched before quota is read. Claude idle
+get_usage also remains disabled until qualified. Codex run events and Claude run
+events/statusline continue supplying readings; missing measurements stay unknown.
+Pi with an approved OpenRouter profile checks only /key. Its null cap leaves
+remaining credit unknown, and an unavailable measurement does not invalidate a
+locally configured key. No /credits request or management key is introduced;
+null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
+An explicit zero key cap stays exhausted even when `/key` omits remaining.
+In a supervised daemon the capacity scheduler alone owns `/key`; health polls
+and fresh launch qualification inspect the local profile and launcher without
+another provider request. They cannot bypass the persisted 1/2/4/30-minute
+measurement backoff. Standalone probes and captures share a bounded request owner.
+Legacy Pi credit probes also populate the durable key facts, so replacing the
+credit snapshot with a null cap cannot erase a previously confirmed stop.
+Readings with room expire after ten minutes; quota at 100%, zero key caps and
+vendor stops keep blocking until their own reset or newer same-window room
+evidence. Null checks retain the stop's original observation time and cannot
+reset its recovery wait or backoff. Provider-confirmed 402 stops require
+successful recovery inference, which package B owns. Check now has a persisted
+60-second gap and audits each new request; retries reuse the same check and
+decision 2B's one early recovery intent per wait.
+
+Wrong-account `identity_mismatch` and confirmed `authentication_failed` are
+distinct repairs and both block work. Only confirmed sign-out uses the legacy
+probe category `auth_failed`; a mismatched identity uses `unavailable` alongside
+the explicit readiness cause. Measurement `timeout`, `protocol` and
+`launch_failed` remain separate from sign-out. An older identity cause survives
+measurement errors, while a newer confirmed identity failure replaces it.
 
 | Harness | Private home binding | Idle fallback |
 | --- | --- | --- |
-| Codex | Registry `home` → `CODEX_HOME` | `account/read` identity check, then `account/rateLimits/read` |
+| Codex | Registry `home` → `CODEX_HOME` | Not available idle until exact executable/interpreter and startup/cleanup boundaries are qualified |
+| Pi (OpenRouter) | Approved local profile | Key cap from `/key`; total balance stays unknown |
 | Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
+| Gemini CLI | Approved local profile `home` → `HOME` / `GEMINI_CLI_HOME` | Not available: quota-neutral API unqualified |
+| OpenCode | Approved local profile `home` → `HOME` and private XDG directories | Not available: provider capacity unqualified |
 
 Homes come from each approved local registry/runtime account, not from directory
 crawling or credential extraction. Cursor uses the same explicit home for its
@@ -641,6 +917,64 @@ no production capability or user switch to guess the schema. Tests use a clearly
 synthetic response, not invented vendor fields. No real Grok billing probe or
 Cursor TUI/cookie extraction is used. Native Grok execution bindings and approval
 requirements remain unchanged.
+
+#### Daemon regression execution evidence (AEON-478, fix round 5)
+
+Executed on 2026-10-03 on the approved writable mbp2606 test runner, using
+`remote-test.sh`, its isolated Postgres database and uncached Go tests
+(`-count=1 -v`). The current implementation is
+`b5ce64725b2b3433100a44040441c4c66ad4cdc3`, which merges readiness parent
+`0c4c4b1584d29f88d5fb07e9bab632df638951b8`. All ten top-level `TestFix3` and
+`TestFix4` tests in `internal/agentaccounts` and `internal/agentd` passed.
+The following historical runs compiled and reached the specified assertions;
+runner, compilation and fixture failures were not counted as regressions.
+
+| Regression | Pre-fix implementation | Executed pre-fix failure | Current result |
+| --- | --- | --- | --- |
+| `TestFix3AutomaticHardStopSurvivesFailedDeliveryAndRestart` | `d3a52c4b6cdcf81a9c06909038d1840c8de55814` | `failed automatic hard-stop delivery was not durable` | PASS |
+| `TestFix3CapacityReplayPreservesConcurrentHealthFailure` | same | `measurement replay overwrote concurrent health failure`, for both `auth_failed` and `unavailable` | PASS, both cases |
+| `TestFix3PiHealthPollingCannotOverlapKeyCapture` | same | `health polling overlapped capture: 2 key requests` | PASS |
+| `TestFix3PiHealthPollingRespectsDurableCaptureBackoff` | same | `health poll bypassed persisted retry: 2 calls` | PASS |
+| `TestFix4AutomaticReplayAfterDayOutageAllowsFreshCheckNow` | `1cb669535c92b37b0214bb495bb497523781f7c2` | `aged automatic replay stalled, changed evidence or recaptured: api 400` | PASS |
+| `TestFix4AgedAutomaticFactsKeepFreshnessAndOrdering` | same | HTTP 400, `invalid readiness observation time`, for both 17% and 100% readings | PASS, both cases |
+| `TestFix3RestartFirstReportCarriesOldCheck` | `f867cb6cc24553eba5e4c2a2500799bc890aa415` with the parent's unchanged test file | HTTP 409 without `X-Aeon-Write-Committed` or `stale_binding`, failing `stale completion must report its committed heartbeat` | PASS |
+
+The first four test bodies are byte-for-byte identical between the historical
+run and the current run. The fix-4 test file is also unchanged between its two
+runs; `1cb66953` differs from reviewed `bd37420c` only in this test fixture, so
+its production implementation is the pre-fix implementation. The restart
+compatibility run replaced only `internal/agentaccounts/readiness_test.go` in
+the runner's disposable `f867cb6c` checkout with that file from `b5ce6472`.
+Historical-run adapters changed only the selected Git revision and that
+explicit test overlay; all runner presence, load, reservation and cleanup
+guards remained intact. No source checkout or branch was rewound.
+
+The current targeted command was
+`go test -count=1 -v ./internal/agentaccounts ./internal/agentd -run 'TestFix[34]'`.
+Historical runs selected `TestFix3` at `d3a52c4b`, `TestFix4` at `1cb66953`,
+and `TestFix3RestartFirstReportCarriesOldCheck` at `f867cb6c`; each exited 1
+for the assertion failures above. The current run exited 0. These are
+synthetic regression results, not qualification of live vendor executables.
+
+The merge preserves both protocols: an ordinary heartbeat can commit the new
+daemon generation while explicitly rejecting an old check completion; a
+measurement-only completion with an unestablished or different generation
+still rejects without changing generation or health. Decisions 1C and 2B,
+admission-owned recovery and the idle-launch qualification gates are unchanged.
+
+At the same implementation commit, a separate uncached remote run passed all
+seven affected Go packages: `internal/agentd`, `internal/agentaccounts`,
+`internal/agentsetup`, `internal/openrouter`, `internal/capacity`,
+`cmd/aeon-agentd` and `internal/reportercontract`. The guarded web runner passed
+the Go formatting check, `npm run build`, 652 Node tests and 688 Vitest tests
+across 55 files. Audit slice assignment and `git diff --check` also passed.
+The follow-up evidence commit changes only this documentation.
+
+Browser validation remains open: the approved remote launcher exited 3 before
+launching `usage-dashboard.spec.ts` and `capacity-learning.spec.ts`, because
+the OPS-247 bootstrap and launcher are pending. No Linux Chromium run is
+claimed. No guard was bypassed and no origin push or deployment was performed;
+the coordinator must run these specs on an approved browser lane or hosted CI.
 
 ## Outcome events (AEON-286)
 

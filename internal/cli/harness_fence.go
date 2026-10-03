@@ -30,10 +30,15 @@ const (
 	harnessGrokSummary
 	// harnessCursorUsage is the launcher's stream-json copy <state>/cursor.jsonl.
 	harnessCursorUsage
+	// Metadata captures named exactly after the new vendor, never vendor auth/database files.
+	harnessGeminiUsage
+	harnessOpenCodeUsage
 	// harnessAgentStatus is <worktree>/.agent-status.json.
 	harnessAgentStatus
 	// harnessExplicitStatus is an explicitly selected non-credential JSON file.
 	harnessExplicitStatus
+	// Explicitly selected Codex app-server capture used for capacity reporting.
+	harnessCodexStream
 )
 
 var errHarnessFileDenied = errors.New("refusing a file outside the harness usage allowlist")
@@ -48,6 +53,10 @@ func harnessKindForSource(source string) (harnessFileKind, bool) {
 		return harnessGrokUsage, true
 	case "cursor":
 		return harnessCursorUsage, true
+	case "gemini":
+		return harnessGeminiUsage, true
+	case "opencode":
+		return harnessOpenCodeUsage, true
 	default:
 		return 0, false
 	}
@@ -106,8 +115,14 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 		ok = base == "session_index.jsonl"
 	case harnessCursorUsage:
 		ok = base == "cursor.jsonl"
+	case harnessGeminiUsage:
+		ok = base == "gemini.jsonl"
+	case harnessOpenCodeUsage:
+		ok = base == "opencode.jsonl"
 	case harnessAgentStatus:
 		ok = base == ".agent-status.json"
+	case harnessCodexStream:
+		ok = strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".json")
 	case harnessExplicitStatus:
 		ok = strings.HasSuffix(base, ".json")
 	default:

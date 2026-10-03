@@ -11,7 +11,9 @@ import (
 	"math/big"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -107,8 +109,8 @@ func (m *Module) attachLimit(ctx context.Context, tenantID, bucket string, max i
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO harness_attach_limits(tenant_id,bucket,attempts) VALUES($1,$2,1)
  ON CONFLICT(tenant_id,bucket) DO UPDATE SET
- attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE harness_attach_limits.attempts+1 END,
- starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket).Scan(&n)
+ attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3::integer * interval '1 second') THEN 1 ELSE harness_attach_limits.attempts+1 END,
+ starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3::integer * interval '1 second') THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket, int(attachwatch.AttemptWindow/time.Second)).Scan(&n)
 	})
 	if err != nil {
 		return err
@@ -127,6 +129,9 @@ func loadAttach(ctx context.Context, tx pgx.Tx, id string) (attachwatch.View, st
 	err := tx.QueryRow(ctx, `SELECT id::text,digest,snapshot,state,expires_at,lease_until,session_id::text,owner_id::text,user_code,consent_mode,coalesce(local_auth_nonce,'') FROM harness_attach_requests WHERE id=$1 FOR UPDATE`, id).Scan(&v.RequestID, &v.Digest, &v.Snapshot, &v.State, &v.ExpiresAt, &v.LeaseUntil, &v.SessionID, &owner, &code, &v.ConsentMode, &v.LocalAuthNonce)
 	if err == nil && v.State == "pending" {
 		v.ConsentMode, err = computerWatchConsentMode(ctx, tx, owner, v.Snapshot.Platform, v.Snapshot.ComputerID)
+	}
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary')`).Scan(&v.AgentActivityMode)
 	}
 	v.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, v.ConsentMode)
 	v.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
@@ -149,8 +154,8 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 	if authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}) != nil {
 		return attachFailure(403, "forbidden", "owner delegation no longer valid", attachwatch.RefusalTicket)
 	}
-	var ticketOK, enrollmentOK bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK)
+	var ticketOK, enrollmentOK, draining bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='draining' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK, &draining)
 	if err != nil {
 		return err
 	}
@@ -158,7 +163,13 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", attachwatch.RefusalTicket)
 	}
 	if !enrollmentOK {
-		return fail(409, "conflict", "project, ticket or harness enrollment changed")
+		// An existing OS process does not carry attach authority. Drain preserves
+		// owned work for settlement, but cannot grant a new session/consent lease.
+		cause := attachwatch.RefusalEnrollment
+		if draining {
+			cause = attachwatch.RefusalDraining
+		}
+		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", cause)
 	}
 	return nil
 }
@@ -256,8 +267,13 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			// gives repair guidance to an authenticated principal for its own
 			// retained computer row and registered, memory-only poll key.
 			var retainedPrincipal, state string
-			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID && state == "revoked" {
-				return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID {
+				switch state {
+				case "revoked":
+					return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+				case "draining":
+					return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalDraining)
+				}
 			}
 			return fail(403, "forbidden", "computer proof rejected")
 		}
@@ -269,6 +285,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if expected.proofVersion != attachwatch.LocalConsentProofVersion {
 			return attachFailure(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required", attachwatch.RefusalVersion)
+		}
+		if in.Operation != "poll" && (in.Doing != nil || in.ToolActivity != nil) {
+			return fail(400, "invalid_request", "activity requires an active watch")
 		}
 		if in.Operation == "request" {
 			s := in.Snapshot
@@ -288,7 +307,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			if err = tx.QueryRow(ctx, `SELECT count(*) FROM harness_attach_requests WHERE computer_id=$1 AND ((state IN ('pending','approved') AND expires_at>clock_timestamp()) OR (state='active' AND lease_until>clock_timestamp()))`, in.ComputerID).Scan(&n); err != nil {
 				return err
 			}
-			if n >= 8 {
+			if n >= attachwatch.ComputerMax {
 				return fail(429, "rate_limited", "computer attach limit reached")
 			}
 			v, _, code, e := loadAttach(ctx, tx, in.RequestID)
@@ -344,6 +363,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		if owner != approvedOwner || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
 			rejected = fail(403, "forbidden", "attach approval binding changed")
 			return attachEnd(ctx, tx, &out, "detached")
+		}
+		if out.State != "active" && (in.Doing != nil || in.ToolActivity != nil) {
+			return fail(400, "invalid_request", "activity requires an active watch")
 		}
 		waiting := out.State == "pending" || out.State == "approved"
 		expired, err := attachExpired(ctx, tx, &out)
@@ -465,6 +487,15 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Sequence < 1 {
 			return fail(400, "invalid_request", "poll sequence required")
+		}
+		if in.Doing != nil || in.ToolActivity != nil {
+			if err = agentactivity.ReportAttached(ctx, tx, p.TenantID, p.ID, *out.SessionID, in.Doing, in.ToolActivity); err != nil {
+				var invalid *agentactivity.InvalidReport
+				if errors.As(err, &invalid) {
+					return fail(400, "invalid_request", invalid.Message)
+				}
+				return err
+			}
 		}
 		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET heartbeat_at=clock_timestamp() WHERE id=$1`, *out.SessionID); err != nil {
 			return err

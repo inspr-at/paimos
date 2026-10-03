@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -25,6 +26,16 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 	}
 	err := db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":principal-backfill"); err != nil {
+			return err
+		}
+		// Serialize email repairs with invitation candidate selection, imports
+		// and manual linking. Acquire this before taking any principal row locks.
+		// Tree and tenant precede alias, since repairs also write node rows and
+		// may create the import actor (whose FK takes a tenant key-share lock).
+		if err := authz.LockProjectMutation(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT p.id::text,p.name,i.display_name,p.email,i.email,u.after->'classic',u.after->'principal'->>'name',to_jsonb(p)

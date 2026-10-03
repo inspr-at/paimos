@@ -45,13 +45,14 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
           :aria-describedby="valueState(selected, option.value) === 'out' ? `not-${dimension}` : undefined"
           @change="changed($event, option.value)" @keydown="keydown($event, option.value, excludable)"
         />
-        <StatusIcon v-if="dimension === 'status'" :state="option.value" />
+        <AppIcon v-if="dimension === 'status' && option.value === 'queued'" name="queue" :size="14" class="queue-glyph" /><StatusIcon v-else-if="dimension === 'status'" :state="option.value" />
         <template v-else-if="dimension === 'priority'"><PriorityIcon v-if="option.value !== 'none'" :priority="option.value" /><span v-else class="no-icon" /></template>
         <template v-else-if="dimension === 'assignee'"><PersonAvatar v-if="option.value !== 'none'" :id="option.value" :name="option.label" :size="18" /><AppIcon v-else name="user" :size="14" class="faint" /></template>
         <AppIcon v-else-if="dimension === 'type'" :name="kindIcon(option.value)" :size="14" class="kind" :class="option.value" />
         <template v-else-if="dimension === 'tag'"><i v-if="option.value !== 'none'" class="tag-dot" :data-color="option.color || undefined" aria-hidden="true" /><AppIcon v-else name="tag" :size="14" class="faint" /></template>
         <AppIcon v-else-if="dimension === 'epic'" name="epic" :size="14" :class="option.value === 'none' ? 'faint' : 'kind epic'" />
         <AppIcon v-else-if="dimension === 'cost'" name="coin" :size="14" class="faint" />
+        <AppIcon v-else-if="dimension === 'human_check'" name="person-check" :size="14" class="faint" />
         <AppIcon v-else name="box" :size="14" class="faint" />
         <span v-if="valueState(selected, option.value) === 'out'" class="not-tag">not</span>
         <span class="option-label">{{ option.label }}</span>
@@ -69,6 +70,7 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
 </template>
 
 <style scoped>
+.queue-glyph { color: var(--teal-ink); }
 .facet-options { display: grid; gap: 1px; }
 .facet-option { position: relative; display: flex; align-items: center; min-height: 32px; border-radius: 8px; }
 .facet-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: inherit; padding: 0 6px 0 10px; font-size: 13.5px; cursor: pointer; }

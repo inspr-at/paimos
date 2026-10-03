@@ -45,6 +45,7 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
@@ -66,6 +67,8 @@ import (
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
+	"github.com/inspr-at/paimos/internal/questions"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/relations"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
@@ -74,6 +77,7 @@ import (
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
 	"github.com/inspr-at/paimos/internal/ticketwork"
@@ -208,6 +212,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("greetings: %w", err)
 	}
 	fileStore := attachments.Store{FilesDir: cfg.FilesDir}
+	attachmentsMod := attachments.New(pool, fileStore)
+	attachmentsMod.Sandbox = attachments.NewSandbox(cfg.PublicURL, cfg.HTMLSandboxOrigin, authMod.PreviewSessionLease)
 	var confirmationMod *confirmation.Module
 	pluginRegistry, err := plugins.BuiltinWithRegistration(func(reg *plugins.Registry) error {
 		var err error
@@ -268,12 +274,44 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
 	go harness.RunLostContactSweeper(ctx, pool)
+	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
+	go modelMod.Run(ctx)
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
+	statusAuto := statusautopilot.New(pool)
+	go statusAuto.Run(ctx)
+	recurringWork := recurrences.New(pool)
+	publishedHistory, err := releasehistory.Embedded()
+	if err != nil {
+		return err
+	}
+	publications := []recurrences.Publication{}
+	for _, release := range publishedHistory.Releases {
+		if release.State != releasehistory.StatePublished {
+			continue
+		}
+		at := release.PublishedAt
+		if at == nil {
+			at = release.TaggedAt
+		}
+		if at == nil {
+			continue
+		}
+		name := release.Codename
+		if name == "" {
+			name = release.Version
+		}
+		publications = append(publications, recurrences.Publication{ProjectKey: "AEON", Name: name, Version: release.Version, PublishedAt: *at})
+	}
+	recurringWork.WithHistory(publications)
+	go recurringWork.Run(ctx)
 	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
+	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
+		return fmt.Errorf("account linking: %w", err)
+	}
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
@@ -295,11 +333,13 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		reviewPublisher = reviewApp
 	}
 	reviewMod := crossreview.New(pool, reviewPublisher)
+	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	go reviewMod.RunStatusReporter(ctx)
 	api := &httpapi.Server{
-		Pool:      pool,
-		Brand:     &productBrand,
-		PublicURL: cfg.PublicURL,
+		Pool:                    pool,
+		Brand:                   &productBrand,
+		PublicURL:               cfg.PublicURL,
+		AttachmentSandboxOrigin: attachmentsMod.Sandbox.Origin(),
 		// AEON-430: the footer names the running release from /api/version.
 		Codename: historyMod.CodenameOf,
 		Web:      webFS,
@@ -316,11 +356,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			tenantbrand.New(pool),
 			workspaceModels,
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
-			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
+			attachmentsMod,
 			greetingsMod,
 			knowledge.New(pool),
 			projectgroups.New(pool),
@@ -340,13 +380,17 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
-			modelregistry.New(pool),
+			questions.New(pool),
+			decisiondesk.New(pool),
+			modelMod,
 			agentaccounts.New(pool),
 			pairingMod,
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
 			releases.New(pool),
+			statusAuto,
+			recurringWork,
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
@@ -379,7 +423,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide),
+		Handler:           attachmentsMod.WrapSandbox(agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide)),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

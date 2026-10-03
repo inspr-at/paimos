@@ -258,8 +258,11 @@ func TestWorkflowShardLayouts(t *testing.T) {
 				Matrix map[string]string `yaml:"matrix"`
 			} `yaml:"strategy"`
 			Steps []struct {
-				Run  string         `yaml:"run"`
-				With map[string]any `yaml:"with"`
+				Name string
+				Uses string            `yaml:"uses"`
+				Run  string            `yaml:"run"`
+				With map[string]any    `yaml:"with"`
+				Env  map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -282,12 +285,35 @@ func TestWorkflowShardLayouts(t *testing.T) {
 		}
 	}
 	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
-		t.Fatal("shard commands must use the selected count and bypass Mac test caching")
+		t.Fatal("shard commands must use the selected count and bypass persistent Mac test results")
 	}
-	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" {
-		t.Fatal("routed checkout/cache trust policy changed")
+	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
+		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
 	}
+	foundCache := false
+	foundFreshTests := false
 	for _, step := range job.Steps {
+		if step.Name == "Test this shard" {
+			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, `test "$cached" -eq 0`)
+		}
+		if strings.HasPrefix(step.Uses, "actions/cache@") {
+			foundCache = true
+			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" {
+				t.Fatal("cache must persist the actual GOCACHE path")
+			}
+			key, _ := step.With["key"].(string)
+			for _, dimension := range []string{"runner.os", "runner.arch", "steps.setup-go.outputs.go-version", "hashFiles('go.sum')", "strategy.job-total", "matrix.shard", "github.head_ref || github.ref_name", "github.sha"} {
+				if !strings.Contains(key, "${{ "+dimension+" }}") {
+					t.Fatalf("cache key missing %s", dimension)
+				}
+			}
+			restore, _ := step.With["restore-keys"].(string)
+			prefix := strings.TrimSuffix(key, "${{ github.sha }}")
+			mainPrefix := strings.Replace(prefix, "${{ github.head_ref || github.ref_name }}", "main", 1)
+			if restore != prefix+"\n"+mainPrefix+"\n" {
+				t.Fatal("cache must restore this branch before main without crossing platforms, toolchains, dependencies or shards")
+			}
+		}
 		if strings.Contains(step.Run, "ci-go-shards test-timing") {
 			t.Fatal("timing budgets run on routed hardware")
 		}
@@ -297,6 +323,164 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			}
 		}
 	}
+	if !foundCache {
+		t.Fatal("missing explicit rolling Go build cache")
+	}
+	if !foundFreshTests {
+		t.Fatal("all shard layouts and events must execute fresh tests and reject cached success")
+	}
+}
+
+// A child script is deliberately outside Go's test-result cache inputs. The
+// workflow must still notice a failing script when only that script changes.
+func TestWorkflowShardRerunsChangedChildScript(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string
+				Env  map[string]string
+			}
+		}
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	var flags string
+	for _, step := range workflow.Jobs["go-test"].Steps {
+		if step.Name == "Test this shard" {
+			flags = step.Env["GOFLAGS"]
+		}
+	}
+	for name, plan := range map[string]shardPlan{
+		"whole":      {whole: []string{"./p"}},
+		"named":      {runs: []namedRun{{path: "./p", names: []string{"TestChild"}}}},
+		"catch-all":  {runs: []namedRun{{path: "./p", names: []string{"TestOther"}, skip: true}}},
+		"empty-skip": {runs: []namedRun{{path: "./p", skip: true}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, "p"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for path, source := range map[string]string{
+				"go.mod":   "module example.com/child\n\ngo 1.26.0\n",
+				"child.sh": "exit 0\n",
+				"p/child_test.go": `package p
+import ("os/exec"; "testing")
+func TestChild(t *testing.T) {
+	if err := exec.Command("sh", "../child.sh").Run(); err != nil {
+		t.Fatal("child script changed:", err)
+	}
+}
+`,
+			} {
+				if err := os.WriteFile(filepath.Join(dir, path), []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			commands, err := plan.commandArgs()
+			if err != nil || len(commands) != 1 {
+				t.Fatalf("commands=%v err=%v", commands, err)
+			}
+			run := func() ([]byte, error) {
+				cmd := exec.Command("go", commands[0]...)
+				cmd.Dir = dir
+				cmd.Env = append(withoutEnvPrefix(os.Environ(), "GOFLAGS="), "GOFLAGS="+flags)
+				return cmd.CombinedOutput()
+			}
+			if out, err := run(); err != nil {
+				t.Fatalf("first execution: %v\n%s", err, out)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "child.sh"), []byte("exit 1\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run()
+			if err == nil || !strings.Contains(string(out), "child script changed:") {
+				t.Fatalf("changed child must execute and fail, err=%v\n%s", err, out)
+			}
+		})
+	}
+}
+
+func TestWorkflowVolatileIdentityLint(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("workflow lint requires python3")
+	}
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct{ Name, Run string }
+		}
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	var script string
+	for _, step := range workflow.Jobs["go-static"].Steps {
+		if step.Name == "Forbid volatile CI identity reads in Go tests" {
+			script = step.Run
+		}
+	}
+	if script == "" {
+		t.Fatal("missing volatile identity lint in required static job")
+	}
+	check := func(t *testing.T, path, source string, wantOK bool) {
+		t.Helper()
+		dir := t.TempDir()
+		file := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(source), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if (err == nil) != wantOK {
+			t.Fatalf("lint success=%t, want %t: %s", err == nil, wantOK, out)
+		}
+	}
+	t.Run("stable-environment", func(t *testing.T) {
+		check(t, "fixture_test.go", `package fixture; var value = os.Getenv("AEON_TEST_DATABASE_URL")`, true)
+	})
+	for _, suffix := range []string{"SHA", "RUN_ID", "RUN_NUMBER", "RUN_ATTEMPT"} {
+		name := "GITHUB_" + suffix
+		t.Run(suffix+"-multiline", func(t *testing.T) {
+			check(t, "nested/fixture_test.go", "package fixture\nvar value = os.LookupEnv(\n\""+name+"\",\n)\n", false)
+		})
+		t.Run(suffix+"-constant", func(t *testing.T) {
+			check(t, "fixture_test.go", "package fixture\nconst key = \""+name+"\"\nvar value = os.Getenv(key)\n", false)
+		})
+	}
+	// The narrowly allowed release binding must not exempt other reads in
+	// that file, or the same literal in any other test file.
+	binding := `package fixture; var binding = "--source-digest \"$` + "GITHUB_" + `SHA\""`
+	const releaseTest = "scripts/releaseworkflow/workflow_test.go"
+	t.Run("release-contract", func(t *testing.T) {
+		check(t, releaseTest, binding, true)
+	})
+	t.Run("release-file-read", func(t *testing.T) {
+		check(t, releaseTest, binding+"\nvar value = os.Getenv(\"GITHUB_"+"SHA\")\n", false)
+	})
+	t.Run("other-file-binding", func(t *testing.T) {
+		check(t, "fixture_test.go", binding, false)
+	})
 }
 
 func TestParseFileRejectsBadShard(t *testing.T) {
@@ -618,6 +802,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 		nodesPackage: {
 			"TestKeep", "TestNew", "TestSafeListPerformancePlan",
 			"TestPlanningBulkUsagePerformance", "TestList6000Performance", "TestList6000FiltersPerformance",
+			"TestList6000PerformanceWithStaleKindStatistics",
 		},
 	}
 	if err := coverageHoles(items, listed, runnable, hostedShardCount); err != nil {
@@ -631,7 +816,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSkip := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance|TestSafeListPerformancePlan)$"
+	wantSkip := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestList6000PerformanceWithStaleKindStatistics|TestPlanningBulkUsagePerformance|TestSafeListPerformancePlan)$"
 	if len(args) != 1 || strings.Join(args[0], " ") != wantSkip {
 		t.Fatalf("catch-all args %q", args)
 	}
@@ -663,7 +848,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTimed := "test -p 1 " + nodesPackage + " -run ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance)$"
+	wantTimed := "test -p 1 " + nodesPackage + " -run ^(TestList6000FiltersPerformance|TestList6000Performance|TestList6000PerformanceWithStaleKindStatistics|TestPlanningBulkUsagePerformance)$"
 	if strings.Join(timed, " ") != wantTimed {
 		t.Fatalf("timing args %q", timed)
 	}
@@ -697,7 +882,7 @@ func TestWholePackageSkipsTimingBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance)$"
+	want := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestList6000PerformanceWithStaleKindStatistics|TestPlanningBulkUsagePerformance)$"
 	if len(args) != 1 || strings.Join(args[0], " ") != want {
 		t.Fatalf("%q", args)
 	}
@@ -711,6 +896,7 @@ func TestClassifyTimedTests(t *testing.T) {
 		nodesPackage: {
 			"TestList6000FiltersPerformance",
 			"TestList6000Performance",
+			"TestList6000PerformanceWithStaleKindStatistics",
 			"TestPlanningBulkUsagePerformance",
 			"TestSafeListPerformancePlan",
 		},
@@ -745,8 +931,9 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			If     string `yaml:"if"`
 			Needs  any    `yaml:"needs"`
 			Steps  []struct {
-				Run string `yaml:"run"`
-				If  string `yaml:"if"`
+				Run string            `yaml:"run"`
+				If  string            `yaml:"if"`
+				Env map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -764,10 +951,22 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			if step.If != "" {
 				t.Fatal("timing budgets have a conditional skip")
 			}
+			if step.Env["GOFLAGS"] != "-count=1" {
+				t.Fatal("timing budgets must execute rather than replay cached results")
+			}
 		}
 	}
 	if count != 1 {
 		t.Fatalf("timing command runs %d times", count)
+	}
+	foundGuard := false
+	for _, step := range workflow.Jobs["release-check"].Steps {
+		if strings.Contains(step.Run, "go test ./scripts/ci-runner-guard -count=1") {
+			foundGuard = true
+		}
+	}
+	if !foundGuard {
+		t.Fatal("release runner guard tests must bypass cached results")
 	}
 	gate := workflow.Jobs["go"]
 	needs, ok := gate.Needs.([]any)
@@ -835,6 +1034,13 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 
 func TestList6000Performance(t *testing.T) { hit("TestList6000Performance") }
 
+func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
+	if os.Getenv("AEON_SHARD_FIXTURE_TIMING") != "1" {
+		t.Fatal("stale-kind timing budget ran on a parallel shard")
+	}
+	hit("TestList6000PerformanceWithStaleKindStatistics")
+}
+
 func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerformance") }
 `)
 	items := []Item{
@@ -859,6 +1065,7 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 	listed := []string{nodesPackage}
 	hits := filepath.Join(root, "hits")
 	env := withoutEnvPrefix(os.Environ(), "HITS=")
+	env = withoutEnvPrefix(env, "AEON_SHARD_FIXTURE_TIMING=")
 	env = append(env, "HITS="+hits)
 	ran := 0
 	for shard := 1; shard <= count; shard++ {
@@ -893,7 +1100,7 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 	}
 	cmd := exec.Command("go", append(timed, "-count=1", "-timeout=60s")...)
 	cmd.Dir = root
-	cmd.Env = env
+	cmd.Env = append(env, "AEON_SHARD_FIXTURE_TIMING=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("timing go %s: %v\n%s", strings.Join(timed, " "), err, out)
@@ -912,6 +1119,7 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 		"TestKeep", "TestNew", "TestSafeListPerformancePlan",
 		"TestPlanningBulkUsagePerformance", "TestPlanningBulkUsagePerformance/sub",
 		"TestList6000Performance", "TestList6000FiltersPerformance",
+		"TestList6000PerformanceWithStaleKindStatistics",
 	}
 	for _, name := range want {
 		if got[name] != 1 {

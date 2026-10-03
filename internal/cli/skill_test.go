@@ -49,6 +49,12 @@ func TestSkillRenderHeaderAndNativeFrontmatter(t *testing.T) {
 	if native.SuggestedPath != filepath.Join(".agents", "skills", "ops", "SKILL.md") {
 		t.Fatalf("native path %q", native.SuggestedPath)
 	}
+	for _, harness := range []string{"gemini", "opencode"} {
+		got, err := renderThroughHarness(raw, harness, "ACME", "ops")
+		if err != nil || got.SuggestedPath != filepath.Join("."+harness, "skills", "ops", "SKILL.md") || !strings.Contains(got.Body, "harness="+harness+" -->") || !strings.HasPrefix(got.Body, "---\nname: \"ops\"\n") {
+			t.Fatal("vendor skill render", harness, got.SuggestedPath, err)
+		}
+	}
 	if _, err := renderThroughHarness(raw, "nope", "ACME", "ops"); err == nil {
 		t.Fatal("unknown harness should fail")
 	}

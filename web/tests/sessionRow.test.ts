@@ -69,3 +69,25 @@ test('execution names the reported model and effort, and omits what is not repor
   assert.equal(empty.accountLine, 'Grok')
   assert.equal(empty.provider, 'unknown')
 })
+
+
+test('media and terminal use their execution label and never infer an AI vendor', () => {
+  for (const [harness, label] of [['media', 'higgsfield/kling3_0'], ['terminal', 'ffmpeg']] as const) {
+    const exec = sessionExecution(view({ model: 'claude-fable', account: 'Claude Max', session: { harness, generator: harness === 'media' ? label : null, command: harness === 'terminal' ? label : null, model: 'gpt-fixture', reasoning_effort: 'high' } }))
+    assert.equal(exec.kind, harness)
+    assert.equal(exec.modelLine, label)
+    assert.equal(exec.provider, 'unknown')
+    assert.equal(exec.effort, '')
+    assert.equal(exec.account, '')
+  }
+})
+
+test('heartbeat model changes refresh the same session row over a stale launch model', () => {
+  const row = view({ harness: 'Claude', model: 'claude-sonnet', session: { harness: 'claude', model: 'claude-sonnet', reasoning_effort: 'low' } })
+  assert.equal(sessionExecution(row).modelLine, 'claude-sonnet · low')
+  const sessionID = row.session.id
+  row.session = { ...row.session, model: 'claude-opus', reasoning_effort: 'high' }
+  assert.equal(row.session.id, sessionID)
+  assert.equal(sessionExecution(row).modelLine, 'claude-opus · high')
+  assert.equal(sessionExecution(row).provider, 'anthropic')
+})

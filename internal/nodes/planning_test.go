@@ -19,6 +19,39 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+func TestPlanningUsageLessSessionDoesNotAddBilling(t *testing.T) {
+	u := newPlanUsage()
+	u.add(usageLine{session: "unreported"})
+	if !u.unreported["unreported"] || len(u.sessions) != 1 || u.reported ||
+		u.listUnpriced || u.paidUnknown || len(u.billingModes) != 0 {
+		t.Fatalf("usage-less session invented usage or billing: %+v", u)
+	}
+	for _, mode := range []string{"api", "subscription"} {
+		for _, input := range []int64{0, 1_000_000} {
+			for _, missingFirst := range []bool{false, true} {
+				u := newPlanUsage()
+				model, price, zero := "grok-4.7", "2", int64(0)
+				cost := "2.000000"
+				if input == 0 {
+					cost = "0.000000"
+				}
+				if missingFirst {
+					u.add(usageLine{session: "unreported"})
+				}
+				u.add(usageLine{session: "reported", model: &model, input: &input, output: &zero, cached: &zero,
+					billing: &mode, cost: &cost, rateIn: &price, rateOut: &price, rateCached: &price})
+				if !missingFirst {
+					u.add(usageLine{session: "unreported"})
+				}
+				if !u.reported || u.input != input || len(u.sessions) != 2 || len(u.unreported) != 1 ||
+					u.listUnpriced || u.paidUnknown || len(u.billingModes) != 1 || !u.billingModes[mode] {
+					t.Fatalf("mode=%s input=%d missingFirst=%t: %+v", mode, input, missingFirst, u)
+				}
+			}
+		}
+	}
+}
+
 func TestPlanningMedian(t *testing.T) {
 	for _, tc := range []struct {
 		in   []float64
@@ -384,16 +417,16 @@ func TestListPlanningColumns(t *testing.T) {
 
 	// Epic: rolls up its open and done children, not the cancelled one.
 	e := views["PLN-1"]
-	if e == nil || e.Route != nil || e.Children == nil || e.Children.Total != 2 || e.Children.Estimated != 2 {
+	if e == nil || e.Route != nil || e.Children == nil || e.Children.Total != 2 || e.Children.Estimated != 0 || e.Children.Uncalibrated != 2 {
 		t.Fatalf("PLN-1 children: %#v", e)
 	}
 	if e.Tokens.Spent == nil || *e.Tokens.Spent != *b.Tokens.Spent || e.Tokens.Sessions != 3 {
 		t.Fatalf("PLN-1 spent: %#v", e.Tokens)
 	}
-	if e.Tokens.Estimated == nil || *e.Tokens.Estimated != 3*defaultTokensPerHour || e.Tokens.Calibration != nil {
+	if e.Tokens.Estimated != nil || e.Tokens.Calibration != nil {
 		t.Fatalf("PLN-1 estimate: %#v", e.Tokens)
 	}
-	if e.Cost == nil || *e.Cost.ListEstimated != "27.000000" || !e.Cost.ListUnpriced || *e.Cost.ListSpent != "4.480000" {
+	if e.Cost == nil || e.Cost.ListEstimated != nil || !e.Cost.ListUnpriced || *e.Cost.ListSpent != "4.480000" {
 		t.Fatalf("PLN-1 cost: %#v", e.Cost)
 	}
 
@@ -404,22 +437,63 @@ func TestListPlanningColumns(t *testing.T) {
 		}
 	}
 
-	// Sorting: model by the role's rung, then area; tokens and cost by spent,
-	// then estimate.
+	// Model sorting always uses the shown model's full identity and version,
+	// with unknowns last; it must match actual and frozen planned cells.
 	keys := func(who tenant.Principal, sort string) []string {
 		return listKeys(t, who, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+sort)
 	}
-	// PLN-5's estimate now suggests build/backend, so it participates in
-	// model sorting despite its cancelled state; roll-up still excludes it.
-	if got := keys(w.admin, "model"); strings.Join(got[:6], ",") != "PLN-4,PLN-5,PLN-8,PLN-6,PLN-2,PLN-7" {
-		t.Fatalf("model sort: %v", got)
+	for _, order := range []string{"model", "-model", "model,-tokens"} {
+		items := listPage(t, w.admin, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+order).Items
+		previous := ""
+		empty := false
+		for _, item := range items {
+			name := ""
+			if item.KindSlug != "epic" && item.Planning != nil {
+				plan := item.Planning
+				if len(plan.Models) > 0 {
+					name = plan.Models[0].FullName()
+					if name == "" {
+						name = plan.Models[0].Label
+					}
+				} else {
+					route := plan.Route
+					if plan.Snapshot != nil {
+						route = plan.Snapshot.Route
+					}
+					if route != nil {
+						name = route.FullName()
+						if name == "" {
+							name = strings.Split(route.Label, " · ")[0]
+						}
+					}
+				}
+			}
+			name = strings.ToLower(name)
+			if name == "" {
+				empty = true
+				continue
+			}
+			if empty {
+				t.Fatalf("%s: populated model follows unknown", order)
+			}
+			if previous != "" && ((order != "-model" && name < previous) || (order == "-model" && name > previous)) {
+				t.Fatalf("%s: %q after %q", order, name, previous)
+			}
+			previous = name
+		}
 	}
-	// Descending reverses the rung and the area, and still leaves a missing area last.
-	if got := keys(w.admin, "-model"); strings.Join(got[:6], ",") != "PLN-7,PLN-2,PLN-8,PLN-5,PLN-6,PLN-4" {
-		t.Fatalf("model sort descending: %v", got)
+
+	// Measured values lead; uncalibrated estimates and absent values tie by ID.
+	known := []nodeJSON{w.nodes["PLN-1"], w.nodes["PLN-2"]}
+	missing := []nodeJSON{w.nodes["PLN-4"], w.nodes["PLN-6"], w.nodes["PLN-7"], w.nodes["PLN-8"], w.nodes["PLN-9"]}
+	slices.SortFunc(known, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+	slices.SortFunc(missing, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+	wantTokens := []string{"PLN-5", known[0].Key, known[1].Key}
+	for _, n := range missing {
+		wantTokens = append(wantTokens, n.Key)
 	}
-	if got := keys(w.admin, "-tokens"); strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-1,PLN-2" && strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-2,PLN-1" {
-		t.Fatalf("tokens sort: %v", got)
+	if got := keys(w.admin, "-tokens"); !slices.Equal(got, wantTokens) {
+		t.Fatalf("tokens sort: %v want %v", got, wantTokens)
 	}
 	if got := keys(w.admin, "-paid"); got[0] != "PLN-5" || slices.Index(got, "PLN-9") < 3 {
 		t.Fatalf("paid sort: %v", got)

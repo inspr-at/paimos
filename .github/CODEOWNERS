@@ -7,6 +7,7 @@
 /scripts/cross-family-gate* @markus-barta
 /scripts/post-cross-family-gate* @markus-barta
 /scripts/trusted-cross-family-poster* @markus-barta
+/scripts/release-pin-pr* @markus-barta
 /scripts/ci-runner-guard/ @markus-barta
 /scripts/verify-live* @markus-barta
 /.github/live-verification-environment.json @markus-barta

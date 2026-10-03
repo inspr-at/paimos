@@ -5,7 +5,8 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { mockReleases, releaseHistory } from './releases-fixtures'
+import { expectStableControls } from './helpers/stable'
+import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
 
 // AEON-309: the CalVer3 renderer names a version by its canonical value and UTC
 // time; an interactive one adds its copy action.
@@ -16,13 +17,15 @@ function versionLabel(version: string, copy = true): string {
 }
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
-const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
+const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
+const pill = (page: Page) => page.getByRole('button', { name: RELEASE_HISTORY_NAME })
 const escaped = (v: string) => v.replace(/\./g, '\\.')
 
 async function setup(page: Page, options: { lastSeen?: string; running?: string; bigProject?: number } = {}) {
   const history = releaseHistory()
   const data = fixtures({ bigProject: options.bigProject })
+  // These existing history interactions exercise the complete, opted-in rail.
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
   if (options.lastSeen) data.preferences.releases = { last_seen: options.lastSeen }
   const calls = await mockWork(page, data)
   const state = await mockReleases(page, history, { running: options.running })
@@ -81,14 +84,18 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(page).toHaveTitle('Releases · PAIMOS AEON')
   await expect(options(page)).toHaveCount(history.releases.length)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
-  await expect(options(page).first()).toContainText('Current')
+  await expect(options(page).first()).toContainText('Live')
   // Row counts follow the blocks in the detail. Without a told ticket, a feature or fix commit counts as other.
   await expect(options(page).first().getByRole('img', { name: '3 other changes', exact: true })).toHaveAttribute('data-tip', '3 other changes')
   await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
   await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases.find(r => r.version === history.current)!.codename })).toBeVisible()
-  await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
-  await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
+  // AEON-488: the title is the live release's codename under a product eyebrow, with one status line.
+  const live = history.releases.find(r => r.version === history.current)!
+  await expect(sheet(page).locator('.head .eyebrow')).toHaveText('PAIMOS AEON · RELEASE')
+  await expect(sheet(page).getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
+  await expect(sheet(page).locator('.head .status-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · 50 min$/)
+  await expect(sheet(page).locator('.detail .live-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · (published|tagged) /)
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await expect(page).toHaveURL(/\/p\/PHAROS(\/tickets)?$/)
@@ -102,10 +109,10 @@ test('deep links open one release, and the address follows the selection', async
   await page.goto(`/releases/${target.version}`)
   await expect(sheet(page)).toBeVisible()
   await expect(options(page).nth(3)).toHaveAttribute('aria-selected', 'true')
-  // AEON-305: the tag message is evidence, not a title; the key stays as a chip.
+  // AEON-305: the tag message is evidence, not a title; the key stays in the change metadata.
   await expect(sheet(page).locator('.detail .headline')).toHaveCount(0)
   await expect(sheet(page).getByText('Historical tag headline')).toHaveCount(0)
-  await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
+  await expect(sheet(page).locator('.detail .changes .meta')).toContainText('PAI-1057')
   // AEON-430: its row title is the codename, never the tag message.
   await expect(options(page).nth(3).locator('.rn-name')).toHaveText(target.codename!)
   await expect(options(page).nth(3).locator('.headline')).toHaveCount(0)
@@ -140,7 +147,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.goto('/releases')
   await historyReady
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   // The first selection's address has landed. Later ones wait until Compare is open.
   await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.current)}(?:$|\\?)`))
   navigationGate = new Promise(resolve => { releaseNavigations = resolve })
@@ -150,7 +157,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.keyboard.press('Enter')
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases[1].codename })).toBeFocused()
   await page.keyboard.press('e')
-  await expect(sheet(page).getByRole('button', { name: /^Evidence/ })).toHaveAttribute('aria-expanded', 'true')
+  await expect(sheet(page).getByRole('button', { name: /^Evidence/ })).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('?')
   await expect(page.getByRole('dialog', { name: 'Release history keys' })).toBeVisible()
   await page.keyboard.press('Escape')
@@ -162,12 +169,17 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(search).toBeFocused()
   await page.keyboard.type('hetzner')
   await expect(options(page)).toHaveCount(1)
-  await expect(sheet(page).locator('.result-count')).toHaveText(`1 of ${history.releases.length}`)
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('1 matching releases')
   await expect(sheet(page).locator('.detail mark')).toHaveText(['Hetzner'])
   await page.keyboard.press('Escape')
+  await expect(search).toHaveValue('hetzner')
+  await expect(options(page)).toHaveCount(1)
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
+  // Esc leaves the field; clearing is an explicit edit, so the filter persists.
+  await search.fill('')
   await expect(options(page)).toHaveCount(history.releases.length)
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
 
   // Compare from the selected release; j and k move the other end.
   await page.keyboard.press('c')
@@ -185,7 +197,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare).toBeVisible()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
-  await expect(compare.locator('.changes')).toContainText('Other changes')
+  await expect(compare.getByRole('region', { name: /^Other, \d+$/ })).toBeVisible()
   // AEON-305: no tag message outside Evidence; without a theme or benefit a
   // release shows its version and, since AEON-430, its codename.
   const included = compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')
@@ -223,21 +235,21 @@ test('compare follows Back, Forward and an in-app release link', async ({ page }
   await openRelease(3)
   await expect(page).toHaveURL(path(3))
   await selected(3)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await page.goBack()
   await expect(page).toHaveURL(path(0))
   await expect(compare).toHaveCount(0)
   await selected(0)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await page.goForward()
   await expect(page).toHaveURL(path(3))
   await expect(compare).toHaveCount(0)
   await selected(3)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await openRelease(1)
@@ -268,7 +280,7 @@ test('a cancelled selection does not swallow the next visit to that release', as
   })
   await page.goto(path(0))
   await selected(0)
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   armed = true
   await page.keyboard.press('j')
   await selected(1)
@@ -300,15 +312,20 @@ test('filters follow the feature and fix blocks, and still keep releases with ti
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
   // These commits name tickets but none tells a benefit, so the rows show other, not features or fixes.
   await toggles.getByRole('button', { name: 'Features' }).click()
-  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('0 matching releases')
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await toggles.getByRole('button', { name: 'Features' }).click()
   await toggles.getByRole('button', { name: 'Fixes' }).click()
   await expect(toggles.getByRole('button', { name: 'Fixes' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(sheet(page).getByText('0 of 7')).toBeVisible()
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('0 matching releases')
   await toggles.getByRole('button', { name: 'Fixes' }).click()
-  await toggles.getByRole('button', { name: 'Tickets' }).click()
-  await expect(options(page)).toHaveCount(5)
+  await toggles.getByRole('button', { name: 'Other', exact: true }).click()
+  await expect(options(page)).toHaveCount(6)
+  await expect(options(page).filter({ hasText: 'Reserved, never published' })).toHaveCount(0)
+  // Ticket filtering now lives in the shared search instead of a Tickets toggle.
+  await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill('PAI-1057')
+  await expect(options(page)).toHaveCount(1)
+  await expect(sheet(page).locator('.detail .changes')).toContainText('PAI-1057')
   await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill('nothing like this')
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await sheet(page).getByRole('button', { name: 'Clear search and filters' }).click()
@@ -319,10 +336,10 @@ test('new since the last visit: a badge on the pill, highlighted releases, and t
   const history = releaseHistory()
   const { data } = await setup(page, { lastSeen: history.releases[4].version })
   await page.goto('/')
-  await expect(page.locator('.new-badge')).toHaveText('3 new')
-  await expect(pill(page)).toHaveAccessibleName(/, 3 new since your last visit$/)
+  await expect(page.locator('.new-badge')).toHaveText('4 new')
+  await expect(pill(page)).toHaveAccessibleName(/, 4 new since your last visit$/)
   await pill(page).click()
-  await expect(sheet(page).locator('.row.fresh')).toHaveCount(3)
+  await expect(sheet(page).locator('.row.fresh')).toHaveCount(4)
   await expect(sheet(page).getByText('New since your last visit')).toBeVisible()
   await expect.poll(() => data.preferences.releases).toEqual({ last_seen: history.current })
   await page.keyboard.press('Escape')
@@ -359,14 +376,17 @@ test('evidence: runs, commit and digest with copy, the rollback target, and what
 test('ticket keys link to the tickets this workspace has; others stay plain', async ({ page }) => {
   const { history } = await setup(page)
   await page.goto(`/releases/${history.releases[3].version}`)
-  await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
-  await expect(sheet(page).locator('.detail .tickets').getByRole('link')).toHaveCount(0)
+  await expect(sheet(page).locator('.detail .changes .meta')).toContainText('PAI-1057')
+  await expect(sheet(page).locator('.detail .changes .meta .ticket-link')).toHaveCount(0)
   await page.keyboard.press('k'); await page.keyboard.press('k')
-  const tickets = sheet(page).locator('.detail .tickets')
+  const tickets = sheet(page).locator('.detail .changes')
   // AEON is a project here, but AEON-74 is not one of its tickets: no dead link.
   await expect(tickets.getByRole('link', { name: /^PHAROS-11: / })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await expect(tickets.getByRole('link')).toHaveCount(1)
-  await expect(tickets.getByText('AEON-74')).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
+  await expect(tickets.locator('.ticket-link')).toHaveCount(1)
+  await expect(tickets.getByText('AEON-74', { exact: true })).toHaveCount(2)
+  for (const key of await tickets.getByText('AEON-74', { exact: true }).all()) {
+    await expect(key).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
+  }
 })
 
 test('a reserved version reads as reserved and never published', async ({ page }) => {
@@ -376,7 +396,8 @@ test('a reserved version reads as reserved and never published', async ({ page }
   await expect(options(page).nth(2)).toHaveClass(/reserved/)
   await expect(options(page).nth(2)).toContainText('Reserved, never published')
   await expect(sheet(page).locator('.detail')).toContainText('The version was taken, but no release was published under it.')
-  await expect(sheet(page).getByRole('button', { name: /^Evidence/ })).toHaveCount(0)
+  await expect(sheet(page).getByRole('button', { name: /^Evidence/ })).toBeDisabled()
+  await expect(sheet(page).locator('#release-evidence')).toHaveCount(0)
 })
 
 test('a build without history says so', async ({ page }) => {
@@ -408,6 +429,8 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const update = sheet(page).getByRole('status').filter({ hasText: 'this page still runs' })
   await expect(update).toBeVisible()
+  // AEON-488: the title already names what the server runs; the status line says this page is older.
+  await expect(sheet(page).getByRole('heading', { level: 1, name: newest.codename })).toBeVisible()
   await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', versionLabel(history.releases[1].version, false))
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
@@ -421,7 +444,7 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await page.getByRole('option', { name: /Release history/ }).click()
   await expect(sheet(page)).toBeVisible()
   // Keys wait until the sheet has taken focus.
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await page.getByRole('button', { name: /^Account for / }).click()
@@ -429,33 +452,44 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await expect(sheet(page)).toBeVisible()
 })
 
-test('rows keep one look per state: current raised, new warm, selected ringed, the rest plain', async ({ page }) => {
+test('rows show live and rollback badges, a warm new tint and a full selected ring', async ({ page }) => {
   const history = releaseHistory()
   await setup(page, { lastSeen: history.releases[4].version })
   await page.goto(`/releases/${history.releases[5].version}`)
-  const look = (i: number) => options(page).nth(i).evaluate(el => { const c = getComputedStyle(el); return { bg: c.backgroundColor, outline: c.outlineStyle } })
+  const look = (i: number) => options(page).nth(i).evaluate(el => {
+    const c = getComputedStyle(el)
+    return { bg: c.backgroundColor, shadow: c.boxShadow, border: c.borderLeftWidth }
+  })
   await expect(options(page).nth(5)).toHaveAttribute('aria-selected', 'true')
   await expect(options(page).nth(1)).toHaveClass(/fresh/)
+  await expect(options(page).first().locator('.current-tag')).toHaveText('Live')
+  await expect(options(page).nth(1).locator('.rollback-tag')).toHaveText('Rollback')
   const current = await look(0), fresh = await look(1), selected = await look(5), plain = await look(6)
-  expect(selected).toEqual({ bg: 'rgba(0, 0, 0, 0)', outline: 'solid' })
-  expect(plain).toEqual({ bg: 'rgba(0, 0, 0, 0)', outline: 'none' })
-  expect(fresh.bg).not.toBe('rgba(0, 0, 0, 0)')
-  expect(current.bg).not.toBe(fresh.bg)
-  expect(current.outline).toBe('none')
+  expect(selected.bg).not.toBe('rgba(0, 0, 0, 0)')
+  expect(selected.shadow).toContain('inset')
+  expect(plain).toEqual({ bg: 'rgba(0, 0, 0, 0)', shadow: 'none', border: '0px' })
+  expect(fresh.bg).not.toBe(plain.bg)
+  expect(current.bg).toBe(fresh.bg)
+  expect(current.shadow).toBe('none')
+  expect(selected.border).toBe('0px')
 })
 
-test('nothing is clipped at 390: stats in a grid, the count on its own line, full headlines', async ({ page }) => {
+test('nothing is clipped at 390: stat card and chart stacked, counts in notes, full headlines', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const { history } = await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toBeVisible()
-  const stats = sheet(page).getByRole('group', { name: 'Release cadence' })
-  await expect(stats.getByText('Running here')).toBeVisible()
-  await expect(stats.getByText('This week')).toBeVisible()
-  await expect(stats.getByText('Median gap')).toHaveCount(0)
-  await stats.getByRole('button', { name: 'More stats' }).click()
-  await expect(stats.getByText('Median gap')).toBeVisible()
-  await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
+  // AEON-488: one stat card that cycles, its arrows always there at 44 px, and the chart under it.
+  const card = sheet(page).getByRole('region', { name: 'Release stats' })
+  await expect(card.getByRole('group', { name: '1 of 7: Releases per week' })).toBeVisible()
+  const next = card.getByRole('button', { name: 'Next stat' })
+  await expect(next).toBeVisible()
+  expect((await next.boundingBox())!.height).toBe(44)
+  await next.click()
+  await expect(card.getByRole('group', { name: '2 of 7: Features per week' })).toBeVisible()
+  await expect(sheet(page).getByRole('region', { name: 'Release cadence' })).toBeVisible()
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('')
+  await expect(options(page).filter({ hasText: 'Reserved, never published' })).toHaveCount(1)
   const clipped = () => page.evaluate(() => {
     const out: string[] = []
     for (const el of document.querySelectorAll<HTMLElement>('dialog[open] *')) {
@@ -464,19 +498,27 @@ test('nothing is clipped at 390: stats in a grid, the count on its own line, ful
       if (el.closest('.list-pane, .detail-pane') && (r.bottom < 0 || r.top > innerHeight)) continue
       if (r.left < -0.5 || r.right > innerWidth + 0.5) out.push(`${el.className || el.tagName} outside ${Math.round(r.left)}..${Math.round(r.right)}`)
       const c = getComputedStyle(el)
-      if ((c.overflowX !== 'visible' || c.textOverflow === 'ellipsis') && el.scrollWidth > el.clientWidth + 1 && !el.matches('.list-pane, .detail-pane, .listbox')) out.push(`${el.className || el.tagName} cut ${el.scrollWidth}>${el.clientWidth}`)
+      if ((c.overflowX !== 'visible' || c.textOverflow === 'ellipsis') && el.scrollWidth > el.clientWidth + 1 && !el.matches('.list-pane, .detail-pane, .listbox')) {
+        // The fixed navigation control exposes its complete label in the shared tip.
+        const tippedNavigation = el.matches('.to-current > span') && el.parentElement?.getAttribute('data-tip') === el.textContent
+        if (!tippedNavigation) out.push(`${el.className || el.tagName} cut ${el.scrollWidth}>${el.clientWidth}`)
+      }
     }
     return out
   })
   expect(await clipped()).toEqual([])
-  await options(page).nth(1).click()
+  await options(page).nth(1).locator('.row-name').click()
   await expect(sheet(page).locator('.detail')).toBeVisible()
+  await expect(sheet(page).locator('.detail-info')).toHaveText('PAIMOS 7 · AEON releases · 6 published')
+  const backToLive = sheet(page).locator('.to-current')
+  await backToLive.hover()
+  await expect(sheet(page).locator('.tooltip')).toHaveText(await backToLive.innerText())
   await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
   expect(await clipped()).toEqual([])
   await sheet(page).getByRole('button', { name: 'All releases' }).click()
   await sheet(page).getByRole('button', { name: 'Compare' }).click()
-  await options(page).nth(3).click()
-  await expect(sheet(page).locator('.detail-pane > .compare')).toBeVisible()
+  await options(page).nth(3).locator('.row-name').click()
+  await expect(sheet(page).locator('.detail-scroll > .compare')).toBeVisible()
   expect(await clipped()).toEqual([])
   void history
 })
@@ -499,22 +541,23 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }
 }
 
-test('the last 14 days show each day’s count above its bar, named for screen readers', async ({ page }) => {
+test('the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toBeVisible()
-  const days = sheet(page).getByRole('list', { name: /releases in the last 14 days/ }).getByRole('listitem')
-  await expect(days).toHaveCount(14)
-  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.count')?.textContent ?? null, today: li.classList.contains('today') })))
-  // A day with releases carries its number; a day without keeps the flat dash and no number.
+  const days = sheet(page).getByRole('list', { name: /^\d+ releases? in the last 7 days$/ }).getByRole('listitem')
+  await expect(days).toHaveCount(7)
+  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.val')?.textContent ?? null, today: li.classList.contains('current'), before: li.classList.contains('before') })))
+  // A day with releases carries its number; an empty one has none; before the first release it says so.
   for (const day of all) {
-    const n = /^(\d+) releases? on \d{1,2} \w+/.exec(day.label)?.[1] ?? null
-    if (n) expect(day.count).toBe(n)
-    else { expect(day.label).toMatch(/^No releases on \d{1,2} \w+/); expect(day.count).toBeNull() }
+    if (day.before) { expect(day.label).toMatch(/^\w{3} \d{1,2} \w{3}: before the first AEON release$/); expect(day.count).toBeNull(); continue }
+    const n = /^(?:\w{3} \d{1,2} \w{3}|Today): (\d+) releases?/.exec(day.label)?.[1]
+    expect(n, day.label).toBeTruthy()
+    expect(day.count).toBe(n === '0' ? null : n)
   }
   expect(all.at(-1)!.today).toBe(true)
-  expect(all.at(-1)!.label).toMatch(/, today$/)
+  expect(all.at(-1)!.label).toMatch(/^Today: \d+ releases? so far/)
   expect(all.some(day => day.count !== null)).toBe(true)
 })
 
@@ -526,7 +569,9 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   await page.goto('/')
   await pill(page).click()
   await expect(sheet(page)).toBeVisible()
-  const rows = sheet(page).locator('.row .calendar-version')
+  // At rest: the pointer that clicked the footer pill would otherwise hover a row.
+  await page.mouse.move(1, 1)
+  const rows = sheet(page).locator('.row .version-pretty')
   await expect(rows.first()).toBeVisible()
   const count = await rows.count()
   expect(count).toBe(history.releases.length)
@@ -538,6 +583,50 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
     expect(drawn).not.toContain('.0.0')
     expect((await row.locator('[data-collapsed="true"]').first().boundingBox())?.width ?? 0).toBe(0)
   }
-  // AEON-430: the footer leads with the marketing name; its version is the hover chip.
-  await expect(page.locator('footer.app-footer .footer-name .rn-name')).toBeVisible()
+  // AEON-515: the footer pill shows the marketing name beside its Pretty version.
+  await expect(page.locator('footer.app-footer .version-pill .footer-codename')).toBeVisible()
+})
+
+test('the running candidate shows frozen features and fixes with honest pending evidence', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const history = releaseHistory()
+  const latest = history.releases[0]!
+  const candidate = {
+    ...latest, state: 'candidate', tag: '', headline: '', tagged_at: null, published_at: null,
+    notes: { source: 'embedded-product-notes', snapshot_sha256: 'a'.repeat(64), captured_at: latest.reserved_at, release_revision: 1, gaps: [], hidden: 0, items: [], public_items: [
+      { key: 'AEON-427', group: 'features', pill_en: 'Frozen feature', pill_de: '', benefit_en: 'Captured feature benefit.', benefit_de: '' },
+      { key: 'AEON-428', group: 'fixes', pill_en: 'Frozen fix', pill_de: '', benefit_en: 'Captured fix benefit.', benefit_de: '' },
+    ] },
+    evidence: { ...latest.evidence, image: null, ci: null, release_run: null, release_url: '', unavailable: [], pending: ['tag_message', 'tagged_at', 'published_at', 'image', 'ci', 'release_run', 'release_url'] },
+  }
+  await mockWork(page, fixtures())
+  await mockReleases(page, { ...history, releases: [candidate, ...history.releases.slice(1)] })
+  await page.goto('/releases')
+  await expect(sheet(page).getByRole('heading', { level: 2, name: latest.codename })).toBeVisible()
+  const detail = sheet(page).locator('article.detail')
+  await expect(detail.getByText('Candidate release', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Publication pending', { exact: true })).toBeVisible()
+  await expect(detail.getByRole('region', { name: 'Features, 1' })).toBeVisible()
+  await expect(detail.getByRole('region', { name: 'Fixes, 1' })).toBeVisible()
+  await expect(detail.getByText('Frozen feature', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Frozen fix', { exact: true })).toBeVisible()
+  await expect(detail.locator('.live-line')).toContainText('reserved')
+  await expect(detail.locator('.live-line')).not.toContainText('tagged')
+  await expect(detail.locator('.detail-info')).toContainText('5 published')
+  await expect(detail.locator('.badges')).toContainText('Publication pending')
+  const evidence = sheet(page).getByRole('button', { name: /^Evidence/ })
+  const grid = sheet(page).getByRole('grid', { name: 'Releases, newest first' })
+  await expectStableControls({
+    controls: { evidence, releaseList: grid, selectedRow: grid.getByRole('row').first() },
+    scrollAreas: { detail: sheet(page).locator('.detail-scroll') },
+    interactions: [{ name: 'open candidate evidence', run: async () => {
+      await evidence.click()
+      await expect(detail.getByRole('list', { name: 'Pending evidence' })).toBeVisible()
+    } }],
+  })
+  await expect(detail.getByText('Tag message: pending', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Release run: pending', { exact: true })).toBeVisible()
+  await expect(detail.locator('a[href*="/actions/runs/"]')).toHaveCount(0)
+  await expect(detail.locator('a[href*="/releases/tag/"]')).toHaveCount(0)
+  await expect(detail.locator('.ev-body')).not.toContainText('sha256:')
 })

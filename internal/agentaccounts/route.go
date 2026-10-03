@@ -19,6 +19,7 @@ import (
 )
 
 type runRow struct {
+	Residency             string
 	LimitEstimates        map[string]int64
 	CapacityOverride      string
 	Purpose               string
@@ -253,6 +254,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
+	if err := reconcileReadinessResources(ctx, tx, a); err != nil {
+		return err
+	}
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return err
@@ -261,7 +265,7 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
-	eligible, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
+	eligible, _, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
 	if err != nil {
 		return err
 	}
@@ -272,14 +276,24 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$2 AND r.state='active' AND w.account_id NOT IN (`+quotaAccounts+`))`, accountID, run.ID).Scan(&quotaChanged); err != nil {
 		return err
 	}
-	if quotaChanged {
+	var recoveryChanged bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_readiness_facts f WHERE f.recovery_run_id=$2 AND f.resource_id NOT IN (`+currentReadinessResources+`))`, a.ID, run.ID).Scan(&recoveryChanged); err != nil {
+		return err
+	}
+	if quotaChanged || recoveryChanged {
 		return &httpError{status: http.StatusConflict, code: "quota_pool_changed", msg: "reserved quota pool confirmation changed"}
 	}
 	all, err := lockAccountWindows(ctx, tx, []string{accountID})
 	if err != nil {
 		return err
 	}
+	var recovery []recoveryPermit
 	if run.Purpose != "pairing_verification" {
+		// Existing queued holds can predate the fact store. Preserve the
+		// telemetry's original wait before binding its canonical recovery permit.
+		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
+			return err
+		}
 		used, err := occupancy(ctx, tx)
 		if err != nil {
 			return err
@@ -288,18 +302,23 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		if err != nil {
 			return err
 		}
-		_, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
+		windows, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
 		if err != nil {
 			return err
 		}
 		if wait != nil {
 			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
 		}
+		for _, w := range windows {
+			recovery = append(recovery, w.recoveryPermits...)
+		}
 	} else if len(activeWindows(all[accountID], now)) == 0 {
 		return fail(http.StatusConflict, "reserved capacity is not eligible")
 	}
 	var invalidCapacity bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_source<>'estimate' AND w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
+	// A stale/retired room ledger is no longer evidence of a budget. Current
+	// hard stops are checked above against their resource/window facts.
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND w.capacity_source<>'estimate' AND w.capacity_read_at>=$2::timestamptz-interval '10 minutes' AND w.ends_at>$2 AND NOT w.capacity_retired AND (NOT w.capacity_allowed OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
 		return err
 	}
 	if invalidCapacity {
@@ -312,7 +331,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if !enabled {
 		return fail(http.StatusConflict, "reserved model profile is not eligible")
 	}
-	return nil
+	// Claim and queued route replay run under the same tenant/pairing fence.
+	// Consume only after every eligibility check; a failure rolls back promotion.
+	return consumeRecovery(ctx, tx, run.ID, recovery)
 }
 
 func validateEstimates(estimates map[string]int64) error {
@@ -442,7 +463,11 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	if err := rows.Err(); err != nil {
 		return Account{}, nil, nil, err
 	}
-	accounts, err = narrowCandidates(ctx, tx, run, harness, accounts)
+	accounts, err = attachWindows(ctx, tx, accounts)
+	if err != nil {
+		return Account{}, nil, nil, err
+	}
+	accounts, _, err = narrowCandidates(ctx, tx, run, harness, accounts)
 	if err != nil {
 		return Account{}, nil, nil, err
 	}
@@ -470,6 +495,14 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		slots := slotCount(account, usedSlots, quotaSlots)
 		if !probeFresh(account, now) || slots >= account.MaxParallel {
 			continue
+		}
+		if run.Purpose != "pairing_verification" {
+			if err := reconcileReadinessResources(ctx, tx, account); err != nil {
+				return Account{}, nil, nil, err
+			}
+			if err := reconcileVendorStop(ctx, tx, account, now); err != nil {
+				return Account{}, nil, nil, err
+			}
 		}
 		var active []Window
 		if run.Purpose == "pairing_verification" {
@@ -542,9 +575,22 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	for i := range picks[0].windows {
 		w := &picks[0].windows[i]
 		if w.ID != "" {
+			if w.capacityKind == "fact" {
+				if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET used=$2,capacity_read_at=$3 WHERE id=$1`, w.ID, w.Used, w.capacityReadAt); err != nil {
+					return Account{}, nil, nil, err
+				}
+			}
 			continue
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,$5,$4,true,'estimate',$6 FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket).Scan(&w.ID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket)
+ SELECT tenant_id,id,$2,$3,$7,$8,$9,'unrestricted',0,$5,$4,true,$10,$6 FROM agent_accounts WHERE id=$1
+ ON CONFLICT(tenant_id,account_id,capacity_kind,capacity_bucket,ends_at) WHERE capacity_kind IS NOT NULL
+ DO UPDATE SET used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket, w.Unit, w.Allowance, w.Used, w.capacitySource).Scan(&w.ID); err != nil {
+			return Account{}, nil, nil, err
+		}
+	}
+	for _, w := range picks[0].windows {
+		if err := consumeRecovery(ctx, tx, run.ID, w.recoveryPermits); err != nil {
 			return Account{}, nil, nil, err
 		}
 	}

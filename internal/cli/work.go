@@ -10,46 +10,49 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
-	EstimateHours       *float64 `json:"estimate_hours,omitempty"`
-	EstimateSource      string   `json:"estimate_source,omitempty"`
-	EstimateBy          string   `json:"estimate_by,omitempty"`
-	EstimateAt          string   `json:"estimate_at,omitempty"`
-	PillEN              string   `json:"pill_en,omitempty"`
-	PillDE              string   `json:"pill_de,omitempty"`
-	BenefitEN           string   `json:"benefit_en,omitempty"`
-	BenefitDE           string   `json:"benefit_de,omitempty"`
-	Hide                bool     `json:"hide_from_release_notes,omitempty"`
-	Warnings            []string `json:"warnings,omitempty"`
-	IssueKey            string   `json:"issue_key"`
-	Title               string   `json:"title"`
-	Type                string   `json:"type"`
-	Status              string   `json:"status"`
-	Priority            string   `json:"priority"`
-	RouteRole           string   `json:"route_role,omitempty"`
-	RouteRoleSource     string   `json:"route_role_source,omitempty"`
-	RouteRoleBy         string   `json:"route_role_by,omitempty"`
-	RouteRoleAt         string   `json:"route_role_at,omitempty"`
-	Area                string   `json:"area,omitempty"`
-	AreaSource          string   `json:"area_source,omitempty"`
-	AreaBy              string   `json:"area_by,omitempty"`
-	AreaAt              string   `json:"area_at,omitempty"`
-	RouteRoleConfirmed  *bool    `json:"route_role_confirmed,omitempty"`
-	AreaConfirmed       *bool    `json:"area_confirmed,omitempty"`
-	Complexity          string   `json:"complexity,omitempty"`
-	ComplexitySource    string   `json:"complexity_source,omitempty"`
-	ComplexityBy        string   `json:"complexity_by,omitempty"`
-	ComplexityAt        string   `json:"complexity_at,omitempty"`
-	ComplexityConfirmed *bool    `json:"complexity_confirmed,omitempty"`
-	Description         string   `json:"description,omitempty"`
-	ID                  string   `json:"id"`
-	Assignee            string   `json:"assignee,omitempty"`
-	Tags                []string `json:"tags,omitempty"`
-	Comments            []string `json:"comments,omitempty"`
+	Queued              *workqueue.Queued `json:"queued,omitempty"`
+	EstimateHours       *float64          `json:"estimate_hours,omitempty"`
+	EstimateSource      string            `json:"estimate_source,omitempty"`
+	EstimateBy          string            `json:"estimate_by,omitempty"`
+	EstimateAt          string            `json:"estimate_at,omitempty"`
+	PillEN              string            `json:"pill_en,omitempty"`
+	PillDE              string            `json:"pill_de,omitempty"`
+	BenefitEN           string            `json:"benefit_en,omitempty"`
+	BenefitDE           string            `json:"benefit_de,omitempty"`
+	Hide                bool              `json:"hide_from_release_notes,omitempty"`
+	Warnings            []string          `json:"warnings,omitempty"`
+	IssueKey            string            `json:"issue_key"`
+	Title               string            `json:"title"`
+	Type                string            `json:"type"`
+	Status              string            `json:"status"`
+	Priority            string            `json:"priority"`
+	RouteRole           string            `json:"route_role,omitempty"`
+	RouteRoleSource     string            `json:"route_role_source,omitempty"`
+	RouteRoleBy         string            `json:"route_role_by,omitempty"`
+	RouteRoleAt         string            `json:"route_role_at,omitempty"`
+	Area                string            `json:"area,omitempty"`
+	AreaSource          string            `json:"area_source,omitempty"`
+	AreaBy              string            `json:"area_by,omitempty"`
+	AreaAt              string            `json:"area_at,omitempty"`
+	RouteRoleConfirmed  *bool             `json:"route_role_confirmed,omitempty"`
+	AreaConfirmed       *bool             `json:"area_confirmed,omitempty"`
+	Complexity          string            `json:"complexity,omitempty"`
+	ComplexitySource    string            `json:"complexity_source,omitempty"`
+	ComplexityBy        string            `json:"complexity_by,omitempty"`
+	ComplexityAt        string            `json:"complexity_at,omitempty"`
+	ComplexityConfirmed *bool             `json:"complexity_confirmed,omitempty"`
+	Description         string            `json:"description,omitempty"`
+	ID                  string            `json:"id"`
+	Assignee            string            `json:"assignee,omitempty"`
+	Tags                []string          `json:"tags,omitempty"`
+	Comments            []string          `json:"comments,omitempty"`
 }
 
 type issueInput struct {
@@ -87,6 +90,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		estimate = &h
 	}
 	return issueView{
+		Queued:        n.Queued,
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
 		IssueKey:            n.Key,
@@ -522,13 +526,7 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		if n.UpdatedAt.IsZero() {
-			return usagef("%s has no revision timestamp; nothing was written", n.Key)
-		}
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
-			if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
-				stale.msg += "; nothing was written"
-			}
+		if err := rt.patchNode(n, patch, &n); err != nil {
 			return err
 		}
 	}
@@ -890,7 +888,7 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	if len(patch) == 0 {
 		return usagef("nothing to update")
 	}
-	if err := rt.do(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n); err != nil {
+	if err := rt.patchNode(n, patch, &n); err != nil {
 		return err
 	}
 	view := viewKnowledge(n, kinds)
@@ -899,6 +897,19 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s/%s (%s)\n", view.Type, view.Slug, view.Key)
 	return nil
+}
+
+// patchNode guards every read/merge/write with the exact snapshot revision.
+// Callers that already created other records must report that partial result.
+func (rt *runtime) patchNode(n apiNode, patch map[string]any, out any) error {
+	if n.UpdatedAt.IsZero() {
+		return usagef("%s has no revision timestamp; nothing was written", n.Key)
+	}
+	err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, out, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)})
+	if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
+		stale.msg += "; nothing was written by this patch"
+	}
+	return err
 }
 
 func (rt *runtime) searchIssues(query, project, typ string, limit int) error {

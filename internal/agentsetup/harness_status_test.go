@@ -23,7 +23,7 @@ type recoveryTable struct {
 }
 
 func TestRecoveryFixIsOneSharedVocabulary(t *testing.T) {
-	table := recoveryTable{Harnesses: []string{"claude", "codex", "cursor", "grok", "pi"}, Reasons: append(append([]string(nil), HarnessReasons...), "future_reason"), Fixes: map[string]map[string]*HarnessFix{}}
+	table := recoveryTable{Harnesses: []string{"claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"}, Reasons: append(append([]string(nil), HarnessReasons...), "future_reason"), Fixes: map[string]map[string]*HarnessFix{}}
 	kinds := map[string]string{"dependency_invalid": FixAddHarness, PinMissing: FixAddHarness, PinPartial: FixAddHarness, PinDrifted: FixAddHarness, PinInvalid: FixAddHarness, PinUnsafe: FixAddHarness, "login_required": FixLogin, "harness_failed": FixRestart, "cli_unavailable": FixRestart, "profile_permissions": FixRestart, "binding_missing": FixAddHarness, "probe_timeout": FixRestart, "probe_failed": FixRestart, "capacity_timeout": FixRestart}
 	for _, harness := range table.Harnesses {
 		table.Fixes[harness] = map[string]*HarnessFix{}
@@ -46,7 +46,7 @@ func TestRecoveryFixIsOneSharedVocabulary(t *testing.T) {
 			}
 		}
 	}
-	if fix := RecoveryFix("gemini", PinDrifted); fix != (HarnessFix{}) {
+	if fix := RecoveryFix("future_harness", PinDrifted); fix != (HarnessFix{}) {
 		t.Fatal("unknown harness received a command", fix)
 	}
 	for _, report := range [][3]string{{"claude", "future_state", "future_reason"}, {"codex", "checking", "starting"}, {"pi", "login_required", ""}} {
@@ -54,7 +54,7 @@ func TestRecoveryFixIsOneSharedVocabulary(t *testing.T) {
 			t.Fatalf("report %v dropped: %+v", report, detail)
 		}
 	}
-	for _, report := range [][3]string{{"claude", "ready", PinDrifted}, {"claude", "blocked", "Local Diagnostic"}, {"claude", "Blocked", ""}, {"gemini", "blocked", PinDrifted}} {
+	for _, report := range [][3]string{{"claude", "ready", PinDrifted}, {"claude", "blocked", "Local Diagnostic"}, {"claude", "Blocked", ""}, {"future_harness", "blocked", PinDrifted}} {
 		if _, ok := HarnessReport(report[0], report[1], report[2]); ok {
 			t.Fatalf("inconsistent or malformed report accepted: %v", report)
 		}
@@ -104,8 +104,8 @@ func TestPartialAttentionKeepsOnlyAProperSubset(t *testing.T) {
 	if len(PartialAttention("codex", []string{"a"}, "ready", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 0 {
 		t.Fatal("a single enrollment was treated as a partial block")
 	}
-	if len(PartialAttention("codex", enrolled, "blocked", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 0 {
-		t.Fatal("attention stuck to a blocked harness")
+	if len(PartialAttention("codex", enrolled, "blocked", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 1 {
+		t.Fatal("account diagnostic lost from a blocked harness")
 	}
 	raw := []byte(`{"state":"ready","attention_accounts":[{"account_id":"a","reason":"pin_drifted"},"nope",{"account_id":"b"}],"fix":"legacy string"}`)
 	var detail HarnessDetail

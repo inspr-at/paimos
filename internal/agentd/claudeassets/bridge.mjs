@@ -20,7 +20,7 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 // ownership. All file access goes through the run-bound daemon MCP proxy.
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
-  "aeon_edit", "aeon_glob", "aeon_grep"];
+  "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"];
 
 function managedToolHook(allowedTools) {
   return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
@@ -203,6 +203,7 @@ let stopping = false;
 let verificationSucceeded = false;
 let sessionStarted = false;
 let sessionID = "";
+let effectiveServiceTier = "default";
 let effectiveModel = "";
 let effectiveEffort = start.effort || "";
 let modelEvidenceStatus = "";
@@ -247,14 +248,42 @@ function observeTurnActivity(message) {
   if (message?.type === "assistant" || message?.type === "stream_event") turnActive = true;
 }
 
-function observeTool(message) {
-  if (message?.type === "assistant" && Array.isArray(message.message?.content) &&
-      message.message.content.some((block) => block?.type === "tool_use")) {
-    emit({ kind: "tool_started" });
-    return;
+function toolActivity(name, input = {}) {
+  name = String(name).replace(/^mcp__aeon__/, '').replace(/^aeon_/, '').toLowerCase();
+  if (name === 'terminal') { name = 'bash'; input = { command: [input.command, ...(Array.isArray(input.args) ? input.args : [])].join(' ') }; }
+  switch (name) {
+    case 'edit': case 'write': case 'multiedit': {
+      const path = input.file_path ?? input.path ?? '';
+      const base = typeof path === 'string' ? path.split('/').at(-1) : '';
+      if (typeof path === 'string' && path.length <= 1024 && !/[\x00\r\n\\:@?=$%]/.test(path) && !path.toLowerCase().includes('.env') &&
+          /^[A-Za-z][A-Za-z0-9_.-]{0,39}\.(go|ts|tsx|js|mjs|vue|css|html|sql|yaml|yml|json|md|sh|py|rs)$/.test(base) &&
+          !/(secret|token|credential|password|id_|private|_rsa|_ed25519)/i.test(base) &&
+          !/[A-Za-z0-9+/_=-]{24,}/.test(base)) return `Editing ${base}`;
+      return 'Editing code';
+    }
+    case 'read': case 'glob': case 'grep': return 'Reading code';
+    case 'bash': {
+      const shell = typeof input.command === 'string' ? input.command : '';
+      const verb = shell.match(/(?:^|[;&|]\s*|\s)(go\s+test|npm\s+(?:run\s+)?test(?::[a-z-]+)?|npx\s+playwright|playwright|git\s+commit|git\s+push|gh\s+pr\s+checks|git\s+worktree\s+(?:remove|prune))\b/)?.[1]?.replace(/\s+/g, ' ');
+      if (verb?.includes('playwright')) return 'Running browser tests';
+      if (verb?.startsWith('go test')) return 'Running Go tests';
+      if (verb?.startsWith('npm ')) return 'Running web tests';
+      if (verb === 'git commit') return 'Committing';
+      if (verb === 'git push') return 'Pushing';
+      if (verb === 'gh pr checks') return 'Waiting for CI';
+      if (verb?.startsWith('git worktree ')) return 'Cleaning up';
+    }
   }
-  if (message?.type === "stream_event" && message.event?.type === "content_block_start" &&
-      message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
+  return 'Working';
+}
+
+function observeTool(message) {
+  const blocks = message?.type === 'assistant' ? message.message?.content :
+    message?.type === 'stream_event' && message.event?.type === 'content_block_start' ? [message.event.content_block] : [];
+  if (!Array.isArray(blocks)) return;
+  for (const block of blocks) if (block?.type === 'tool_use') {
+    emit({ kind: 'tool_started', activity_text: toolActivity(block.name, block.input) });
+  }
 }
 
 // Project only the documented quota fields. Never forward arbitrary SDK data.
@@ -333,6 +362,7 @@ try {
     pathToClaudeCodeExecutable: claudePath,
     persistSession: false,
     settingSources: [],
+    extraArgs: { settings: JSON.stringify({fastMode:false}) },
     strictMcpConfig: true,
     mcpServers,
     plugins: [],
@@ -451,6 +481,30 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID, vendor_message_id: uuid });
         if (state.reacted) deleteCorrelation(uuid);
         controlUUID = "";
+      } else if (request.op === "tier") {
+        failureReason = "setting_rejected";
+        if (!sessionStarted || turnActive || !["default", "fast"].includes(request.value) ||
+            (request.value === "fast" && !["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(effectiveModel)) ||
+            typeof queryHandle.applyFlagSettings !== "function" ||
+            typeof queryHandle.reinitialize !== "function") throw new Error("unavailable");
+        try {
+          await queryHandle.applyFlagSettings({ fastMode: request.value === "fast" });
+          // A setter acknowledgement can hide a cooldown or account block.
+          const confirmed = await queryHandle.reinitialize();
+          if (confirmed?.fast_mode_state !== (request.value === "fast" ? "on" : "off")) throw new Error("tier unconfirmed");
+        } catch {
+          // Restore the last confirmed tier before any next turn. An uncertain
+          // rollback closes the Query instead of running with an unknown price.
+          try {
+            await queryHandle.applyFlagSettings({ fastMode: effectiveServiceTier === "fast" });
+            const restored = await queryHandle.reinitialize();
+            if (restored?.fast_mode_state !== (effectiveServiceTier === "fast" ? "on" : "off")) throw new Error("restore unconfirmed");
+          } catch { fatal = true; }
+          throw new Error("tier rejected");
+        }
+        effectiveServiceTier = request.value;
+        emit({ kind: "settings_changed", service_tier: request.value });
+        emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "model" || request.op === "effort") {
         failureReason = "setting_rejected";
         if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");

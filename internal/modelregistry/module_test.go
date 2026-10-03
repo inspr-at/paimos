@@ -215,7 +215,7 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	astra := profileBySlug(profiles, "codex-astra-xhigh")
 	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
 		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 4 || gate.Ladder[1].SkipReasons[0] != "author family" {
+		len(gate.Ladder) != 7 || gate.Ladder[1].SkipReasons[0] != "author family" {
 		t.Fatalf("gate %+v", gate)
 	}
 	otherGate := decode[Resolution](t, &other, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude", "", http.StatusOK)
@@ -269,9 +269,9 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 			}
 		})
 	}
-	for _, input := range []string{"pi", "unknown"} {
+	for _, input := range []string{"pi", "opencode", "unknown"} {
 		status, body := call(t, &admin, http.MethodGet, "/api/models/resolve?role=review-gate&author_family="+input, "")
-		if status != http.StatusBadRequest || !strings.Contains(string(body), "openai, anthropic, xai or cursor") {
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "openai, anthropic, xai, cursor, google or local") {
 			t.Fatalf("invalid family %q: status %d, body %s", input, status, body)
 		}
 	}

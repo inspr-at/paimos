@@ -5,6 +5,7 @@
 // mocks, it answers only its own routes and lets the rest fall through.
 import type { Page } from '@playwright/test'
 import { deflateSync } from 'node:zlib'
+import type { AutopilotSettings, ProjectOverride } from '../src/lib/statusAutopilot'
 
 export interface SettingsMockOptions {
   greeting?: boolean; failPatch?: boolean; noQuotes?: boolean; noKeys?: boolean
@@ -54,8 +55,22 @@ export function settingsData(options: SettingsMockOptions = {}) {
 export type SettingsData = ReturnType<typeof settingsData>
 
 export async function mockSettings(page: Page, data: SettingsData, options: SettingsMockOptions = {}) {
+  const autopilot: AutopilotSettings = { enabled: true, revision: 0, rules: { new: { enabled: true, days: 7 }, backlog: { enabled: true, days: 90 }, blocked: { enabled: true, days: 14 }, progress: { enabled: true, days: 3 }, done: { enabled: true, days: 14 }, publish: { enabled: true }, accept: { enabled: true, days: 30 } } }
+  const autopilotProjects: Record<string, ProjectOverride> = {}
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method()
+    if (path === '/api/settings/status-autopilot') {
+      if (method === 'PUT') { const body = request.postDataJSON(); Object.assign(autopilot, { enabled: body.enabled, rules: body.rules, revision: autopilot.revision + 1 }) }
+      return route.fulfill({ json: autopilot })
+    }
+    if (path === '/api/status-autopilot/changes' || path === '/api/status-autopilot/proposals') return route.fulfill({ json: { items: [] } })
+    const autopilotProject = /^\/api\/projects\/([^/]+)\/status-autopilot$/.exec(path)
+    if (autopilotProject) {
+      const override = autopilotProjects[autopilotProject[1]!] ??= { mode: 'inherit', effective_enabled: true, revision: 0 }
+      if (method === 'PUT') { override.mode = request.postDataJSON().mode; override.revision++ }
+      override.effective_enabled = override.mode === 'on' || override.mode === 'inherit' && autopilot.enabled
+      return route.fulfill({ json: override })
+    }
     if (path === '/api/me/security/session-watching') {
       if (method === 'PUT') data.watchConsent = request.postDataJSON().consent_mode
       return route.fulfill({ json: { consent_mode: data.watchConsent, local_auth_computers: data.localAuthComputers } })
@@ -103,6 +118,7 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
       data.greetings.push({ timezone: request.headers()['x-timezone'] ?? '' })
       return route.fulfill({ json: { salutation: 'Good afternoon', name: data.profile.preferred_name || data.profile.first_name, message: 'Small steps, shipped, beat big plans on paper.', id: 'g-small-steps' } })
     }
+    if (path === '/api/models/refresh' && method === 'GET') return route.fulfill({ json: { settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: false, interval_minutes: 1440 }, last_run_at: null, last_result: {}, sources: [], observations: [] } })
     if (path === '/api/portal/settings' && method === 'GET') return route.fulfill({ json: { enabled: false, slug: 'inspr' } })
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: data.keys } })
     if (path === '/api/quotes/settings' && method === 'GET') {

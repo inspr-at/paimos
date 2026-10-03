@@ -3,16 +3,15 @@
 // wide. Without a saved choice the table fills its width: narrow tables drop
 // columns, wide ones (from ~1500px of table, about an 1800px screen) add Assignee,
 // Epic, Release and Tags (when some row has them), Estimate and Created. A saved
-// choice fixes order and visibility; columns that cannot fit still step aside from
-// the end. On wide tables Title stops at ~960px and the spare width goes to the
+// choice fixes order and visibility; narrow desktop tables scroll to keep it.
+// On wide tables Title stops at ~960px and the spare width goes to the
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
-// The planning columns (Model, Tokens, ≈ Cost, Paid; AEON-329) join wide tables
-// when a loaded row fills them, leave first when space runs out, and stay hidden
-// while no loaded row has a value, even when chosen.
+// Planning columns join Automatic when populated. Saved ticks always draw,
+// including empty cells. Legacy Paid choices map to Cost (AEON-511).
 import type { SortField } from './work.ts'
 import { PLANNING_COLUMNS } from './planning.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
 export interface ColumnDef { id: ColumnId; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>>; defaultView?: string | null }
@@ -28,12 +27,12 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
   { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
   { id: 'estimate', label: 'Estimate', sort: 'estimate', width: 96, min: 72, max: 180, end: true },
-  // 156px fits "Codex astra · xhigh" at the cell's 12.5px type.
-  { id: 'model', label: 'Model', sort: 'model', width: 156, min: 96, max: 260 },
-  // 118px fits "1.54M / 10M"; ≈ Cost fits "$4.48 / $27".
+  // Model name and version, brand mark, effort meter, measured check and +N.
+  { id: 'model', label: 'Model', sort: 'model', width: 176, min: 96, max: 260 },
+  { id: 'suggested', label: 'Suggested release', sort: null, width: 152, min: 120, max: 260 },
+  // Fixed measured slot follows the value; running estimates carry "~".
   { id: 'tokens', label: 'Tokens', sort: 'tokens', width: 118, min: 84, max: 180, end: true },
-  { id: 'list_cost', label: '≈ Cost', sort: 'list_cost', width: 112, min: 80, max: 170, end: true },
-  { id: 'paid', label: 'Paid', sort: 'paid', width: 100, min: 72, max: 160, end: true },
+  { id: 'list_cost', label: 'Cost', sort: 'list_cost', width: 128, min: 80, max: 170, end: true },
   { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
   { id: 'progress', label: 'Progress', sort: 'progress', width: 100, min: 84, max: 140, end: true },
@@ -50,17 +49,27 @@ export const TITLE_TARGET = 960
 const TITLE_ROOM = 420
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['paid', 'list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+const DROP_ORDER: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
 // Columns only wide tables add on their own.
-const WIDE_EXTRAS: ColumnId[] = ['paid', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
+const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
 const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has. `workers` is live ticket work with
 // no stored assignee; it earns the Assignee column the same way a person does.
-export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
+export interface Present { suggested?: boolean; assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
+
+/** Normalize saved preferences, shared links and saved views without mutating them. */
+export function normalizeColumnIds(ids: readonly unknown[]): ColumnId[] {
+  return [...new Set(ids.map(id => id === 'paid' ? 'list_cost' : id).filter((id): id is ColumnId => typeof id === 'string' && COLUMN_BY_ID.has(id as ColumnId)))]
+}
+/** Ticks represent the saved choice, even when the table is a phone card. */
+export function pickerColumns(prefs: ListPrefs | null | undefined, drawn: ColumnId[], costAllowed: boolean) {
+  const allowed = (id: ColumnId) => costAllowed || id !== 'list_cost'
+  return { order: orderOf(prefs).filter(allowed), visible: normalizeColumnIds(prefs?.visible ?? drawn).filter(allowed), customised: !!prefs?.visible }
+}
 
 export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
-  const valid = (prefs?.order ?? []).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
+  const valid = normalizeColumnIds(prefs?.order ?? []).filter(id => !PINNED.includes(id))
   const rest = COLUMNS.map(c => c.id).filter(id => !PINNED.includes(id) && !valid.includes(id))
   return [...PINNED, ...new Set(valid), ...rest]
 }
@@ -72,7 +81,7 @@ export function automaticColumns(tableWidth: number, present: Present = {}): Col
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
   if (tableWidth >= WIDE_TABLE) {
     const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : []),
-      ...PLANNING_COLUMNS.filter(id => present[id])]
+      ...PLANNING_COLUMNS.filter(id => present[id]), ...(present.suggested ? ['suggested' as const] : [])]
     const wide: ColumnId[] = [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
     if (present.progress) wide.push('progress')
     if (present.eta) wide.push('eta')
@@ -87,15 +96,15 @@ export function automaticColumns(tableWidth: number, present: Present = {}): Col
 
 export function widthOf(id: ColumnId, prefs: ListPrefs | null | undefined): number {
   const def = COLUMN_BY_ID.get(id)!
-  const saved = prefs?.widths?.[id]
+  const saved = prefs?.widths?.[id] ?? (id === 'list_cost' ? prefs?.widths?.paid : undefined)
   return typeof saved === 'number' && Number.isFinite(saved) ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
 }
 
 // The columns to show, in order. `customised` is true when a saved choice applies.
-export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null }): { columns: ColumnDef[]; customised: boolean } {
-  if (options.phone) {
-    // A phone card keeps its own set. Progress, ETA and an hour estimate join it when a
-    // loaded row has one; a saved choice does not hide them.
+export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean }): { columns: ColumnDef[]; customised: boolean } {
+  if (options.phone && !options.prefs?.visible) {
+    // Automatic phone cards keep their compact set. Saved choices below apply
+    // to cards too; their optional cells grow downward instead of scrolling.
     const phone: ColumnId[] = [...PHONE]
     if (options.present?.progress) phone.push('progress')
     if (options.present?.eta) phone.push('eta')
@@ -104,8 +113,8 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   }
   const prefs = options.prefs
   const customised = !!prefs?.visible
-  const chosen = customised ? new Set<ColumnId>([...PINNED, ...prefs!.visible!]) : new Set(automaticColumns(tableWidth, options.present))
-  for (const id of PLANNING_COLUMNS) if (!options.present?.[id]) chosen.delete(id)
+  const chosen = customised ? new Set<ColumnId>([...PINNED, ...normalizeColumnIds(prefs!.visible!)]) : new Set(automaticColumns(tableWidth, options.present))
+  if (options.costAllowed === false) chosen.delete('list_cost')
   let ids = orderOf(prefs).filter(id => chosen.has(id))
   const total = (title: number) => ids.reduce((sum, id) => sum + (id === 'title' ? title : widthOf(id, prefs)), 0)
   // Columns a wide table adds on its own leave first when Title would get cramped.
@@ -115,7 +124,7 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   }
   // Whatever does not fit beside a readable title steps aside, least essential first.
   const title = COLUMN_BY_ID.get('title')!.min
-  for (const id of DROP_ORDER) {
+  if (!customised) for (const id of DROP_ORDER) {
     if (total(title) <= tableWidth || tableWidth <= 0) break
     ids = ids.filter(x => x !== id)
   }

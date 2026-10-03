@@ -6,13 +6,30 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrations, contractMarker, destructive, publishedMigrations } from './check-migrations.mjs';
+import { checkMigrations, contractMarker, destructive, publishedMigrations, splitSQL } from './check-migrations.mjs';
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
 
 test('duplicate numbers fail even with different names and SQL', () => {
   const problems = checkMigrations(new Map([['1050_first.sql', 'SELECT 1;'], ['1050_second.sql', 'SELECT 2;']]));
   assert.match(problems.join('\n'), /duplicate migration number 1050/);
+});
+
+test('AEON-613 quota migrations coexist with the AEON-615 and lead block reservations', () => {
+  const directory = new URL('../internal/db/migrations/', import.meta.url);
+  const names = readdirSync(directory).filter(name => /_quota_warning(?:s|_observations)\.sql$/.test(name)).sort();
+  assert.equal(names.length, 2);
+  assert.match(names[0], /_quota_warnings\.sql$/);
+  assert.match(names[1], /_quota_warning_observations\.sql$/);
+  assert.ok(names[0] > '1135_account_readiness.sql', 'quota tables follow their readiness foreign key target');
+  const files = new Map(names.map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
+  // 1136/1137 belong to AEON-615; the lead reserved the whole 1139–1146
+  // block for other workers. Validate a combined candidate, since these
+  // branch-only migrations previously passed the isolated-tree guard.
+  for (const number of [1136, 1137, 1138, 1139, 1140, 1141, 1142, 1143, 1144, 1145, 1146]) {
+    files.set(`${number}_reserved_other_ticket.sql`, `CREATE TABLE reserved_${number}(id uuid);`);
+  }
+  assert.deepEqual(checkMigrations(files), []);
 });
 
 test('drops and renames require a header contract marker', () => {
@@ -190,7 +207,7 @@ test('the static guard runs on PR and merge-group checkouts with full release-ta
   const migrationJob = workflow.split(/^  migration-compat:\n/m)[1].split(/^  [\w-]+:\n/m)[0];
   assert.match(migrationJob, /fetch-depth: 0/);
   assert.match(migrationJob, /node scripts\/check-migrations.mjs --base-ref/);
-  assert.match(migrationJob, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1/);
+  assert.match(migrationJob, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1\s*$/m);
   // Migration compatibility remains unconditional, including its steps. Other
   // jobs, such as the PR/queue review gate, deliberately have event guards.
   assert.doesNotMatch(migrationJob, /^\s+if:/m);
@@ -288,12 +305,25 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('the original integration exception remains the unchanged merged 1054 contract migration', () => {
+test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql']);
-  const [entry] = manifest.exceptions;
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql']);
+  const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
+  assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
+  const runKinds = manifest.exceptions.find(entry => entry.file === '1066_run_kinds.sql');
+  assert.ok(runKinds);
+  assert.equal(runKinds.file, '1066_run_kinds.sql');
+  assert.equal(runKinds.ticket, 'AEON-501');
+  const briefing = manifest.exceptions.find(entry => entry.file === '1087_briefing_autopilot_visibility.sql');
+  assert.ok(briefing);
+  assert.equal(briefing.file, '1087_briefing_autopilot_visibility.sql');
+  assert.equal(briefing.ticket, 'AEON-454');
+  const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
+  assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
+  assert.match(runKinds.reason, /strict superset/);
+
   assert.equal(entry.ticket, 'AEON-397');
   assert.match(entry.reason, /contract|unconfirmed|person/i);
   const source = execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${entry.file}`], {encoding: 'utf8'});
@@ -303,7 +333,37 @@ test('the original integration exception remains the unchanged merged 1054 contr
   assert.equal(destructive(source), true);
 });
 
-test('the current tree passes only with the explicit pinned contract exceptions', () => {
+test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review exception', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = manifest.exceptions.find(entry => entry.file === '1100_aithema_pending_content.sql');
+  assert.equal(entry.ticket, 'AEON-483');
+  assert.match(entry.reason, /coordinator review before merge\/release/);
+  assert.match(entry.reason, /does not.*skip previous-binary compatibility/);
+  const source = readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8');
+  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
+  assert.equal(destructive(source), true);
+  assert.match(source, /octet_length\(original_bytes\) <= 1048576/);
+  assert.match(source, /contract = 'aithema\.spec\.snapshot'/);
+  assert.match(source, /contract = 'aithema\.journal\.record' AND kind = 'pending_op\.content'/);
+  const statements = splitSQL(source);
+  const drops = statements.filter(sql => /DROP CONSTRAINT/.test(sql));
+  assert.deepEqual(drops, ['ALTER TABLE aithema_journal_records\n    DROP CONSTRAINT aithema_journal_records_original_bytes_check']);
+  assert.equal(destructive(statements.filter(sql => !drops.includes(sql)).join(';')), false);
+  assert.match(source, /\) NOT VALID;/);
+  assert.doesNotMatch(source, /VALIDATE CONSTRAINT|CREATE UNIQUE INDEX/);
+  assert.match(source, /total BETWEEN 1048577 AND 16777216/);
+  const validation = readFileSync(new URL('../internal/db/migrations/1101_aithema_content_bytes_validate.sql', import.meta.url), 'utf8');
+  assert.equal(destructive(validation), false);
+  assert.match(validation, /VALIDATE CONSTRAINT aithema_journal_records_content_bytes_check/);
+  const index = readFileSync(new URL('../internal/db/migrations/1102_aithema_content_address.sql', import.meta.url), 'utf8');
+  assert.equal(destructive(index), false);
+  assert.ok(index.startsWith('-- aeon:no-transaction\n'));
+  assert.equal(splitSQL(index).length, 1);
+  assert.match(index, /CREATE UNIQUE INDEX CONCURRENTLY/);
+
+});
+
+test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
@@ -311,6 +371,39 @@ test('the current tree passes only with the explicit pinned contract exceptions'
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
+});
+
+test('briefing visibility expansion preserves every existing restriction', () => {
+  const original = readFileSync(new URL('../internal/db/migrations/0823_event_reference_visibility.sql', import.meta.url), 'utf8');
+  const expanded = readFileSync(new URL('../internal/db/migrations/1087_briefing_autopilot_visibility.sql', import.meta.url), 'utf8');
+  const addition = "OR type IN ('status_autopilot.changed', 'status_autopilot.skipped')";
+  assert.equal(expanded.split(addition).length, 2);
+  const condition = sql => sql.slice(sql.indexOf('USING ((SELECT aeon_visible_all())')).replace(/\s+/g, ' ').trim();
+  // Removing exactly the two admitted types recovers the original policy.
+  assert.equal(condition(expanded.replace(addition, '')), condition(original));
+  const name = '1087_briefing_autopilot_visibility.sql';
+  const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = exceptions.exceptions.find(e => e.file === name);
+  assert.ok(entry);
+  const files = new Map(exceptions.exceptions.map(e => [e.file, readFileSync(new URL(`../internal/db/migrations/${e.file}`, import.meta.url), 'utf8')]));
+  files.set(name, expanded.replace(addition, "OR type LIKE 'status_autopilot.%'"));
+  assert.match(checkMigrations(files, new Map(), null, {exceptions}).join('\n'), /1087_briefing_autopilot_visibility.sql: exception migration changed/);
+});
+
+test('1088 stages every widened check before definition-selected drops', () => {
+  const sql = readFileSync(new URL('../internal/db/migrations/1088_more_harnesses.sql', import.meta.url), 'utf8');
+  const adds = [...sql.matchAll(/ALTER TABLE (\w+) ADD CONSTRAINT (\w+)\s+CHECK ([\s\S]*?);/g)];
+  assert.equal(adds.length, 10);
+  for (const [, table, constraint, check] of adds) {
+    assert.match(check, /NOT VALID$/);
+    const validate = `ALTER TABLE ${table} VALIDATE CONSTRAINT ${constraint};`;
+    assert.ok(sql.includes(validate), `missing ${validate}`);
+    assert.ok(sql.indexOf(validate) < sql.indexOf('DROP CONSTRAINT'), 'drop before validation');
+  }
+  assert.match(sql, /pg_get_constraintdef/);
+  assert.doesNotMatch(sql, /DROP CONSTRAINT work_order_reviews_check/);
+  assert.match(sql, /reviewer_profile_id IS NULL/);
+  assert.match(sql, /reviewer_family IS NULL/);
 });

@@ -15,20 +15,22 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type apiNode struct {
-	Warnings  []string        `json:"warnings,omitempty"`
-	ID        string          `json:"id"`
-	Key       string          `json:"key"`
-	KindID    string          `json:"kind_id"`
-	Title     string          `json:"title"`
-	Body      string          `json:"body"`
-	Fields    json.RawMessage `json:"fields"`
-	State     string          `json:"state"`
-	ParentID  *string         `json:"parent_id"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Queued    *workqueue.Queued `json:"queued,omitempty"`
+	Warnings  []string          `json:"warnings,omitempty"`
+	ID        string            `json:"id"`
+	Key       string            `json:"key"`
+	KindID    string            `json:"kind_id"`
+	Title     string            `json:"title"`
+	Body      string            `json:"body"`
+	Fields    json.RawMessage   `json:"fields"`
+	State     string            `json:"state"`
+	ParentID  *string           `json:"parent_id"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 type nodePage struct {
@@ -104,7 +106,9 @@ func (rt *runtime) api() (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.New(inst.URL, inst.APIKey), nil
+	c := client.New(inst.URL, inst.APIKey)
+	c.ConfirmStepUp = localStepUp(inst.URL, inst.AgentdStateRoot)
+	return c, nil
 }
 
 func (rt *runtime) do(method, path string, body, dest any) error {

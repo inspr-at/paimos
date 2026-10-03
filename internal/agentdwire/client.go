@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -20,7 +21,44 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/stepup"
 )
+
+// Fixed attach refusal codes admitted over the owner-only socket. Keep the
+// English and German inventories in sync; callers receive a copy.
+var attachRefusalCodes = []string{
+	"attach_live_limit",
+	"attach_pairing_revoked",
+	"attach_version_mismatch",
+	"attach_ticket_not_visible",
+	"attach_code_expired",
+	"attach_draining",
+	"attach_enrollment_unavailable",
+	"attach_registration_lost",
+	"attach_pairing_unavailable",
+	"attach_scope_changed",
+	"attach_computer_limit",
+	"attach_attempt_limit",
+	"attach_registration_limit",
+	"attach_poll_limit",
+	"attach_rate_limit",
+	"attach_snapshot_changed",
+	"attach_consent_required",
+	"attach_ended",
+	"attach_invalid_request",
+	"attach_offline",
+	"attach_server_unavailable",
+	"attach_unknown",
+	"attach_local_unavailable",
+	"attach_pairing_mismatch",
+}
+
+// AttachRefusalCodes lists the socket's attach refusal allowlist for parity.
+func AttachRefusalCodes() []string {
+	codes := slices.Clone(attachRefusalCodes)
+	slices.Sort(codes)
+	return codes
+}
 
 type Client struct {
 	Socket    string
@@ -65,6 +103,12 @@ func (c Client) token() (string, error) {
 		return "", errors.New("agentd token file invalid")
 	}
 	return string(raw), nil
+}
+
+func (c Client) AccountLink(ctx context.Context, req agentd.AccountLinkRequest) (agentsetup.AccountLinkView, error) {
+	var out agentsetup.AccountLinkView
+	err := c.lifecycleRequest(ctx, "POST", "/v1/account-link", req, &out)
+	return out, err
 }
 
 func (c Client) Lifecycle(ctx context.Context, accountID string) (agentd.LifecycleStatus, error) {
@@ -113,6 +157,9 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}}
 	defer transport.CloseIdleConnections()
 	hc := &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if path == "/v1/step-up" && method == "POST" {
+		hc.Timeout = stepup.ConfirmTimeout + 5*time.Second
+	}
 	r, err := http.NewRequestWithContext(ctx, method, "http://agentd"+path, bytes.NewReader(raw))
 	if err != nil {
 		return errors.New("invalid local request")
@@ -121,18 +168,31 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	r.Header.Set("Content-Type", "application/json")
 	res, err := hc.Do(r)
 	if err != nil {
+		if path == "/v1/step-up" {
+			return errors.New("local Touch ID confirmation unavailable, cancelled or timed out")
+		}
 		return errors.New("local agentd unavailable")
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if path == "/v1/step-up" {
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 769))
+			hint := strings.TrimSpace(string(raw))
+			if readErr == nil && len(raw) <= 768 && validAttachDiagnostic(hint) {
+				return errors.New("Touch ID: " + hint)
+			}
+			return errors.New("local Touch ID confirmation refused")
+		}
 		if path == "/v1/attach" && res.StatusCode == http.StatusConflict {
 			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 1025))
 			if readErr == nil && len(raw) <= 1024 {
 				var detail agentd.AttachLocalError
 				if json.Unmarshal(raw, &detail) == nil && validAttachDiagnostic(detail.Hint) {
 					switch detail.Code {
-					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported",
-						"attach_live_limit", "attach_pairing_revoked", "attach_version_mismatch", "attach_ticket_not_visible", "attach_code_expired":
+					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported":
+						return &detail
+					}
+					if slices.Contains(attachRefusalCodes, detail.Code) {
 						return &detail
 					}
 				} else if hint := strings.TrimSpace(string(raw)); !strings.HasPrefix(hint, "{") && validAttachDiagnostic(hint) {

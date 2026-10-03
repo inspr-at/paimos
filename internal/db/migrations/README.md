@@ -4,6 +4,20 @@
 session advisory lock, and records each completed filename in `schema_migrations`.
 Normally each file and its migration record share one transaction.
 
+AEON-452 keeps `1088_more_harnesses.sql` as one numbered migration but commits
+its CHECK installation, validation and replacement in three transactions.
+Installation uses `NOT VALID` and commits before validation scans, releasing its
+exclusive DDL locks. The old enum checks remain enforced until all replacements
+validate; only the enum predicates are retired, preserving review null-pairing.
+Each phase uses the five-second lock timeout and the migration advisory lock.
+Temporary `schema_migrations` phase records include the exact source digest and
+commit with their phase, so a stopped run resumes without repeating completed
+DDL. Different source bytes on a partial run are refused. Replacement, removal
+of only these temporary records and the completed filename record commit
+together. Other files retain their existing transaction behavior. The regression
+in `more_harnesses_migration_test.go` interrupts after installation, resumes
+validation with a writer lock held, and verifies replay and ledger cleanup.
+
 For an index on a hot table, put `-- aeon:no-transaction` on the **first line**
 (before the SPDX comment) and use exactly one `CREATE INDEX CONCURRENTLY`
 statement per file. `IF NOT EXISTS` is supported. Index and table names must be
@@ -30,6 +44,31 @@ RLS also applies to the migration owner. Each tenant commits independently;
 `ON CONFLICT DO NOTHING` makes a partially completed run safe to retry. The
 filename is recorded only after every tenant succeeds. Key scopes are unchanged.
 
+AEON-502 A (1104–1107) adds work kinds, sparse model preferences, run
+residency/starter stamps, session placement and profile retirements. An empty
+matrix preserves existing role ladders. Model locks bound Default → You →
+Project selection; residency locks allow any narrower choice and flag loosening.
+Ticket requirements and existing run stamps remain floors. Account routing
+recomputes the canonical starter's live requirement before every reservation,
+recheck and vendor retry; no account evidence means class `any`.
+Pairing verification remains exempt. Preference endpoints, planning callers
+and UI editing follow in 502b–e.
+
+AEON-604 (1129) stores host-owned residency evidence per account in a tenant-RLS
+table. The record includes bounded country sets, profile coverage, local
+execution, verification/expiry, proof reference and optional retention/training
+declarations. Writes snapshot the account binding and emit an event; the fence
+rejects missing, expired, future-dated or superseded evidence. The additive table
+does not change existing account rows or grant any account residency by default.
+
+Migration 1104's tenant-loop seed and replacement area-schema helper require an
+exact-byte exception in `scripts/migration-policy-exceptions.json`. The new
+slug pattern includes every previous area, and current Go area validation stays
+unchanged. Coordinator review and previous-binary compatibility CI remain
+required before merge/release. Before rolling back below this fence, set all
+residency requirements to `any` or pause dispatch; older binaries cannot enforce
+these stamps.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement
@@ -50,6 +89,12 @@ child contributes 100 without retaining its stopped session's ETA. Nested epics
 still count as one direct child, and unknown or failed work stays unknown.
 The published `aeon_node_eta` function remains available to previous binaries.
 
+AEON-523's `1080_invited_alias_access.sql` adds `aeon_bind_legacy_uninvited`,
+used by sign-in, import and unlink to preserve an accepted invite's explicit
+access. Linked aliases never seed access, and people with aliases retain their
+explicit bindings without recreating grants from legacy labels. The original legacy binder stays
+available for previous binaries; no published SQL or function is replaced.
+
 Every new migration containing any statement outside the expand-safe allowlist
 must have this standalone line comment in its header, before SQL (after `aeon:no-transaction`
 when applicable):
@@ -67,7 +112,7 @@ history for this read-only verification. Record the expansion/backfill and the
 old binary's removed dependency on that ticket. The marker declares the phase; it never
 bypasses runtime compatibility checks.
 
-The allowlist covers `CREATE TABLE`, `CREATE INDEX` (including `CONCURRENTLY`),
+The allowlist covers `CREATE TABLE`, `CREATE INDEX` (including `UNIQUE` and `CONCURRENTLY`),
 `CREATE TYPE`, `CREATE FUNCTION`, `CREATE POLICY`, `CREATE TRIGGER`, nullable
 `ADD COLUMN` or one with a constant non-null default, `ADD CONSTRAINT … NOT
 VALID`, `VALIDATE CONSTRAINT`, `COMMENT ON`, `GRANT`, `INSERT INTO` / `UPDATE`
@@ -157,3 +202,40 @@ static guard on the combined `merge_group` checkout is the merge-time duplicate
 number guarantee once that check is required; queue candidates containing both
 files fail. This worker does not change protection settings. Existing required
 checks and the AEON-438/459 runner routing are unchanged.
+
+AEON-483 uses three branch-only migrations: 1100 adds a nullable content address,
+installs the replacement byte check `NOT VALID`, creates digest-only alias receipts
+and durable chunk tables, and drops the old byte check in an isolated statement.
+That drop is its only policy exception. 1101 validates the check in a separate
+transaction after 1100 releases its exclusive lock; 1102 builds the unique content
+index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
+one concurrent index statement per marked file, including unique indexes, and
+checks uniqueness before reusing a valid unrecorded index.
+
+AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
+replacing unpublished migration 1136. The current shared ledger assigns
+1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
+The replacement reservations are recorded on AEON-613 before renaming; the
+coordinator must mirror 1147/1148 to the shared ledger because workers may
+author only inside their own repository. The settings/receipt SQL is unchanged.
+
+DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.
+Classify `quota_warning_settings` as metadata, located by `(tenant_id)`.
+Classify `account_quota_warnings` as personal quota telemetry (resource/window
+identity, reading time, remaining percentage, reset, threshold and recovery),
+located by `(tenant_id,id)`, when merging with the inventory branch. These
+records contain no credentials, local paths or raw vendor responses.
+
+AEON-613 fix5 reserves **1148** for `account_quota_warning_observations`,
+replacing unpublished migration 1137. This stores the latest measured
+quota/window state, including healthy readings, separately from notification
+receipts in 1147. Only its filename and receipt-migration comment change.
+The reservation is recorded on AEON-613; the coordinator must mirror it to the
+shared ledger under the same ownership boundary. Existing receipts remain
+unchanged, and current availability resumes with the next fresh measurement.
+The first fenced write seeds its watermark from retained receipt reading and
+recovery times. A historical recovery with no retained healthy percentage stays
+unknown; it never synthesizes a quota figure. A newer measured observation
+replaces it, while delayed readings remain blocked across reset transitions.
+Classify this table as personal quota telemetry, located by
+`(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.

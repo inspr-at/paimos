@@ -4,13 +4,16 @@ package modelregistry
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -20,18 +23,30 @@ const (
 	evRoutes  = "model.routes_replaced"
 )
 
+// Display is model identity for presentation; Version on Profile is the pin revision.
+type Display struct {
+	DisplayName  string `json:"display_name,omitempty"`
+	ShortName    string `json:"short_name,omitempty"`
+	ModelVersion string `json:"model_version,omitempty"`
+}
+
+func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " " + d.ModelVersion) }
+
 // Profile is one immutable model pin.
 type Profile struct {
-	ID        string    `json:"id"`
-	Slug      string    `json:"slug"`
-	Version   string    `json:"version"`
-	Harness   string    `json:"harness"`
-	Family    string    `json:"family"`
-	Model     string    `json:"model"`
-	Effort    string    `json:"effort"`
-	Tier      string    `json:"tier"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
+	Display
+	EffortLevel *int      `json:"effort_level"`
+	Provider    string    `json:"provider"`
+	ID          string    `json:"id"`
+	Slug        string    `json:"slug"`
+	Version     string    `json:"version"`
+	Harness     string    `json:"harness"`
+	Family      string    `json:"family"`
+	Model       string    `json:"model"`
+	Effort      string    `json:"effort"`
+	Tier        string    `json:"tier"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // Route is one step in a role ladder. A non-available state suppresses the
@@ -46,6 +61,7 @@ type Route struct {
 }
 
 type profileWrite struct {
+	Display
 	Slug    string `json:"slug"`
 	Version string `json:"version"`
 	Harness string `json:"harness"`
@@ -66,7 +82,10 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		if err := ensureAdditionalCatalog(ctx, tx, p); err != nil {
+			return err
+		}
+		return upgradeCatalog(ctx, tx, p)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
 		return err
@@ -75,7 +94,10 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		if err := ensureAdditionalCatalog(ctx, tx, p); err != nil {
+			return err
+		}
+		return upgradeCatalog(ctx, tx, p)
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -103,6 +125,9 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		}
 		routes = append(routes, stored)
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return err
+	}
 	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
 		Profiles []Profile `json:"profiles"`
 		Routes   []Route   `json:"routes"`
@@ -110,20 +135,59 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 }
 
 func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertProfileWithState(ctx, tx, tenantID, in, true)
+}
+
+// Discovery records a pin without granting it to wildcard accounts.
+func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertProfileWithState(ctx, tx, tenantID, in, false)
+}
+
+func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite, enabled bool) (Profile, error) {
 	var out Profile
-	err := tx.QueryRow(ctx, `
+	overrides := map[string]string{}
+	if in.DisplayName != "" {
+		overrides["display_name"] = in.DisplayName
+	}
+	if in.ShortName != "" {
+		overrides["short_name"] = in.ShortName
+	}
+	if in.ModelVersion != "" {
+		overrides["model_version"] = in.ModelVersion
+	}
+	raw, err := json.Marshal(overrides)
+	if err != nil {
+		return out, err
+	}
+	err = tx.QueryRow(ctx, `
 		INSERT INTO model_profiles
-			(tenant_id, slug, version, harness, family, model, effort, tier, enabled)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true)
+			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
 		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier).
+		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled, string(raw)).
 		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
+			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, tenantID, out.ID).
+			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
+	}
+	if out.Harness == "gemini" {
+		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
+	}
 	return out, err
+}
+
+// Only these constant identifiers enter SQL; the caller's role is never SQL.
+func roleRoutesTable(role string) string {
+	if role == "review-gate-security" {
+		return "model_security_role_routes"
+	}
+	return "model_role_routes"
 }
 
 func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO model_role_routes (tenant_id, role, priority, profile_id, state, reason, valid_until)
+		INSERT INTO `+roleRoutesTable(route.Role)+` (tenant_id, role, priority, profile_id, state, reason, valid_until)
 		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
 		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
 	return err
@@ -131,9 +195,9 @@ func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) e
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, slug, version, harness, family, model, effort, tier, enabled, created_at
-		FROM model_profiles
-		ORDER BY slug, version, id`)
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		ORDER BY p.slug, p.version, p.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +205,11 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider); err != nil {
 			return nil, err
+		}
+		if profile.Harness == "gemini" {
+			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
 		}
 		out = append(out, profile)
 	}
@@ -152,7 +219,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM model_role_routes
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes
 		ORDER BY role, priority, profile_id`)
 	if err != nil {
 		return nil, err
@@ -170,6 +237,18 @@ func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 }
 
 func validateProfile(in profileWrite) error {
+	for _, field := range []struct {
+		value string
+		max   int
+	}{{in.DisplayName, 128}, {in.ShortName, 128}, {in.ModelVersion, 64}} {
+		if len(field.value) > field.max || strings.ContainsAny(field.value, "\x00\r\n") {
+			return fail(http.StatusBadRequest, "invalid model display metadata")
+		}
+	}
+	if (in.DisplayName == "") != (in.ShortName == "") {
+		return fail(http.StatusBadRequest, "display_name and short_name must be supplied together")
+	}
+
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)
@@ -180,14 +259,25 @@ func validateProfile(in profileWrite) error {
 	if in.Version == "" || len(in.Version) > 64 || strings.ContainsAny(in.Version, "\x00\r\n") {
 		return fail(http.StatusBadRequest, "invalid version")
 	}
-	if !validHarness(in.Harness) || (!validFamily(in.Family) && !(in.Harness == "pi" && in.Family == "unknown")) || !validTier(in.Tier) {
+	if !validHarness(in.Harness) || (!validFamily(in.Family) && !((in.Harness == "pi" || in.Harness == "opencode") && in.Family == "unknown")) || !validTier(in.Tier) {
 		return fail(http.StatusBadRequest, "invalid harness, family or tier")
 	}
 	if len(in.Model) > 128 || !modelRE.MatchString(in.Model) {
 		return fail(http.StatusBadRequest, "invalid model")
 	}
+	if harnesslaunch.ModelFamily(in.Harness, in.Model) != in.Family {
+		return fail(http.StatusBadRequest, "profile family does not match its harness/provider binding")
+	}
 	if len(in.Effort) > 32 || !effortRE.MatchString(in.Effort) {
 		return fail(http.StatusBadRequest, "invalid effort")
+	}
+	if in.Harness == "gemini" {
+		if _, err := harnesslaunch.GeminiBudgetForModel(in.Model, in.Effort); err != nil {
+			return fail(http.StatusBadRequest, err.Error())
+		}
+	}
+	if in.Harness == "opencode" && !strings.Contains(in.Model, "/") {
+		return fail(http.StatusBadRequest, "OpenCode requires provider/model")
 	}
 	return nil
 }
@@ -235,6 +325,9 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 		return before, nil
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
 		return nil, err
 	}
 	for _, route := range normalized {

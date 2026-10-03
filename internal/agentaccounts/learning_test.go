@@ -302,7 +302,7 @@ func TestLearningBlindSettlementCalibratesAndReplayDoesNotMint(t *testing.T) {
 		}
 		return err
 	})
-	// A calibrated blind window still admits at most one daytime run.
+	// A calibrated estimate cannot invent a serial budget; the real cap remains.
 	a.MaxParallel = 4
 	inLearning(t, person, func(tx pgx.Tx) error {
 		windows, err := lockAccountWindows(t.Context(), tx, []string{a.ID})
@@ -310,8 +310,15 @@ func TestLearningBlindSettlementCalibratesAndReplayDoesNotMint(t *testing.T) {
 			return err
 		}
 		_, wait, err := admission(t.Context(), tx, a, windows[a.ID], now, 1, runRow{Purpose: "managed"}, false)
+		if err != nil {
+			return err
+		}
+		if wait != nil {
+			t.Fatalf("estimate limited concurrent unknown usage: %+v", wait)
+		}
+		_, wait, err = admission(t.Context(), tx, a, windows[a.ID], now, 4, runRow{Purpose: "managed"}, false)
 		if err == nil && (wait == nil || wait.Code != "capacity") {
-			t.Fatalf("concurrent blind run escaped %+v", wait)
+			t.Fatalf("real slot cap lost: %+v", wait)
 		}
 		return err
 	})

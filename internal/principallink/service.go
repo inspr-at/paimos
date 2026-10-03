@@ -57,7 +57,7 @@ func (s *Service) Unlink(ctx context.Context, slug, from string) (Result, error)
 // the event; eventLinked and eventUnlinked select the event type. Linking
 // deletes the source's role bindings.
 func LinkTx(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID, eventLinked, eventUnlinked string) (Result, error) {
-	out, err := apply.Apply(ctx, tx, tenantID, from, to)
+	out, err := apply.Apply(ctx, tx, tenantID, from, to, actorID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -87,6 +87,13 @@ func (s *Service) change(ctx context.Context, slug, from, to string) (Result, er
 		return result, err
 	}
 	err = db.InTenant(ctx, s.pool, tid, func(tx pgx.Tx) error {
+		// Take access ownership before even creating the audit actor. Inserting
+		// it first takes an event-counter lock. NO KEY UPDATE serializes links
+		// while allowing a node writer's tenant FK check to finish first.
+		var lockedTenant string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tid).Scan(&lockedTenant); err != nil {
+			return err
+		}
 		actor, err := operator(ctx, tx, tid)
 		if err != nil {
 			return err
@@ -146,15 +153,17 @@ func (s *Service) Suggest(ctx context.Context, slug string) ([]Suggestion, error
 	}
 	err = db.InTenant(ctx, s.pool, tid, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `WITH people AS (
-   SELECT p.id,p.name,coalesce(nullif(p.email,''),i.email) email,i.issuer
+   SELECT p.id,p.name,coalesce(nullif(p.email,''),i.email) email,i.issuer,
+    translate(trim(coalesce(nullif(p.email,''),i.email)),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C" email_key,
+    translate(trim(p.name),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C" name_key
    FROM principals p JOIN identities i ON i.id=p.identity_id
    WHERE p.tenant_id=$1 AND p.kind='person' AND p.linked_to IS NULL
   ) SELECT a.id::text,a.name,a.email,b.id::text,b.name,b.email,
-  CASE WHEN lower(trim(a.email))=lower(trim(b.email)) THEN 'same_email' ELSE 'username_email_local_part' END
+  CASE WHEN a.email_key=b.email_key THEN 'same_email' ELSE 'username_email_local_part' END
   FROM people a JOIN people b ON a.id<>b.id
   WHERE a.issuer='paimos-classic' AND b.issuer<>'paimos-classic'
    AND nullif(trim(b.email),'') IS NOT NULL AND strpos(b.email,'@')>1
-   AND (lower(trim(a.email))=lower(trim(b.email)) OR lower(trim(a.name))=lower(split_part(trim(b.email),'@',1)))
+   AND (a.email_key=b.email_key OR a.name_key=split_part(b.email_key,'@',1))
   ORDER BY a.name,a.id,b.name,b.id`, tid)
 		if err != nil {
 			return err

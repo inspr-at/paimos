@@ -22,7 +22,12 @@ web-check:
 
 # Playwright smoke against a running server (BASE_URL defaults to http://127.0.0.1:8080)
 e2e:
-    cd web && npx playwright install chromium && npm run e2e
+    cd web && npm run e2e
+
+# Full browser suites: committed HEAD on the approved remote lane; no local fallback.
+# Set AEON_REMOTE_CONTROL_DIR to the coordinator's remote-test.sh directory.
+ui-remote *args:
+    cd web && npm run test:remote -- {{args}}
 
 # Build the web app and the binary
 build: web-check
@@ -39,6 +44,11 @@ release-check:
 # Prepared rules wrapper drift; does not activate instructions or receive rules.
 rules-check:
     go run ./scripts/rules-bootstrap check
+
+# Offline audit toolkit contracts, renderer smoke tests and tracked-file ownership
+audit-check:
+    python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
+    python3 -B scripts/audit/covcheck.py --summary
 
 # Release history manifest (inspr.release-history.v1) embedded in the server; reads the local tags.
 release-history:

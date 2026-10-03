@@ -18,10 +18,12 @@ export const GLYPH = /[‹›«»✕✖✗✘×▶▸►▷▹◀◂◄◁◃▲
 const ENTITY = /&(larr|rarr|uarr|darr|harr|crarr|times|lsaquo|rsaquo|laquo|raquo|bull|check|cross|star|starf|hellip|#x?[0-9a-f]+);/i
 // Deliberate exceptions, each with its reason.
 const ALLOW: { file: string; includes: string; why: string }[] = [
+  { file: 'lib/serviceTier.ts', includes: 'TIER_NAME[s.tier]} ×${s.price_multiplier}', why: 'frozen numerical price multiplier in approved AEON-436 fragment, not an icon (AEON-612)' },
   { file: 'components/agents/SessionMessages.vue', includes: 'identical posts`">×{{ m.count }}', why: 'multiplicity of identical messages (AEON-267), numerical text, not an icon' },
   { file: 'lib/quotes/prose.ts', includes: 'export const BULLETS', why: 'the bullets a quote prints in its document' },
   { file: 'components/business/QuoteLines.vue', includes: 'class="rate-hint">× ', why: 'rate × quantity, a multiplication in text' },
   { file: 'components/work/AttachmentLightbox.vue', includes: '.width} × ${', why: 'image dimensions, 1200 × 800' },
+  { file: 'lib/releaseStats.ts', includes: '${rate(r)}×`', why: 'a multiple in text, "3× the median gap" (AEON-488)' },
 ]
 
 function files(dir: string): string[] {

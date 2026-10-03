@@ -857,7 +857,7 @@ func (m *Module) dismissInbox(r *http.Request, actor tenant.Principal) (any, err
 	if reason == "" || len(reason) > maxDismissReasonBytes || !utf8.ValidString(reason) || strings.ContainsRune(reason, 0) {
 		return nil, fail(400, "invalid_request", "Give a reason of at most 500 bytes; it goes back to the proposer.")
 	}
-	if credentialLeaks.MatchString(normalizeProposalText(reason)) {
+	if hasCredentials(reason) {
 		return nil, fail(422, "credential_text", "The reason contains credential-shaped text. Remove it.")
 	}
 	var p Proposal

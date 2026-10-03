@@ -1,14 +1,16 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261001130110.0.0",
+  "version": "261003095616.0.0",
   "release_channel": "stable",
-  "release_sequence": 115,
-  "codename": "Lucky Lune",
-  "reserved_at": "2026-10-01T13:01:10Z",
-  "ticket": "AEON-506",
+  "release_sequence": 122,
+  "codename": "Benign Byte",
+  "reserved_at": "2026-10-03T09:56:16Z",
+  "ticket": "AEON-627",
   "unpublished_reservations": [
     "260923134337.0.0",
-    "260925231350.0.0"
+    "260925231350.0.0",
+    "261001205522.0.0",
+    "261001230453.0.0"
   ]
 }
