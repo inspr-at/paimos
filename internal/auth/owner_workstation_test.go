@@ -54,7 +54,9 @@ func newWorkstationFixture(t *testing.T) *workstationFixture {
 	m, owner := keyFixture(t)
 	scopes := []string{}
 	for _, p := range authz.Registry {
-		if p.AgentGrantable {
+		// The fixture switches to built-in Admin below. Recurrence automation
+		// requires an explicit custom-role grant, even for workstation keys.
+		if p.AgentGrantable && p.Key != "recurrences.manage" {
 			scopes = append(scopes, p.Key)
 		}
 	}
