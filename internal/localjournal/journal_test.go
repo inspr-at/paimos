@@ -17,6 +17,27 @@ type testRecord struct {
 	State string `json:"state"`
 }
 
+func TestStartupErrorsIdentifyCheckpointAndJournal(t *testing.T) {
+	for _, suffix := range []string{".checkpoint.json", ".journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Chmod(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "diagnostic"+suffix)
+			// Invalid JSON stays out of the error even when it contains data.
+			if err := os.WriteFile(path, []byte("private fixture contents\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Open(Config[testRecord]{Directory: dir, Prefix: "diagnostic", Version: 1, MaxBytes: 1024, MaxRecords: 4,
+				Key: func(r testRecord) (string, error) { return r.ID, nil }, Validate: func(testRecord) error { return nil }})
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "corrupt or unsupported") || strings.Contains(err.Error(), "private fixture contents") {
+				t.Fatal("corrupt startup state lacks safe file diagnostic", err)
+			}
+		})
+	}
+}
+
 func TestJournalRejectsOversizedCheckpointBeforeAppending(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	j, err := Open(Config[testRecord]{Directory: dir, Prefix: "bounded", Version: 1, MaxBytes: 1024, MaxRecords: 4,
