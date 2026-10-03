@@ -3,21 +3,22 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // One tooltip for the whole app: any element with data-tip gets it on hover
 // (after a short delay) and on keyboard focus. Screen readers use the element's
-// own label; the tooltip is decoration for sighted pointer and keyboard users.
+// own label; overflowing text becomes an accessible, focusable scroll region.
 const text = ref('')
 const x = ref(0)
 const y = ref(0)
 const below = ref(false)
 const scrollable = ref(false)
 const tip = ref<HTMLElement>()
-// Inside a modal dialog the tooltip moves into it, above the page (the top layer);
-// otherwise it sits at the end of <body>, above popovers and menus (which leave
-// the app's own stacking layer too).
+// Retain the anchor's panel/dialog DOM ownership for outside-pointer checks.
+// A manual popover puts it in the top layer, escaping the owner's overflow and
+// transformed containing block while keeping viewport-relative coordinates.
 const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 type Trigger = 'pointer' | 'focus' | 'touch'
 let trigger: Trigger | null = null
-let focusOwner: Element | null = null
+let focusOwner: HTMLElement | null = null
+let restoringFocus = false
 let timer: ReturnType<typeof setTimeout> | undefined
 let focusObserver: MutationObserver | undefined
 let sourceObserver: MutationObserver | undefined
@@ -48,11 +49,16 @@ async function show(element: HTMLElement, cause: Trigger) {
   }
   target = element
   trigger = cause
-  focusOwner = cause === 'focus' ? document.activeElement : null
-  layer.value = element.closest<HTMLElement>('dialog[open]')
+  if (!tip.value?.contains(document.activeElement)) {
+    focusOwner = cause === 'focus' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : element.closest<HTMLElement>('button, a[href], input, [tabindex]')
+  }
+  layer.value = element.closest<HTMLElement>('.floating, [popover]:popover-open, dialog[open]')
   text.value = value
   await nextTick()
   if (target !== element || !element.isConnected) { if (target === element) hide(); return }
+  if (!tip.value?.matches(':popover-open')) tip.value?.showPopover()
   const rect = element.getBoundingClientRect()
   const width = tip.value?.offsetWidth ?? 0
   const height = tip.value?.offsetHeight ?? 0
@@ -75,7 +81,8 @@ async function show(element: HTMLElement, cause: Trigger) {
 }
 function hide() { clearTimeout(timer); sourceObserver?.disconnect(); target = null; trigger = null; focusOwner = null; text.value = ''; scrollable.value = false }
 function hasFocusedTip() {
-  return target !== null && trigger === 'focus' && focusOwner === document.activeElement && find(focusOwner) === target
+  return target !== null && (tip.value?.contains(document.activeElement)
+    || (trigger === 'focus' && focusOwner === document.activeElement && find(focusOwner) === target))
 }
 function insideTip(event: Event) { return event.target instanceof Node && tip.value?.contains(event.target) }
 function over(event: PointerEvent) {
@@ -95,6 +102,7 @@ function revealFocus(focused: Element) {
   else hide()
 }
 function focusIn(event: FocusEvent) {
+  if (insideTip(event)) return
   focusObserver?.disconnect()
   const focused = event.target
   if (!(focused instanceof Element)) return
@@ -112,9 +120,34 @@ function focusIn(event: FocusEvent) {
   })
   focusObserver.observe(document.body, { childList: true, subtree: true, attributes: true,
     attributeFilter: ['aria-activedescendant', 'data-tip', 'data-clip-tip'] })
-  revealFocus(focused)
+  if (!restoringFocus) revealFocus(focused)
 }
 function keydown(event: KeyboardEvent) {
+  const inRegion = scrollable.value && tip.value?.contains(document.activeElement)
+  // Capture before the owning panel's Tab/escape handlers. Reading a name must
+  // not navigate its options or close it; native region scrolling stays intact.
+  if (inRegion && event.key === 'Escape') {
+    event.preventDefault(); event.stopImmediatePropagation()
+    const owner = focusOwner
+    hide()
+    restoringFocus = true
+    try { if (owner?.isConnected) owner.focus({ preventScroll: true }) }
+    finally { restoringFocus = false }
+    return
+  }
+  if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey
+    && scrollable.value && focusOwner === document.activeElement && !event.shiftKey) {
+    event.preventDefault(); event.stopImmediatePropagation()
+    tip.value?.focus({ preventScroll: true })
+    return
+  }
+  if (inRegion) {
+    if (event.key === 'Tab' && event.shiftKey) {
+      event.preventDefault(); event.stopImmediatePropagation()
+      focusOwner?.focus({ preventScroll: true })
+    }
+    return
+  }
   if (event.key === 'Escape' || !hasFocusedTip()) hide()
   // An arrow at a list boundary need not change aria-activedescendant.
   // Refresh after the owning component has processed that navigation.
@@ -123,7 +156,11 @@ function keydown(event: KeyboardEvent) {
     if (focused?.hasAttribute('aria-activedescendant')) void nextTick(() => revealFocus(focused))
   }
 }
-function focusOut() { focusObserver?.disconnect(); hide() }
+function focusOut(event: FocusEvent) {
+  if (event.relatedTarget instanceof Node && (tip.value?.contains(event.relatedTarget)
+    || (insideTip(event) && event.relatedTarget === focusOwner))) return
+  focusObserver?.disconnect(); hide()
+}
 function pointerDown(event: PointerEvent) {
   if (!hasFocusedTip() && !insideTip(event)) hide()
 }
@@ -131,7 +168,7 @@ function scroll(event: Event) {
   // Scrolling within a long disclosure must leave it readable. Page and
   // nested-container scrolling follow the keyboard source's new position.
   if (insideTip(event)) return
-  if (hasFocusedTip() && target) void show(target, 'focus')
+  if (hasFocusedTip() && target) void show(target, trigger ?? 'focus')
   else hide()
 }
 function touch(event: MouseEvent) {
@@ -147,7 +184,7 @@ onMounted(() => {
   document.addEventListener('focusout', focusOut)
   document.addEventListener('pointerdown', pointerDown)
   document.addEventListener('click', touch)
-  document.addEventListener('keydown', keydown)
+  window.addEventListener('keydown', keydown, true)
   document.addEventListener('scroll', scroll, true)
   window.addEventListener('resize', scroll)
 })
@@ -157,7 +194,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('focusout', focusOut)
   document.removeEventListener('pointerdown', pointerDown)
   document.removeEventListener('click', touch)
-  document.removeEventListener('keydown', keydown)
+  window.removeEventListener('keydown', keydown, true)
   document.removeEventListener('scroll', scroll, true)
   window.removeEventListener('resize', scroll)
   hide()
@@ -167,13 +204,15 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport :to="layer ?? 'body'">
-    <div v-if="text" ref="tip" class="tooltip" :class="{ below, scrollable }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
+    <div v-if="text" ref="tip" popover="manual" class="tooltip" :class="{ below, scrollable }" :style="{ transform: `translate(${x}px, ${y}px)` }"
+      :role="scrollable ? 'region' : undefined" :aria-label="scrollable ? 'Full text' : undefined" :aria-hidden="scrollable ? undefined : true" :tabindex="scrollable ? 0 : undefined"
+      @keydown="event => { if (event.key !== 'Tab') event.stopPropagation() }">{{ text }}</div>
   </Teleport>
 </template>
 
 <style scoped>
 .tooltip {
-  position: fixed; z-index: 80; top: 0; left: 0; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 5px 10px; border-radius: 8px; pointer-events: none; overflow-wrap: anywhere;
+  position: fixed; z-index: 80; inset: auto; top: 0; left: 0; margin: 0; border: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 5px 10px; border-radius: 8px; pointer-events: none; overflow-wrap: anywhere;
   overflow-y: auto; overscroll-behavior: contain;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; white-space: pre-line;
   box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px rgba(0, 0, 0, .5);
@@ -181,4 +220,5 @@ onBeforeUnmount(() => {
 /* Only overflowing text takes pointer input; ordinary tips leave controls
    underneath reachable. */
 .tooltip.scrollable { pointer-events: auto; }
+.tooltip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
 </style>
