@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   balanceShards, checkCoverage, discoverSpecs, loadManifest, main, parseArgs,
-  parseShard, planCommands, planFlakeRetry, retryCount, validateManifest, mergeReports, webRoot,
+  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, validateManifest, mergeReports, webRoot,
 } from './ci-web-shard.mjs'
 
 const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project: null,
@@ -103,7 +103,8 @@ test('commands retain config/project/workers/traces/evidence and honor PW_RETRIE
 })
 
 test('real manifest covers every UI spec once for 1, 12 and 256 shards, including nested specs', () => {
-  const manifest = loadManifest(), expected = discoverSpecs()
+  // Specs that landed on main after the manifest was written run in the `unlisted` group.
+  const expected = discoverSpecs(), manifest = reconcileManifest(loadManifest(), expected).manifest
   assert.ok(expected.includes('tests/quotes/print-receipt.spec.ts'))
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
   for (const count of [1, 12, 256]) {
@@ -288,4 +289,26 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
+})
+
+test('manifest drift never blocks a PR: new specs join the gate, removed ones are dropped, --strict reports both', async () => {
+  const manifest = fixture()
+  const discovered = [...files(manifest).filter(file => file !== 'tests/a-0.spec.ts'), 'tests/brand-new.spec.ts', 'tests/quotes/also-new.spec.ts']
+  const { manifest: reconciled, unlisted, stale } = reconcileManifest(manifest, discovered)
+  assert.deepEqual(unlisted, ['tests/brand-new.spec.ts', 'tests/quotes/also-new.spec.ts'])
+  assert.deepEqual(stale, ['tests/a-0.spec.ts'])
+  const group = reconciled.groups.find(g => g.id === 'unlisted')
+  assert.equal(group.gate, undefined, 'unlisted specs must be gated')
+  assert.deepEqual(group.specs.map(s => s.file), unlisted)
+  const shards = balanceShards(reconciled, 3)
+  assert.deepEqual(checkCoverage(reconciled, shards, discovered), { specs: discovered.length, shards: 3 })
+  assert.ok(!files(reconciled).includes('tests/a-0.spec.ts'))
+  // A fully clean tree adds nothing.
+  assert.equal(reconcileManifest(manifest, files(manifest)).manifest.groups.length, manifest.groups.length)
+  assert.throws(() => reconcileManifest({ ...manifest, groups: [...manifest.groups, { ...group, id: 'unlisted' }] }, [...discovered, 'tests/x.spec.ts']), /reserved/)
+  assert.equal(parseArgs(['--check', '--strict']).strict, true)
+  // The real tree with the real manifest still plans a full gate even if main moved on.
+  const out = []
+  assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
+  assert.ok(JSON.parse(out.pop()).specs >= 49)
 })

@@ -85,6 +85,24 @@ export function discoverSpecs(root = webRoot, directories = ['tests']) {
   return files.sort(compare)
 }
 
+// Specs added or removed on main after the manifest was written must not break
+// unrelated PRs (and a shard job must never silently skip a new spec). Undeclared
+// specs join the gate in an `unlisted` group with a default weight; declared
+// specs that no longer exist are dropped. --strict turns either into an error.
+export function reconcileManifest(manifest, discovered, { defaultWeightSeconds = 60 } = {}) {
+  const found = new Set(discovered)
+  const declared = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  const unlisted = discovered.filter(file => !declared.has(file)).sort(compare)
+  const stale = [...declared].filter(file => !found.has(file)).sort(compare)
+  if (unlisted.length && manifest.groups.some(group => group.id === 'unlisted')) throw new Error('Manifest must not declare the reserved group id: unlisted')
+  const groups = manifest.groups.map(group => ({ ...group, specs: group.specs.filter(spec => found.has(spec.file)) })).filter(group => group.specs.length)
+  if (unlisted.length) {
+    groups.push({ id: 'unlisted', config: 'playwright.ui.config.ts', project: null, flags: ['--workers=2'], env: {}, hostedOnly: true,
+      specs: unlisted.map(file => ({ file, weightSeconds: defaultWeightSeconds })) })
+  }
+  return { manifest: { ...manifest, groups }, unlisted, stale }
+}
+
 export function checkCoverage(manifest, shards, expectedSpecs, { all = false } = {}) {
   validateManifest(manifest)
   const expected = new Set(expectedSpecs)
@@ -170,7 +188,7 @@ export function planFlakeRetry(commands, env, root = webRoot) {
 
 export function parseArgs(args, defaultCount = 12) {
   let shard, mode = 'run', count = parseShard(`1/${defaultCount}`).count
-  let lastFailed = false, testList, reporter, all = false
+  let lastFailed = false, testList, reporter, all = false, strict = false
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--list' || arg === '--check') {
@@ -185,6 +203,8 @@ export function parseArgs(args, defaultCount = 12) {
       count = parseShard(`1/${value}`).count
     } else if (arg === '--all') {
       all = true
+    } else if (arg === '--strict') {
+      strict = true
     } else if (arg === '--last-failed') {
       lastFailed = true
     } else if (arg === '--test-list' || arg.startsWith('--test-list=')) {
@@ -202,7 +222,7 @@ export function parseArgs(args, defaultCount = 12) {
   if (lastFailed && testList) throw new Error('Choose one of --last-failed and --test-list')
   if (mode !== 'run' && (lastFailed || testList || reporter)) throw new Error('Retry/reporter options require run mode')
   return { mode, shard, count: shard?.count ?? count,
-    ...(all ? { all } : {}), ...(lastFailed ? { lastFailed } : {}), ...(testList ? { testList } : {}), ...(reporter ? { reporter } : {}),
+    ...(all ? { all } : {}), ...(strict ? { strict } : {}), ...(lastFailed ? { lastFailed } : {}), ...(testList ? { testList } : {}), ...(reporter ? { reporter } : {}),
   }
 }
 
@@ -226,16 +246,23 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
   readLastRun = path => JSON.parse(readFileSync(path, 'utf8')),
 } = {}) {
   const options = parseArgs(args, manifest.defaultShards ?? 12)
-  const shards = balanceShards(manifest, options.count, { all: options.all })
   const expected = discoverSpecs(root, manifest.specDirectories ?? ['tests'])
+  const reconciled = reconcileManifest(manifest, expected)
+  if (options.strict && (reconciled.unlisted.length || reconciled.stale.length)) {
+    throw new Error(`Manifest drift: ${reconciled.unlisted.length} unlisted, ${reconciled.stale.length} stale spec(s): ${[...reconciled.unlisted, ...reconciled.stale].join(', ')}`)
+  }
+  manifest = reconciled.manifest
+  const drift = { ...(reconciled.unlisted.length ? { unlisted: reconciled.unlisted } : {}), ...(reconciled.stale.length ? { stale: reconciled.stale } : {}) }
+  const shards = balanceShards(manifest, options.count, { all: options.all })
   const coverage = checkCoverage(manifest, shards, expected, { all: options.all })
   for (const group of manifest.groups) if (!existsSync(resolve(root, group.config))) throw new Error(`Missing config: ${group.config}`)
   const plans = (options.shard ? [shards[options.shard.index - 1]] : shards).map(shard => ({ ...shard, commands: planCommands(manifest, shard, env, root) }))
   if (options.mode === 'check') {
-    out(JSON.stringify({ ...coverage, weightSeconds: shards.map(s => Number(s.weightSeconds.toFixed(2))) }))
+    out(JSON.stringify({ ...coverage, ...drift, weightSeconds: shards.map(s => Number(s.weightSeconds.toFixed(2))) }))
     return 0
   }
   if (options.mode === 'list') { out(JSON.stringify(plans, null, 2)); return 0 }
+  if (Object.keys(drift).length) out(`::warning::ci-web-shards.json drift: ${drift.unlisted?.length ?? 0} unlisted spec(s) run in the gate with a default weight, ${drift.stale?.length ?? 0} stale entr${drift.stale?.length === 1 ? 'y' : 'ies'} ignored; update the manifest (ci:web:shard -- --check --strict)`)
   // A full shard is a CI-only entry point. Local inspection remains browser-free.
   if (!env.CI || ['0', 'false'].includes(env.CI)) throw new Error('Run CI shards on hosted CI; use --list or --check locally')
   if (env.RUNNER_ENVIRONMENT !== 'github-hosted') throw new Error('CI web shards require RUNNER_ENVIRONMENT=github-hosted')
