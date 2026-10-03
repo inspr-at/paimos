@@ -183,3 +183,102 @@ func TestRegistrationAliasUsesResumedOwner(t *testing.T) {
 		})
 	}
 }
+
+func TestRegistrationAliasExistingReplayPropagatesHistory(t *testing.T) {
+	for _, supplied := range []bool{false, true} {
+		t.Run(map[bool]string{false: "omitted", true: "unchanged"}[supplied], func(t *testing.T) {
+			f := newFixture(t)
+			thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "original"))
+			ref, alias := "replay-history-"+uid(), "replay-alias-"+uid()
+			// Register before either reference has ownership. Another session
+			// subsequently binds the shared native reference to this role.
+			pending, lease := f.registerNative(t, f.alice, f.project, alias, ref)
+			first, _ := f.registerNative(t, f.alice, f.project, ref, "")
+			f.bind(t, f.alice, thread, first, "0")
+			f.nativeClaims(t, thread, 1)
+			vendor := ""
+			if supplied {
+				vendor = ref
+			}
+			expect(t, f.replayNative(f.alice, f.project, alias, lease, vendor), http.StatusCreated)
+			f.nativeClaims(t, thread, 2)
+			f.bind(t, f.alice, thread, pending, "1")
+		})
+	}
+}
+
+func TestRegistrationAliasAgentCreatorContinuation(t *testing.T) {
+	f := newFixture(t)
+	thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "original"))
+	ref := "creator-history-" + uid()
+	first, _ := f.registerNative(t, f.alice, f.project, ref, "")
+	f.bind(t, f.alice, thread, first, "0")
+	f.stopNative(t, first)
+	f.agent.KeyCreatorID = f.alice.ID
+	f.agent.Scopes = append(f.agent.Scopes, "harness.write")
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=$2,created_by_principal_id=$3 WHERE principal_id=$1`, f.agent.ID, f.agent.Scopes, f.alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	id, lease := f.registerNative(t, f.agent, f.project, ref, "creator-alias-"+uid())
+	f.nativeClaims(t, thread, 2)
+	f.bind(t, f.alice, thread, id, "1")
+	decode[Thread](t, f.call(f.agent, "POST", "/api/chat-deliveries/binding/resolve", WorkerBindingRequest{thread.ID, id, "2"}, lease))
+}
+
+func TestRegistrationAliasStaleCoordinatorBeforeEvents(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "continuation", true: "conflict"}[conflict], func(t *testing.T) {
+			f := newFixture(t)
+			thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "lead", "lead"))
+			ref := "stale-history-" + uid()
+			in := map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "management_mode": "unmanaged", "role": "coordinator", "harness_session_ref": ref, "worker_lease": "stale-first-lease-" + uid(), "advertised_capabilities": []string{"inbox"}}
+			w := f.call(f.alice, "POST", "/api/projects/"+f.project+"/harness-sessions", in, "")
+			expect(t, w, http.StatusCreated)
+			var first harness.Session
+			if err := json.Unmarshal(w.Body.Bytes(), &first); err != nil {
+				t.Fatal(err)
+			}
+			f.bind(t, f.alice, thread, first.ID, "0")
+			if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET heartbeat_at=clock_timestamp()-interval '1 day' WHERE id=$1`, first.ID); err != nil {
+				t.Fatal(err)
+			}
+			// At the first closure event, ownership propagation must already be
+			// complete. This proves ordering without sleeps or timing thresholds.
+			if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION test_registration_claims_before_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.type='harness.stopped' AND (SELECT count(*) FROM chat_native_contexts)<>2 THEN
+ RAISE EXCEPTION 'ownership missing before event'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER test_registration_claims_before_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION test_registration_claims_before_event()`); err != nil {
+				t.Fatal(err)
+			}
+			in["worker_lease"] = "stale-next-lease-" + uid()
+			in["vendor_session_ref"] = "stale-alias-" + uid()
+			actor := f.alice
+			if conflict {
+				actor = f.bob
+			}
+			w = f.call(actor, "POST", "/api/projects/"+f.project+"/harness-sessions", in, "")
+			if conflict {
+				expect(t, w, http.StatusConflict)
+				if !strings.Contains(w.Body.String(), "chat binding unavailable") {
+					t.Fatal("stale replacement rejected for the wrong reason")
+				}
+				var intact bool
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT stopped_at IS NULL AND handed_over_to_id IS NULL FROM harness_sessions WHERE id=$1`, first.ID).Scan(&intact); err != nil || !intact {
+					t.Fatalf("rejected stale replacement changed predecessor: %v %v", intact, err)
+				}
+			} else {
+				expect(t, w, http.StatusCreated)
+				f.nativeClaims(t, thread, 2)
+				var next harness.Session
+				if err := json.Unmarshal(w.Body.Bytes(), &next); err != nil {
+					t.Fatal(err)
+				}
+				f.bind(t, f.alice, thread, next.ID, "1")
+				var closed bool
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT stopped_at IS NOT NULL AND stop_reason='heartbeat_lost' AND handed_over_to_id=$2 FROM harness_sessions WHERE id=$1`, first.ID, next.ID).Scan(&closed); err != nil || !closed {
+					t.Fatalf("stale predecessor not closed/handed over: %v %v", closed, err)
+				}
+			}
+		})
+	}
+}
