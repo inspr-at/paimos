@@ -165,7 +165,7 @@ for (const truncated of [false, true]) test(`partial account budgets show permit
   await expect(costs.getByText('Usage not reported · provisional', { exact: true })).toBeVisible()
   await expect(costs.locator('time')).toHaveAttribute('datetime', AT)
   await expect(costs).toContainText('Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
-  const truncation = costs.getByText('Account budget windows are truncated. Additional windows and accounts are omitted.', { exact: true })
+  const truncation = costs.getByText('Account budget windows are truncated. Additional windows are omitted; account coverage may be incomplete.', { exact: true })
   if (truncated) await expect(truncation).toBeVisible()
   else await expect(truncation).toHaveCount(0)
   await expect(costs).not.toContainText('No account budget windows recorded.')
