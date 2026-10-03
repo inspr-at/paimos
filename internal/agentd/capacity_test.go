@@ -105,6 +105,7 @@ func TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI(t *testing.T) {
 	}
 	a := NewCodexAdapter(fakeVendorPath(t, "codex_capacity"), map[string]string{"key": home})
 	a.SetExpectedEmails(map[string]string{"key": "agent@example.test"})
+	qualifyCodexFixture(t, a)
 	got := a.CaptureCapacity(t.Context(), "key")
 	if len(got) != 1 || got[0].Source != "agentd" || got[0].UsedPercent != 31 || got[0].WindowKind != "weekly" {
 		t.Fatal(got)
@@ -126,16 +127,20 @@ func TestIdleCodexCaptureUsesPinnedInterpreter(t *testing.T) {
 	bin := privateHome(t)
 	node := filepath.Join(bin, "node")
 	vendor := fakeVendorPath(t, "codex_capacity")
-	if err := os.WriteFile(node, []byte("#!/bin/sh\nexec "+strconv.Quote(vendor)+" \"$@\"\n"), 0700); err != nil {
+	nodeRaw := []byte("#!/bin/sh\nexec " + strconv.Quote(vendor) + " \"$@\"\n")
+	if err := os.WriteFile(node, nodeRaw, 0700); err != nil {
 		t.Fatal(err)
 	}
 	launcher := filepath.Join(privateHome(t), "codex")
-	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 1.0.0; exit; fi\nif [ \"$1\" = login ]; then echo 'Logged in using ChatGPT'; exit; fi\nexec node \"$@\"\n"), 0700); err != nil {
+	launcherRaw := []byte("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 1.0.0; exit; fi\nif [ \"$1\" = login ]; then echo 'Logged in using ChatGPT'; exit; fi\nexec node \"$@\"\n")
+	if err := os.WriteFile(launcher, launcherRaw, 0700); err != nil {
 		t.Fatal(err)
 	}
 	a := NewCodexAdapter(launcher, map[string]string{"local": home})
 	a.Nodes = map[string]harnesslaunch.Node{"local": {Path: node, Version: "1.0.0"}}
 	a.SetExpectedEmails(map[string]string{"local": "agent@example.test"})
+	// Qualify only this synthetic fixture; production idle capture stays gated.
+	a.idleUsage = &codexIdleCapability{binaryPath: launcher, binarySHA256: sha256Hex(launcherRaw), nodePath: node, nodeSHA256: sha256Hex(nodeRaw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true}
 	s, api, _ := testSupervisor(t)
 	reporter := &idleCapacityTestAPI{&capacityTestAPI{API: api}}
 	s.api, s.adapters[Codex] = reporter, a

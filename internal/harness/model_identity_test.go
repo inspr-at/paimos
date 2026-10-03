@@ -4,6 +4,7 @@ package harness_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -203,5 +204,74 @@ func TestSessionModelIdentityEffortOnlyHeartbeatPreservesLegacyRaw(t *testing.T)
 				t.Fatalf("stored legacy identity changed: %#v", s)
 			}
 		})
+	}
+}
+
+func TestHeartbeatModelSwitchRequiresGenerationLease(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	lease := "model-switch-own-lease-000000000000001"
+	registration := map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "test-host", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "model-switch-ref-000000000000000001", "worker_lease": lease, "model": "claude-sonnet", "reasoning_effort": "low"}
+	w := f.call(f.person, "POST", base, registration, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	path := base + "/" + id
+	foreignLease := "model-switch-foreign-lease-00000000001"
+	other := map[string]any{}
+	for k, v := range registration {
+		other[k] = v
+	}
+	other["harness_session_ref"] = "model-switch-other-ref-0000000000001"
+	other["worker_lease"] = foreignLease
+	expect(t, f.call(f.person, "POST", base, other, ""), 201)
+	body := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "model": "claude-opus", "reasoning_effort": "high"}
+	w = f.call(f.agent, "POST", path+"/heartbeat", body, foreignLease)
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "harness worker proof rejected") {
+		t.Fatal("foreign lease rejected for wrong reason", w.Body.String())
+	}
+	detail := decode(t, f.call(f.person, "GET", path, nil, ""))
+	if detail["model"] != "claude-sonnet" || len(detail["metadata_history"].([]any)) != 0 || detail["activity_sequence"] != float64(0) {
+		t.Fatal("foreign lease mutated session", detail)
+	}
+	for _, tc := range []struct{ field, value string }{{"model", strings.Repeat("x", 129)}, {"reasoning_effort", strings.Repeat("x", 41)}} {
+		bad := map[string]any{"phase": "working", "activity_sequence": 1, tc.field: tc.value}
+		w = f.call(f.agent, "POST", path+"/heartbeat", bad, lease)
+		expect(t, w, 400)
+		if !strings.Contains(w.Body.String(), "too long") {
+			t.Fatal("bounds rejected for wrong reason", w.Body.String())
+		}
+	}
+	w = f.call(f.agent, "POST", path+"/heartbeat", body, lease)
+	expect(t, w, 200)
+	got := decode(t, w)
+	if got["id"] != id || got["model"] != "claude-opus" || got["reasoning_effort"] != "high" {
+		t.Fatal("switch failed", got)
+	}
+	// Replay is tied to the original registration, even after current metadata changes.
+	w = f.call(f.person, "POST", base, registration, "")
+	expect(t, w, 201)
+	if decode(t, w)["id"] != id {
+		t.Fatal("registration replay replaced generation")
+	}
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2}, lease), 200)
+	detail = decode(t, f.call(f.person, "GET", path, nil, ""))
+	history := detail["metadata_history"].([]any)
+	if len(history) != 2 || detail["model"] != "claude-opus" || detail["reasoning_effort"] != "high" {
+		t.Fatal("switch not audited or preserved", detail)
+	}
+	page := decode(t, f.call(f.person, "GET", "/api/harness-sessions", nil, ""))["items"].([]any)
+	found := false
+	for _, item := range page {
+		s := item.(map[string]any)
+		if s["id"] == id {
+			found = true
+			if s["model"] != "claude-opus" || s["reasoning_effort"] != "high" {
+				t.Fatal("UI feed has stale identity", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("updated session missing from UI feed")
 	}
 }

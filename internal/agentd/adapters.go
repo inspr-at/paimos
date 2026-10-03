@@ -101,6 +101,7 @@ func firstNonempty(a, b string) string {
 
 // CodexAdapter speaks the app-server thread and turn protocol.
 type CodexAdapter struct {
+	idleUsage   *codexIdleCapability // Release-owned qualification; never configured by enrollment.
 	quotaIDs    sync.Map
 	IdleTimeout time.Duration // Zero uses the ten-minute clean-turn completion window.
 	Path        string
@@ -264,6 +265,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if account.Account.ID != "" {
 		a.quotaIDs.Store(r.AccountKey, account.Account.ID)
 	}
+	probe, cancelProbe := context.WithTimeout(op, 2*time.Second)
+	reportCodexModels(probe, p, observe, r.Run.ID)
+	cancelProbe()
 	cp.readCapacity(op, "start")
 	if p.vendorLimited.Load() {
 		return fail(errors.New("Codex capacity refused run"))
@@ -298,7 +302,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	}
 	raw, err = p.request(op, "jsonrpc", "thread/start", threadArgs)
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
-		return fail(errors.New("Codex thread start failed"))
+		return fail(modelStartError("Codex thread start failed", err))
 	}
 	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
@@ -313,7 +317,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	// Launch parameters alone are not evidence of its effective settings.
 	observe(AdapterEvent{HarnessModel: thread.Model, HarnessEffort: thread.Effort})
 	if err := cp.startTurn(op, r); err != nil {
-		return fail(errors.New("Codex turn start failed"))
+		return fail(modelStartError("Codex turn start failed", err))
 	}
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
@@ -329,7 +333,10 @@ type PiAdapter struct {
 	Nodes      map[string]piprobe.Node
 	probeMu    sync.Mutex
 	probes     map[string]piProbeResult
-	probeLocks map[string]*sync.Mutex
+	probeLocks map[string]chan struct{}
+	// In a supervised daemon only the durable capacity scheduler owns /key.
+	// Health and launch qualification inspect the local profile and launcher.
+	capacityManaged bool
 }
 
 type piProbeResult struct {

@@ -120,6 +120,7 @@ export interface HarnessDetail {
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
+  local_auth_pinned?: boolean
   request_id: string
   tenant_id: string
   tenant_name: string
@@ -1717,6 +1718,7 @@ function parseView(data: unknown): PairingView {
     local_processes: oneOf(record.local_processes, PROCESS_STATES, 'local_processes'),
     enrollments: enrollments(record.enrollments),
   }
+  if (typeof record.local_auth_pinned === 'boolean') view.local_auth_pinned = record.local_auth_pinned
   if (typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 0) view.revision = record.revision
   if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
   const setup = optionalEnum(record.setup_state, SETUP_STATES)
@@ -2017,4 +2019,13 @@ function invalid(field: string): never {
     code: 'invalid_response',
     next: 'Reload the page. If this continues, start a new pairing code on the computer.',
   })
+}
+
+// Pin readiness is separate from advisory hardware capability and connectivity.
+export function touchIDConfirmation(view: Pick<PairingView, 'platform' | 'computer_state' | 'local_auth_pinned'>): string {
+  if (view.computer_state === 'revoked') return 'Touch ID confirmation: unavailable (pairing disconnected)'
+  if (view.platform !== 'darwin') return 'Touch ID confirmation: unsupported on this platform'
+  if (view.local_auth_pinned === true) return 'Touch ID confirmation: ready (pairing key pinned)'
+  if (view.local_auth_pinned === false) return 'Touch ID confirmation: needs pairing upgrade — run aeon-agentd status on this computer for its exact pairing command.'
+  return 'Touch ID confirmation: pairing readiness unknown — run aeon-agentd status on this computer.'
 }

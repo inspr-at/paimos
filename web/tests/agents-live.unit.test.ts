@@ -229,3 +229,22 @@ it('principal requests never borrow a sibling session label or claim its ownersh
   await store.refreshSessions()
   expect(store.askerName('a1')).toEqual({ name: 'Shared fixture principal', harness: '', sessionId: '' })
 })
+
+it('passes only session/run wake identities from bounded telemetry and usage payloads', () => {
+  class Stream extends EventTarget {
+    static current: Stream
+    onopen = null
+    onerror = null
+    close = vi.fn()
+    constructor() { super(); Stream.current = this }
+  }
+  vi.stubGlobal('EventSource', Stream)
+  const changed = vi.fn(), stop = subscribeAgents(changed)
+  Stream.current.dispatchEvent(new MessageEvent('run.telemetry', { data: JSON.stringify({ after: { run_id: 'selected-run', report: { kind: 'finished' } } }) }))
+  Stream.current.dispatchEvent(new MessageEvent('harness.usage_reported', { data: JSON.stringify({ after: { session_id: 'selected-session', input_tokens: 100 } }) }))
+  expect(changed.mock.calls).toEqual([['run.telemetry', { run_id: 'selected-run' }], ['harness.usage_reported', { session_id: 'selected-session' }]])
+  Stream.current.dispatchEvent(new MessageEvent('run.telemetry', { data: '{broken' }))
+  Stream.current.dispatchEvent(new MessageEvent('run.telemetry', { data: ' '.repeat(65_537) }))
+  expect(changed.mock.calls.slice(2)).toEqual([['run.telemetry'], ['run.telemetry']])
+  stop()
+})

@@ -13,13 +13,14 @@ import type { QueuedTicket } from '../../lib/workQueue'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import TicketHours from '../business/TicketHours.vue'
 import TicketEstimate from './TicketEstimate.vue'
+import TicketPlacement from './TicketPlacement.vue'
 import type { SaveResult } from '../../lib/useTicket'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 
 // Status, priority, assignee and release (editable popovers), type (read-only),
 // the parent epic, and estimate and dates only when they have values.
-const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; queueEntry?: QueuedTicket | null; queueEditable?: boolean; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult> }>()
+const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; queueEntry?: QueuedTicket | null; queueEditable?: boolean; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult>; savePlacement?: (fields: Record<string, unknown>) => Promise<SaveResult> }>()
 const emit = defineEmits<{ status: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; epic: [anchor: HTMLElement]; release: [anchor: HTMLElement]; openParent: [key: string] }>()
 
 function text(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
@@ -95,6 +96,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <div v-if="layout === 'column'" class="prop"><dt>Created</dt><dd><time class="prop-static" :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time></dd></div>
     <!-- Last: logged hours arrive after the ticket, and nothing moves when they do. -->
     <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
+    <TicketPlacement :item="item" :editable="editable" :save="savePlacement" />
   </dl>
 </template>
 

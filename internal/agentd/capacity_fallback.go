@@ -69,6 +69,9 @@ func (a *CodexAdapter) CapacitySupport(key string) string {
 	if _, err := localHome(a.Homes, key); err != nil || a.Emails[key] == "" {
 		return "not available: account binding missing"
 	}
+	if !a.CanCaptureCapacity(key) {
+		return "not available idle: reading starts with a run"
+	}
 	return "account/rateLimits/read"
 }
 func (a *ClaudeAdapter) CapacitySupport(key string) string {

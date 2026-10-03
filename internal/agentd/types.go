@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -260,6 +261,7 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	ModelReports []modelreport.Observation
 	HarnessTier  string
 	Doing        string
 	ToolActivity *agentactivity.Activity

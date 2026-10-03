@@ -12,6 +12,7 @@ const route = { display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.
 // This whole response comes from TestPlanningListHoverFixture, including the
 // server's usage-less session flags. Serve its bytes without a client adapter.
 const serverListBody = readFileSync(new URL('./fixtures/planning-list.json', import.meta.url), 'utf8')
+const truncatedListBody = readFileSync(new URL('./fixtures/planning-truncated-list.json', import.meta.url), 'utf8')
 function planning(spent: number | null, estimated: number | null, running = 0): TicketPlanning {
   return { route, tokens: { spent, estimated, running, input: spent ?? 0, output: 0, cached: Math.round((spent ?? 0) * .8), sessions: spent === null ? 0 : 1, unreported: 0 } }
 }
@@ -36,6 +37,31 @@ const display = (page: Page) => page.getByRole('button', { name: 'Display: Displ
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-10-01T12:00:00Z')) })
 
+test('real capped planner response displays legacy estimates and the truncation basis', async ({ page }) => {
+  const data = fixtures()
+  const item = JSON.parse(truncatedListBody).items[0]
+  data.projects[0] = { ...data.projects[0]!, ...item.project }
+  data.preferences[`list:${item.project.id}`] = { visible: ['model', 'tokens', 'list_cost'] }
+  await mockWork(page, data)
+  await page.route('**/api/nodes?**', async route => {
+    if (new URL(route.request().url()).searchParams.get('kind') === 'project') return route.fallback()
+    await route.fulfill({ contentType: 'application/json', body: truncatedListBody })
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`/p/${item.project.key}?sort=key&closed=1`)
+  const basis = 'median of finished tickets on route codex gpt-6-astra xhigh (n=5); history truncated'
+  for (const [column, figure, tip] of [
+    ['c-tokens', '~8M', `Estimated ~8M tokens · no agent session yet\n${basis}`],
+    ['c-list-cost', '~$80', `Estimated ~$80 at API list prices ($40.00/h)\nBilling shows once a session reports\n${basis}`],
+  ]) {
+    const cell = row(page, 'TRUNCATED-1').locator(`.${column} .plan-figure`)
+    await expect(cell).toHaveText(figure!)
+    await expect(cell).toHaveAccessibleDescription(tip!)
+    await cell.hover()
+    await expect(page.locator('.tooltip')).toHaveText(tip!)
+  }
+})
+
 test('server list response preserves exact usage-less and mixed-session hovers', async ({ page }) => {
   const data = fixtures()
   const project = JSON.parse(serverListBody).items[0].project
@@ -59,8 +85,9 @@ test('server list response preserves exact usage-less and mixed-session hovers',
   await expect(row(page, 'HOVER-1').locator('.c-tokens .plan-figure')).toHaveText('—')
   await assertTip('HOVER-1', 'c-tokens', 'Usage not reported yet\n1 session running on Cursor grok-4.7')
   await assertTip('HOVER-2', 'c-tokens', 'Usage not reported yet')
-  await assertTip('HOVER-6', 'c-tokens', 'Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
-  for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) await assertTip(key, 'c-list-cost', 'Billing not reported yet')
+  await assertTip('HOVER-6', 'c-tokens', 'Uncalibrated · insufficient model history (n=0)\n1 session running on Cursor grok-4.7')
+  for (const key of ['HOVER-1', 'HOVER-2']) await assertTip(key, 'c-list-cost', 'Billing not reported yet')
+  await assertTip('HOVER-6', 'c-list-cost', 'Uncalibrated · insufficient model history (n=0)')
   await assertTip('HOVER-3', 'c-tokens', 'Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
   for (const [key, spent, input, value] of [['HOVER-4', '1M', '1,000,000', '$2.00'], ['HOVER-5', '0', '0', '$0']] as const) {
     await assertTip(key, 'c-tokens', `Measured so far ${spent} · Cursor grok-4.7\n1 session running · input ${input} (0 cached) · output 0\n1 session has no usage report yet`)

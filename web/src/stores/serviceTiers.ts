@@ -175,13 +175,13 @@ export const useServiceTiers = defineStore('service-tiers', () => {
     if (!s.process_ownership) throw new Error('Process ownership is not confirmed.')
     return { request_id: crypto.randomUUID(), tier, expected_revision: snapshot.revision, expected_ownership: { ...s.process_ownership } }
   }
-  async function change(s: HarnessSession, name: string, to: ServiceTier, options: { request?: TierRequest; decision?: 'approve' | 'decline'; withUndo?: boolean; snapshot?: TierState } = {}) {
+  async function change(s: HarnessSession, name: string, to: ServiceTier, options: { request?: TierRequest; decision?: 'approve' | 'decline'; withUndo?: boolean; undoOf?: string; snapshot?: TierState } = {}) {
     if (busy.value[s.id] || uncertain.value[s.id]) return false
     const reason = unavailable(s)
     if (reason && options.decision !== 'decline') { toast(reason, { tone: 'error' }); return false }
     if (!grant.value.person || !can('harness.control', s.project_id)) return false
     const before = options.snapshot ?? state(s), generation = epoch, actor = viewer.value
-    const body = changeBody(s, to, before)
+    const body = { ...changeBody(s, to, before), ...(options.undoOf ? { undo_of_control_id: options.undoOf } : {}) }
     // Starting the next change retires the previous rejection for this viewer.
     if (before.last_change?.outcome === 'rejected') dismissed.value[s.id] = before.last_change.id
     busy.value[s.id] = true; errors.value[s.id] = ''
@@ -218,6 +218,7 @@ export const useServiceTiers = defineStore('service-tiers', () => {
       if (generation !== epoch || answer.session_id !== s.id) return false
       const current = state(s)
       states.value[s.id] = { ...current, requests: [answer, ...current.requests.filter(q => q.id !== answer.id)] }
+      try { await load(s) } catch { /* Request accepted; the history can be refreshed on the next read. */ }
       return true
     } catch (error) { if (generation === epoch) errors.value[s.id] = error instanceof Error ? error.message : 'Request failed.'; return false }
     finally { if (generation === epoch) busy.value[s.id] = false }
@@ -232,7 +233,7 @@ export const useServiceTiers = defineStore('service-tiers', () => {
       const current = await load(s)
       if (generation !== epoch || undo.value !== receipt) return
       if (!current || !undoTierAllowed(current, receipt)) throw new Error(current?.pending?.state === 'claimed' ? 'The daemon is applying this change. Check its confirmation before undoing.' : 'The tier changed again. Undo is no longer available.')
-      if (await change(s, receipt.name, receipt.from, { snapshot: current })) undo.value = null
+      if (await change(s, receipt.name, receipt.from, { snapshot: current, undoOf: receipt.control })) undo.value = null
     } catch (error) { toast(error instanceof Error ? error.message : 'Undo failed.', { tone: 'error' }) }
   }
   return { states, busy, errors, dialog, undo, state, report, rejection, dismissRejection, canDismissRejection, unavailable, canAsk, load, follow, watchPage, reconcile, open, close, change, ask, undoChange }

@@ -27,6 +27,7 @@ func TestRequestedAccountNarrowsEnrollmentWithoutFallback(t *testing.T) {
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", fmt.Sprintf(`{"account_key":%q,"harness":"codex","daemon_id":"daemon-a","label":"Local account"}`, key), 201, &a)
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 		callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+a.ID+"/windows", windowBody(time.Now().Add(-time.Minute), time.Now().Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
+		fixtureAlwaysOn(t, mod, admin, a.ID)
 		return a
 	}
 	other, chosen := register("other"), register("chosen")

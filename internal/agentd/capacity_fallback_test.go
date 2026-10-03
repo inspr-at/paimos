@@ -286,6 +286,7 @@ func TestCodexFallbackEnumeratesThreeHomes(t *testing.T) {
 	}
 	a := NewCodexAdapter(fake, homes)
 	a.SetExpectedEmails(map[string]string{"one": "agent@example.test", "two": "agent@example.test", "three": "agent@example.test"})
+	qualifyCodexFixture(t, a)
 	t.Setenv("OPENAI_API_KEY", "fixture-parent-value")
 	t.Setenv("CODEX_SQLITE_HOME", "/parent-must-not-inherit")
 	for key, home := range homes {
