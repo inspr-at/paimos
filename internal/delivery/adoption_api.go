@@ -40,6 +40,7 @@ type AdoptionJob struct {
 	LeaseUntil           *time.Time      `json:"lease_until"`
 	ReportRef            string          `json:"report_ref,omitempty"`
 	ReportDigest         string          `json:"report_digest,omitempty"`
+	SourceFingerprint    string          `json:"source_fingerprint,omitempty"`
 	ReportCounts         json.RawMessage `json:"report_counts"`
 	ReportIncomplete     bool            `json:"report_incomplete"`
 	BackupRef            string          `json:"backup_ref,omitempty"`
@@ -59,11 +60,11 @@ type DeliveryStatus struct {
 	Adoption      *AdoptionJob  `json:"adoption"`
 }
 
-const adoptionColumns = `j.state,j.revision,j.attempts,coalesce(j.reason_code,''),j.reason_message,j.last_checked_at,j.next_attempt_at,j.lease_until,coalesce(j.report_ref,''),coalesce(j.report_digest,''),j.report_counts,j.report_incomplete,coalesce(j.backup_ref,''),j.backup_verified_at,j.cleanup_state,j.next_reconcile_at,j.reserved_backup_bytes,j.reserved_restore_slots`
+const adoptionColumns = `j.state,j.revision,j.attempts,coalesce(j.reason_code,''),j.reason_message,j.last_checked_at,j.next_attempt_at,j.lease_until,coalesce(j.report_ref,''),coalesce(j.report_digest,''),coalesce(j.source_fingerprint,''),j.report_counts,j.report_incomplete,coalesce(j.backup_ref,''),j.backup_verified_at,j.cleanup_state,j.next_reconcile_at,j.reserved_backup_bytes,j.reserved_restore_slots`
 
 func scanJob(row pgx.Row) (AdoptionJob, error) {
 	var j AdoptionJob
-	err := row.Scan(&j.State, &j.Revision, &j.Attempts, &j.ReasonCode, &j.ReasonMessage, &j.LastCheckedAt, &j.NextAttemptAt, &j.LeaseUntil, &j.ReportRef, &j.ReportDigest, &j.ReportCounts, &j.ReportIncomplete, &j.BackupRef, &j.BackupVerifiedAt, &j.CleanupState, &j.NextReconcileAt, &j.ReservedBackupBytes, &j.ReservedRestoreSlots)
+	err := row.Scan(&j.State, &j.Revision, &j.Attempts, &j.ReasonCode, &j.ReasonMessage, &j.LastCheckedAt, &j.NextAttemptAt, &j.LeaseUntil, &j.ReportRef, &j.ReportDigest, &j.SourceFingerprint, &j.ReportCounts, &j.ReportIncomplete, &j.BackupRef, &j.BackupVerifiedAt, &j.CleanupState, &j.NextReconcileAt, &j.ReservedBackupBytes, &j.ReservedRestoreSlots)
 	return j, err
 }
 func statusTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) (DeliveryStatus, error) {

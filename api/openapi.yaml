@@ -355,7 +355,7 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {description: Atomic batch refusal; zero rows placed, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryBatchRefusal'}}}}
         '503': {$ref: '#/components/responses/Error'}
   /reviews/github:
     post:
@@ -17407,12 +17407,54 @@ components:
         next_cursor: {type: string}
         count: {type: integer, minimum: 0}
         incomplete: {type: boolean}
+    DeliveryBatchRefusal:
+      type: object
+      required: [error, code, placed, items]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        placed: {type: integer, const: 0}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [item_id, placed, code, reason]
+            properties:
+              item_id: {type: string, format: uuid}
+              placed: {type: boolean, const: false}
+              code: {type: string, const: batch_not_applied}
+              reason: {type: string}
     DeliveryPlacementResult:
       type: object
       required: [items]
       properties:
         items: {type: array, maxItems: 101, items: {$ref: '#/components/schemas/DeliveryPlacement'}}
         release_revision: {type: integer, minimum: 1}
+    DeliveryAdoptionJob:
+      type: object
+      description: Private persisted summary; opaque report and backup references never authorize download. No provider journal or credential payloads.
+      required: [state, revision, attempts, report_incomplete, cleanup_state]
+      properties:
+        state: {type: string, enum: [pending, checking, backing_up, applying, adopted, refused, retry_wait]}
+        revision: {type: integer, minimum: 1}
+        attempts: {type: integer, minimum: 0}
+        reason_code: {type: string, maxLength: 64}
+        reason_message: {type: string, maxLength: 2048}
+        last_checked_at: {type: [string, 'null'], format: date-time}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        lease_until: {type: [string, 'null'], format: date-time}
+        report_ref: {type: string, maxLength: 512}
+        report_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        source_fingerprint: {type: string, pattern: '^[0-9a-f]{64}$'}
+        report_counts: {type: [object, 'null']}
+        report_incomplete: {type: boolean}
+        backup_ref: {type: string, maxLength: 512}
+        backup_verified_at: {type: [string, 'null'], format: date-time}
+        cleanup_state: {type: string, enum: [none, pending, checking, blocked, reclaimed]}
+        next_reconcile_at: {type: [string, 'null'], format: date-time}
+        reserved_backup_bytes: {type: integer, minimum: 0}
+        reserved_restore_slots: {type: integer, minimum: 0, maximum: 1}
     DeliveryStatus:
       type: object
       required: [project_id, mode, revision]
@@ -17422,13 +17464,13 @@ components:
         revision: {type: integer, minimum: 0}
         next_sequence: {type: integer, minimum: 1}
         build_defaults: {$ref: '#/components/schemas/DeliveryBuildSettings'}
-        adoption: {type: [object, 'null'], description: Private persisted job summary; report/backup references never authorize download.}
+        adoption: {oneOf: [{$ref: '#/components/schemas/DeliveryAdoptionJob'}, {type: 'null'}]}
     DeliveryAdoptionAccepted:
       type: object
       required: [project_id, adoption, status_ref]
       properties:
         project_id: {type: string, format: uuid}
-        adoption: {type: object}
+        adoption: {$ref: '#/components/schemas/DeliveryAdoptionJob'}
         status_ref: {type: string}
     DeliveryAdoptionPage:
       type: object
