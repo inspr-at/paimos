@@ -370,6 +370,7 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 	if err != nil {
 		return s, err
 	}
+	project := s.ProjectID
 	if err = require(ctx, tx, p, "chat.receive", s.ProjectID); err != nil {
 		return s, err
 	}
@@ -402,6 +403,9 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 	s, err = harness.VerifyExternalLeaseTx(ctx, tx, r, p, in.SessionID, true)
 	if err != nil {
 		return s, err
+	}
+	if s.OwnerPersonID != owner || s.ProjectID != project || kind == "lead" && s.Role != "coordinator" || kind == "worker" && s.Role != "worker" {
+		return s, unavailable()
 	}
 	if err = require(ctx, tx, p, "chat.receive", s.ProjectID); err != nil {
 		return s, err
