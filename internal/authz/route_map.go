@@ -263,6 +263,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/members":                                                       "members.read",
 	"GET /api/models":                                                        "models.read",
 	"GET /api/models/resolve":                                                "models.read",
+	"GET /api/models/routes":                                                 "models.read",
 	"GET /api/node-keys/{key}":                                               "nodes.read",
 	"GET /api/outcomes":                                                      "outcome.read",
 	"GET /api/nodes":                                                         "nodes.read",

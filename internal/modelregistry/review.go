@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ type ReviewRoute struct {
 	OwnerRequired bool
 	Trace         PreferenceTrace
 }
+
+var reviewFamilyRank = map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
+
+// ReviewFamilyRank exposes a copy of the built-in dispatch order. The Policies
+// read shares this source without allowing callers to change routing rules.
+func ReviewFamilyRank() map[string]int { return maps.Clone(reviewFamilyRank) }
 
 // ResolveReview uses registry pins and the flywheel's family fallback order.
 // Profiles remain tenant policy; no model names or shell snippets are invented.
@@ -64,12 +71,11 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return out, err
 	}
-	rank := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
 	if out.Role == "review-gate" {
 		sort.SliceStable(steps, func(i, j int) bool {
 			a, b := steps[i].Profile, steps[j].Profile
-			if rank[a.Family] != rank[b.Family] {
-				return rank[a.Family] < rank[b.Family]
+			if reviewFamilyRank[a.Family] != reviewFamilyRank[b.Family] {
+				return reviewFamilyRank[a.Family] < reviewFamilyRank[b.Family]
 			}
 			if a.Tier != b.Tier {
 				return a.Tier == "frontier"

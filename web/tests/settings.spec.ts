@@ -26,7 +26,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/, /^Policies/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -55,12 +55,12 @@ test('a greeting that cannot be saved goes back to how it was', async ({ page })
   await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeChecked()
 })
 
-test('members see Personal and Developer; an admin section explains itself', async ({ page }) => {
+test('members see Personal, Developer and Policies; an admin section explains itself', async ({ page }) => {
   await setup(page, { role: 'member' })
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
-  // Members get both per-person settings sections.
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/])
+  // Members get their preferences and the read-only Policies page.
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/, /^Policies/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
