@@ -14197,7 +14197,7 @@ components:
         tickets: {type: integer, minimum: 0}
         hours: {type: [number, 'null'], description: Median measured active hours in history; model-adjusted estimate hours in planning. Null below five samples.}
         tokens: {type: [integer, 'null'], description: Median reported input plus output tokens; null below five samples.}
-        speed_factor: {type: [number, 'null'], description: Median active hours divided by frozen estimate hours, exact cell only; null below five valid estimates.}
+        speed_factor: {type: [number, 'null'], description: 'Median active hours divided by frozen estimate hours, exact cell only; null below five valid estimates.'}
         speed_tickets: {type: integer, minimum: 0}
     TicketPlanning:
       description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Live model names come from the registry at read time. Work-start estimate snapshots freeze the planned route and rates separately. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
