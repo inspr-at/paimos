@@ -21,8 +21,9 @@ beforeEach(async () => {
   scope = effectScope(); editor = scope.run(() => useThemeEditor())!; await settle()
 })
 afterEach(() => scope.stop())
-it.each(['selection', 'delete'] as const)('per-record recovery state machine retains an active %s conflict through other-record events', async operation => {
+it.each(['selection', 'save', 'delete'] as const)('per-record recovery state machine retains an active %s conflict through other-record events', async operation => {
   const other = { ...theme(), id: 'other', name: 'Other personal', revision: 9 }
+  const unrelated = { ...theme(), id: 'unrelated', name: 'Unrelated personal' }
   const fail = (message: string) => Object.assign(new Error(message), { status: 409 })
   const assertState = (phase: string, conflicted: boolean, feedback: string, id = 'personal') => {
     expect(editor.active.value!.theme.id, phase).toBe(id)
@@ -34,11 +35,21 @@ it.each(['selection', 'delete'] as const)('per-record recovery state machine ret
   if (operation === 'selection') {
     vi.mocked(api.selectTheme).mockRejectedValueOnce(fail('Selection changed'))
     await editor.choose(other)
+  } else if (operation === 'save') {
+    editor.draft.value!.name = 'Unsaved name'
+    vi.mocked(api.updateTheme).mockRejectedValueOnce(fail('Active theme changed'))
+    await editor.save()
   } else {
     vi.mocked(api.deleteTheme).mockRejectedValueOnce(fail('Active theme changed'))
     await editor.remove(theme())
   }
   assertState('active conflict', true, operation === 'selection' ? 'Selection changed' : 'Active theme changed')
+  if (operation === 'save') {
+    vi.mocked(api.getActiveTheme).mockRejectedValueOnce(new Error('Discard reload failed'))
+    editor.discard(); await settle()
+    assertState('discard without a fresh read', true, 'Discard reload failed')
+    expect(editor.dirty.value).toBe(false)
+  }
   vi.mocked(api.deleteTheme).mockRejectedValueOnce(fail('Other theme changed'))
   await editor.remove(other)
   assertState('another record conflicts', true, 'Other theme changed')
@@ -49,7 +60,7 @@ it.each(['selection', 'delete'] as const)('per-record recovery state machine ret
   expect(editor.conflict.value).toBe(true); expect(editor.error.value).toBe('Other theme changed')
   expect(editor.busy.value).toBe(true)
   // Even a newer list record cannot replace the active record or its draft.
-  release({ items: [{ ...theme(), revision: 5 }, other], next_cursor: null })
+  release({ items: [{ ...theme(), revision: 5 }, other, unrelated], next_cursor: null })
   await paging
   assertState('pagination completed', true, 'Other theme changed')
   expect(editor.draft.value!.revision).toBe(4)
@@ -58,11 +69,12 @@ it.each(['selection', 'delete'] as const)('per-record recovery state machine ret
   await editor.load()
   assertState('reload failed', true, 'Reload failed')
   vi.mocked(api.deleteTheme).mockResolvedValueOnce(undefined)
-  await editor.remove(other)
-  expect(editor.items.value.some(item => item.id === 'other')).toBe(false)
+  await editor.remove(unrelated)
+  expect(editor.items.value.some(item => item.id === 'unrelated')).toBe(false)
+  expect(editor.items.value.some(item => item.id === 'other')).toBe(true)
   assertState('another record deleted successfully', true, 'Reload failed')
   editor.draft.value!.name = 'Blind edit'; await editor.save()
-  expect(api.updateTheme).not.toHaveBeenCalled()
+  expect(api.updateTheme).toHaveBeenCalledTimes(operation === 'save' ? 1 : 0)
   editor.draft.value!.name = theme().name
   vi.mocked(api.selectTheme).mockResolvedValueOnce({ ...chosen(), theme: other, selected_theme_id: other.id, revision: 13 })
   await editor.choose(other)

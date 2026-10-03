@@ -20,6 +20,8 @@ can edit shared themes, including the workspace default (`scope: default`).
 Fresh selection or reload resolves a prior conflict; a conflict on another
 theme does not disable the selected theme's editor. Loading more themes keeps
 unresolved conflict feedback and recovery available until fresh active state loads.
+Recovery belongs to each theme: another theme's conflict or successful deletion
+cannot unlock an unresolved selected theme, even after pagination or a failed reload.
 Pagination sits above the scrolling list and retains its space when the last
 page arrives, keeping New theme, recovery and Colours controls in place.
 Colours has separate light and dark accents, optional derived dark values,
