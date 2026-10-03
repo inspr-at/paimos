@@ -358,6 +358,19 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 	}
 	var result Event
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Access changes take the tenant fence first. Undo handlers may then
+		// recheck resource permissions without inverting that global lock order.
+		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
+		// The route check ran in an earlier transaction; a revocation may have
+		// committed while this request waited for the tenant fence.
+		if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.RouteScope(r.Context())); err != nil {
+			if errors.Is(err, authz.ErrForbidden) {
+				return ErrForbidden
+			}
+			return err
+		}
 		// Serialize attempts on this original event without modifying history or
 		// taking the event counter before a resource lock (writers take it last).
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 12))`, p.TenantID+":"+strconv.FormatInt(id, 10)); err != nil {

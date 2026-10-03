@@ -3,7 +3,9 @@
 package knowledge
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -14,6 +16,53 @@ import (
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+func TestLearningDraftTenantBeforeAdvisory(t *testing.T) {
+	for _, undo := range []bool{false, true} {
+		name := "draft"
+		if undo {
+			name = "undo"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setup(t)
+			h := rulesHandler(f)
+			setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
+			publicID := nodeLearningID(f.ticket)
+			layer := rulesLayer(t, h, f.a, rules.Scope{Layer: "person", OwnerID: f.a.ID})
+			set := rulesSet(t, h, f.a, layer.ID, "Learning draft")
+			body, err := json.Marshal(map[string]any{"layer_id": layer.ID, "set_id": set.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := "/api/knowledge/learnings/" + publicID + "/draft"
+			wantStatus, wantDecision, wantRules := http.StatusOK, "drafted", 1
+			if undo {
+				w := call(t, f, f.a, "POST", path, string(body))
+				expect(t, w, http.StatusOK)
+				decision := decode[LearningDecision](t, w)
+				path = "/api/events/" + strconv.FormatInt(decision.EventID, 10) + "/undo"
+				body = nil
+				wantStatus, wantDecision, wantRules = http.StatusCreated, "", 0
+			}
+			dbtest.TenantBeforeAdvisory(t, f.db, f.a.TenantID, f.a.TenantID+":learning:"+publicID, 275, func(ctx context.Context) error {
+				r := httptest.NewRequestWithContext(tenant.WithPrincipal(ctx, f.a), "POST", path, strings.NewReader(string(body)))
+				r.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				f.handler.ServeHTTP(w, r)
+				if w.Code != wantStatus {
+					return fmt.Errorf("%s: status %d want %d: %s", path, w.Code, wantStatus, w.Body.String())
+				}
+				return nil
+			})
+			if got := decisionOf(t, f, publicID); got != wantDecision {
+				t.Fatalf("decision %q want %q", got, wantDecision)
+			}
+			if got := rulesGet(t, h, f.a, set.ID); len(got.Rules) != wantRules || got.PublishedVersion != "" {
+				t.Fatalf("draft rules=%d want %d; published=%q", len(got.Rules), wantRules, got.PublishedVersion)
+			}
+		})
+	}
+}
 
 func TestLearningRuleDraft(t *testing.T) {
 	f := setup(t)

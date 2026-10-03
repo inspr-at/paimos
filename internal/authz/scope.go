@@ -302,11 +302,14 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, args...).Scan(&project)
 	})
-	if errors.Is(err, pgx.ErrNoRows) || project == nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if project == nil {
+		return "", nil
 	}
 	return *project, nil
 }

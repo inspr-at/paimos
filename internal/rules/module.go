@@ -137,10 +137,10 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 				return err
 			}
 			if r.Method != "GET" && r.Method != "HEAD" {
-				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
+				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
 					return err
 				}
-				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
+				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
 					return err
 				}
 				// Project visibility was derived when the transaction began; derive
@@ -282,14 +282,11 @@ func expired(ctx context.Context) bool {
 // binding, member and invite mutations in internal/authz) and holds it until
 // commit. Every permission decision of a rules write is made after it, so a
 // concurrent demotion either commits first and is seen, or waits for this
-// write. Order: the tenant advisory lock first, then the row, the same order as
-// authz.lockProjectMutation, so the two never deadlock.
+// write. Order: the tenant row first, then the tree advisory lock, matching
+// authz.lockProjectMutation, operator calls and Undo.
 //
-// NO KEY UPDATE, not UPDATE: it conflicts with the FOR UPDATE that access
-// changes take, but not with the KEY SHARE a foreign key check takes when some
-// other request inserts a row that references the tenant (a knowledge entry,
-// say). Such a request may hold KEY SHARE while it waits for the tenant
-// advisory lock held here; FOR UPDATE would close that cycle into a deadlock.
+// NO KEY UPDATE conflicts with other access fences but permits the KEY SHARE
+// held by foreign-key checks while another writer waits for the tree lock.
 func lockAccess(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	var id string
 	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id)

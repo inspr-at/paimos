@@ -2,11 +2,14 @@
 package crm
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func withUndo(t *testing.T, f *fixture) {
@@ -44,6 +48,174 @@ func eventOf(t *testing.T, f fixture, typ string) events.Event {
 func undoEvent(t *testing.T, f fixture, event events.Event, status int) {
 	t.Helper()
 	expect(t, request(f.handler, f.admin, http.MethodPost, "/api/events/"+strconv.FormatInt(event.ID, 10)+"/undo", ""), status)
+}
+
+func TestCRMUndoRechecksUndoPermissionAfterFence(t *testing.T) {
+	for _, other := range []bool{false, true} {
+		name := "own event"
+		if other {
+			name = "other actor event"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setup(t)
+			withUndo(t, &f)
+			expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/organisations", map[string]any{"name": "Keep this customer"}), 201)
+			event := eventOf(t, f, "crm.customer_created")
+			caller := f.admin
+			if other {
+				caller.ID = f.second
+			}
+			var role string
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, caller.TenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'undo_writer','Undo writer') RETURNING id::text`, caller.TenantID).Scan(&role); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission)
+				 SELECT $1::uuid,$2::uuid,unnest(ARRAY['nodes.read','events.read','events.undo','events.undo_other','crm.write'])`, caller.TenantID, role); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID, role)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			revoke, err := f.db.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer revoke.Rollback(context.Background())
+			if _, err = revoke.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, caller.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = revoke.Exec(ctx, `DELETE FROM role_permissions WHERE tenant_id=$1 AND role_id=$2 AND permission='events.undo'`, caller.TenantID, role); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				r := httptest.NewRequest(http.MethodPost, "/api/events/"+strconv.FormatInt(event.ID, 10)+"/undo", nil)
+				r = r.WithContext(tenant.WithPrincipal(ctx, caller))
+				w := httptest.NewRecorder()
+				f.handler.ServeHTTP(w, r)
+				done <- w
+			}()
+			// The route sees the committed grant. Reaching the tenant-row wait
+			// proves the route accepted the request before revocation commits.
+			dbtest.WaitForLock(t, ctx, f.db, revoke.Conn().PgConn().PID(), "transactionid")
+			if err = revoke.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case w := <-done:
+				expect(t, w, http.StatusForbidden)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			var deleted bool
+			var undos int
+			if err = f.db.Admin.QueryRow(ctx, `SELECT deleted_at IS NOT NULL,
+			 (SELECT count(*) FROM events WHERE tenant_id=$1 AND undo_of=$3)
+			 FROM nodes WHERE tenant_id=$1 AND id=$2`, caller.TenantID, *event.NodeID, event.ID).Scan(&deleted, &undos); err != nil {
+				t.Fatal(err)
+			}
+			if deleted || undos != 0 {
+				t.Fatalf("denied undo mutated customer or history: deleted=%v undo events=%d", deleted, undos)
+			}
+			// Restoring exactly the withdrawn grant proves the resource and all
+			// remaining permissions stayed valid throughout the denied request.
+			if _, err = f.db.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'events.undo')`, caller.TenantID, role); err != nil {
+				t.Fatal(err)
+			}
+			expect(t, request(f.handler, caller, http.MethodPost, "/api/events/"+strconv.FormatInt(event.ID, 10)+"/undo", ""), http.StatusCreated)
+		})
+	}
+}
+
+func TestCRMUndoUsesCurrentAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		permissions []string
+		legacy      []string
+		owner       bool
+		want        int
+	}{
+		{"revoked stale admin", []string{"nodes.read", "events.read", "events.undo"}, []string{"admin"}, false, 403},
+		{"events only custom role", []string{"nodes.read", "events.read", "events.undo", "events.undo_other"}, []string{"admin"}, false, 403},
+		{"owner without legacy admin", nil, []string{}, true, 201},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			withUndo(t, &f)
+			expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/organisations", map[string]any{"name": "Authority fixture"}), 201)
+			event := eventOf(t, f, "crm.customer_created")
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+				var role string
+				if tc.owner {
+					if err := tx.QueryRow(t.Context(), `SELECT id::text FROM roles WHERE key='owner'`).Scan(&role); err != nil {
+						return err
+					}
+				} else {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'undo_test','Undo test') RETURNING id::text`, f.admin.TenantID).Scan(&role); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest($3::text[])`, f.admin.TenantID, role, tc.permissions); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.admin.ID, role); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE principals SET roles=$2 WHERE id=$1`, f.admin.ID, tc.legacy)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			f.admin.Roles = tc.legacy
+			undoEvent(t, f, event, tc.want)
+			var deleted bool
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT deleted_at IS NOT NULL FROM nodes WHERE id=$1`, *event.NodeID).Scan(&deleted); err != nil {
+				t.Fatal(err)
+			}
+			if deleted != (tc.want == 201) {
+				t.Fatal("undo mutation disagrees with live authority")
+			}
+		})
+	}
+}
+
+func TestCRMUndoBindingRequiresManageGrant(t *testing.T) {
+	f := setup(t)
+	withUndo(t, &f)
+	expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/contacts/"+f.contact+"/principals", map[string]any{"principal_id": f.customer}), 201)
+	event := eventOf(t, f, EventContactBound)
+	var role string
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'crm_writer','CRM writer') RETURNING id::text`, f.admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest(ARRAY['nodes.read','events.read','events.undo','crm.write'])`, f.admin.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.admin.ID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	undoEvent(t, f, event, 403)
+	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 1 {
+		t.Fatal("denied undo removed binding")
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'crm.manage')`, f.admin.TenantID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	undoEvent(t, f, event, 201)
+	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 0 {
+		t.Fatal("permitted undo left binding")
+	}
 }
 func TestCRMUndoStaleAndPrimary(t *testing.T) {
 	f := setup(t)

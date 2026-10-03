@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,19 +18,31 @@ import (
 
 const auditPage = 50
 
-// accessEventTypes are the v2 audit names plus the P1 names they replace.
-var accessEventTypes = []string{
-	"role.created", "role.updated", "role.deleted",
-	"binding.set", "binding.removed",
-	"invite.created", "invite.revoked", "invite.accepted",
-	"principal.agent_created", "principal.deactivated", "principal.reactivated", "principal.alias_linked", "principal.alias_unlinked",
-	"agent_key.created", "agent_key.revoked", "agent_key.scopes_extended", "agent_key.scopes_changed",
-	"authz.role_created", "authz.role_updated", "authz.role_deleted",
-	"authz.workspace_role_changed", "authz.binding_reassigned", "authz.binding_migrated",
-	"authz.agent_binding_created", "authz.agent_binding_migrated", "authz.owner_fallback",
-	"authz.key_created", "authz.key_revoked",
-	"principal.linked", "principal.unlinked",
+// accessEventNames is the single classification of current and historical
+// authority events. Both the query allowlist and response mapping derive from it.
+var accessEventNames = map[string]string{
+	"role.created": "role.created", "role.updated": "role.updated", "role.deleted": "role.deleted",
+	"binding.set": "binding.set", "binding.removed": "binding.removed",
+	"invite.created": "invite.created", "invite.revoked": "invite.revoked", "invite.accepted": "invite.accepted",
+	"principal.agent_created": "principal.agent_created", "principal.deactivated": "principal.deactivated", "principal.reactivated": "principal.reactivated",
+	"principal.alias_linked": "principal.alias_linked", "principal.alias_unlinked": "principal.alias_unlinked",
+	"agent_key.created": "agent_key.created", "agent_key.revoked": "agent_key.revoked", "agent_key.scopes_extended": "agent_key.scopes_extended", "agent_key.scopes_changed": "agent_key.scopes_changed",
+	"authz.role_created": "role.created", "authz.role_updated": "role.updated", "authz.role_deleted": "role.deleted",
+	"authz.workspace_role_changed": "binding.set", "authz.binding_reassigned": "binding.set", "authz.binding_migrated": "binding.set",
+	"authz.agent_binding_created": "binding.set", "authz.agent_binding_migrated": "binding.set", "authz.owner_fallback": "binding.set",
+	"authz.agent_permission_granted": "role.updated",
+	"authz.key_created":              "agent_key.created", "authz.key_revoked": "agent_key.revoked",
+	"principal.linked": "principal.alias_linked", "principal.unlinked": "principal.alias_unlinked",
 }
+
+var accessEventTypes = func() []string {
+	types := make([]string, 0, len(accessEventNames))
+	for name := range accessEventNames {
+		types = append(types, name)
+	}
+	sort.Strings(types)
+	return types
+}()
 
 type auditItem struct {
 	ID      int64          `json:"id"`
@@ -154,37 +167,11 @@ func decodeJSON(raw []byte) any {
 }
 
 func mapAuditType(stored string, after any) (string, bool) {
-	switch stored {
-	case "role.created", "role.updated", "role.deleted",
-		"binding.set", "binding.removed",
-		"invite.created", "invite.revoked", "invite.accepted",
-		"principal.agent_created", "principal.deactivated", "principal.reactivated", "principal.alias_linked", "principal.alias_unlinked",
-		"agent_key.created", "agent_key.revoked", "agent_key.scopes_extended", "agent_key.scopes_changed":
-		return stored, true
-	case "authz.role_created":
-		return "role.created", true
-	case "authz.role_updated":
-		return "role.updated", true
-	case "authz.role_deleted":
-		return "role.deleted", true
-	case "authz.workspace_role_changed":
-		if jsonField(after, "role_id") == "" && hasJSONField(after, "role_id") {
-			return "binding.removed", true
-		}
-		return "binding.set", true
-	case "authz.binding_reassigned", "authz.binding_migrated", "authz.agent_binding_created", "authz.agent_binding_migrated", "authz.owner_fallback":
-		return "binding.set", true
-	case "authz.key_created":
-		return "agent_key.created", true
-	case "authz.key_revoked":
-		return "agent_key.revoked", true
-	case "principal.linked":
-		return "principal.alias_linked", true
-	case "principal.unlinked":
-		return "principal.alias_unlinked", true
-	default:
-		return "", false
+	if stored == "authz.workspace_role_changed" && jsonField(after, "role_id") == "" && hasJSONField(after, "role_id") {
+		return "binding.removed", true
 	}
+	mapped, ok := accessEventNames[stored]
+	return mapped, ok
 }
 
 func subjectID(typ string, before, after any) string {
