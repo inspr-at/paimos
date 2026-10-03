@@ -4436,26 +4436,10 @@
     "261003095616.0.0": {
       "release_channel": "stable",
       "release_sequence": 122,
-      "snapshot_sha256": "b60b7d535cc838e06b439817e3f4d365941785777b3a7882aa96fa6492dd1ea9",
-      "captured_at": "2026-10-03T14:17:10Z",
+      "snapshot_sha256": "d303e43e8f97005403b383e4b84de6c1f0243d8e0f61eec14e35b6517817490c",
+      "captured_at": "2026-10-03T14:47:43Z",
       "release_revision": 1,
       "items": [
-        {
-          "key": "AEON-502",
-          "pill_en": "Choose models by work",
-          "pill_de": "Modelle nach Arbeit wählen",
-          "benefit_en": "Choose preferred models by type of work in the web app, with workspace, personal and project settings. Inherited choices and locks show which setting applies.",
-          "benefit_de": "Wähle in der Web-App bevorzugte Modelle nach Art der Arbeit, mit Einstellungen für Arbeitsbereich, Person und Projekt. Geerbte Werte und Sperren zeigen, welche Einstellung gilt.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-524",
-          "pill_en": "Pause agents",
-          "pill_de": "Agenten pausieren",
-          "benefit_en": "You can request a pause for supported agents, one by one or in groups of up to 200 eligible agents; a completed pause saves a handover so a later run can continue from there.",
-          "benefit_de": "Du kannst für unterstützte Agenten eine Pause anfordern, einzeln oder in Gruppen von bis zu 200 berechtigten Agenten; eine abgeschlossene Pause speichert eine Übergabe, damit ein späterer Lauf dort weitermachen kann.",
-          "group": "features"
-        },
         {
           "key": "AEON-536",
           "pill_en": "Questions in one place",
