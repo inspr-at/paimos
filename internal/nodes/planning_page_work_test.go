@@ -144,3 +144,36 @@ func planningSubtreeWork(plan any, subtree bool) (rows, probes float64) {
 	}
 	return rows, probes
 }
+
+func TestPlanningUnestimatedUsageFreePageSkipsUnusedMicros(t *testing.T) {
+	p := newPrincipal(t, "planning-no-unused-micros")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Unestimated"}`)
+	item := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"No estimate or usage","parent_id":"`+root.ID+`"}`)
+	ctx := tenant.WithPrincipal(t.Context(), p)
+	if err := New(appPool, nil).(*Module).tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		recorded := &planningPageQueryRecorder{Tx: tx}
+		items := []listItem{{nodeJSON: item, KindSlug: "ticket", Project: &listProject{ID: root.ID}}}
+		views, err := loadPlanning(ctx, recorded, items, assigneeSeen{harnessAll: true, members: true}, nil)
+		if err != nil {
+			return err
+		}
+		if len(views) != 0 {
+			t.Fatal("unestimated, usage-free ticket invented planning data")
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes WHERE id=$1 AND deleted_at IS NULL)`, item.ID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			t.Fatal("planning fixture lost its ticket")
+		}
+		if recorded.sql != "" {
+			t.Fatal("unestimated, usage-free page executed unused monetary planning")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
