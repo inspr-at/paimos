@@ -425,7 +425,7 @@ func recoveryItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, 
 	}
 	// Admit only this recovery population before the cap. Unrelated completed
 	// rows cannot consume its slots; per-node event lookups remain bounded.
-	cte := `WITH candidates AS MATERIALIZED (SELECT e.*,n.updated_at FROM ` + Effective + ` e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.item_node_id JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id WHERE e.tenant_id=$1 AND e.project_node_id=$2 AND e.kind IN ('ticket','task') AND e.state IN ('done','accepted','delivered') AND n.updated_at>=d.adopted_at AND ` + pred + ` ORDER BY n.updated_at DESC,e.item_node_id DESC LIMIT 5001), recovered AS MATERIALIZED (SELECT e.*,episode.at AS completed_at FROM (SELECT * FROM candidates ORDER BY updated_at DESC,item_node_id DESC LIMIT 5000) e JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id JOIN LATERAL (SELECT at FROM events ev WHERE ev.tenant_id=e.tenant_id AND ev.node_id=e.item_node_id AND ev.after->>'state' IN ('done','accepted','delivered') AND ev.before->>'state' IS DISTINCT FROM ev.after->>'state' ORDER BY ev.id DESC LIMIT 1) episode ON episode.at>d.adopted_at) `
+	cte := `WITH candidates AS MATERIALIZED (SELECT e.*,n.updated_at FROM ` + recoveryEffective + ` e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.item_node_id JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id WHERE e.tenant_id=$1 AND e.project_node_id=$2 AND e.kind IN ('ticket','task') AND e.state IN ('done','accepted','delivered') AND n.updated_at>=d.adopted_at AND ` + pred + ` ORDER BY n.updated_at DESC,e.item_node_id DESC LIMIT 5001), recovered AS MATERIALIZED (SELECT e.*,episode.at AS completed_at FROM (SELECT * FROM candidates ORDER BY updated_at DESC,item_node_id DESC LIMIT 5000) e JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id JOIN LATERAL (SELECT at FROM events ev WHERE ev.tenant_id=e.tenant_id AND ev.node_id=e.item_node_id AND ev.after->>'state' IN ('done','accepted','delivered') AND ev.before->>'state' IS DISTINCT FROM ev.after->>'state' ORDER BY ev.id DESC LIMIT 1) episode ON episode.at>d.adopted_at) `
 	err = tx.QueryRow(ctx, cte+`SELECT (SELECT count(*) FROM recovered),(SELECT count(*) FROM candidates)>5000`, p.TenantID, project, rank).Scan(&out.Count, &out.Incomplete)
 	if err != nil {
 		return out, err
@@ -469,7 +469,7 @@ type RecoveryCounts struct {
 func recoveryCounts(ctx context.Context, tx pgx.Tx, p tenant.Principal, r Release) (*RecoveryCounts, error) {
 	out := &RecoveryCounts{}
 	err := tx.QueryRow(ctx, `WITH candidates AS MATERIALIZED (
- SELECT e.*,n.updated_at FROM `+Effective+` e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.item_node_id
+ SELECT e.*,n.updated_at FROM `+recoveryEffective+` e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.item_node_id
  JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id
  WHERE e.tenant_id=$1 AND e.project_node_id=$2 AND e.kind IN ('ticket','task')
  AND e.state IN ('done','accepted','delivered') AND n.updated_at>=d.adopted_at

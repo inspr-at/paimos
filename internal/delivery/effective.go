@@ -17,6 +17,8 @@ import "github.com/inspr-at/paimos/internal/deliverymodel"
 // New creates therefore need no placement write or maintenance trigger.
 const Effective = deliverymodel.Effective
 
+const recoveryEffective = deliverymodel.EffectiveByIdentity
+
 func ItemKind(kind string) bool { return kind == "epic" || kind == "ticket" || kind == "task" }
 
 // Completed is the unit's own successful state, never an epic rollup or a
