@@ -1,7 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { contrastRatio, DARK_CARD, DARK_INK, deriveDark, inkOn, PORCELAIN, themeTokens, WHITE_INK } from '../src/lib/themeValues.ts'
+import { contrastRatio, DARK_CARD, DARK_INK, deriveDark, inkOn, LIGHT_CARD, PORCELAIN, textOn, themeTokens, WHITE_INK } from '../src/lib/themeValues.ts'
+
+test('extreme light accents produce readable text on light cards', () => {
+  for (const accent of ['#ffffff', '#fefefe', '#fffafa', '#ffffe0']) {
+    assert.ok(contrastRatio(textOn(accent, LIGHT_CARD), LIGHT_CARD) >= 4.5, accent)
+    const values = structuredClone(PORCELAIN)
+    values.primary.light = accent
+    values.secondary.light = accent
+    const tokens = themeTokens(values, false)
+    for (const token of ['--teal-ink', '--gold-ink', '--warn', '--warn-ink']) assert.ok(contrastRatio(tokens[token]!, LIGHT_CARD) >= 4.5, `${accent}: ${token}`)
+    assert.equal(tokens['--teal'], accent, 'the selected fill stays unchanged')
+  }
+})
+
+test('extreme dark accents produce readable text on dark cards', () => {
+  for (const accent of ['#000000', '#010101', '#010005', '#050000']) {
+    assert.ok(contrastRatio(textOn(accent, DARK_CARD), DARK_CARD) >= 4.5, accent)
+    const values = structuredClone(PORCELAIN)
+    values.primary.dark = accent
+    values.secondary.dark = accent
+    const tokens = themeTokens(values, true)
+    for (const token of ['--teal-ink', '--gold-ink', '--warn', '--warn-ink']) assert.ok(contrastRatio(tokens[token]!, DARK_CARD) >= 4.5, `${accent}: ${token}`)
+    assert.equal(tokens['--teal'], accent, 'hand-set dark fills stay unchanged')
+  }
+})
 
 test('filled ink is the higher contrast choice, independent of mode and hex casing', () => {
   for (const fill of ['#ffffff', '#000000', '#a4e5df', '#d69b31', '#8547b0', '#ff0000', '#687078']) {

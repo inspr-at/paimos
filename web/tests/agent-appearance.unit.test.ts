@@ -5,6 +5,32 @@ beforeEach(() => vi.resetModules())
 afterEach(() => vi.unstubAllGlobals())
 const response = (value: unknown) => new Response(JSON.stringify({ value }))
 
+it('personal behaviour writes preserve stored accessibility choices while a theme is active', async () => {
+  const stored = { palette: 'deutan', dimInactive: false, inactiveOpacity: 72, yellowMinutes: 8, redMinutes: 21 }
+  const writes: unknown[] = []
+  let written!: () => void
+  const saved = new Promise<void>(resolve => { written = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    expect(url).toBe('/api/preferences/agent-state')
+    if (init.method === 'PUT') {
+      writes.push(JSON.parse(String(init.body)).value)
+      written()
+      return response(writes.at(-1))
+    }
+    return response(stored)
+  }))
+  const { useAgentAppearance } = await import('../src/lib/agentAppearance')
+  const { applyAppearanceTheme } = await import('../src/lib/appearanceTheme')
+  const { PORCELAIN } = await import('../src/lib/themeValues')
+  const settings = useAgentAppearance()
+  await settings.ready
+  applyAppearanceTheme(PORCELAIN)
+  expect(settings.choice.value.palette).toBe('standard')
+  settings.save({ yellowMinutes: 9 })
+  await saved
+  expect(writes).toEqual([{ ...stored, yellowMinutes: 9 }])
+})
+
 it('shares viewer state preferences across surfaces and preserves independent settings', async () => {
   const writes: unknown[] = []
   const fetch = vi.fn(async (url: string, init: RequestInit) => {
