@@ -212,11 +212,25 @@ func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
 	if _, err := appPool.Exec(t.Context(), `ANALYZE node_kinds`); err != nil {
 		t.Fatal(err)
 	}
-	traceListQueries(t)
-	testList6000Performance(t)
+	p, path := testList6000Performance(t)
+	status, body := call(t, &p, http.MethodGet, path, "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["ticket"] != 6000 {
+		t.Fatal("stale-statistics fixture lost its 6000 tickets or selected page")
+	}
+	ids := make([]string, len(page.Items))
+	for i, item := range page.Items {
+		ids[i] = item.ID
+	}
+	plan := logPagePlanningPerformancePlan(t, p, ids)
+	found, rows, visits := planningSubtreeWork(plan, false)
+	t.Logf("page subtree rows=%.0f, node visits=%.0f", rows, visits)
+	if !found || rows != float64(len(ids)) || visits > float64(2*len(ids)) {
+		t.Fatalf("page subtree work: found=%t rows=%.0f visits=%.0f, want %d roots and at most %d child probes", found, rows, visits, len(ids), 2*len(ids))
+	}
 }
 
-func testList6000Performance(t *testing.T) {
+func testList6000Performance(t *testing.T) (tenant.Principal, string) {
 	t.Helper()
 	p := newPrincipal(t, "large-list")
 	project := kindBySlug(t, p, "project")
@@ -307,6 +321,7 @@ func testList6000Performance(t *testing.T) {
 			}
 		}
 	}
+	return p, path
 }
 
 // Project summaries name the people most recently active in each project: the

@@ -149,13 +149,21 @@ func planningOpenWhere(c string) string {
 // children, and theirs. Needs plan_states in scope.
 func planningSubtreeSQL(roots string) string {
 	tenant := `current_setting('aeon.tenant_id')::uuid`
+	// Keep child lookups dependent on their selected parent. Stale kind
+	// statistics must not rescan the tenant's tickets once per page root.
 	return `SELECT r.root, r.root AS id FROM (` + roots + `) r
     UNION ALL SELECT r.root, c.id FROM (` + roots + `) r
-    JOIN nodes c ON c.tenant_id=` + tenant + ` AND c.parent_id=r.root` + planningOpenChild("c") + `
+    CROSS JOIN LATERAL (
+        SELECT * FROM nodes WHERE tenant_id=` + tenant + ` AND parent_id=r.root OFFSET 0
+    ) c` + planningOpenChild("c") + `
     WHERE ` + planningOpenWhere("c") + `
     UNION ALL SELECT r.root, g.id FROM (` + roots + `) r
-    JOIN nodes c ON c.tenant_id=` + tenant + ` AND c.parent_id=r.root` + planningOpenChild("c") + `
-    JOIN nodes g ON g.tenant_id=` + tenant + ` AND g.parent_id=c.id` + planningOpenChild("g") + `
+    CROSS JOIN LATERAL (
+        SELECT * FROM nodes WHERE tenant_id=` + tenant + ` AND parent_id=r.root OFFSET 0
+    ) c` + planningOpenChild("c") + `
+    CROSS JOIN LATERAL (
+        SELECT * FROM nodes WHERE tenant_id=` + tenant + ` AND parent_id=c.id OFFSET 0
+    ) g` + planningOpenChild("g") + `
     WHERE ` + planningOpenWhere("c") + ` AND ` + planningOpenWhere("g")
 }
 

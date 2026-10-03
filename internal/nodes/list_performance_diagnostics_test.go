@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -196,80 +195,87 @@ func safePerformancePlan(value any) any {
 	}
 }
 
-// Temporary fix4 diagnosis: log bounded static query categories, never arguments.
-type listQueryTrace struct {
-	t         *testing.T
-	slow      *listTraceStart
-	principal tenant.Principal
-}
-type listTraceKey struct{}
-type listTraceStart struct {
-	start time.Time
-	sql   string
-	args  []any
-	p     tenant.Principal
+// Capture the real page-money statement, with the same RLS, rates and IDs as
+// loadPlanMicros. EXPLAIN runs only for this synthetic fixture, after timing.
+type pagePlanningExplainTx struct {
+	pgx.Tx
+	plan any
 }
 
-func (tr *listQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	p, _ := tenant.PrincipalFrom(ctx)
-	return context.WithValue(ctx, listTraceKey{}, listTraceStart{time.Now(), data.SQL, data.Args, p})
-}
-func (tr *listQueryTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryEndData) {
-	s := ctx.Value(listTraceKey{}).(listTraceStart)
-	d := time.Since(s.start)
-	if strings.Contains(s.sql, "planning_values AS") {
-		tr.slow = &s
-		tr.principal = s.p
-	}
-	if d < 5*time.Millisecond {
-		return
-	}
-	label := "other"
-	for _, c := range []string{"finished AS (", "WITH done AS", "planning_values AS", "WITH RECURSIVE scope", "TRUNCATE", "INSERT INTO nodes", "ANALYZE"} {
-		if strings.Contains(s.sql, c) {
-			label = c
-			break
+func (tx *pagePlanningExplainTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "planning_values AS MATERIALIZED") {
+		var raw []byte
+		if err := tx.Tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON, TIMING OFF) "+sql, args...).Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &tx.plan); err != nil {
+			return nil, err
 		}
 	}
-	tr.t.Logf("diagnostic query category %q: %s", label, d)
+	return tx.Tx.Query(ctx, sql, args...)
 }
-func traceListQueries(t *testing.T) {
+func logPagePlanningPerformancePlan(t *testing.T, p tenant.Principal, ids []string) any {
 	t.Helper()
-	old := appPool
-	cfg := old.Config()
-	trace := &listQueryTrace{t: t}
-	cfg.ConnConfig.Tracer = trace
-	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), 12*time.Second)
+	defer cancel()
+	ctx = db.WithReadStatementTimeout(ctx, 5*time.Second)
+	var plan any
+	err := New(appPool, nil).(*Module).tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		seen, err := assigneeAudience(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		recording := &pagePlanningExplainTx{Tx: tx}
+		money, err := loadPlanMicros(ctx, recording, ids, seen)
+		if err != nil {
+			return err
+		}
+		if len(money) != len(ids) {
+			return fmt.Errorf("planning rows = %d, want %d", len(money), len(ids))
+		}
+		plan = safePerformancePlan(recording.plan)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("planning performance diagnostics failed: %T (statement timeout=%t)", err, db.IsStatementTimeout(err))
+	}
+	clean, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	appPool = pool
-	t.Cleanup(func() {
-		appPool = old
-		pool.Close()
-		if trace.slow == nil {
-			return
+	t.Logf("page planning plan: %s", clean)
+	return plan
+}
+
+// Count node visits only within the subtree CTE. The fixture has no children,
+// so scanning all tenant tickets for every selected row is wasted work.
+func planningSubtreeWork(value any, subtree bool) (found bool, rows, visits float64) {
+	switch value := value.(type) {
+	case []any:
+		for _, item := range value {
+			f, r, v := planningSubtreeWork(item, subtree)
+			found = found || f
+			rows += r
+			visits += v
 		}
-		ctx, cancel := context.WithTimeout(tenant.WithPrincipal(context.Background(), trace.principal), 10*time.Second)
-		defer cancel()
-		err := New(old, nil).(*Module).tx(ctx, trace.principal.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-			var raw []byte
-			if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON, TIMING OFF) "+trace.slow.sql, trace.slow.args...).Scan(&raw); err != nil {
-				return err
-			}
-			var plan any
-			if err := json.Unmarshal(raw, &plan); err != nil {
-				return err
-			}
-			clean, err := json.Marshal(safePerformancePlan(plan))
-			if err != nil {
-				return err
-			}
-			t.Logf("planning money plan: %s", clean)
-			return nil
-		})
-		if err != nil {
-			t.Errorf("planning explain failed: %T", err)
+	case map[string]any:
+		if value["Subplan Name"] == "CTE plan_sub" {
+			found = true
+			rows, _ = value["Actual Rows"].(float64)
+			subtree = true
 		}
-	})
+		if subtree && value["Relation Name"] == "nodes" {
+			n, _ := value["Actual Rows"].(float64)
+			removed, _ := value["Rows Removed by Filter"].(float64)
+			loops, _ := value["Actual Loops"].(float64)
+			visits += (n + removed) * loops
+		}
+		for _, key := range []string{"Plan", "Plans"} {
+			f, r, v := planningSubtreeWork(value[key], subtree)
+			found = found || f
+			rows += r
+			visits += v
+		}
+	}
+	return
 }
