@@ -8379,9 +8379,11 @@ paths:
       description: Anonymous, no-store. Disabled has no intake or voting controls. Registered never counts browser ballots; anonymous history is separate, never added to active totals. B1 reports registered_available false.
       security: []
       parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 30}, description: Keyset cursor returned as next_cursor; history pages contain at most 100 public wishes}
         - {name: tenantSlug, in: path, required: true, schema: {type: string}}
       responses:
         '200': {description: Participation policy, content: {application/json: {schema: {$ref: '#/components/schemas/PortalParticipation'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}/participation:
@@ -8391,10 +8393,12 @@ paths:
       description: Anonymous, no-store. Disabled has no intake or voting controls. Registered never counts browser ballots; anonymous history is separate, never added to active totals. B1 reports registered_available false.
       security: []
       parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 30}, description: Keyset cursor returned as next_cursor; history pages contain at most 100 public wishes}
         - {name: tenantSlug, in: path, required: true, schema: {type: string}}
         - {name: productSlug, in: path, required: true, schema: {type: string}}
       responses:
         '200': {description: Participation policy, content: {application/json: {schema: {$ref: '#/components/schemas/PortalParticipation'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}/products/{productSlug}:
@@ -12535,9 +12539,10 @@ components:
         registered_available: {const: false}
         registered_since: {type: string, format: date-time}
         anonymous_history_until: {type: string, format: date-time}
+        next_cursor: {type: string, description: Last public wish key on this page; pass as after to continue}
         anonymous_history:
           type: array
-          maxItems: 500
+          maxItems: 100
           items:
             type: object
             additionalProperties: false

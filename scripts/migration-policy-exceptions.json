@@ -46,7 +46,7 @@
     },
     {
       "file": "1138_portal_products.sql",
-      "sha256": "055411a8a6b598dc289ca2e13532aa7c0cceb0f2b7a2b4a6399e090dd097931d",
+      "sha256": "2259cf5f13deaa67f68c3f082b0b5b98dec1b24eb84db634b1d62bf50de32c10",
       "ticket": "AEON-619",
       "reason": "Additive product registry, product project-link table and nullable legacy product bindings. The classifier flags the FORCE-RLS tenant-loop backfill and legacy mirror DELETE despite retaining every legacy table, column, ballot and response shape. Backfill captures the old default once and retains participation as legacy for existing published products; new products are disabled. Exact-byte exception is for coordinator review before merge/release and does not waive previous-binary probes."
     }

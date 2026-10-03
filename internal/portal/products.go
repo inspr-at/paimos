@@ -56,6 +56,7 @@ type participation struct {
 	RegisteredSince     *time.Time      `json:"registered_since,omitempty"`
 	HistoryUntil        *time.Time      `json:"anonymous_history_until,omitempty"`
 	History             []ballotHistory `json:"anonymous_history"`
+	NextCursor          string          `json:"next_cursor,omitempty"`
 }
 
 // Every portal write uses the same fences as access changes and node moves.
@@ -188,7 +189,7 @@ func (m *Module) writeProductSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func loadParticipation(ctx context.Context, tx pgx.Tx, p productSettings) (participation, error) {
+func loadParticipation(ctx context.Context, tx pgx.Tx, p productSettings, after string) (participation, error) {
 	on := p.Policy == "legacy"
 	out := participation{Policy: p.Policy, Voting: on, Intake: on, Corrections: on, RegisteredSince: p.RegisteredSince, HistoryUntil: p.HistoryUntil, History: []ballotHistory{}}
 	if on {
@@ -198,8 +199,8 @@ func loadParticipation(ctx context.Context, tx pgx.Tx, p productSettings) (parti
         JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='portal_wish'
         JOIN portal_votes v ON v.tenant_id=n.tenant_id AND v.wish_id=n.id AND v.product_id=$1::uuid
         WHERE n.parent_id=$1::uuid AND n.deleted_at IS NULL AND n.state='published'
-        AND ($2::timestamptz IS NULL OR v.created_at<=$2)
-        GROUP BY n.id,n.key,n.position ORDER BY n.position,n.key LIMIT 500`, p.ProductID, p.HistoryUntil)
+        AND ($2::timestamptz IS NULL OR v.created_at<=$2) AND n.key>$3
+        GROUP BY n.id,n.key ORDER BY n.key LIMIT 101`, p.ProductID, p.HistoryUntil, after)
 	if err != nil {
 		return out, err
 	}
@@ -208,6 +209,10 @@ func loadParticipation(ctx context.Context, tx pgx.Tx, p productSettings) (parti
 		var h ballotHistory
 		if err := rows.Scan(&h.WishKey, &h.Votes); err != nil {
 			return out, err
+		}
+		if len(out.History) == 100 {
+			out.NextCursor = out.History[99].WishKey
+			break
 		}
 		out.History = append(out.History, h)
 	}
@@ -223,6 +228,11 @@ func (m *Module) readParticipation(w http.ResponseWriter, r *http.Request) {
 	if !m.limit(w, r, "portal-read", 120) {
 		return
 	}
+	after := r.URL.Query().Get("after")
+	if len(r.URL.Query()["after"]) > 1 || after != "" && !validKey(after) {
+		fail(w, http.StatusBadRequest, "invalid history cursor")
+		return
+	}
 	tid, err := m.resolveTenant(r.Context(), r.PathValue("tenantSlug"))
 	var out participation
 	if err == nil {
@@ -231,7 +241,7 @@ func (m *Module) readParticipation(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			out, err = loadParticipation(r.Context(), tx, p)
+			out, err = loadParticipation(r.Context(), tx, p, after)
 			return err
 		})
 	}

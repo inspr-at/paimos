@@ -35,6 +35,7 @@ function storedLang(): 'en' | 'de' {
   try {
     return localStorage.getItem(langKey) === 'de' ? 'de' : 'en'
   } catch {
+    if (revision !== loadRevision || address !== apiBase.value) return
     return 'en'
   }
 }
@@ -98,16 +99,20 @@ function statusLabel(status: string) {
   }
 }
 
+let loadRevision = 0
 async function load() {
+  const revision = ++loadRevision
+  const address = apiBase.value
   loading.value = true
   error.value = ''
   missing.value = false
   try {
-    const response = await resilientFetch(`${apiBase.value}/roadmap`, {
+    const response = await resilientFetch(`${address}/roadmap`, {
       credentials: 'omit',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
     })
+    if (revision !== loadRevision || address !== apiBase.value) return
     if (response.status === 404) {
       missing.value = true
       doc.value = null
@@ -115,14 +120,16 @@ async function load() {
       return
     }
     if (!response.ok) throw new Error('unavailable')
-    doc.value = await response.json() as RoadmapDocument
+    const document = await response.json() as RoadmapDocument
+    if (revision !== loadRevision || address !== apiBase.value) return
+    doc.value = document
     setPageTitle(doc.value.product ? "What's coming" : 'Nothing published yet')
   } catch {
     error.value = 'The roadmap could not be loaded.'
     doc.value = null
     setPageTitle("What's coming")
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 

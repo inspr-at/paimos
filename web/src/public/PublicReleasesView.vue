@@ -39,6 +39,7 @@ function storedLang(): 'en' | 'de' {
   try {
     return localStorage.getItem(langKey) === 'de' ? 'de' : 'en'
   } catch {
+    if (revision !== loadRevision || address !== apiBase.value) return
     return 'en'
   }
 }
@@ -82,16 +83,20 @@ function noteHasGerman(note: PublicNote) {
 const visibleReleases = computed(() => (doc.value?.releases ?? []).filter(release => release.notes.some(noteHasText)))
 const hasGerman = computed(() => visibleReleases.value.some(release => release.notes.some(noteHasGerman)))
 
+let loadRevision = 0
 async function load() {
+  const revision = ++loadRevision
+  const address = apiBase.value
   loading.value = true
   error.value = ''
   missing.value = false
   try {
-    const response = await resilientFetch(`${apiBase.value}/releases`, {
+    const response = await resilientFetch(`${address}/releases`, {
       credentials: 'omit',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
     })
+    if (revision !== loadRevision || address !== apiBase.value) return
     if (response.status === 404) {
       missing.value = true
       doc.value = null
@@ -99,14 +104,16 @@ async function load() {
       return
     }
     if (!response.ok) throw new Error('unavailable')
-    doc.value = await response.json() as ReleasesDocument
+    const document = await response.json() as ReleasesDocument
+    if (revision !== loadRevision || address !== apiBase.value) return
+    doc.value = document
     setPageTitle(doc.value.product ? 'Releases' : 'Nothing published yet')
   } catch {
     error.value = 'Releases could not be loaded.'
     doc.value = null
     setPageTitle('Releases')
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 

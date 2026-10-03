@@ -55,10 +55,12 @@ CREATE INDEX portal_votes_product ON portal_votes(tenant_id, product_id, wish_id
 -- including its position/key tie-break, then never derive a default from order.
 DO $$
 DECLARE t record; prior text := current_setting('aeon.tenant_id', true);
+        prior_visible text := current_setting('aeon.visible_projects', true);
 BEGIN
     FOR t IN SELECT id FROM tenants LOOP
         PERFORM set_config('aeon.tenant_id', t.id::text, true);
         PERFORM set_config('aeon.portal_moderation','on',true);
+        PERFORM set_config('aeon.visible_projects','*',true);
         INSERT INTO portal_products(tenant_id, product_id, slug, published, is_default, participation_policy)
         SELECT tenant_id, id, lower(key), state='published', rank=1,
                CASE WHEN state='published' THEN 'legacy' ELSE 'disabled' END
@@ -75,6 +77,7 @@ BEGIN
         WHERE v.tenant_id=w.tenant_id AND v.wish_id=w.id;
     END LOOP;
     PERFORM set_config('aeon.tenant_id', coalesce(prior, ''), true);
+    PERFORM set_config('aeon.visible_projects',coalesce(prior_visible,''),true);
 END;
 $$;
 

@@ -86,6 +86,21 @@ func portalPublicKind(r *http.Request) string {
 		u := *r.URL
 		clone.URL = &u
 		suffix := strings.Join(parts[7:], "/")
+		read := r.Method == http.MethodGet || r.Method == http.MethodHead
+		valid := false
+		if read {
+			switch suffix {
+			case "", "catalog", "wishes", "comparison", "pace", "participation", "catalog.json", "llms.txt", "releases", "roadmap", "roadmap.json":
+				valid = true
+			}
+		}
+		if r.Method == http.MethodPost {
+			valid = suffix == "wishes" || suffix == "corrections" || len(parts) == 10 && parts[7] == "wishes" && parts[9] == "votes" && len(parts[8]) <= 30 && portalWishKeyPattern.MatchString(parts[8])
+		}
+		if !valid {
+			return ""
+		}
+
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && (suffix == "catalog" || suffix == "wishes" || suffix == "comparison" || suffix == "pace") {
 			suffix = ""
 		}

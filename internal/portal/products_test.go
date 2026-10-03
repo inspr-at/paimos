@@ -228,6 +228,53 @@ func TestProductRegisteredGateAndBallotHistory(t *testing.T) {
 	}
 }
 
+func TestProductHistoryUsesBoundedKeysetPages(t *testing.T) {
+	f := productFixture(t)
+	d := f.d
+	tid := makeTenant(t, d, "history-pages", "History pages")
+	id := insertNode(t, d, tid, "PPR-1", "portal_product", "History", "summary", "published", "", "{}")
+	configureFixtureProduct(t, d, tid, id, "history", "disabled", true)
+	setPortal(t, d, tid, true)
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH wishes AS (
+            INSERT INTO nodes(tenant_id,key,kind_id,title,state,parent_id)
+            SELECT $1::uuid,'PWS-'||n::text,k.id,'Public wish '||n::text,'published',$2::uuid
+            FROM generate_series(1,102) n CROSS JOIN node_kinds k WHERE k.slug='portal_wish'
+            RETURNING id)
+            INSERT INTO portal_votes(tenant_id,wish_id,voter_hash,weight,product_id)
+            SELECT $1::uuid,id,repeat('b',64),1,$2::uuid FROM wishes`, tid, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/public/portal/history-pages/participation"
+	var first, second participation
+	rec := f.do("GET", base, "", "203.0.113.165:1", nil, nil, nil)
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &first) != nil || len(first.History) != 100 || first.NextCursor == "" {
+		t.Fatalf("first history page %d %s", rec.Code, rec.Body)
+	}
+	rec = f.do("GET", base+"?after="+first.NextCursor, "", "203.0.113.165:1", nil, nil, nil)
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &second) != nil || len(second.History) != 2 || second.NextCursor != "" {
+		t.Fatalf("second history page %d %s", rec.Code, rec.Body)
+	}
+	seen := map[string]bool{}
+	for _, page := range []participation{first, second} {
+		for _, wish := range page.History {
+			if seen[wish.WishKey] || wish.Votes != 1 {
+				t.Fatalf("repeated/changed history %+v", wish)
+			}
+			seen[wish.WishKey] = true
+		}
+	}
+	if len(seen) != 102 {
+		t.Fatalf("history lost wishes: %d", len(seen))
+	}
+	rec = f.do("GET", base+"?after=invalid", "", "203.0.113.165:1", nil, nil, nil)
+	if rec.Code != 400 {
+		t.Fatalf("invalid cursor %d", rec.Code)
+	}
+}
+
 func TestNewProductStartsClosedAndDisabled(t *testing.T) {
 	f := productFixture(t)
 	d := f.d
@@ -505,7 +552,7 @@ func TestProductMigrationPreservesLegacySelectionAndVotes(t *testing.T) {
 			var id, policy, project string
 			var n, sum int
 			if err := tx.QueryRow(t.Context(), `SELECT product_id::text,participation_policy FROM portal_products WHERE is_default`).Scan(&id, &policy); err != nil {
-				return err
+				return fmt.Errorf("migration default: %w", err)
 			}
 			if id != f.selected || policy != "legacy" {
 				t.Fatalf("migration default %s %s", id, policy)
@@ -517,7 +564,7 @@ func TestProductMigrationPreservesLegacySelectionAndVotes(t *testing.T) {
 				t.Fatalf("tenant product count %d", n)
 			}
 			if err := tx.QueryRow(t.Context(), `SELECT project_node_id::text FROM portal_product_pace WHERE product_id=$1::uuid AND NOT release_history`, f.selected).Scan(&project); err != nil {
-				return err
+				return fmt.Errorf("migration project: %w", err)
 			}
 			if project != f.project {
 				t.Fatal("migration changed the linked project")

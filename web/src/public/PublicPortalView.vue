@@ -166,7 +166,7 @@ async function load() {
         const policy = policyResponse.ok ? await policyResponse.json() as Participation : null
         if (revision !== loadRevision || address !== base.value) return
         // Missing/invalid policy never enables an input control.
-        participation.value = policy && ['disabled', 'legacy', 'registered'].includes(policy.policy) ? policy : null
+        participation.value = policy && ['disabled', 'legacy', 'registered'].includes(policy.policy) && typeof policy.voting_enabled === 'boolean' && typeof policy.wish_intake_enabled === 'boolean' && typeof policy.corrections_enabled === 'boolean' ? policy : null
       } catch {
         if (revision !== loadRevision || address !== base.value) return
         participation.value = null
