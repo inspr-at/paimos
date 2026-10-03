@@ -192,6 +192,10 @@ function pointerDown(event: PointerEvent) {
   // Multiple contacts are a scrolling/zoom gesture, never a disclosure.
   if (previous || event.isPrimary === false || event.button !== 0
     || !element?.hasAttribute('data-clip-tip') || !element.dataset.tip) return
+  // A clipped-name hold belongs to disclosure, not an ancestor's selection
+  // timer. Leave native scrolling, focus and ordinary taps intact; only the
+  // completed hold's compatibility click is consumed below.
+  event.stopPropagation()
   const started = { element, value: element.dataset.tip, pointerId: event.pointerId, x: event.clientX, y: event.clientY }
   press = started
   pressTimer = setTimeout(() => {
