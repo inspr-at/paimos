@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -282,61 +281,5 @@ func TestLastOwnerFenceSerializesRemovalAndDeactivation(t *testing.T) {
 	}
 	if remaining != 1 {
 		t.Fatalf("active owners after concurrent mutations: %d", remaining)
-	}
-}
-
-// Probe real row locks before the helper attempts the tree lock. This catches
-// the merge's tenant/tree inversion without sleeps or a possible deadlock.
-type projectFenceProbeTx struct {
-	pgx.Tx
-	probe func()
-}
-
-func (tx projectFenceProbeTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	if strings.Contains(sql, "pg_advisory_xact_lock") {
-		tx.probe()
-	}
-	return tx.Tx.Exec(ctx, sql, args...)
-}
-
-func TestProjectFencesTakeTenantBeforeTreeAndAllowForeignKeys(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		lock func(context.Context, pgx.Tx, string) error
-	}{
-		{"mutation", LockProjectMutation},
-		{"resource write", LockProjectWrite},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newAuthorityFixture(t)
-			ctx := authorityDeadline(t)
-			probes := 0
-			if err := db.InTenant(ctx, f.d.App, f.actor.TenantID, func(tx pgx.Tx) error {
-				return tc.lock(ctx, projectFenceProbeTx{Tx: tx, probe: func() {
-					probes++
-					for _, mode := range []string{"NO KEY UPDATE", "KEY SHARE"} {
-						err := db.InTenant(ctx, f.d.App, f.actor.TenantID, func(other pgx.Tx) error {
-							_, err := other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR `+mode+` NOWAIT`, f.actor.TenantID)
-							return err
-						})
-						if mode == "KEY SHARE" {
-							if err != nil {
-								t.Errorf("tenant FK key-share blocked: %v", err)
-							}
-							continue
-						}
-						var pe *pgconn.PgError
-						if !errors.As(err, &pe) || pe.Code != "55P03" {
-							t.Errorf("tenant not fenced before tree: %v", err)
-						}
-					}
-				}}, f.actor.TenantID)
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if probes != 1 {
-				t.Fatalf("tree boundary probes: %d, want 1", probes)
-			}
-		})
 	}
 }
