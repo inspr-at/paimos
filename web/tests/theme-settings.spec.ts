@@ -163,6 +163,38 @@ test('selection after a deletion conflict restores editable Colours and Save', a
   await expect(page.locator('.theme-status')).toContainText('Saved.')
   expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
 })
+test('pagination keeps deletion conflict feedback and Reload until fresh active state resolves it', async ({ page }) => {
+  const data = await setup(page, { fail: 409, defaultLater: true }); await page.goto('/settings/theme')
+  await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+  const status = page.locator('.theme-status')
+  const reload = page.getByRole('button', { name: 'Reload themes', exact: true })
+  const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
+  await expect(status).toContainText('changed elsewhere')
+  await expect(reload).toBeVisible(); await expect(primary).toBeDisabled()
+  await page.getByRole('button', { name: 'Keep theme', exact: true }).click()
+  await expectStableControls({ controls: { reload, primary }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'pagination retains conflict and recovery', run: async () => {
+      await page.getByRole('button', { name: 'Load more themes', exact: true }).click()
+      await expect(page.getByRole('button', { name: 'Load more themes', exact: true })).toHaveCount(0)
+      await expect(page.locator('[data-theme-id="default"]')).toBeVisible()
+      await expect(status).toContainText('changed elsewhere')
+      await expect(reload).toBeVisible(); await expect(reload).toBeEnabled()
+      await expect(primary).toBeDisabled()
+    } },
+  ] })
+  expect(data.writes).toHaveLength(1)
+  expect(data.writes[0]).toMatchObject({ method: 'DELETE', path: '/api/themes/copper' })
+  data.fail = 0
+  data.items.find(item => item.id === 'copper')!.revision++
+  await reload.click()
+  await expect(status).not.toContainText('changed elsewhere')
+  await expect(reload).toBeHidden(); await expect(primary).toBeEnabled()
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0); await expect(status).toContainText('Saved.')
+  expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
+})
 test('New theme duplicates the default even on a later list page; managers may edit it', async ({ page }) => {
   const data = await setup(page, { admin: true, defaultLater: true }); await page.goto('/settings/theme')
   await expect(page.getByRole('button', { name: 'Load more themes' })).toBeVisible()

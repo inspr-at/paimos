@@ -94,6 +94,42 @@ it('a failed reload keeps an unresolved save conflict from allowing a blind resa
   expect(editor.conflict.value).toBe(true); expect(editor.error.value).toBe('Reload failed')
   expect(api.updateTheme).toHaveBeenCalledTimes(1)
 })
+it.each(['selection', 'save', 'delete'] as const)('pagination preserves an unresolved %s conflict until fresh active state loads', async operation => {
+  editor.cursor.value = 'next-page'
+  const failure = Object.assign(new Error('Theme changed; reload before editing'), { status: 409 })
+  if (operation === 'selection') {
+    vi.mocked(api.selectTheme).mockRejectedValue(failure)
+    await editor.choose({ ...theme(), id: 'other' })
+  } else if (operation === 'save') {
+    editor.draft.value!.name = 'Unsaved name'
+    vi.mocked(api.updateTheme).mockRejectedValue(failure)
+    await editor.save()
+  } else {
+    vi.mocked(api.deleteTheme).mockRejectedValue(failure)
+    await editor.remove(theme())
+  }
+  expect(editor.conflict.value).toBe(true)
+  expect(editor.error.value).toBe(failure.message)
+  const retainedDraft = JSON.parse(JSON.stringify(editor.draft.value))
+  let release!: (page: Awaited<ReturnType<typeof api.listThemes>>) => void
+  vi.mocked(api.listThemes).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  const paging = editor.more()
+  const pendingFeedback = editor.error.value
+  release({ items: [{ ...theme(), id: 'later' }], next_cursor: null })
+  await paging
+  expect(pendingFeedback).toBe(failure.message)
+  expect(api.listThemes).toHaveBeenLastCalledWith('next-page')
+  expect(editor.items.value.map(item => item.id)).toEqual(['personal', 'later'])
+  expect(editor.cursor.value).toBeNull()
+  expect(editor.draft.value).toEqual(retainedDraft)
+  expect(editor.conflict.value).toBe(true)
+  expect(editor.error.value).toBe(failure.message)
+  vi.mocked(api.getActiveTheme).mockResolvedValue({ ...chosen(), theme: { ...theme(), name: 'Fresh theme', revision: 5 }, revision: 13 })
+  await editor.load()
+  expect(editor.draft.value!.name).toBe('Fresh theme')
+  expect(editor.conflict.value).toBe(false)
+  expect(editor.error.value).toBe('')
+})
 it('identity change resets drafts and drops a delayed save result', async () => {
   let release!: (record: ThemeRecord) => void
   vi.mocked(api.updateTheme).mockImplementation(() => new Promise(resolve => { release = resolve }))
