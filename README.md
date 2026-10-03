@@ -337,6 +337,23 @@ why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
 commands are read-only; role-only `model resolve build` retains its existing
 advisory response.
 
+In the web app, open **Model preferences** from the Agents gear or a project's
+agents popover. The **Why this model?** planning cell opens its kind of work.
+Choose Automatic, follow new versions or pin a version at Default, You or
+Project. Kinds can be added or removed at Default and Project; system kinds stay.
+Row locks have a Set by menu and an Option/Alt-click shortcut. A looser provider
+choice below a lock is allowed with a warning. Retired versions are hidden;
+review qualification and provider evidence explain disabled picker choices.
+Save progress, failures and refreshed conflicts appear beside the pinned footer
+actions, in a reserved two-line slot that wraps and scrolls for longer messages.
+Opening reset confirmation clears stale feedback and announces the reset scope.
+Keyboard resets return focus to the row’s model chip; removing a kind returns
+focus to Everything else. Adding a kind retains focus during save and returns
+focus to Add a kind of work afterward.
+
+Model-cell hovers retain the planned and measured details and show the
+**Why this model?** action. These buttons do not add sequential tab stops to the list.
+
 The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
 `/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
 Use a level's returned `revision` for edits and the DELETE `revision` query
