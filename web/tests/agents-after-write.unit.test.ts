@@ -9,11 +9,16 @@ import { cancelRun, type AgentRunRow } from '../src/lib/agentRows'
 import { wired, wiredPage } from './wire-fixtures'
 import { disconnectComputer, removeComputer, type PairingView } from '../src/lib/agentPairing'
 import type { AccountCapacity, CapacitySchedule, ScheduleOverride } from '../src/lib/capacity'
+import { APIError } from '../src/lib/api'
+import { readDeskProjection } from '../src/lib/decisionDesk'
+import { clearPermissions } from '../src/lib/authz'
+import { resetPositions } from '../src/lib/position'
+import type { DeskProjection } from '../src/lib/decisionDesk'
 import { usePolledData } from '../src/lib/usePolledData'
 import { useAgents } from '../src/stores/agents'
 import { useCapacity } from '../src/stores/capacity'
 
-type Server = { accounts: AgentAccount[]; runs: AgentRunRow[]; capacity: AccountCapacity[]; schedules: ScheduleOverride[]; computers: PairingView[] }
+type Server = { accounts: AgentAccount[]; runs: AgentRunRow[]; capacity: AccountCapacity[]; schedules: ScheduleOverride[]; computers: PairingView[]; desk: DeskProjection }
 let server: Server
 let hold = false
 const held: (() => void)[] = []
@@ -31,6 +36,7 @@ vi.mock('../src/lib/agents', async importOriginal => ({
   listApprovals: async () => [], listModels: async () => [],
   listMessages: async () => ({ items: [] }), listTargets: async () => [],
 }))
+vi.mock('../src/lib/decisionDesk', () => ({ readDeskProjection: vi.fn(() => get(() => server.desk)) }))
 vi.mock('../src/lib/agentRows', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/agentRows')>(),
   listRuns: () => get(() => wiredPage(server.runs)),
@@ -57,10 +63,13 @@ const account = (id: string, state: AgentAccount['state'] = 'available') => ({ i
 const computer = (state: PairingView['computer_state']) => ({ computer_id: 'pc', request_id: 'req', computer_state: state, enrollments: [{ account_id: 'a', state: state === 'draining' ? 'draining' : 'active' }] }) as unknown as PairingView
 
 beforeEach(() => {
+  vi.mocked(readDeskProjection).mockReset()
+  vi.mocked(readDeskProjection).mockImplementation(() => get(() => server.desk))
   setActivePinia(createPinia())
   hold = false
   held.length = 0
   server = {
+    desk: { items: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: 'question', revision: 1, title: 'First canonical question', held: false, created_at: '2026-10-02T10:00:00Z', href: '/agents?needs=q:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', source: '/api/questions/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }], counts: { open: 8, held: 2, chores: 3 }, has_more: true, next_cursor: 'next', as_of: '2026-10-02T12:00:00Z' },
     accounts: [account('a'), account('b')],
     runs: [{ id: 'r', agent_principal_id: 'agent', account_id: 'a', status: 'queued', row_version: 1 } as AgentRunRow],
     // reserved_runs stands in for the capacity a queued run holds on its account.
@@ -106,6 +115,7 @@ async function writeDuringReads(write: (stores: { agents: ReturnType<typeof useA
   await Promise.all([agents.loadAll(), capacity.load(), agents.refreshAgentRuns('agent')])
   hold = true
   const old = Promise.all([agents.loadAll(), capacity.load(), agents.refreshAgentRuns('agent')])
+  // Accounts, runs, agent runs and the three capacity reads; no unused desk read.
   await vi.waitFor(() => expect(held.length).toBe(6))
   hold = false
   await write({ agents, capacity })
@@ -174,4 +184,35 @@ it('a refresh after invalidate reads again instead of joining the dropped read',
   release[0](1)
   await old
   expect(read.data.value).toBe(2)
+})
+
+it('badge counts the current panel until the complete desk cutover', async () => {
+  const { agents } = await writeDuringReads(async ({ agents }) => {
+    await agents.afterWrite()
+  })
+  expect(agents.pending).toHaveLength(0)
+  expect(agents.needsCount).toBe(0)
+  expect(agents.needsCount).toBe(agents.pending.length + agents.held.length)
+})
+
+it.each(['loadAll', 'loadNeeds', 'afterWrite'] as const)('%s never polls the unconsumed projection or marks Agents stale on its failure', async action => {
+  const projection = vi.mocked(readDeskProjection)
+  projection.mockResolvedValueOnce(server.desk).mockRejectedValue(new APIError(500, 'projection unavailable'))
+  const agents = useAgents()
+  const refresh = () => action === 'loadNeeds' ? agents.loadNeeds(true) : agents[action]()
+  await refresh()
+  await refresh()
+  expect(agents.sessionsState).toBe('ready')
+  expect(agents.approvalsState).toBe('ready')
+  expect(agents.refreshStale).toBe(false)
+  expect(projection).not.toHaveBeenCalled()
+})
+
+it.each([['access revocation', clearPermissions], ['person change', resetPositions]])('%s does not restart unused desk polling', async (_label, reset) => {
+  const agents = useAgents()
+  await agents.loadNeeds(true)
+  reset()
+  await agents.loadNeeds(true)
+  expect(agents.needsCount).toBe(agents.pending.length + agents.held.length)
+  expect(readDeskProjection).not.toHaveBeenCalled()
 })

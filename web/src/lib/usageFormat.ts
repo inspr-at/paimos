@@ -52,6 +52,12 @@ export interface AllowanceWindow {
   headroom: number | null
   hard_remaining: number | null
 }
+export interface AllowanceAccount {
+  account_id: string
+  label: string
+  harness: string
+  account_state: string
+}
 /** Tokens by component, each with the sessions that reported it (AEON-301).
  *  A missing component is left out of the sum, never counted as zero. */
 export interface TokenParts {
@@ -142,7 +148,13 @@ export interface UsageDashboard {
   trend: UsageTrend[]
   tickets: UsageTicket[]
   tickets_cost_unknown: number
-  allowance: { state: 'visible' | 'partial' | 'withheld' | 'none'; windows: AllowanceWindow[]; truncated?: boolean }
+  allowance: {
+    state: 'visible' | 'partial' | 'withheld' | 'none'
+    windows: AllowanceWindow[]
+    /** Bounded windows and account identities are incomplete, independently of privacy. */
+    truncated?: boolean
+    accounts?: AllowanceAccount[]
+  }
   ratings?: {
     votes: number
     average: string | null

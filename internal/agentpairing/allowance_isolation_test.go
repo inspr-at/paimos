@@ -132,11 +132,20 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 					continue
 				}
 				found = true
-				if !account.Available {
-					t.Fatal("verification cap blocked the regular-work launcher catalog")
+				hasProfile := false
+				for _, model := range account.Models {
+					for _, effort := range model.Efforts {
+						hasProfile = hasProfile || effort.ProfileID == e.ProfileID
+					}
+				}
+				if !hasProfile {
+					t.Fatalf("paired model profile missing from regular-work launcher catalog: %+v", account.Models)
 				}
 				if len(account.Windows) != 2 {
-					t.Fatalf("owner catalog lost ordinary windows: got %d, want 2", len(account.Windows))
+					t.Fatalf("regular-work launcher catalog has %d windows, want 2", len(account.Windows))
+				}
+				if !account.Available {
+					t.Fatalf("regular-work launcher catalog account unavailable: reasons=%v wait=%+v", account.UnavailableReasons, account.Wait)
 				}
 				for _, window := range account.Windows {
 					if window.ID == verificationWindow {

@@ -118,10 +118,10 @@ type UsageTicket struct {
 	UsageGroup
 }
 
-// AllowanceReport is pacing from registered windows, or an explicit withhold.
+// AllowanceReport is bounded pacing with explicit privacy and coverage state.
 type AllowanceReport struct {
-	Truncated bool               `json:"truncated"`
 	State     string             `json:"state"`
+	Truncated bool               `json:"truncated"`
 	Windows   []AllowanceWindow  `json:"windows"`
 	Accounts  []AllowanceAccount `json:"accounts"`
 }
@@ -746,6 +746,10 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 	ids := []string{}
 	seen := map[string]bool{}
 	for rows.Next() {
+		if len(windows) == 1024 {
+			out.Truncated = true
+			break
+		}
 		var w AllowanceWindow
 		var used int64
 		if err := rows.Scan(&w.AccountID, &w.Label, &w.Harness, &w.AccountState, &w.WindowID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {

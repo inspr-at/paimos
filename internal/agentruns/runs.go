@@ -438,13 +438,20 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if generation == nil || *generation != in.Generation {
 		return nil, workorders.Fail(409, "account daemon generation changed")
 	}
+	// Disconnect may already have released a queued run's reservations. Check
+	// enrollment authority under the pairing lock before those mutable holds so
+	// the owning daemon still gets the revocation cleanup instruction.
+	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
+		return nil, err
+	}
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
 	// A managed run's own provisional estimate can outlive its short ledger
 	// window while a vendor stop is backing off. Its current permission comes
 	// from ValidateReservedCapacity below, including the single recovery permit.
-	// Obsolete measured holds may also reach current admission, but only a
-	// recovery permit bound in this transaction can authorize their launch.
+	// Obsolete measured holds defer to that same current admission. Measurement
+	// age is not a vendor stop: only an outstanding recoverable stop needs a
+	// recovery permit. Requiring one after the stop clears strands queued holds.
 	// Manual and pairing windows retain their expiry/freshness gates.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,
  (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
@@ -469,19 +476,17 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	valid := true
 	quotaValid := true
 	active := true
-	needsRecovery := false
 	for rows.Next() {
 		var id, state string
-		var current, quotaMatches, recoverable bool
-		if err = rows.Scan(&id, &state, &quotaMatches, &current, &recoverable); err != nil {
+		var current, quotaMatches, obsoleteMeasured bool
+		if err = rows.Scan(&id, &state, &quotaMatches, &current, &obsoleteMeasured); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		count++
 		valid = valid && seen[id]
 		quotaValid = quotaValid && quotaMatches
-		active = active && state == "active" && (current || recoverable)
-		needsRecovery = needsRecovery || !current && recoverable
+		active = active && state == "active" && (current || obsoleteMeasured)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -495,9 +500,6 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return releaseObsoleteClaim(ctx, tx, p, v, "quota_pool_changed")
 		}
 		return nil, workorders.Fail(409, "reservation set mismatch")
-	}
-	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
-		return nil, err
 	}
 	if v.Status != "queued" {
 		if v.DaemonID != nil && v.Generation != nil {
@@ -513,15 +515,6 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
 		}
 		return nil, workorders.Fail(409, "reserved capacity is not eligible")
-	}
-	if needsRecovery {
-		var held bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_readiness_facts WHERE recovery_run_id=$1)`, v.ID).Scan(&held); err != nil {
-			return nil, err
-		}
-		if !held {
-			return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
-		}
 	}
 	if o.Assignee != nil && *o.Assignee != v.AgentID {
 		return nil, workorders.Fail(409, "work-order assignment changed")

@@ -161,6 +161,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdSearch("search"),
 		rt.cmdModel(),
 		rt.cmdCapacity(),
+		rt.cmdAgents(),
 		rt.cmdUse(),
 		rt.cmdOnboard(),
 		rt.cmdSession(),

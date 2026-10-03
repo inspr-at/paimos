@@ -79,8 +79,7 @@ function selectGroup(keys: string[], all: boolean) {
 function unavailableReason(key: string) {
   if (!access.registry.some(p => p.key === key && p.agent_grantable)) return 'Unavailable to agent keys'
   if (!myPermissions().has(key)) return 'Not in your permissions'
-  if (agentRole.value && !agentRole.value.permissions.includes(key)) return `Not in this agent's role (${agentRole.value.name})`
-  if (!agentRole.value) return "Not in this agent's project roles"
+  if (ceiling.value && !ceiling.value.has(key)) return agentRole.value ? `Not in this agent's role (${agentRole.value.name})` : "Not in this agent's project roles"
   return "Not in the key creator's current permissions"
 }
 function codeUnavailable(key: string): string | undefined {

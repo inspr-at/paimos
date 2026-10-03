@@ -193,14 +193,18 @@
 // Pending captures expire after five minutes from their original requested_at;
 // aliases never renew them. Polling and reports reject expired captures, new
 // keys invalidate them and request fresh work, and old keys return 409.
-// Automatic restart reports may advance daemon generation while check-bound
-// completion remains fenced. Account-local capture errors never affect peers.
+// Restart reports advance daemon generation even when carrying an old check:
+// the heartbeat commits, completion/facts are rejected with 409 stale_binding
+// and X-Aeon-Write-Committed, and the daemon refreshes pending work.
+// Account-local capture errors never affect peers.
 // Owners/registered daemons retain their own check result/controls while
 // pooled quota detail remains withheld until all resource owners share it.
 // Legacy readings and key caps use the account's canonical local membership;
 // positive key caps with unknown total balance still carry UsageUnknownReason.
 // Availability-only advice uses historical state enums. Dashboard windows and
-// harness reset details use the same current accountprivacy policy. If a
+// harness reset details use the same current accountprivacy policy. Dashboard
+// allowances consider at most 1024 windows, mark truncation explicitly, and
+// report partial when visible windows omit withheld or truncated windows. If a
 // successful mutation's response cannot be delivered safely, the error states
 // "write committed" and sets X-Aeon-Write-Committed so callers refresh first.
 //
@@ -212,8 +216,10 @@
 // An eligible unstarted reservation may acquire that permit during claim;
 // other queued holds stay intact and cannot launch during its recovery wait.
 // A managed run's own expired provisional estimate reaches current admission;
-// an obsolete measured hold also reaches admission but needs a current bound
-// recovery permit. Manual and pairing ledgers retain their expiry checks.
+// an obsolete measured hold also reaches current admission, which binds a
+// recovery permit only while a recoverable stop remains. Aging alone and a
+// cleared stop cannot strand queued holds. Manual and pairing ledgers retain
+// their expiry checks.
 // Telemetry-only denials acquire a canonical wait at claim or a fresh owner
 // check, preserving the original stop/deadline and the exact early intent.
 // Readiness evaluates the same non-mutating admission policy, including fresh
