@@ -438,7 +438,7 @@ defineExpose({ toggleHistory })
               <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
               <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ exec.kind === 'ai' ? view.harness : exec.accountLine }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
             </span>
-            <TierCell v-if="serviceTiers.state(view.session).active_tier && serviceTiers.state(view.session).active_tier !== 'default'" class="phone-tier" :session="view.session" :name="view.name" phone />
+            <TierCell class="phone-tier" :session="view.session" :name="view.name" phone />
           </span>
           <span role="cell" class="c-tier"><TierCell :session="view.session" :name="view.name" /></span>
           <span role="cell" class="c-host">
@@ -690,6 +690,10 @@ defineExpose({ toggleHistory })
   .table { --tree-step: 28px; --title-line: 18px; display: block; }
   .thead, .c-tier { display: none; }
   .phone-tier { display: inline-flex; }
+  /* Default needs the same reachable control as paid tiers. Reserve its box
+     through confirmation, price feedback and Undo so neighbours stay put. */
+  .phone-tier :deep(.tier-mark) { width: 72px; }
+  .phone-tier :deep(.price) { max-width: 44px; overflow: hidden; text-overflow: ellipsis; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
   .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }

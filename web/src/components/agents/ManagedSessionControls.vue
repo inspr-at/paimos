@@ -181,7 +181,7 @@ async function sendRequest() {
               <AppIcon name="edit" :size="16" /><span class="mi-text"><span>{{ settingNames[kind] }}</span><small>{{ currentSetting(kind) || 'Set' }}</small></span>
             </button>
           </template>
-          <slot name="more" />
+          <slot name="more" :anchor="moreAnchor" />
         </div>
         <p :id="`${uid}-limits`" class="menu-note">Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p>
       </div>

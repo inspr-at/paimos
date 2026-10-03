@@ -152,8 +152,8 @@ onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
 const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
 const quick = computed(() => !!props.view && quickRemoval(props.view))
-function pickTier() {
-  const view = props.view, anchor = root.value?.querySelector<HTMLElement>('[aria-label="More session actions"]')
+function pickTier(anchor: HTMLElement | null) {
+  const view = props.view
   if (view && anchor) serviceTiers.open(view.session, view.name, anchor)
 }
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
@@ -189,8 +189,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
       <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
-        <template v-if="compactControls" #more>
-          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
+        <template v-if="compactControls" #more="{ anchor }">
+          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier(anchor)"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
