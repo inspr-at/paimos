@@ -166,16 +166,16 @@ func TestHeartbeatReportsOnlyAppliedRequests(t *testing.T) {
 			}
 			for i, beat := range beats {
 				if outcome == "applied" {
-					if beat.body["model"] != "fixture-model" || beat.body["reasoning_effort"] != "high" {
+					if i == 0 && (beat.body["model"] != "fixture-model" || beat.body["reasoning_effort"] != "high") {
 						t.Fatal("applied model was overwritten by flags")
 					}
 					if i == 0 && beat.body["display_label"] != rename.Payload.DisplayLabel {
 						t.Fatal("applied rename not sent")
 					}
-					if i == 1 && beat.body["display_label"] != nil {
+					if i == 1 && (beat.body["display_label"] != nil || beat.body["model"] != nil || beat.body["reasoning_effort"] != nil) {
 						t.Fatal("stale local name reverted applied rename")
 					}
-				} else if beat.body["model"] != "original-model" || beat.body["reasoning_effort"] != "low" || beat.body["display_label"] != nil {
+				} else if beat.body["model"] != nil || beat.body["reasoning_effort"] != nil || beat.body["display_label"] != nil {
 					t.Fatal("unapplied request changed metadata")
 				}
 			}

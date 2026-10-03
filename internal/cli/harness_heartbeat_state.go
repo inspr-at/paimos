@@ -20,6 +20,9 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	ModelSent             bool                    `json:"model_sent,omitempty"`
+	SentModel             string                  `json:"sent_model,omitempty"`
+	SentEffort            string                  `json:"sent_effort,omitempty"`
 	ActivityMode          string                  `json:"agent_activity_mode,omitempty"`
 	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
