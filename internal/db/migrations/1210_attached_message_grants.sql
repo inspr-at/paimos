@@ -25,12 +25,12 @@ CREATE POLICY tenant_isolation ON attached_message_grants
  WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 -- Counters live on existing authority records, never a second inbox/queue.
 ALTER TABLE harness_attach_requests ADD COLUMN message_tokens double precision NOT NULL DEFAULT 3,
- ADD COLUMN message_tokens_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ ADD COLUMN message_tokens_at timestamptz NOT NULL DEFAULT 'epoch'::timestamptz,
  ADD COLUMN message_notice_tokens double precision NOT NULL DEFAULT 3,
- ADD COLUMN message_notice_tokens_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ ADD COLUMN message_notice_tokens_at timestamptz NOT NULL DEFAULT 'epoch'::timestamptz,
  ADD COLUMN message_notice_at timestamptz,
  ADD COLUMN message_notice_count integer NOT NULL DEFAULT 0 CHECK(message_notice_count BETWEEN 0 AND 255);
-ALTER TABLE agent_pairing_computers ADD COLUMN message_window_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ALTER TABLE agent_pairing_computers ADD COLUMN message_window_at timestamptz NOT NULL DEFAULT 'epoch'::timestamptz,
  ADD COLUMN message_window_count integer NOT NULL DEFAULT 0,
- ADD COLUMN message_notice_window_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ ADD COLUMN message_notice_window_at timestamptz NOT NULL DEFAULT 'epoch'::timestamptz,
  ADD COLUMN message_notice_window_count integer NOT NULL DEFAULT 0;

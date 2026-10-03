@@ -193,7 +193,7 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			return err
 		}
 		var priorDigest string
-		err := tx.QueryRow(ctx, `SELECT request_digest FROM inbox_compat_messages WHERE project_id=$1::uuid AND sender_principal_id=$2::uuid AND key_digest=$3`, project, p.ID, key).Scan(&priorDigest)
+		err = tx.QueryRow(ctx, `SELECT request_digest FROM inbox_compat_messages WHERE project_id=$1::uuid AND sender_principal_id=$2::uuid AND key_digest=$3`, project, p.ID, key).Scan(&priorDigest)
 		if err == nil {
 			if priorDigest != digest {
 				return errConflict
