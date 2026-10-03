@@ -28,6 +28,12 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const moreError = ref('')
   const facets = ref<Facets>({})
   const dimensionFacets = ref<Partial<Record<Dimension, Record<string, number>>>>({})
+  const releaseNames = ref<Record<string, string>>({})
+  const facetErrors = reactive<Record<string, string>>({})
+  let labelsProject: string | null = null
+  function learnLabels(page: ListPage) {
+    releaseNames.value = { ...releaseNames.value, ...page.facet_labels?.ships_in }
+  }
   const names = reactive(new Map<string, string>())
   // Label colours seen on loaded rows (tag facets carry names only).
   const colors = reactive(new Map<string, string>())
@@ -80,19 +86,24 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   async function load(options: { pageSize?: number } = {}) {
     const within = projectId.value
     if (!within) return
+    if (labelsProject !== within) { releaseNames.value = {}; labelsProject = within }
+    delete facetErrors.ships_in
     pageSize = options.pageSize ?? 200
     const request = ++generation
     const current = filters.value
     loading.value = true; loadingMore.value = false; error.value = ''; moreError.value = ''
     extraFacets.value = {}
-    const extras = activeDimensions(current).filter(dimension => facetOf(dimension)).map(async dimension => {
+    const countedDimensions = activeDimensions(current).filter(dimension => facetOf(dimension))
+    const extras = countedDimensions.map(async dimension => {
       const facet = facetOf(dimension)!
       const page = await fetchList(apiParams(within, current, { omit: dimension, facets: [facet], limit: 1 }))
+      if (request === generation) learnLabels(page)
       return [dimension, page.facets?.[facet] ?? {}] as const
     })
     try {
       const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
       if (!page) return
+      learnLabels(page)
       learn(page.items)
       const read = take(page.items, sent)
       rows.value = read.rows
@@ -108,6 +119,9 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     }
     const settled = await Promise.allSettled(extras)
     if (request !== generation) return
+    for (let index = 0; index < settled.length; index++) {
+      if (settled[index].status === 'rejected' && countedDimensions[index] === 'ships_in') facetErrors.ships_in = 'Release counts could not be loaded. Try again.'
+    }
     dimensionFacets.value = Object.fromEntries(settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
   }
 
@@ -165,9 +179,11 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const request = generation
     const key = `${request}:${facet}`
     if (asked.has(key)) return asked.get(key)!
-    const run = fetchList(apiParams(within, filters.value, { facets: [facet], limit: 1 }))
-      .then(page => { if (request === generation) extraFacets.value = { ...extraFacets.value, [facet]: page.facets?.[facet] ?? {} } })
-      .catch(() => { /* the menu shows what the loaded rows have */ })
+    delete facetErrors[facet]
+    const run = fetchList(apiParams(within, filters.value, { omit: facet === 'ships_in' ? 'ships_in' : undefined, facets: [facet], limit: 1 }))
+      .then(page => { if (request === generation) { learnLabels(page); extraFacets.value = { ...extraFacets.value, [facet]: page.facets?.[facet] ?? {} } } })
+      .catch(() => { if (request === generation && facet === 'ships_in') facetErrors[facet] = 'Release counts could not be loaded. Try again.' })
+      .finally(() => { asked.delete(key) })
     asked.set(key, run)
     return run
   }
@@ -338,5 +354,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state]) state[row.state]--
   }
 
-  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
+  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, releaseNames, facetErrors, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

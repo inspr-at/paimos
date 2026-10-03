@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -50,6 +52,13 @@ type listEpic struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 }
+type listDeliveryOrder struct {
+	ReleaseID   *string `json:"release_id"`
+	ReleaseRank *string `json:"release_rank"`
+	Rank        *string `json:"rank"`
+	Expedite    bool    `json:"expedite"`
+}
+
 type listItem struct {
 	nodeJSON
 	KindSlug      string       `json:"kind_slug"`
@@ -67,7 +76,8 @@ type listItem struct {
 	LeadWorker *leadWorker `json:"lead_worker,omitempty"`
 	// Planning is the resolved model, tokens and (with harness.read) cost of a
 	// ticket, task or epic (AEON-329). Absent when there is nothing to show.
-	Planning *planningView `json:"planning,omitempty"`
+	Planning      *planningView      `json:"planning,omitempty"`
+	DeliveryOrder *listDeliveryOrder `json:"delivery_order,omitempty"`
 }
 
 // leadWorker is one bound live session, chosen by the server.
@@ -76,9 +86,10 @@ type leadWorker struct {
 	Key  string `json:"key"`
 }
 type nodePage struct {
-	Items      []listItem                `json:"items"`
-	NextCursor *string                   `json:"next_cursor"`
-	Facets     map[string]map[string]int `json:"facets,omitempty"`
+	Items       []listItem                   `json:"items"`
+	NextCursor  *string                      `json:"next_cursor"`
+	Facets      map[string]map[string]int    `json:"facets,omitempty"`
+	FacetLabels map[string]map[string]string `json:"facet_labels,omitempty"`
 }
 type treeEntry struct {
 	Node  nodeJSON `json:"node"`
@@ -121,6 +132,8 @@ type listQuery struct {
 	CostUnitsNot   []string `json:"cost_units_not,omitempty"`
 	Releases       []string `json:"releases,omitempty"`
 	ReleasesNot    []string `json:"releases_not,omitempty"`
+	ShipsIn        []string `json:"ships_in,omitempty"`
+	ShipsInNot     []string `json:"ships_in_not,omitempty"`
 	HumanChecks    []string `json:"human_checks,omitempty"`
 	HumanChecksNot []string `json:"human_checks_not,omitempty"`
 	// Epics match everything below an epic (its subtree, not the epic itself);
@@ -159,8 +172,8 @@ type treeQuery struct {
 // maxListIDs bounds the ids filter: one live refetch covers at most a page.
 const maxListIDs = 200
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "order": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
+var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "ships_in": true, "human_check": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -285,6 +298,17 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		return out, err
 	}
 	if out.Releases, out.ReleasesNot, err = negatedList(r, "release", label); err != nil {
+		return out, err
+	}
+	// Count raw inputs before splitting/deduplicating them or querying placements.
+	shipsCount := 0
+	for _, raw := range v["ships_in"] {
+		shipsCount += strings.Count(raw, ",") + 1
+		if len(raw) > 6400 || shipsCount > 100 {
+			return out, badRequest("ships_in lists at most 100 values")
+		}
+	}
+	if out.ShipsIn, out.ShipsInNot, err = negatedList(r, "ships_in", personOrNone); err != nil {
 		return out, err
 	}
 	if out.HumanChecks, out.HumanChecksNot, err = negatedList(r, "human_check", func(value string) (string, bool) { return value, value == "pending" || value == "none" }); err != nil {
@@ -511,11 +535,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		for rows.Next() {
 			var item listItem
 			var fields, position string
+			var placement []byte
 			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
 			var assigneeAvatar bool
 			var leadName, leadKey *string
 			var listSpent, listEst, paidSpent, paidEst *string
 			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.HumanCheck, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
+			dest = append(dest, &placement)
 			if money != nil {
 				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
 			}
@@ -523,6 +549,12 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				rows.Close()
 				return err
+			}
+			if len(placement) > 0 {
+				if err := json.Unmarshal(placement, &item.DeliveryOrder); err != nil {
+					rows.Close()
+					return err
+				}
 			}
 			if money != nil {
 				parsed, err := planMicrosFromText(listSpent, listEst, paidSpent, paidEst)
@@ -583,11 +615,21 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for rows.Next() {
 				var name, value string
 				var count int
-				if err = rows.Scan(&name, &value, &count); err != nil {
+				var label *string
+				if err = rows.Scan(&name, &value, &count, &label); err != nil {
 					rows.Close()
 					return err
 				}
 				page.Facets[name][value] = count
+				if label != nil {
+					if page.FacetLabels == nil {
+						page.FacetLabels = map[string]map[string]string{}
+					}
+					if page.FacetLabels[name] == nil {
+						page.FacetLabels[name] = map[string]string{}
+					}
+					page.FacetLabels[name][value] = *label
+				}
 			}
 			err = rows.Err()
 			rows.Close()
@@ -978,6 +1020,15 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	add(q.CostUnitsNot, not(labelMatch("cost_unit")))
 	add(q.Releases, labelMatch("release"))
 	add(q.ReleasesNot, not(labelMatch("release")))
+	shipsMatch := func(values []string) string {
+		return `coalesce(place.release_node_id::text,'none')=ANY(` + arg(values) + `::text[])`
+	}
+	if len(q.ShipsIn)+len(q.ShipsInNot) > 0 {
+		// No effective placement in journey mode: it must not look like backlog.
+		conditions += "\n        AND place.project_node_id IS NOT NULL"
+		add(q.ShipsIn, shipsMatch)
+		add(q.ShipsInNot, not(shipsMatch))
+	}
 	checkMatch := func(values []string) string {
 		return `(CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END)=ANY(` + arg(values) + `::text[])`
 	}
@@ -1073,6 +1124,15 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
             coalesce(n.fields->>'priority','') AS priority_raw,`
 	}
+	deliveryJoin, deliveryProjection := "", "NULL::jsonb AS delivery_order,"
+	if wantsDelivery(q) {
+		deliveryJoin = ` LEFT JOIN ` + delivery.Effective + ` place ON place.tenant_id=n.tenant_id AND place.project_node_id=n.project_id AND place.item_node_id=n.id `
+		deliveryProjection = `CASE WHEN place.project_node_id IS NOT NULL THEN jsonb_build_object('release_id',place.release_node_id,'release_rank',place.release_rank,'rank',place.rank,'expedite',place.expedite) END AS delivery_order,`
+		if sortFields {
+			deliveryProjection += `place.project_node_id AS delivery_project_id,place.expedite AS delivery_expedite,place.release_rank AS delivery_release_rank,place.rank AS delivery_rank,`
+		}
+	}
+	projection += deliveryProjection
 	// Hide closed uses the same buckets as the project counts. Until the filter
 	// is on, the predicate stays the previous literal so an unfiltered list
 	// keeps its plan.
@@ -1093,7 +1153,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
     )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
-            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + `
+            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + deliveryJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
@@ -1119,6 +1179,14 @@ func listOrder(q listQuery) string {
 			dir = "DESC"
 		}
 		switch key.Name {
+		case "order":
+			// All readers share delivery.Effective: release rows before backlog,
+			// ranked backlog before tail; completed/cancelled flags are ignored.
+			parts = append(parts,
+				`CASE WHEN f.delivery_project_id IS NOT NULL THEN CASE WHEN f.delivery_expedite THEN -1 ELSE 0 END ELSE CASE f.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END END `+dir,
+				`f.delivery_release_rank COLLATE "C" `+dir+` NULLS LAST`,
+				`f.delivery_rank COLLATE "C" `+dir+` NULLS LAST`,
+				`f.created_at `+dir, `f.id `+dir)
 		case "key":
 			parts = append(parts, `regexp_replace(f.key,'-[0-9]+$','') `+dir, `substring(f.key from '-([0-9]+)$')::numeric `+dir)
 		case "state":
@@ -1158,6 +1226,9 @@ func listOrder(q listQuery) string {
 		}
 	}
 	return strings.Join(append(parts, "f.id ASC"), ",")
+}
+func wantsDelivery(q listQuery) bool {
+	return sortsBy(q, "order") || len(q.ShipsIn)+len(q.ShipsInNot) > 0 || slices.Contains(q.FacetNames, "ships_in")
 }
 func sortsBy(q listQuery, name string) bool {
 	for _, key := range q.Sort {
@@ -1227,7 +1298,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if sortsBy(q, "estimate") {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
 	}
-	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
+	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn,f.delivery_order` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
@@ -1241,7 +1312,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            par.id::text,par.key,par.title,pk.slug,
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
-           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + `
+           epic.id::text,epic.key,epic.title,` + leadColumns + `,s.delivery_order` + moneyCols + `
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
@@ -1299,12 +1370,22 @@ func facetSQL(q listQuery) (string, []any) {
 		extra += `
     UNION ALL SELECT 'release',coalesce(nullif(` + labelSQL("release") + `,''),'none') FROM filtered f JOIN nodes n ON n.id=f.id`
 	}
+	if want("ships_in") {
+		extra += `
+    UNION ALL SELECT 'ships_in',coalesce(f.delivery_order->>'release_id','none') FROM filtered f WHERE f.delivery_order IS NOT NULL`
+	}
+	labelColumn, labelJoin := "NULL::text", ""
+	if want("ships_in") {
+		labelColumn = "label.title"
+		labelJoin = ` LEFT JOIN nodes label ON c.name='ships_in' AND label.tenant_id=current_setting('aeon.tenant_id')::uuid AND label.id::text=c.value AND label.deleted_at IS NULL`
+	}
 	sql := prefix + `, facet_values AS (
     SELECT 'state' AS name,f.state AS value FROM filtered f
     UNION ALL SELECT 'kind',f.kind_slug FROM filtered f
     UNION ALL SELECT 'priority',f.priority FROM filtered f
     UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
-    ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY(` + names + `::text[]) GROUP BY name,value`
+    ) , counted AS (SELECT name,value,count(*)::int AS count FROM facet_values WHERE name=ANY(` + names + `::text[]) GROUP BY name,value)
+    SELECT c.name,c.value,c.count,` + labelColumn + ` FROM counted c` + labelJoin
 	return sql, args
 }
 

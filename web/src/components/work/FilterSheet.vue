@@ -8,7 +8,7 @@ import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
 
 // Phones: every filter in one sheet, and grouping; the same state as the toolbar.
-const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; view?: 'list' | 'outline' | 'graph'; canSave?: boolean }>(), { view: 'list' })
+const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; facetErrors?: Record<string, string>; view?: 'list' | 'outline' | 'graph'; canSave?: boolean }>(), { view: 'list' })
 const emit = defineEmits<{
   toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
@@ -77,6 +77,7 @@ defineExpose({ open, close })
             :dimension="dimension.key" :options="options(dimension.key)" :selected="filters[dimension.key]"
             @toggle="value => emit('toggle', dimension.key, value)" @exclude="value => emit('exclude', dimension.key, value)"
           />
+          <p v-if="facetErrors?.[dimension.key]" role="alert">{{ facetErrors[dimension.key] }}</p>
         </section>
         <section v-if="view !== 'graph'" class="sheet-section">
           <p class="eyebrow">Date</p>

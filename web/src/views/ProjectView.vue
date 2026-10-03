@@ -399,25 +399,25 @@ function options(dimension: Dimension) {
     }
     return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
   }
-  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, releases: list.releaseNames.value })
   return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
-  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value })
+  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, releases: list.releaseNames.value })
 }
 // What a menu needs before it opens: names, label counts or the project's epics.
 const facetLoading = ref(false)
 function needOptions(dimension: Dimension) {
   if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
   if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
-  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check' : null
-  if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
+  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'ships_in' ? 'ships_in' : dimension === 'human_check' ? 'human_check' : null
+  if (facet && (!filters.value[dimension].length || list.facetErrors[facet])) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
 }
 function sheetOpened() {
   if (graphActive.value) return
   void list.resolveNames(options('assignee').map(o => o.value))
   void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release', 'human_check']) void list.requestFacet(facet)
+  for (const facet of ['tag', 'cost_unit', 'release', 'ships_in', 'human_check']) void list.requestFacet(facet)
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -1621,7 +1621,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
-          :facet-loading="facetLoading"
+          :facet-loading="facetLoading" :facet-errors="list.facetErrors"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
@@ -1711,7 +1711,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        ref="filterSheet" :filters="filters" :options="options" :facet-errors="list.facetErrors" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"

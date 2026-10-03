@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -52,6 +53,12 @@ func TestListDeliveryQueryValidation(t *testing.T) {
 	if _, err := parseListQuery(httptest.NewRequest("GET", "/api/nodes?ships_in="+strings.Join(values, ","), nil)); err == nil || !strings.Contains(err.Error(), "at most 100") {
 		t.Fatalf("101 placements: %v", err)
 	}
+	for _, query := range []string{"ships_in=" + strings.TrimSuffix(strings.Repeat(id+",", 101), ","), "ships_in=" + strings.Join(values[:60], ",") + "&ships_in=" + strings.Join(values[60:], ",")} {
+		if _, err := parseListQuery(httptest.NewRequest("GET", "/api/nodes?"+query, nil)); err == nil || !strings.Contains(err.Error(), "at most 100") {
+			t.Errorf("raw bound not enforced: %v", err)
+		}
+	}
+
 }
 
 func TestListDeliveryOrderFilterFacetAndPaging(t *testing.T) {
@@ -177,6 +184,37 @@ func TestListDeliveryOrderFilterFacetAndPaging(t *testing.T) {
 		all := read(t, "PR-1", "facets=ships_in,release&sort=order&limit=1")
 		if len(all.Facets["ships_in"]) != 3 || all.Facets["ships_in"]["none"] != 3 || all.Facets["ships_in"][ids["REL-2"]] != 1 {
 			t.Fatalf("all memberships: %+v", all.Facets)
+		}
+	})
+
+	t.Run("filter independent of sort and facet", func(t *testing.T) {
+		expectKeys(t, read(t, "PR-1", "ships_in="+ids["REL-2"]+"&sort=key"), "TK-3")
+		status, body := call(t, &p, "GET", "/api/nodes?within="+ids["PR-1"]+"&kind=epic,task&ships_in="+ids["REL-2"]+"&sort=order&facets=ships_in", "")
+		page := decode[deliveryListPage](t, status, body, http.StatusOK)
+		expectKeys(t, page, "EP-1", "TS-1")
+		if page.Facets["ships_in"][ids["REL-2"]] != 2 {
+			t.Fatal("facet must honor item kinds")
+		}
+	})
+	t.Run("project-scoped reader cannot observe hidden release IDs or labels", func(t *testing.T) {
+		guest := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Person, Name: "Guest"}
+		if err := testDB.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Guest') RETURNING id::text`, p.TenantID).Scan(&guest.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, p.TenantID, guest.ID, ids["PR-2"]); err != nil {
+			t.Fatal(err)
+		}
+		status, body := call(t, &guest, "GET", "/api/nodes?kind=ticket&sort=order&facets=ships_in", "")
+		page := decode[deliveryListPage](t, status, body, http.StatusOK)
+		expectKeys(t, page, "TK-9")
+		if len(page.Facets["ships_in"]) != 1 || page.Facets["ships_in"]["none"] != 1 || len(page.Labels) != 0 || strings.Contains(string(body), ids["REL-1"]) || strings.Contains(string(body), "Same release title") {
+			t.Fatalf("hidden membership leaked: %s", body)
+		}
+		status, body = call(t, &guest, "GET", "/api/nodes?kind=ticket&ships_in="+ids["REL-1"]+"&sort=order&facets=ships_in", "")
+		page = decode[deliveryListPage](t, status, body, http.StatusOK)
+		expectKeys(t, page)
+		if len(page.Facets["ships_in"]) != 0 || len(page.Labels) != 0 {
+			t.Fatal("hidden filter must disclose no facets")
 		}
 	})
 	t.Run("cursor retains ordering and is bound to ships_in", func(t *testing.T) {

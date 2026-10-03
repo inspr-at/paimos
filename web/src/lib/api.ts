@@ -199,6 +199,7 @@ export interface ListPerson { id: string; name: string; has_avatar?: boolean }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
 export interface ListProject { id: string; key: string; title: string }
 export interface LeadWorker { name: string; key: string }
+export interface DeliveryOrder { release_id: string | null; release_rank: string | null; rank: string | null; expedite: boolean }
 export interface ListItem extends WorkNode {
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
@@ -209,13 +210,14 @@ export interface ListItem extends WorkNode {
   lead_worker?: LeadWorker | null
   // Model, tokens and (with harness.read) cost for the planning columns (AEON-329).
   planning?: TicketPlanning
+  delivery_order?: DeliveryOrder
 }
 export type Facets = Record<string, Record<string, number>>
-export interface ListPage extends Page<ListItem> { facets?: Facets }
+export interface ListPage extends Page<ListItem> { facets?: Facets; facet_labels?: Record<string, Record<string, string>> }
 export interface ListQuery {
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
-  tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
+  tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]; ships_in?: string[]
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
   // Only these nodes (at most 200), every other filter still applied (AEON-326).
