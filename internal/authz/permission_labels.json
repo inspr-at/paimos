@@ -1,5 +1,6 @@
 {
   "resources": {
+    "recurrences": "recurring work",
     "questions": "questions",
     "nodes": "work",
     "comments": "comments",
@@ -60,6 +61,7 @@
     "create": "Create"
   },
   "special": {
+    "agents.plan.read": "See their agent start plan",
     "harness.watch": "View live conversations"
   }
 }
