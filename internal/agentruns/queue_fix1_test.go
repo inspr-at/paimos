@@ -23,8 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Pause the review after its pairing lock, before workorders.Create takes the
-// tree lock. The queue mutation must wait for pairing without holding the tree.
+// Pause the review after its tenant and pairing locks, before workorders.Create
+// takes the tree lock. The queue must wait on tenant without holding the tree.
 type reviewLockPause struct {
 	first  atomic.Bool
 	locked chan uint32
@@ -88,11 +88,16 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 	}
 	queueDone := make(chan int, 1)
 	go func() {
-		queueDone <- f.request(f.person, "POST", "/api/queue", `{"node_id":"`+queueTicket+`"}`, "").Code
+		r := httpRequest(ctx, f.person, "POST", "/api/queue", `{"node_id":"`+queueTicket+`"}`)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		queueDone <- w.Code
 	}()
 	for {
 		var waiting bool
-		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks held JOIN pg_locks waiting USING(locktype,database,classid,objid,objsubid) WHERE held.pid=$1 AND held.locktype='advisory' AND held.granted AND NOT waiting.granted)`, pid).Scan(&waiting)
+		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+ WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) AND query=$2)`, pid,
+			`SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,9 +106,28 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("queue did not wait for pairing lock")
-		case <-time.After(10 * time.Millisecond):
+			t.Fatal("queue did not wait for tenant lock")
+		case code := <-queueDone:
+			t.Fatalf("queue crossed held tenant fence: %d", code)
+		default:
 		}
+	}
+	// Prove that neither blocked writer holds the tree, independently of the
+	// expected tenant barrier. A misplaced tree acquisition would deadlock.
+	treeProbe, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer treeProbe.Rollback(context.Background())
+	var treeFree bool
+	if err := treeProbe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, f.person.TenantID).Scan(&treeFree); err != nil {
+		t.Fatal(err)
+	}
+	if !treeFree {
+		t.Fatal("tenant waiter already holds tree lock")
+	}
+	if err := treeProbe.Rollback(ctx); err != nil {
+		t.Fatal(err)
 	}
 	close(pause.resume)
 	for _, result := range []struct {
