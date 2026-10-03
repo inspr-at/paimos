@@ -79,7 +79,7 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 		return n
 	}
 	beforeDesignation := count("agent_key.owner_workstation_changed")
-	beforeRoles := count("role.created")
+	beforeRoles := count("authz.role_created")
 	beforeReported := count("agent_pairing.reported")
 	beforeDisconnected := count("agent_pairing.disconnected")
 
@@ -234,7 +234,7 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 		wantDisconnected++
 	}
 	for kind, want := range map[string]int{
-		"agent_key.owner_workstation_changed": wantDesignation, "role.created": wantRoles,
+		"agent_key.owner_workstation_changed": wantDesignation, "authz.role_created": wantRoles,
 		"agent_pairing.reported": wantReported, "agent_pairing.disconnected": wantDisconnected,
 	} {
 		if got := count(kind); got != want {
