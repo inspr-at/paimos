@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
@@ -70,7 +71,10 @@ func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, err
 		       n.fields,
 		       CASE WHEN jsonb_typeof(n.fields->'tags') = 'array' THEN n.fields->'tags' ELSE '[]'::jsonb END,
 		       (
-		         SELECT r.number
+		         SELECT assigned.sequence FROM (
+ SELECT pr.sequence FROM `+delivery.Effective+` placed JOIN project_releases pr ON pr.tenant_id=placed.tenant_id AND pr.release_node_id=placed.release_node_id WHERE placed.tenant_id=n.tenant_id AND placed.item_node_id=n.id AND pr.visibility='published' AND pr.sequence BETWEEN 1 AND 9999
+ UNION ALL
+ SELECT r.number AS sequence
 		         FROM journey_tickets jt
 		         JOIN journey_releases r
 		           ON r.tenant_id = jt.tenant_id
@@ -82,7 +86,8 @@ func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, err
 		         WHERE jt.tenant_id = n.tenant_id
 		           AND jt.ticket_node_id = n.id
 		           AND jt.project_node_id = n.project_id
-		         ORDER BY r.number
+		         AND NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.tenant_id=n.tenant_id AND d.project_node_id=n.project_id)
+ ) assigned ORDER BY assigned.sequence
 		         LIMIT 1
 		       ),
 		       CASE jsonb_typeof(n.fields->'release')

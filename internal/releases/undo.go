@@ -30,6 +30,9 @@ func undoMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
 		return events.Change{}, err
 	}
+	if err := requireJourneyMode(ctx, tx, before.ProjectID); err != nil {
+		return events.Change{}, &legacyUndoConflict{}
+	}
 	var current *string
 	var projectRevision int64
 	if err := tx.QueryRow(ctx, `SELECT current_release_node_id::text,revision FROM journey_projects WHERE project_node_id=$1 FOR UPDATE`, before.ProjectID).Scan(&current, &projectRevision); err != nil {
@@ -106,3 +109,9 @@ func sameRelease(a, b *string) bool {
 	}
 	return *a == *b
 }
+
+type legacyUndoConflict struct{}
+
+func (*legacyUndoConflict) Error() string          { return "This project plans with releases" }
+func (*legacyUndoConflict) Unwrap() error          { return events.ErrConflict }
+func (*legacyUndoConflict) ConflictReason() string { return "This project plans with releases" }

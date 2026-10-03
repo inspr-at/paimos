@@ -85,6 +85,9 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 		if authz.RequireTx(r.Context(), tx, p, "releases.read", authz.Scope{ProjectID: project}) != nil {
 			return fail(403, "project access required")
 		}
+		if err := requireJourneyMode(r.Context(), tx, r.PathValue("projectId")); err != nil {
+			return err
+		}
 		var state string
 		if err := tx.QueryRow(r.Context(), `SELECT r.state,r.revision FROM journey_releases r JOIN journey_projects j ON j.tenant_id=r.tenant_id AND j.project_node_id=r.project_node_id JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id JOIN nodes pn ON pn.tenant_id=r.tenant_id AND pn.id=r.project_node_id WHERE r.project_node_id=$1 AND r.release_node_id=$2 AND j.current_release_node_id=r.release_node_id AND rn.deleted_at IS NULL AND pn.deleted_at IS NULL`, project, release).Scan(&state, &out.Revision); err != nil {
 			return err
@@ -175,6 +178,9 @@ func (m *module) addMembership(w http.ResponseWriter, r *http.Request) {
 func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, in membershipInput) (membershipResult, error) {
 	var result membershipResult
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+		return result, err
+	}
+	if err := requireJourneyMode(ctx, tx, project); err != nil {
 		return result, err
 	}
 	var person bool

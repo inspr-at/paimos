@@ -37,14 +37,15 @@ type journeyMembership struct {
 }
 
 type projectMoveSnapshot struct {
-	Node    nodeJSON           `json:"node"`
-	Journey *journeyMembership `json:"journey,omitempty"`
+	Node    nodeJSON            `json:"node"`
+	Journey *journeyMembership  `json:"journey,omitempty"`
+	ShipsIn []shipsMoveSnapshot `json:"ships_in_before_move,omitempty"`
 }
 
 func loadJourneyMembership(ctx context.Context, tx pgx.Tx, id string) (*journeyMembership, error) {
 	var m journeyMembership
 	err := tx.QueryRow(ctx, `SELECT project_node_id::text,feature_node_id::text,release_node_id::text,walker_position,source,scope_revision_required,access_change,estimated_hours::text
-	 FROM journey_tickets WHERE ticket_node_id=$1::uuid FOR UPDATE`, id).
+	 FROM journey_tickets WHERE ticket_node_id=$1::uuid AND NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.project_node_id=journey_tickets.project_node_id) FOR UPDATE`, id).
 		Scan(&m.ProjectID, &m.FeatureID, &m.ReleaseID, &m.WalkerPosition, &m.Source, &m.ScopeRevisionRequired, &m.AccessChange, &m.EstimatedHours)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -129,6 +130,9 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
+		if err := refuseReleaseNode(ctx, tx, id); err != nil {
+			return err
+		}
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
@@ -182,6 +186,10 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if err != nil {
 			return err
 		}
+		shipsBefore, err := shipsInBeforeMove(ctx, tx, id, &projectID)
+		if err != nil {
+			return err
+		}
 		var newKey string
 		if err := tx.QueryRow(ctx, `SELECT aeon_next_node_key(current_setting('aeon.tenant_id')::uuid,$1)`, prefix).Scan(&newKey); err != nil {
 			return dbErr("allocate node key", err)
@@ -204,10 +212,13 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 			return err
 		}
 		if err := m.record(ctx, tx, p.ID, &id, evNodeProjectMoved,
-			projectMoveSnapshot{Node: current, Journey: beforeJourney}, projectMoveSnapshot{Node: moved, Journey: afterJourney}); err != nil {
+			projectMoveSnapshot{Node: current, Journey: beforeJourney, ShipsIn: shipsBefore}, projectMoveSnapshot{Node: moved, Journey: afterJourney}); err != nil {
 			return err
 		}
 		result = projectMoveResult{IssueID: id, OldKey: current.Key, NewKey: newKey, ProjectID: projectID, Detached: []string{}, Notes: []string{}}
+		if len(shipsBefore) > 0 {
+			result.Notes = append(result.Notes, "Backlog rank was removed; Undo returns the item to its original project tail.")
+		}
 		if current.ParentID != nil && *current.ParentID != sourceProject {
 			result.Detached = append(result.Detached, "parent")
 		}

@@ -46,6 +46,7 @@ import (
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/decisiondesk"
+	"github.com/inspr-at/paimos/internal/deliveryadoption"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
@@ -413,6 +414,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)
 	}
+	adoptionWorker, err := deliveryadoption.FromEnvironment(ctx, pool, cfg.PublicURL)
+	if err != nil {
+		closeListener()
+		return fmt.Errorf("delivery adoption: %w", err)
+	}
+
 	if ln == nil {
 		listened, lerr := net.Listen("tcp", cfg.Addr)
 		if lerr != nil {
@@ -429,6 +436,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	errCh := make(chan error, 1)
 	go func() {
 		api.SetServing(true)
+		go adoptionWorker.Run(ctx)
 		err := srv.Serve(ln)
 		api.SetServing(false)
 		if errors.Is(err, http.ErrServerClosed) {

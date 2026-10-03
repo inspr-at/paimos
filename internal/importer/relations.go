@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -145,6 +146,13 @@ func applyReleaseMembership(ctx context.Context, tx pgx.Tx, tenantID, actor stri
 	}
 	if projectID == "" {
 		return 0, nil
+	}
+	adopted, err := delivery.ReleasesMode(ctx, tx, projectID)
+	if err != nil {
+		return 0, err
+	}
+	if adopted {
+		return 0, errReleasesModeSkipped
 	}
 	wrote := 0
 	projectWrote, err := ensureJourneyProject(ctx, tx, tenantID, projectID)
@@ -320,3 +328,5 @@ func linkTicketRelease(ctx context.Context, tx pgx.Tx, tenantID, projectID, tick
 	}
 	return 1, nil
 }
+
+var errReleasesModeSkipped = errors.New("This project plans with releases")

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -112,7 +113,9 @@ func loadTicketGraph(ctx context.Context, tx pgx.Tx, tenantID, projectID string,
  LEFT JOIN node_kinds parent_kind ON parent_kind.tenant_id=parent_node.tenant_id AND parent_kind.id=parent_node.kind_id
    AND parent_kind.slug IN ('ticket','epic')
  LEFT JOIN journey_tickets jt ON jt.tenant_id=n.tenant_id AND jt.ticket_node_id=n.id AND jt.project_node_id=$2::uuid
- LEFT JOIN nodes release_node ON release_node.tenant_id=n.tenant_id AND release_node.id=jt.release_node_id AND release_node.deleted_at IS NULL
+ LEFT JOIN `+delivery.Effective+` placed ON placed.tenant_id=n.tenant_id AND placed.item_node_id=n.id
+ LEFT JOIN project_delivery delivery_mode ON delivery_mode.tenant_id=n.tenant_id AND delivery_mode.project_node_id=n.project_id
+ LEFT JOIN nodes release_node ON release_node.tenant_id=n.tenant_id AND release_node.id=CASE WHEN delivery_mode.project_node_id IS NULL THEN jt.release_node_id ELSE placed.release_node_id END AND release_node.deleted_at IS NULL
  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND n.project_id=$2::uuid
    AND k.slug IN ('ticket','epic')
    AND ($3::bool OR (`+ticketGraphCategorySQL+`) <> 'done')

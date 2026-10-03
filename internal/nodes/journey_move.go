@@ -26,6 +26,7 @@ type journeyTicketSnapshot struct {
 type movedNodeSnapshot struct {
 	nodeJSON
 	JourneyTickets []journeyTicketSnapshot `json:"journey_tickets,omitempty"`
+	ShipsIn        []shipsMoveSnapshot     `json:"ships_in_before_move,omitempty"`
 }
 
 // subtreeJourneyTickets is called before reparenting while the tree is locked.
@@ -35,6 +36,7 @@ func subtreeJourneyTickets(ctx context.Context, tx pgx.Tx, id string) ([]journey
 	 UNION ALL SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id=s.id WHERE n.deleted_at IS NULL
 	) SELECT jt.ticket_node_id::text,n.project_id::text FROM journey_tickets jt
 	 JOIN subtree s ON s.id=jt.ticket_node_id JOIN nodes n ON n.id=jt.ticket_node_id
+ WHERE NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.project_node_id=jt.project_node_id)
 	 ORDER BY jt.ticket_node_id`, id)
 	if err != nil {
 		return nil, err
@@ -83,7 +85,7 @@ func transferJourneyMembership(ctx context.Context, tx pgx.Tx, ticketID, sourceP
 	}
 	var targetJourney bool
 	if targetProject != "" {
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid)`, targetProject).Scan(&targetJourney); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid AND NOT EXISTS(SELECT 1 FROM project_delivery WHERE project_node_id=$1::uuid))`, targetProject).Scan(&targetJourney); err != nil {
 			return nil, err
 		}
 	}

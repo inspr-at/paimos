@@ -8,6 +8,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -61,10 +62,15 @@ func (m *module) readMemberships(w http.ResponseWriter, r *http.Request) {
  JOIN nodes n ON n.id=requested.id AND n.project_id=$1 AND n.deleted_at IS NULL
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug IN ('ticket','task')
  LEFT JOIN journey_tickets t ON t.tenant_id=n.tenant_id AND t.project_node_id=n.project_id AND t.ticket_node_id=n.id
+ LEFT JOIN `+delivery.Effective+` placed ON placed.tenant_id=n.tenant_id AND placed.item_node_id=n.id
+ LEFT JOIN project_delivery mode ON mode.tenant_id=n.tenant_id AND mode.project_node_id=n.project_id
  LEFT JOIN (
    SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state,rn.title
    FROM journey_releases r JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
- ) live ON live.tenant_id=t.tenant_id AND live.project_node_id=t.project_node_id AND live.release_node_id=t.release_node_id
+   WHERE NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.tenant_id=r.tenant_id AND d.project_node_id=r.project_node_id)
+   UNION ALL
+   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state,rn.title FROM project_releases r JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
+ ) live ON live.tenant_id=n.tenant_id AND live.project_node_id=n.project_id AND live.release_node_id=CASE WHEN mode.project_node_id IS NULL THEN t.release_node_id ELSE placed.release_node_id END
  ORDER BY requested.ordinal`, project, ids)
 		if err != nil {
 			return err

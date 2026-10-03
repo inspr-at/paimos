@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -137,6 +138,9 @@ func (m *module) get(w http.ResponseWriter, r *http.Request) {
 		// Keep membership and order stable while R1 structural edits and R3 plan
 		// mutations use the corresponding exclusive tree lock.
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock_shared(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+			return err
+		}
+		if err := requireJourneyMode(r.Context(), tx, r.PathValue("projectId")); err != nil {
 			return err
 		}
 		var locked string
@@ -267,4 +271,14 @@ func load(ctx context.Context, tx pgx.Tx, project, release string) (Walker, erro
 		out.Features = append(out.Features, f)
 	}
 	return out, rows.Err()
+}
+
+func requireJourneyMode(ctx context.Context, tx pgx.Tx, project string) error {
+	if err := delivery.RequireJourney(ctx, tx, project); err != nil {
+		if errors.Is(err, delivery.ErrReleasesMode) {
+			return fail(409, err.Error())
+		}
+		return err
+	}
+	return nil
 }

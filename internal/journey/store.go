@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/requirements"
@@ -97,6 +98,13 @@ func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID
 	// already locks the project, before act reaches its explicit lockJourney.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
 		return err
+	}
+	adopted, modeErr := delivery.ReleasesMode(ctx, tx, projectID)
+	if modeErr != nil {
+		return modeErr
+	}
+	if adopted {
+		return nil
 	}
 	var one int
 	err := tx.QueryRow(ctx, `
@@ -184,6 +192,11 @@ func lockJourney(ctx context.Context, tx pgx.Tx, projectID string) error {
 
 func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease bool) (facts, error) {
 	var f facts
+	var modeErr error
+	f.ReleasesMode, modeErr = delivery.ReleasesMode(ctx, tx, projectID)
+	if modeErr != nil {
+		return f, modeErr
+	}
 	var confirmed bool
 	var releaseID *string
 	f.ProjectID = projectID

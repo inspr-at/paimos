@@ -36,6 +36,9 @@ func undoMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 	if err != nil {
 		return events.Change{}, err
 	}
+	if len(before.ShipsIn) > 0 {
+		restored.Warnings = append(restored.Warnings, "Undo returns released-model backlog items to their original project's unranked tail.")
+	}
 	for i, ticket := range before.JourneyTickets {
 		if ticket.TicketID != after.JourneyTickets[i].TicketID {
 			return events.Change{}, events.ErrConflict
@@ -74,6 +77,9 @@ func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e event
 	if err != nil {
 		return events.Change{}, err
 	}
+	if len(before.ShipsIn) > 0 {
+		restored.Warnings = append(restored.Warnings, "Undo returns released-model backlog items to their original project's unranked tail.")
+	}
 	if err := restoreJourneyMembership(ctx, tx, p, after.Node.ID, before.Journey, after.Journey); err != nil {
 		return events.Change{}, err
 	}
@@ -89,6 +95,9 @@ func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e event
 func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after nodeJSON) (nodeJSON, error) {
 	if err := armPortalModeration(ctx, tx, p); err != nil {
 		return nodeJSON{}, err
+	}
+	if err := refuseReleaseNode(ctx, tx, after.ID); err != nil {
+		return nodeJSON{}, events.ErrConflict
 	}
 	current, err := loadNode(ctx, tx, after.ID, true)
 	if err != nil {
@@ -110,6 +119,10 @@ func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before
 		!current.UpdatedAt.Equal(after.UpdatedAt) {
 		return nodeJSON{}, events.ErrConflict
 	}
+	shipsBefore, err := shipsInBeforeMove(ctx, tx, after.ID, before.ParentID)
+	if err != nil {
+		return nodeJSON{}, events.ErrConflict
+	}
 	if before.Key != after.Key {
 		command, err := tx.Exec(ctx, `DELETE FROM node_key_aliases WHERE key=$1 AND node_id=$2::uuid`, before.Key, after.ID)
 		if err != nil || command.RowsAffected() != 1 {
@@ -126,6 +139,9 @@ func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before
 		if _, err := tx.Exec(ctx, `INSERT INTO node_key_aliases(tenant_id,key,node_id) VALUES($1::uuid,$2,$3::uuid)`, p.TenantID, after.Key, after.ID); err != nil {
 			return nodeJSON{}, events.ErrConflict
 		}
+	}
+	if len(shipsBefore) > 0 {
+		restored.Warnings = append(restored.Warnings, "Backlog rank was not restored; the item returns to its original project tail.")
 	}
 	return restored, nil
 }

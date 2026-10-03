@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -18,6 +19,7 @@ func agree(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, i
 	if err != nil {
 		return nil, err
 	}
+
 	if err = requirePerson(ctx, tx, p); err != nil {
 		return nil, err
 	}
@@ -152,6 +154,13 @@ func commitAgreement(ctx context.Context, tx pgx.Tx, p tenant.Principal, project
 }
 
 func generateWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, item Requirement, bindRelease string, tickets bool) error {
+	adopted, modeErr := delivery.ReleasesMode(ctx, tx, project)
+	if modeErr != nil {
+		return modeErr
+	}
+	if adopted && bindRelease != "" {
+		return fail(409, "This project plans with releases")
+	}
 	var body string
 	var origin *string
 	if err := tx.QueryRow(ctx, `SELECT n.body,r.origin_draft_id::text FROM journey_requirements r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.requirement_node_id WHERE r.requirement_node_id=$1`, item.NodeID).Scan(&body, &origin); err != nil {
@@ -231,7 +240,7 @@ func generateWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, project st
 			return err
 		}
 		var release *string
-		if !s.later {
+		if !s.later && !adopted {
 			if bindRelease != "" {
 				var bound, state string
 				if err = tx.QueryRow(ctx, `SELECT release_node_id::text, state FROM journey_releases WHERE project_node_id=$1 AND release_node_id=$2::uuid`, project, bindRelease).Scan(&bound, &state); err != nil {

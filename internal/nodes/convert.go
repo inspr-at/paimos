@@ -119,6 +119,9 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
+		if err := refuseReleaseNode(ctx, tx, id); err != nil {
+			return err
+		}
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
@@ -403,6 +406,9 @@ func undoKindChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 	}
 	if err := armPortalModeration(ctx, tx, p); err != nil {
 		return events.Change{}, err
+	}
+	if err := refuseReleaseNode(ctx, tx, *e.NodeID); err != nil {
+		return events.Change{}, events.ErrConflict
 	}
 	current, err := loadNode(ctx, tx, after.ID, true)
 	if err != nil {
