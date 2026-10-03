@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 )
 
 // Label is the short display name of a profile: the harness, the model
@@ -64,7 +66,7 @@ func ModelKey(model string) string {
 func Revision(ctx context.Context, tx pgx.Tx) (string, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.role, r.priority, r.state, r.valid_until, p.slug, p.version, p.enabled
-		FROM model_role_routes r
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) r
 		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
 		ORDER BY r.role, r.priority`)
 	if err != nil {

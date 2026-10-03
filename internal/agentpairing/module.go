@@ -143,7 +143,7 @@ func (m *Module) person(permission string, fn func(http.ResponseWriter, *http.Re
 }
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+		if err := LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)

@@ -238,7 +238,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
           <button type="button" class="pill-btn icon" aria-label="Zoom in" aria-keyshortcuts="+" data-tip="Zoom in · +" @click="zoomIn"><AppIcon name="plus" :size="14" /></button>
           <span class="percent mono" aria-live="polite">{{ percent }}%</span>
         </div>
-        <button v-if="items.length > 1 && isImage(current)" type="button" class="pill-btn solo" :aria-pressed="!!compare" aria-keyshortcuts="c" data-tip="Compare two screens · c" @click="toggleCompare"><AppIcon name="compare" :size="14" />Compare</button>
+        <button v-if="items.length > 1 && isImage(current)" type="button" class="pill-btn solo compare-btn" :aria-pressed="!!compare" aria-label="Compare" aria-keyshortcuts="c" data-tip="Compare two screens · c" @click="toggleCompare"><AppIcon name="compare" :size="14" /><span class="label">Compare</span></button>
         <button type="button" class="pill-btn solo details-btn" :aria-pressed="details" aria-label="Details" aria-keyshortcuts="d" data-tip="Details · d" @click="details = !details; $nextTick(fit)"><AppIcon name="info" :size="15" /><span class="label">Details</span></button>
         <a class="pill-btn round" :href="contentUrl(current.id, 'original')" :download="current.name" :aria-label="`Download ${current.name}`" data-tip="Download the original"><AppIcon name="download" :size="15" /></a>
         <a v-if="isHTML(current)" class="pill-btn round" :href="htmlURL || undefined" :aria-disabled="!htmlURL" :tabindex="htmlURL ? 0 : -1" aria-label="Open preview in new tab" data-tip="Open preview in new tab" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"><AppIcon name="external" :size="15" /></a>
@@ -314,7 +314,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
           <button v-for="view in (['side', 'slider', 'onion'] as const)" :key="view" type="button" role="radio" class="pill-btn" :aria-checked="compare.view === view" @click="compare.view = view">
             {{ view === 'side' ? 'Side by side' : view === 'slider' ? 'Slider' : 'Onion skin' }}
           </button>
-          <label v-if="compare.view === 'onion'" class="onion"><span class="sr-only">Overlay opacity</span><input v-model.number="onion" type="range" min="0" max="1" step="0.01" /></label>
+          <label class="onion" :class="{ inactive: compare.view !== 'onion' }" :aria-hidden="compare.view !== 'onion' ? true : undefined"><span class="sr-only">Overlay opacity</span><input v-model.number="onion" type="range" min="0" max="1" step="0.01" :disabled="compare.view !== 'onion'" /></label>
           <span class="compare-note">A: {{ current.caption || current.name }} · B: {{ other?.caption || other?.name }} — pick B in the strip</span>
         </div>
         <ol v-if="items.length > 1" class="strip" aria-label="All attachments">
@@ -339,7 +339,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
   --lb-ink: #edf4f0; --lb-ink-2: #acc3c2; --lb-glass: rgba(20, 42, 46, .78); --lb-edge: rgba(191, 240, 235, .14);
   width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--lb-ink);
   background: radial-gradient(120% 90% at 50% 40%, #16323a 0%, #0c1c20 60%, #081417 100%);
-  display: none; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden;
+  display: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden;
 }
 .lightbox[open] { display: grid; }
 .lightbox::backdrop { background: rgba(4, 12, 14, .7); }
@@ -412,8 +412,10 @@ figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; co
 .details dd { margin: 0; color: var(--lb-ink); overflow-wrap: anywhere; }
 .details .btn { justify-self: start; }
 .foot { display: grid; justify-items: center; gap: 10px; padding: 10px 18px 16px; }
+.foot > .pill { max-width: 100%; min-width: 0; }
 .foot:empty { display: none; }
 .onion { display: inline-flex; align-items: center; padding: 0 10px; }
+.onion.inactive { visibility: hidden; }
 .onion input { width: 140px; accent-color: #d69b31; }
 .compare-note { padding: 0 12px; font-size: 12px; color: var(--lb-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
 .strip { display: flex; gap: 8px; max-width: 100%; margin: 0; padding: 4px; list-style: none; overflow-x: auto; scrollbar-width: none; }
@@ -425,19 +427,30 @@ figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; co
 .thumb:focus-visible { outline: 2px solid #a4e5df; outline-offset: 2px; }
 .thumb-file { font: 700 11px/1 var(--mono); color: #a4e5df; }
 .b-tag { position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; font-size: 10px; }
+@media (pointer: coarse) {
+  .pill-btn { min-width: 44px; min-height: 44px; }
+  .onion input { min-height: 44px; }
+  .slider-handle { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+}
 @media (max-width: 720px) {
   .lb-bar { gap: 6px; min-height: 60px; padding: 8px 10px 8px 14px; }
   .title-block { flex: 1 1 auto; }
   .name { font-size: 15.5px; }
-  .zoom, .copy-link, .pill-btn.solo:not(.details-btn):not([aria-pressed="true"]) { display: none; }
-  .details-btn { width: 36px; height: 36px; padding: 0; }
-  .details-btn .label { display: none; }
-  .pill-btn.round, .details-btn { flex: none; }
+  .zoom, .copy-link { display: none; }
+  .details-btn, .compare-btn, .pill-btn.round { width: 44px; height: 44px; padding: 0; }
+  .details-btn .label, .compare-btn .label { display: none; }
+  .pill-btn.round, .details-btn, .compare-btn { flex: none; }
   .body.with-details { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .details { border-left: 0; border-top: 1px solid var(--lb-edge); max-height: 40dvh; }
   /* Swipe to move on a phone; the arrows sit low so they do not cover the image. */
-  .nav { top: auto; bottom: 12px; width: 40px; height: 40px; margin-top: 0; }
+  .nav { top: auto; bottom: 12px; width: 44px; height: 44px; margin-top: 0; }
   .nav.prev { left: 8px; } .nav.next { right: 8px; }
   .side-by-side { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  .foot > .pill { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; border-radius: 16px; }
+  .foot > .pill .pill-btn { min-height: 44px; padding-inline: 4px; }
+  .onion input { min-height: 44px; }
+  .slider-handle { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  .compare-note { grid-column: 1 / -1; max-width: 100%; min-width: 0; padding: 4px 8px; }
+  .onion { grid-column: 1 / -1; justify-content: center; }
 }
 </style>

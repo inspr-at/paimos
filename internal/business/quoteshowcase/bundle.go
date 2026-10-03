@@ -89,6 +89,9 @@ type QuoteSpec struct {
 type ProfileSpec struct {
 	Name string
 	Raw  json.RawMessage
+	// Files supplies assets for programmatically assembled bundles. The directory
+	// reader currently accepts self-contained profile JSON only.
+	Files map[string][]byte
 }
 
 type manifestFile struct {

@@ -162,6 +162,19 @@ dc start aeon
 Check every command's exit status, and record the current image digest and configuration with the backup.
 Periodically restore into a separate recovery host to verify the backup.
 
+`paimos files verify --tenant SLUG` checks the tenant's shared blob store:
+attachments (including soft-deleted/history references), avatars and their undo
+history, confirmation receipts, and immutable quote profile assets used by
+frozen versions. `paimos files gc --tenant SLUG` is a dry run; `--apply` deletes
+only unreferenced files at least seven days old. Writers and cleanup serialize
+on the same tenant/hash database lock through reference commit or file unlink.
+Multi-file transactions reserve their complete blob set in tenant/hash order
+before publishing files or appending events, including all profiles in a
+showcase apply. The storage guard rejects new out-of-order or post-event locks.
+Upgrade every writer and operator CLI before using cleanup: older binaries do
+not participate in this protocol. Verify reports pre-existing missing or corrupt
+files; cleanup does not repair them.
+
 Before upgrading, read the target release notes, take a verified backup, and
 record the old pinned image. Update `AEON_IMAGE` to the new explicit version or
 digest, then run `dc pull aeon` and `dc up -d --no-deps --wait --wait-timeout 180

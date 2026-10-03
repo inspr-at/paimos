@@ -22,10 +22,23 @@ import (
 	"testing/synctest"
 
 	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/imagework"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/image/draw"
 )
+
+// Admission tests exercise preparation without database I/O inside synctest.
+// Publication and the durable avatar references are checked separately below.
+func stageAvatarForTest(ctx context.Context, store attachments.Store, tenant string, data []byte, crop Crop) error {
+	staged, err := stageAvatarData(ctx, store, tenant, data, crop)
+	for _, blob := range staged {
+		_ = blob.Close()
+	}
+	return err
+}
 
 // A valid PNG header with no pixel data: a decoder error means the caller
 // reached full decoding instead of rejecting dimensions/crops from the header.
@@ -80,7 +93,7 @@ func TestCompressedImageBombs(t *testing.T) {
 		}
 		if dimensions[0] == 10000 {
 			store := attachments.Store{FilesDir: t.TempDir()}
-			_, err := store.Put(t.Context(), "00000000-0000-0000-0000-000000000559", bytes.NewReader(data))
+			_, err := store.Stage(t.Context(), "00000000-0000-0000-0000-000000000559", bytes.NewReader(data))
 			if err == nil || !strings.Contains(err.Error(), "invalid or oversized image") {
 				t.Fatalf("attachment bomb: %v", err)
 			}
@@ -145,11 +158,11 @@ func TestImageUploadAdmissionAndCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		avatarDone, attachmentDone := make(chan error, 1), make(chan error, 1)
 		go func() {
-			_, _, err := storeAvatarData(ctx, store, tenant, data, Crop{Size: 300})
+			err := stageAvatarForTest(ctx, store, tenant, data, Crop{Size: 300})
 			avatarDone <- err
 		}()
 		go func() {
-			_, err := store.Put(ctx, tenant, bytes.NewReader(data))
+			_, err := store.Stage(ctx, tenant, bytes.NewReader(data))
 			attachmentDone <- err
 		}()
 		synctest.Wait()
@@ -178,12 +191,14 @@ func TestImageUploadAdmissionAndCancellation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := storeAvatarData(t.Context(), store, tenant, data, Crop{Size: 300}); err != nil {
+	if err := stageAvatarForTest(t.Context(), store, tenant, data, Crop{Size: 300}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Put(t.Context(), tenant, bytes.NewReader(data)); err != nil {
+	blob, err := store.Stage(t.Context(), tenant, bytes.NewReader(data))
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer blob.Close()
 }
 
 func TestAvatarStorageDoesNotReenterDecodeAdmission(t *testing.T) {
@@ -201,10 +216,10 @@ func TestAvatarStorageDoesNotReenterDecodeAdmission(t *testing.T) {
 		}
 		defer small()
 		// Enough headroom for this avatar, but not a second admission while
-		// storing its canonical PNG. Passing it through Store.Put deadlocks.
+		// storing its canonical PNG. Passing it through Store.Stage deadlocks.
 		done := make(chan error, 1)
 		go func() {
-			_, _, err := storeAvatarData(t.Context(), store, "00000000-0000-0000-0000-000000000559", data, Crop{Size: 300})
+			err := stageAvatarForTest(t.Context(), store, "00000000-0000-0000-0000-000000000559", data, Crop{Size: 300})
 			done <- err
 		}()
 		synctest.Wait()
@@ -228,7 +243,7 @@ func TestImageAdmissionReleasedOnErrors(t *testing.T) {
 		if err := processAvatar(t.Context(), pngHeader(2048, 2048), Crop{Size: 2048}, nil); err == nil {
 			t.Fatal("accepted truncated avatar")
 		}
-		if _, err := store.Put(t.Context(), tenant, bytes.NewReader(pngHeader(4096, 4096))); err == nil {
+		if _, err := store.Stage(t.Context(), tenant, bytes.NewReader(pngHeader(4096, 4096))); err == nil {
 			t.Fatal("accepted truncated attachment")
 		}
 		want := errors.New("synthetic storage failure")
@@ -338,8 +353,38 @@ func TestAvatarCropPixelsAndStoredPNGs(t *testing.T) {
 		}
 	}
 	store := attachments.Store{FilesDir: t.TempDir()}
-	const tenant = "00000000-0000-0000-0000-000000000559"
-	hash, hashes, err := storeAvatarData(t.Context(), store, tenant, data.Bytes(), crop)
+	d := dbtest.Open(t)
+	p := person(t, d, "avatar-pixels", "pixels@example.test")
+	tenant := p.TenantID
+	staged, err := stageAvatarData(t.Context(), store, tenant, data.Bytes(), crop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, blob := range staged {
+			_ = blob.Close()
+		}
+	}()
+	hash := staged[0].SHA256
+	hashes := map[string]string{}
+	for i, size := range []int{32, 64, 128, 256} {
+		hashes[strconv.Itoa(size)] = staged[i+1].SHA256
+	}
+	if _, err := store.Open(tenant, hash, "original"); !os.IsNotExist(err) {
+		t.Fatalf("avatar became visible before publication: %v", err)
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tenant, func(tx pgx.Tx) error {
+		before, existed, err := read(t.Context(), tx, tenant, p.ID, true)
+		if err != nil {
+			return err
+		}
+		if err := attachments.Publish(t.Context(), tx, attachments.OwnerAvatar, staged...); err != nil {
+			return err
+		}
+		after := before
+		after.AvatarOriginalHash, after.AvatarHashes = hash, hashes
+		return change(t.Context(), tx, p, before, existed, after)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,9 +415,13 @@ func TestAttachmentGIFSmallerFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := attachments.Store{FilesDir: t.TempDir()}
-	got, err := store.Put(t.Context(), "00000000-0000-0000-0000-000000000559", &data)
-	if err != nil || got.Width != 10 || got.Height != 10 {
-		t.Fatalf("GIF logical screen/first frame: %+v, %v", got, err)
+	got, err := store.Stage(t.Context(), "00000000-0000-0000-0000-000000000559", &data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer got.Close()
+	if got.Width != 10 || got.Height != 10 {
+		t.Fatalf("GIF logical screen/first frame: %+v", got)
 	}
 }
 
@@ -405,7 +454,7 @@ func TestAttachmentHeaderBoundsBeforeDecode(t *testing.T) {
 	const tenant = "00000000-0000-0000-0000-000000000559"
 	store := attachments.Store{FilesDir: t.TempDir()}
 	for _, dimensions := range [][2]uint32{{4097, 4096}, {8193, 1}, {1, 8193}} {
-		_, err := store.Put(t.Context(), tenant, bytes.NewReader(pngHeader(dimensions[0], dimensions[1])))
+		_, err := store.Stage(t.Context(), tenant, bytes.NewReader(pngHeader(dimensions[0], dimensions[1])))
 		if err == nil || !strings.Contains(err.Error(), "invalid or oversized image") {
 			t.Fatalf("%v: want header rejection, got %v", dimensions, err)
 		}
