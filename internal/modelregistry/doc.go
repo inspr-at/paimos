@@ -14,6 +14,8 @@
 // are insert-only. Replacing routes never rewrites a profile, so an expired
 // suppression leaves history intact and simply stops matching once valid_until
 // has passed.
+// Route priorities must fit PostgreSQL's positive integer range; structural
+// validation rejects overflow before catalog preparation can commit.
 //
 // Boundary integration: model list, legacy and placement resolution, preference
 // GET, profile/whole-tenant replacement and both review entries prepare before
@@ -37,6 +39,8 @@
 // command template is rendered from the built-in harness text and is never
 // executed. Nothing is selected when every candidate was skipped; review-gate
 // then sets owner_required.
+// Placement resolution also accepts review-gate-security with author_family;
+// an unavailable security ladder returns owner_required and its explanation.
 //
 // ResolveTicketRoute is the read-only helper for a ticket's role and area.
 // The ladder is still keyed by role. A missing selection returns nil.

@@ -6722,8 +6722,8 @@ paths:
       description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
-        - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
+        - {name: role, in: query, description: 'Required unless ticket supplies its route role. review-gate-security requires placement resolution; unavailable security ladders return owner_required with their explanation.', schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: author_family, in: query, description: "Required for review-gate and review-gate-security. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
@@ -14279,7 +14279,7 @@ components:
       required: [role, priority, profile_id, state]
       properties:
         role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
-        priority: {type: integer, minimum: 1}
+        priority: {type: integer, minimum: 1, maximum: 2147483647}
         profile_id: {type: string, format: uuid}
         state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
         reason: {type: string}

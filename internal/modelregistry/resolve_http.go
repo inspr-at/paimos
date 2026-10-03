@@ -105,7 +105,7 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q.Role != "" || ticket == "" {
-		if _, err := validateResolveQuery(resolveQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness}); err != nil {
+		if err := validatePlacementQuery(q); err != nil {
 			writePreferenceError(w, err)
 			return
 		}
@@ -226,6 +226,16 @@ func authorizedPlacement(ctx context.Context, tx pgx.Tx, p tenant.Principal, q W
 		return q, err
 	}
 
-	_, err = validateResolveQuery(resolveQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness})
-	return q, err
+	return q, validatePlacementQuery(q)
+}
+
+// Security review has the same input requirements as ordinary review, but its
+// owner-required outcome belongs to ResolveWork rather than the legacy ladder.
+func validatePlacementQuery(q WorkQuery) error {
+	role := q.Role
+	if role == "review-gate-security" {
+		role = "review-gate"
+	}
+	_, err := validateResolveQuery(resolveQuery{Role: role, AuthorFamily: q.AuthorFamily, Harness: q.Harness})
+	return err
 }

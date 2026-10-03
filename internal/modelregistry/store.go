@@ -5,6 +5,7 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -357,6 +358,9 @@ func normalizeRouteStructure(incoming []Route) ([]Route, error) {
 		}
 		if route.Priority < 1 {
 			return nil, fail(http.StatusBadRequest, "priority must be positive")
+		}
+		if route.Priority > math.MaxInt32 {
+			return nil, fail(http.StatusBadRequest, "priority exceeds storage range")
 		}
 		if !uuidRE.MatchString(route.ProfileID) {
 			return nil, fail(http.StatusBadRequest, "invalid profile id")
