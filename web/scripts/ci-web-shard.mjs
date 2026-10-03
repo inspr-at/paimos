@@ -147,9 +147,10 @@ export function planFlakeRetry(commands, env, root = webRoot) {
   if (!env.PW_GREP) throw new Error('Flake retry needs PW_GREP')
   // The reporter path is relative to the config testDir or to web/; accept both.
   const wanted = test.file.replace(/^(?:\.\/)?(?:web\/)?/, '')
-  const matches = commands.flatMap(command => command.files
-    .filter(file => file === wanted || file.endsWith(`/${wanted}`))
-    .map(file => ({ command, file })))
+  const find = test => commands.flatMap(command => command.files.filter(test).map(file => ({ command, file })))
+  // Prefer the exact spec path (or testDir + path); a bare suffix could match two specs.
+  let matches = find(file => file === wanted || file === `tests/${wanted}`)
+  if (!matches.length) matches = find(file => file.endsWith(`/${wanted}`))
   if (matches.length !== 1) throw new Error(`Flake retry file ${test.file} matches ${matches.length} specs in this shard`)
   const { command, file } = matches[0]
   const projectAt = command.args.indexOf('--project')

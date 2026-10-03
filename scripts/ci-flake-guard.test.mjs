@@ -411,3 +411,24 @@ test('with CI_FLAKE_REQUIRE_JSON a failure beside another group\'s startup error
     { code: 0, output: '[1/1] [chromium] › tests/a.spec.ts:12:3 › group › needs a [safe] choice\n1 passed' }], { env, command, kind: 'playwright' })
   assert.equal(noReport.code, 1)
 })
+
+test('mixed line,json wrapper output uses the JSON identity only, so one retry can succeed', async () => {
+  const env = { GITHUB_EVENT_NAME: 'merge_group', CI_FLAKE_REQUIRE_JSON: '1' }
+  const command = ['npm', 'run', 'ci:web:shard']
+  // Terminal headings are cwd-relative (tests/a.spec.ts); the merged JSON is testDir-relative (a.spec.ts).
+  const lineA = '  1) [chromium] › tests/a.spec.ts:12:3 › group › needs a [safe] choice\n'
+  const json = status => JSON.stringify((() => {
+    const report = JSON.parse(pwJSON(status))
+    const rename = suite => { if (suite.file) suite.file = suite.file.replace('tests/', ''); suite.title = suite.title?.replace('tests/', ''); (suite.suites ?? []).forEach(rename); (suite.specs ?? []).forEach(spec => { spec.file = spec.file.replace('tests/', '') }) }
+    report.suites.forEach(rename)
+    return report
+  })())
+  const first = `${lineA}  1 failed\n${json('unexpected')}\n`
+  const retried = `[1/1] [chromium] › tests/a.spec.ts:12:3 › group › needs a [safe] choice\n1 passed\n${json('expected')}\n`
+  const parsed = parsePlaywright(first)
+  assert.equal(parsed.failures.length, 1, 'one test must have one identity')
+  assert.equal(parsed.failures[0].file, 'a.spec.ts')
+  const result = await guard([{ code: 1, output: first }, { code: 0, output: retried }], { env, command, kind: 'playwright' })
+  assert.equal(result.code, 0)
+  assert.equal(result.calls.length, 2, 'exactly one retry')
+})

@@ -101,6 +101,9 @@ jobs:
           GOFLAGS: -count=1
         run: |
           set -euo pipefail
+          # ci-flake-report.mjs reads the guard summaries; keep them even when this step fails.
+          mkdir -p "$RUNNER_TEMP/ci-flake-evidence"
+          trap 'cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/ci-flake-evidence/go-test-${{ matrix.shard }}.md" || true' EXIT
           if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
             node scripts/ci-flake-guard.mjs --kind go -- go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
           else
@@ -110,6 +113,15 @@ jobs:
           packages=$(grep -cE '^ok[[:space:]]' "$RUNNER_TEMP/go-test.log" || true)
           printf 'Go shard %s/%s: %s successful package invocations, %s cached\n' "${{ matrix.shard }}" "$AEON_GO_SHARD_COUNT" "$packages" "$cached" >> "$GITHUB_STEP_SUMMARY"
           test "$cached" -eq 0
+      - name: Preserve flake-guard summaries
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: go-test-${{ matrix.shard }}-flake-evidence
+          path: ${{ runner.temp }}/ci-flake-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in

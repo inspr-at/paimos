@@ -244,6 +244,10 @@ test('a flake retry selects exactly one test in its original group and fails clo
   assert.ok(retryOutput.startsWith(`${original}-retry-`) && retryOutput !== original, 'retry reuses the first attempt output directory')
   // Reporter paths relative to the config testDir resolve to the same spec.
   assert.deepEqual(planFlakeRetry(planned, withTests({ ...test, file: spec.replace(/^[^/]+\//, '') }), webRoot)[0].files, [spec])
+  // A testDir-relative reporter path prefers the exact tests/<path> spec over any longer suffix match.
+  const nested = structuredClone(planned)
+  nested[0].files = ['tests/a.spec.ts', 'tests/x/a.spec.ts']
+  assert.deepEqual(planFlakeRetry(nested, withTests({ ...test, file: 'a.spec.ts' }), webRoot)[0].files, ['tests/a.spec.ts'])
   for (const bad of [
     { ...env, CI_FLAKE_PLAYWRIGHT_TESTS: 'not json', PW_GREP: 'x' },
     withTests(),

@@ -210,7 +210,10 @@ export function parsePlaywright(output) {
   }
   // Both failure details and the final failed-test list use this heading.
   // Progress lines provide execution evidence for a successful narrowed retry.
-  for (const line of clean.split('\n')) {
+  // Valid structured reports are authoritative: terminal headings are cwd-relative
+  // (tests/a.spec.ts) while JSON paths are testDir-relative (a.spec.ts), so mixing
+  // both would give one test two identities. Headings are the fallback only.
+  for (const line of reports > 0 ? [] : clean.split('\n')) {
     const heading = line.match(/^\s*(\d+\)|\[\d+\/\d+\])\s+(?:\[([^\]]+)\]\s+›\s+)?(.+?):(\d+):(\d+)\s+›\s+(.*?)\s*(?:={2,})?\s*$/);
     if (heading) records.push(pwRecord(heading[3], heading[4], heading[5], heading[6], heading[2] ?? '', heading[1].endsWith(')') ? 'fail' : 'observed'));
   }
