@@ -417,6 +417,9 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 		if hit := capacity.VendorLimit(p.limitVendor, raw, nil, time.Now().UTC()); hit != nil {
 			p.emitVendorLimit(hit)
 		}
+		if (method == "thread/start" || method == "turn/start") && explicitModelInvalid(response.Error) {
+			return nil, errModelInvalid
+		}
 		// Only this explicit rejection proves steer did not inject input.
 		// Never expose raw vendor errors or retry transport/malformed responses.
 		var rejection struct {

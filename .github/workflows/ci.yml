@@ -267,6 +267,11 @@ jobs:
         run: npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1
       - working-directory: web
         run: npm run build
+      - name: Install shells for generated account command unit checks
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Web unit checks
+        working-directory: web
+        run: npm run test:unit
       - name: Access scope and role helper tests
         working-directory: web
         run: node --experimental-strip-types --test tests/access.test.ts tests/agent-login.test.ts
@@ -559,9 +564,9 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
-      - name: Test workspace model provider controls
+      - name: Test workspace model provider and catalog refresh controls
         working-directory: web
-        run: npm test -- tests/model-provider.spec.ts --workers=1
+        run: npm test -- tests/model-provider.spec.ts tests/model-refresh.spec.ts --workers=1
 
   status-autopilot-ui:
     runs-on: ubuntu-latest

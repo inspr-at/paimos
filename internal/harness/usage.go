@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -293,6 +295,20 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		delta := *out.InputTokens + *out.OutputTokens - *old.InputTokens - *old.OutputTokens
 		if err := agentaccounts.ObserveSessionTokens(ctx, tx, p.ID, *out.AccountID, out.Model, delta, old.ReportedAt, out.ReportedAt); err != nil {
 			return nil, err
+		}
+	}
+	// Usage can contain several models, including historical data after stop.
+	// Only the live session's exact identity can supply health evidence.
+	if s.StoppedAt == nil && s.Model != nil && *s.Model == out.Model && s.ReasoningEffort != nil && modelreport.ValidTuple(out.Model, *s.ReasoningEffort) && out.OutputTokens != nil && *out.OutputTokens > 0 {
+		var enrolled bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE registered_by_principal_id=$1 AND harness=$2 AND state='available')`, p.ID, s.Harness).Scan(&enrolled); err != nil {
+			return nil, err
+		}
+		if enrolled {
+			evidence := modelregistry.Observation{ReportID: modelregistry.EvidenceID(s.ID + "/usage/" + in.ReportID), Harness: s.Harness, Model: out.Model, Effort: *s.ReasoningEffort, Status: "working"}
+			if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, []modelregistry.Observation{evidence}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return usageReportResult{Usage: out}, record(ctx, tx, p, s, "usage_reported", before, out)
