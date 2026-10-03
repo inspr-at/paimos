@@ -650,16 +650,16 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
 		return nil, err
 	}
-	if err := authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: projectID}); err != nil {
+	if err := project(ctx, tx, projectID); err != nil {
 		return nil, err
 	}
 	if p.Kind == tenant.Agent {
 		// A registered generation must be able to heartbeat and stop itself.
+		// Endpoint also verifies the exact bearer key's harness.write scope.
 		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: projectID}); err != nil {
 			return nil, err
 		}
-	}
-	if err := project(ctx, tx, projectID); err != nil {
+	} else if err := authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: projectID}); err != nil {
 		return nil, err
 	}
 	if in.SucceedsID != nil {
