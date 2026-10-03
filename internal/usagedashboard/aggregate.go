@@ -755,10 +755,6 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		if err := rows.Scan(&w.AccountID, &w.Label, &w.Harness, &w.AccountState, &w.WindowID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
 			return out, err
 		}
-		if len(windows) == 1024 {
-			out.Truncated = true
-			break
-		}
 		w.StartsAt, w.EndsAt = w.StartsAt.UTC(), w.EndsAt.UTC()
 		applyMeasuredAvailability(&w, used, now)
 		windows = append(windows, w)
