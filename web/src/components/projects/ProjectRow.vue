@@ -37,7 +37,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
       <span class="key-badge"><template v-for="(part, i) in highlight(project.routeKey, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
       <span class="project-text">
         <span class="project-name">
-          <span class="name"><template v-for="(part, i) in highlight(project.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+          <span v-clip-tip="project.title" class="name"><template v-for="(part, i) in highlight(project.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
           <span v-if="project.frozen" class="chip state-chip frozen">Frozen</span>
           <span v-else-if="project.state === 'deleted'" class="chip state-chip">Deleted</span>
           <span v-else-if="project.archived && showArchived" class="chip state-chip">Archived</span>
@@ -86,7 +86,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
 .row-live { position: absolute; grid-column: 2 / 3; grid-row: 1; top: 50%; right: 0; translate: 0 -50%; z-index: 1; max-width: 260px; }
 .project-item.live .project-text { padding-right: 268px; }
 .project-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.name { font-size: 14.5px; font-weight: 650; letter-spacing: -.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name { min-width: 0; font-size: 14.5px; font-weight: 650; letter-spacing: -.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-desc { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state-chip { height: 18px; padding: 0 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .state-chip.frozen { color: var(--gold-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
@@ -113,7 +113,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .activity { display: block; grid-area: time; margin-right: 38px; font-size: 12px; }
   .progress { grid-area: bar; }
   .project-row > .stat, .people-cell { display: none; }
-  .name { white-space: normal; }
+  .name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .project-desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .row-more { position: absolute; top: 4px; right: 2px; margin: 0; width: 44px; height: 44px; }
   .row-live { top: auto; right: 10px; bottom: 12px; translate: none; max-width: calc(100% - 20px); }

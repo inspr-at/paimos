@@ -39,12 +39,12 @@ function stepLabel(stage: Stage, index: number) {
 <template>
   <nav class="rail" :class="{ passive }" aria-label="Project journey">
     <div class="rail-title">
-      <span class="tt"><b>{{ projectTitle }}</b><template v-if="releaseLabel"> · {{ releaseLabel }}</template> · {{ STAGE_LABEL[current] }}</span>
+      <span v-clip-tip="`${projectTitle}${releaseLabel ? ` · ${releaseLabel}` : ''} · ${STAGE_LABEL[current]}`" class="tt"><b>{{ projectTitle }}</b><template v-if="releaseLabel"> · {{ releaseLabel }}</template> · {{ STAGE_LABEL[current] }}</span>
       <span class="hint" :title="hint">{{ hint }}</span>
     </div>
     <ol class="stages">
       <li v-for="(stage, index) in STAGES" :key="stage" :class="[stateOf(stage), { here: stage === current, viewed: stage === viewed }]">
-        <button type="button" class="step" :aria-current="stage === viewed ? 'step' : undefined" :aria-label="stepLabel(stage, index)" :data-tip="stage === current ? `${STAGE_LABEL[stage]} · now` : undefined" @click="emit('view', stage)">
+        <button type="button" class="step" :aria-current="stage === viewed ? 'step' : undefined" :aria-label="stepLabel(stage, index)" :data-tip="stepLabel(stage, index)" @click="emit('view', stage)">
           <span class="n" aria-hidden="true">
             <AppIcon v-if="stateOf(stage) === 'done'" name="check" :size="12" />
             <AppIcon v-else-if="stateOf(stage) === 'skipped'" name="minus" :size="12" />
@@ -68,7 +68,7 @@ function stepLabel(stage: Stage, index: number) {
   background: var(--glass); box-shadow: var(--shadow); -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
 }
 .rail-title { display: flex; align-items: baseline; gap: 16px; min-width: 0; font-size: 13px; color: var(--ink-2); }
-.rail-title .tt { flex-shrink: 0; white-space: nowrap; }
+.rail-title .tt { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-title b { color: var(--ink); font-weight: 600; }
 /* What comes next: fades in while the rail is hovered or focused. */
 .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--gold-ink); opacity: 0; transition: opacity .5s ease-in-out; }
@@ -107,6 +107,7 @@ li.done .link::after { content: ''; position: absolute; right: -2px; top: -2px; 
 @media (max-width: 720px) {
   .rail { padding: 10px 12px 12px; }
   .rail-title .hint { display: none; }
+  .rail-title .tt { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .stages { overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 0 12px 2px; gap: 2px; }
   .stages li { flex: 0 0 auto; }
   .link { flex: 0 0 8px; min-width: 8px; margin: 0 1px; }

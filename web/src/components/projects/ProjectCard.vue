@@ -38,7 +38,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
         <span v-if="project.frozen" class="chip state-chip frozen">Frozen</span>
         <span v-else-if="project.state === 'deleted'" class="chip state-chip">Deleted</span>
       </span>
-      <span class="card-name"><template v-for="(part, i) in highlight(project.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+      <span v-clip-tip="project.title" class="card-name"><template v-for="(part, i) in highlight(project.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
       <span class="card-desc" :data-tip="project.description.length > 48 ? project.description : undefined" :aria-hidden="project.description ? undefined : 'true'">{{ project.description }}</span>
       <span class="card-mid">
         <span class="ring-wrap" :data-tip="projectProgressTip(project.open, project.in_progress, project.done, project.cancelled)">
@@ -107,6 +107,9 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 @media (hover: hover) { .card:hover .card-grip { opacity: 1; } }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) { .card-grip, .card-more { transition: opacity .15s ease; } }
 .card-more:hover, .card.menu .card-more { color: var(--teal-ink); }
+@media (max-width: 720px) {
+  .card-name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+}
 @media (hover: none) { .card-more { opacity: 1; } .card-grip { display: none; } }
 @media (max-width: 600px) { .card-link { padding: 14px 16px 0; } .card-foot { margin: 18px 16px 12px; } .card-top { padding-right: 40px; } .card-more { top: 6px; right: 6px; width: 44px; height: 44px; } }
 </style>
