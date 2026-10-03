@@ -23,7 +23,7 @@ export interface KnowledgeEntry extends KnowledgeItem {
   renamed_from?: string; event_id?: number
 }
 export interface KnowledgePage {
-  items: KnowledgeItem[]; total: number; truncated: boolean
+  items: KnowledgeItem[]; total: number; truncated: boolean; next_cursor?: string; counts_incomplete?: boolean
   counts: { type: Partial<Record<KnowledgeType, number>>; status: Partial<Record<KnowledgeStatus, number>> }
 }
 
@@ -101,9 +101,9 @@ function query(values: Record<string, string | number | undefined>): string {
   const text = params.toString()
   return text ? `?${text}` : ''
 }
-export interface ListParams { project_id?: string; q?: string; type?: KnowledgeType[]; status?: KnowledgeStatus[]; sort?: string; limit?: number }
+export interface ListParams { ships_in?: string; cursor?: string; project_id?: string; q?: string; type?: KnowledgeType[]; status?: KnowledgeStatus[]; sort?: string; limit?: number }
 export const listKnowledge = (params: ListParams = {}, signal?: AbortSignal) =>
-  send<KnowledgePage>(query({ project_id: params.project_id, q: params.q?.trim(), type: params.type?.join(','), status: params.status?.join(','), sort: params.sort, limit: params.limit }), { signal })
+  send<KnowledgePage>(query({ ships_in: params.ships_in, cursor: params.cursor, project_id: params.project_id, q: params.q?.trim(), type: params.type?.join(','), status: params.status?.join(','), sort: params.sort, limit: params.limit }), { signal })
 export const getKnowledge = (id: string) => send<KnowledgeEntry>(`/${encodeURIComponent(id)}`)
 export const resolveKnowledge = (projectId: string, type: KnowledgeType, slug: string) =>
   send<KnowledgeEntry>(`/resolve${query({ project_id: projectId, type, slug })}`)

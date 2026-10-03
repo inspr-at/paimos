@@ -108,6 +108,21 @@ paths:
       description: One repeatable-read request for active and released rollups and backlog/abandoned counts. No item bodies or completion-event lookup.
       security: [{session: []}, {agentKey: []}]
       parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: released_cursor, in: query, schema: {type: string, maxLength: 2048}}
       responses:
@@ -126,6 +141,21 @@ paths:
       description: Keyset page with rollups and resolved settings.
       security: [{session: []}, {agentKey: []}]
       parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
@@ -186,6 +216,21 @@ paths:
       description: Effective placement, captured revisions and epic context. through is derived include-earlier; completed_later is mutually exclusive and uses bounded recovery candidates plus events.
       security: [{session: []}, {agentKey: []}]
       parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
@@ -208,6 +253,21 @@ paths:
       description: Ranked backlog or oldest-first tail. completed_unplaced uses completion events after adoption; candidates cap at 5000 and expose incompleteness.
       security: [{session: []}, {agentKey: []}]
       parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
@@ -4939,8 +4999,14 @@ paths:
         slug, key and body (German and English full text plus word matches);
         the excerpt is plain text around the first match. counts cover the
         project and q scope before the type and status filters.
+        With ships_in, the visible linked-context population and own filters
+        intersect before keyset pagination/counts (maximum page 200). Counts
+        stop at 10,001 and report counts_incomplete. Release UUID context is
+        refused with release_context_undecided until decision K1 is resolved.
       security: *auth
       parameters:
+        - {name: ships_in, in: query, description: "Single releases-mode project scope, UUID or none (ranked and tail Backlog). Requires project_id. Release context awaits K1; no fallback to all work.", schema: {type: string, maxLength: 36}}
+        - {name: cursor, in: query, description: "Query-bound keyset cursor; scoped limit at most 200.", schema: {type: string, maxLength: 2048}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
         - {name: status, in: query, description: 'Comma-separated active, proposed, archived', schema: {type: string}}
@@ -4954,6 +5020,17 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgePage'}
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: Release linked-context definition awaits decision K1
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '503':
           $ref: '#/components/responses/Error'
     post:
       operationId: createKnowledge
@@ -16344,6 +16421,8 @@ components:
       type: object
       required: [items, total, truncated, counts]
       properties:
+        next_cursor: {type: string, maxLength: 2048}
+        counts_incomplete: {type: boolean, description: "Scoped counts stop at 10001 and are lower bounds when true."}
         items: {type: array, items: {$ref: '#/components/schemas/KnowledgeItem'}}
         total: {type: integer}
         truncated: {type: boolean}
@@ -17195,6 +17274,17 @@ components:
             $ref: '#/components/schemas/ImportJob'
         next_cursor:
           type: [string, 'null']
+    DeliveryMatchCounts:
+      type: object
+      required: [matched_count, shown_count, hidden_count, hidden_finished, hidden_exit, incomplete]
+      properties:
+        matched_count: {type: integer, minimum: 0, description: "Lower bound when incomplete; scan capped at 10001."}
+        shown_count: {type: integer, minimum: 0}
+        hidden_count: {type: integer, minimum: 0}
+        hidden_finished: {type: integer, minimum: 0}
+        hidden_exit: {type: integer, minimum: 0}
+        hidden_other: {type: integer, minimum: 0, description: "Custom Hide set matched an open/doing category; never counted as an exit."}
+        incomplete: {type: boolean}
     DeliveryReleaseRow:
       type: object
       required: [project_id, release_id, visibility, state, rank, revision]
@@ -17370,6 +17460,8 @@ components:
       type: object
       required: [project_id, release_id, visibility, state, rank, revision, title, rollup]
       properties:
+        display_name: {type: string, description: "Bound product marketing name or actual project/internal title. Product-name inventories exceeding 10000 entries or sequence 10000 refuse rather than omit matches."}
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
         project_id: {type: string, format: uuid}
         release_id: {type: string, format: uuid}
         title: {type: string}
@@ -17396,6 +17488,7 @@ components:
       type: object
       required: [items]
       properties:
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
         items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeliveryRelease'}}
         next_cursor: {type: string}
     DeliveryItem:
@@ -17420,6 +17513,7 @@ components:
       type: object
       required: [items, count, incomplete]
       properties:
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
         items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/DeliveryItem'}}
         next_cursor: {type: string}
         count: {type: integer, minimum: 0}
@@ -17512,6 +17606,8 @@ components:
       type: object
       required: [active, released, backlog, abandoned]
       properties:
+        backlog_matches: {type: object, additionalProperties: {$ref: '#/components/schemas/DeliveryMatchCounts'}}
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
         active_next_cursor: {type: string}
         counts_incomplete: {type: boolean}
         active: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeliveryRelease'}}
@@ -17520,6 +17616,81 @@ components:
         abandoned: {type: integer, minimum: 0}
 
   parameters:
+    DeliveryPlanningView:
+      name: view
+      in: query
+      description: "Full live effective population; incompatible with recovery/through. Omission preserves old defaults."
+      schema: {type: string, enum: [planning]}
+    DeliveryPlanningSearch:
+      name: q
+      in: query
+      description: "At most 200 UTF-8 bytes. Release name or visible work match before pagination."
+      schema: {type: string, maxLength: 200}
+    DeliveryPlanningHideClosed:
+      name: hide_closed
+      in: query
+      description: "Hide applies after search; counts include hidden hits."
+      schema: {type: boolean, default: true}
+    DeliveryPlanningHideState:
+      name: hide_state
+      in: query
+      description: "Tenant-taxonomy states; at most 100 raw values and 6400 bytes. Hide off removes no states."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningState:
+      name: work_state
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningKind:
+      name: kind
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningPriority:
+      name: priority
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningAssignee:
+      name: assignee
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningTag:
+      name: tag
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningCostUnit:
+      name: cost_unit
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningHumanCheck:
+      name: human_check
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningEpic:
+      name: epic
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningDateField:
+      name: date_field
+      in: query
+      description: "Same date bounds as the ticket list."
+      schema: {type: string}
+    DeliveryPlanningDateFrom:
+      name: date_from
+      in: query
+      description: "Same date bounds as the ticket list."
+      schema: {type: string}
+    DeliveryPlanningDateTo:
+      name: date_to
+      in: query
+      description: "Same date bounds as the ticket list."
+      schema: {type: string}
     NodeId:
       name: nodeId
       in: path

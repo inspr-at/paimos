@@ -4,18 +4,42 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
-Ticket lists offer **In release** independently of **Imported release**.
-`GET /api/nodes?ships_in=<release-node-UUID>|none&facets=ships_in&sort=order`
-filters by release identity or releases-mode backlog; prefix a value with `!`
-to exclude it. Facet counts cover the filtered result before pagination;
-`facet_labels.ships_in` supplies visible release titles. Release order puts
-expedited open work first, then container position, item rank, creation time
-and ID. Ranked backlog precedes the unranked tail. Journey projects retain
-priority and creation-time ordering and have no `ships_in` placement.
-Client ordering preserves timestamp microseconds. Requested list placement
-clears after a move into a journey project; reads that do not request placement
-retain the last known projection until an authoritative refresh.
-The URL and saved views preserve both filters and the chosen sort.
+Project work has one release scope: omit `ships_in` for all work, send a single
+release UUID for that release, or `none` for ranked and unranked Backlog.
+Ticket URL state and saved views retain single UUID/`none` scopes; older multiple
+or excluded values show “Choose a release scope” and block the read. Ordinary
+filters still intersect scope. The selectable **In release** facet is removed;
+the separate **Imported release** label and compatible API facet counts remain.
+The breadcrumb/picker is owned by P6b.
+
+`GET /api/nodes?within=<project>&ships_in=<UUID|none>&sort=order` preserves
+release order, C-collated ranks, timestamp microseconds and placement identity.
+Journey projects keep their existing priority/creation-time ordering.
+
+Delivery overview, release list, item and Backlog reads accept `view=planning`,
+`q`, `hide_closed`, optional `hide_state`, and ordinary work filters (release
+lifecycle `state` stays separate from `work_state`). Search runs before paging;
+Hide runs after matching. `matches` reports whole-query pre/post-Hide counts,
+finished/exit breakdown and a lower-bound flag after 10,001 matches. Rollups
+remain unfiltered. Planning Backlog includes live completed/cancelled work in
+ranked and tail parts. Cursors bind principal/tenant/project/collection/query;
+changed queries refuse old cursors. Recovery/`through` combinations are refused.
+Product marketing names use P3's explicit runtime product binding; over-budget
+name inventories or sequences above 10,000 refuse without omitting later hits.
+
+`GET /api/knowledge?project_id=<project>&ships_in=none` reads deduplicated,
+one-hop visible `relates` context of effective Backlog work in either direction,
+including ranked and tail members. Its own type/status/search filters intersect
+before counts and keyset pages (limit ≤200, cursor ≤2048 bytes); capped counts
+are explicit lower bounds. Unscoped callers retain their previous shape and
+behavior. **K1 remains open:** release-UUID Knowledge scopes validate current
+project/release visibility, then return `409 release_context_undecided` until the
+coordinator records the release-context definition; no all-work fallback.
+
+List reads discard stale project, person and query responses. The implementation
+uses shared work predicates and a single read snapshot per overview, without
+per-member HTTP requests. P3/P4a/P5 integration keeps pairing → tree → tenant as
+the canonical mutation fence prefix and mounts persisted adoption reporting.
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 

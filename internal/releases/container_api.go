@@ -23,6 +23,10 @@ import (
 
 type Option func(*module)
 
+func WithProductProject(tenantID, projectID string) Option {
+	return func(m *module) { m.store = m.store.WithProductProject(tenantID, projectID) }
+}
+
 func WithAdoptionReporting(reporter delivery.AdoptionReporting) Option {
 	return func(m *module) { m.adoption = reporter }
 }
@@ -92,6 +96,10 @@ func containerOptions(w http.ResponseWriter, r *http.Request) (delivery.ReadOpti
 		}
 		out.Limit = n
 	}
+	if err := delivery.ParsePlanningOptions(q, &out); err != nil {
+		httpapi.WriteError(w, 400, err.Error())
+		return out, false
+	}
 	return out, true
 }
 func (m *module) containerMount(mux *http.ServeMux) {
@@ -143,7 +151,8 @@ func (m *module) containerRead(w http.ResponseWriter, r *http.Request) {
 		}
 		out, err = m.store.Adoptions(r.Context(), p, opt)
 	case strings.HasSuffix(r.URL.Path, "/delivery/overview"):
-		out, err = m.store.Overview(r.Context(), p, project, r.URL.Query().Get("released_cursor"))
+		opt.Cursor = r.URL.Query().Get("released_cursor")
+		out, err = m.store.OverviewQuery(r.Context(), p, project, opt)
 	case strings.HasSuffix(r.URL.Path, "/delivery/verify"):
 		out, err = m.store.VerifyAdoption(r.Context(), p, project, m.adoption)
 	case strings.HasSuffix(r.URL.Path, "/adoption-report"):

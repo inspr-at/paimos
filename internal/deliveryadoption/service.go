@@ -53,6 +53,10 @@ func pollWait(ctx context.Context) error {
 	}
 }
 
+func (s *Service) ProductProject() (string, string) {
+	return s.cfg.Product.TenantID, s.cfg.Product.ProjectID
+}
+
 func (s *Service) WithClock(now func() time.Time) *Service { copy := *s; copy.now = now; return &copy }
 
 func (s *Service) authority(tenantID string) (Authority, bool) {

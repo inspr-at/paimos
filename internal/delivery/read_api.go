@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workquery"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -27,6 +28,8 @@ type Rollup struct {
 	OpenHours float64 `json:"open_hours"`
 }
 type ReleaseView struct {
+	DisplayName string       `json:"display_name,omitempty"`
+	Matches     *MatchCounts `json:"matches,omitempty"`
 	Release
 	Title                 string            `json:"title"`
 	Body                  string            `json:"body"`
@@ -41,10 +44,16 @@ type ReleaseView struct {
 	IncludedIn            string            `json:"included_in_release_id,omitempty"`
 }
 type ReleasePage struct {
+	Matches    *MatchCounts  `json:"matches,omitempty"`
 	Items      []ReleaseView `json:"items"`
 	NextCursor string        `json:"next_cursor,omitempty"`
 }
 type ReadOptions struct {
+	View                              string
+	Work                              workquery.Query
+	HideClosed                        bool
+	HideStates                        []string
+	ProductNames                      map[int]string `json:"-"`
 	Limit                             int
 	Cursor, State, Part, Through      string
 	CompletedLater, CompletedUnplaced bool
@@ -118,11 +127,12 @@ func (s *Store) read(ctx context.Context, p tenant.Principal, project string, fn
 const estimateSQL = `CASE WHEN jsonb_typeof(n.fields->'estimate_hours')='number' AND n.fields->>'estimate_hours' ~ '^[0-9]{1,7}(\.[0-9]{1,6})?$' THEN (n.fields->>'estimate_hours')::float8 ELSE NULL END`
 const releaseViewSQL = `SELECT r.project_node_id::text,r.release_node_id::text,r.visibility,coalesce(r.sequence,0),r.state,r.rank,r.revision,r.entry_closes_at,coalesce(r.version_scheme,''),coalesce(r.version,''),r.cut_at,r.released_at,n.title,n.body,r.build_settings,d.build_defaults,(r.build_authorized_by IS NOT NULL),coalesce(r.reservation_basis,''),r.reservation_ref,coalesce(r.released_by::text,''),coalesce(r.included_in_release_id::text,''),coalesce(stats.units,0),coalesce(stats.completed,0),coalesce(stats.hours,0) FROM project_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL JOIN project_delivery d ON d.tenant_id=r.tenant_id AND d.project_node_id=r.project_node_id JOIN nodes pn ON pn.tenant_id=r.tenant_id AND pn.id=r.project_node_id AND pn.deleted_at IS NULL LEFT JOIN LATERAL (SELECT count(*) FILTER(WHERE e.kind IN ('ticket','task') AND e.state NOT IN ('cancelled','canceled')) units,count(*) FILTER(WHERE e.kind IN ('ticket','task') AND e.state IN ('done','accepted','delivered')) completed,sum(CASE WHEN e.kind IN ('ticket','task') AND e.state NOT IN ('done','accepted','delivered','cancelled','canceled') THEN ` + estimateSQL + ` ELSE 0 END) hours FROM ` + Effective + ` e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.item_node_id WHERE e.tenant_id=r.tenant_id AND e.project_node_id=r.project_node_id AND e.release_node_id=r.release_node_id) stats ON true WHERE r.tenant_id=$1 AND r.project_node_id=$2`
 
-func scanView(row pgx.Row) (ReleaseView, error) {
+func scanView(row pgx.Row, extra ...any) (ReleaseView, error) {
 	var v ReleaseView
 	var overrides, defaults []byte
 	var authorized bool
-	err := row.Scan(&v.ProjectID, &v.ID, &v.Visibility, &v.Sequence, &v.State, &v.Rank, &v.Revision, &v.EntryClosesAt, &v.VersionScheme, &v.Version, &v.CutAt, &v.ReleasedAt, &v.Title, &v.Body, &overrides, &defaults, &authorized, &v.ReservationBasis, &v.ReservationRef, &v.ReleasedBy, &v.IncludedIn, &v.Rollup.Units, &v.Rollup.Completed, &v.Rollup.OpenHours)
+	dest := []any{&v.ProjectID, &v.ID, &v.Visibility, &v.Sequence, &v.State, &v.Rank, &v.Revision, &v.EntryClosesAt, &v.VersionScheme, &v.Version, &v.CutAt, &v.ReleasedAt, &v.Title, &v.Body, &overrides, &defaults, &authorized, &v.ReservationBasis, &v.ReservationRef, &v.ReleasedBy, &v.IncludedIn, &v.Rollup.Units, &v.Rollup.Completed, &v.Rollup.OpenHours}
+	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = ErrNotFound
@@ -154,6 +164,9 @@ func (s *Store) GetRelease(ctx context.Context, p tenant.Principal, project, rel
 	return out, err
 }
 func listReleases(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, opt ReadOptions) (ReleasePage, error) {
+	if opt.View == "planning" {
+		return planningReleases(ctx, tx, p, project, opt)
+	}
 	out := ReleasePage{Items: []ReleaseView{}}
 	limit, err := pageLimit(opt.Limit, 50)
 	if err != nil {
@@ -207,6 +220,11 @@ func (s *Store) ListReleases(ctx context.Context, p tenant.Principal, project st
 	var out ReleasePage
 	err := s.read(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
+		if opt.View == "planning" {
+			if err = s.productNames(ctx, tx, p, project, &opt); err != nil {
+				return err
+			}
+		}
 		out, err = listReleases(ctx, tx, p, project, opt)
 		return err
 	})
@@ -214,12 +232,14 @@ func (s *Store) ListReleases(ctx context.Context, p tenant.Principal, project st
 }
 
 type Overview struct {
-	Active           []ReleaseView  `json:"active"`
-	ActiveNextCursor string         `json:"active_next_cursor,omitempty"`
-	Released         ReleasePage    `json:"released"`
-	Backlog          map[string]int `json:"backlog"`
-	Abandoned        int            `json:"abandoned"`
-	CountsIncomplete bool           `json:"counts_incomplete"`
+	Matches          *MatchCounts           `json:"matches,omitempty"`
+	BacklogMatches   map[string]MatchCounts `json:"backlog_matches,omitempty"`
+	Active           []ReleaseView          `json:"active"`
+	ActiveNextCursor string                 `json:"active_next_cursor,omitempty"`
+	Released         ReleasePage            `json:"released"`
+	Backlog          map[string]int         `json:"backlog"`
+	Abandoned        int                    `json:"abandoned"`
+	CountsIncomplete bool                   `json:"counts_incomplete"`
 }
 
 func (s *Store) Overview(ctx context.Context, p tenant.Principal, project, cursor string) (Overview, error) {
@@ -265,10 +285,11 @@ type ItemView struct {
 	ReleaseRank    string     `json:"-"`
 }
 type ItemPage struct {
-	Items      []ItemView `json:"items"`
-	NextCursor string     `json:"next_cursor,omitempty"`
-	Count      int        `json:"count"`
-	Incomplete bool       `json:"incomplete"`
+	Matches    *MatchCounts `json:"matches,omitempty"`
+	Items      []ItemView   `json:"items"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+	Count      int          `json:"count"`
+	Incomplete bool         `json:"incomplete"`
 }
 
 const itemColumns = `e.item_node_id::text,e.project_node_id::text,coalesce(e.release_node_id::text,''),coalesce(e.rank,''),e.revision,e.expedite,e.due_on::text,n.updated_at,n.key,n.title,e.kind,e.state,e.created_at,` + estimateSQL + `,coalesce((WITH RECURSIVE ancestors AS (SELECT n.parent_id AS id,1 AS depth UNION ALL SELECT a.parent_id,ancestors.depth+1 FROM ancestors JOIN nodes a ON a.tenant_id=n.tenant_id AND a.id=ancestors.id WHERE ancestors.depth<64) SELECT a.id::text FROM ancestors JOIN nodes a ON a.tenant_id=n.tenant_id AND a.id=ancestors.id JOIN node_kinds ak ON ak.tenant_id=a.tenant_id AND ak.id=a.kind_id WHERE ak.slug='epic' AND a.deleted_at IS NULL ORDER BY ancestors.depth LIMIT 1),''),coalesce(e.release_rank,'')`
@@ -288,6 +309,14 @@ func (s *Store) Items(ctx context.Context, p tenant.Principal, project, release 
 		return out, invalidInput("invalid item filters")
 	}
 	err = s.read(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error {
+		if opt.View == "planning" {
+			if opt.CompletedLater || opt.CompletedUnplaced || opt.Through != "" {
+				return invalidInput("planning conflicts with recovery or through")
+			}
+			var e error
+			out, e = planningItems(ctx, tx, p, project, release, opt, limit)
+			return e
+		}
 		if e := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: project}); e != nil {
 			return e
 		}

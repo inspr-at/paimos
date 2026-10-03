@@ -180,7 +180,10 @@ func TestListDeliveryOrderFilterFacetAndPaging(t *testing.T) {
 		expectKeys(t, read(t, "PR-1", "ships_in=none&sort=order"), "TK-4", "TK-5", "TK-6")
 		expectKeys(t, read(t, "PR-1", "ships_in=!none,!"+ids["REL-1"]+"&sort=order"), "TK-3")
 		expectKeys(t, read(t, "PR-1", "ships_in="+ids["REL-1"]+","+ids["REL-2"]+"&priority=high&sort=order"), "TK-2")
-		expectKeys(t, read(t, "PR-2", "ships_in="+ids["REL-1"]+"&sort=order"))
+		status, body := call(t, &p, "GET", "/api/nodes?within="+ids["PR-2"]+"&ships_in="+ids["REL-1"], "")
+		if status != http.StatusNotFound || !strings.Contains(string(body), "release scope not found") {
+			t.Fatalf("cross-project scope must refuse: %d %s", status, body)
+		}
 		all := read(t, "PR-1", "facets=ships_in,release&sort=order&limit=1")
 		if len(all.Facets["ships_in"]) != 3 || all.Facets["ships_in"]["none"] != 3 || all.Facets["ships_in"][ids["REL-2"]] != 1 {
 			t.Fatalf("all memberships: %+v", all.Facets)
@@ -211,10 +214,11 @@ func TestListDeliveryOrderFilterFacetAndPaging(t *testing.T) {
 			t.Fatalf("hidden membership leaked: %s", body)
 		}
 		status, body = call(t, &guest, "GET", "/api/nodes?kind=ticket&ships_in="+ids["REL-1"]+"&sort=order&facets=ships_in", "")
-		page = decode[deliveryListPage](t, status, body, http.StatusOK)
-		expectKeys(t, page)
-		if len(page.Facets["ships_in"]) != 0 || len(page.Labels) != 0 {
-			t.Fatal("hidden filter must disclose no facets")
+		if status != http.StatusNotFound && status != http.StatusForbidden {
+			t.Fatalf("hidden scope must refuse: %d %s", status, body)
+		}
+		if strings.Contains(string(body), ids["REL-1"]) || strings.Contains(string(body), "Same release title") {
+			t.Fatal("hidden scope refusal must disclose no identity or label")
 		}
 	})
 	t.Run("cursor retains ordering and is bound to ships_in", func(t *testing.T) {
@@ -227,6 +231,15 @@ func TestListDeliveryOrderFilterFacetAndPaging(t *testing.T) {
 		status, body := call(t, &p, "GET", "/api/nodes?within="+ids["PR-1"]+"&kind=ticket&ships_in=none&sort=order&limit=2&cursor="+url.QueryEscape(*page.NextCursor), "")
 		if status != http.StatusBadRequest || !strings.Contains(string(body), "cursor") {
 			t.Fatalf("changed filter must reject cursor: %d %s", status, body)
+		}
+		other := p
+		if err := testDB.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other scoped reader') RETURNING id::text`, p.TenantID).Scan(&other.ID); err != nil {
+			t.Fatal(err)
+		}
+		dbtest.BindRole(t, testDB, p.TenantID, other.ID, "owner")
+		status, body = call(t, &other, "GET", "/api/nodes?within="+ids["PR-1"]+"&kind=ticket&ships_in=!none&sort=order&limit=2&cursor="+url.QueryEscape(*page.NextCursor), "")
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "cursor does not match") {
+			t.Fatalf("changed authorized principal must reject cursor: %d %s", status, body)
 		}
 	})
 	t.Run("journey mode retains priority and has no placement", func(t *testing.T) {

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { reactive, ref, shallowRef, type Ref } from 'vue'
+import { reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem, type ListPage, type ListQuery } from './api'
+import { releaseScope } from './releaseScope'
 import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
-import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
+import { activeDimensions, apiParams, filtersToQuery, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { askDoneGate } from './doneGateAsk'
 import { benefitGateError, benefitRetryFields, completionFields, needsBenefitPrompt } from './doneGate'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
 
 const FACETS = LIST_FACETS
-const facetOf = (dimension: Dimension) => DIMENSION_BY_KEY.get(dimension)!.facet
+const facetOf = (dimension: Dimension) => dimension === 'ships_in' ? 'ships_in' : DIMENSION_BY_KEY.get(dimension)?.facet
 function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong' }
 
 // Loads one project's ticket list page by page (cursor paging, 200 rows),
@@ -18,7 +19,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 // from a second, one-row request without that filter, so its menu still
 // shows what else could be chosen.
 // review: a change that met someone else's newer version offers to show it.
-export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void; fetchList?: (query: ListQuery) => Promise<ListPage> } = {}) {
+export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void; identity?: () => string; fetchList?: (query: ListQuery) => Promise<ListPage> } = {}) {
   const fetchList = listOptions.fetchList ?? listNodes
   const rows = ref<ListItem[]>([])
   const cursor = ref<string | null>(null)
@@ -46,6 +47,17 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // Counts asked for when a menu opens (labels, cost units, releases), per query.
   const extraFacets = ref<Record<string, Record<string, number>>>({})
   let generation = 0
+  let identityGeneration = 0
+  let epicsGeneration = 0
+  watch([projectId, () => JSON.stringify(filtersToQuery(filters.value)), () => listOptions.identity?.() ?? ''], (next, previous) => {
+    generation++; identityGeneration++; rows.value = []; cursor.value = null; edge.value = null; reads.value = null
+    facets.value = {}; dimensionFacets.value = {}; extraFacets.value = {}; error.value = ''; moreError.value = ''
+    loading.value = false; loadingMore.value = false; releaseNames.value = {}; names.clear(); colors.clear()
+    loadedOnce.value = false
+    if (next[0] !== previous[0] || next[2] !== previous[2]) {
+      epicsGeneration++; epics.value = []; epicsFor = ''; epicsLoad = null
+    }
+  }, { flush: 'sync' })
 
   function learn(items: ListItem[]) {
     for (const item of items) {
@@ -70,13 +82,18 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // A page read before a gap may miss a change the stream did not deliver (a
   // deletion, say): like every other read, it is read again before any of
   // its rows can show. stale: a newer load replaced this one (no page); what
-  // it found still goes to the row store.
+  // a same-query refresh still teaches the store newer revisions. A changed
+  // project/person/scope/query discards the response before it reaches the store.
   async function trusted(read: () => Promise<ListPage>, stale: () => boolean): Promise<{ page: ListPage | null; sent: number }> {
+    const identity = identityGeneration
     for (;;) {
       const sent = rowStore.mark()
       const page = await read()
       const doubtful = rowStore.gapSince(sent)
-      if (stale()) { if (!doubtful) for (const item of page.items) rowStore.adopt(item, sent); return { page: null, sent } }
+      if (stale()) {
+        if (identity === identityGeneration && !doubtful) for (const item of page.items) rowStore.adopt(item, sent)
+        return { page: null, sent }
+      }
       if (!doubtful) return { page, sent }
     }
   }
@@ -86,6 +103,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   async function load(options: { pageSize?: number } = {}) {
     const within = projectId.value
     if (!within) return
+    if (releaseScope(filters.value.ships_in).kind === 'repair') { generation++; rows.value = []; facets.value = {}; cursor.value = null; error.value = 'Choose a release scope'; loadedOnce.value = true; return }
     if (labelsProject !== within) { releaseNames.value = {}; labelsProject = within }
     delete facetErrors.ships_in
     pageSize = options.pageSize ?? 200
@@ -130,17 +148,19 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   let moreRequest: Promise<void> | null = null
   function loadMore(): Promise<void> {
     if (loadingMore.value && moreRequest) return moreRequest
-    moreRequest = fetchMore().finally(() => { moreRequest = null })
+    const pending = fetchMore().finally(() => { if (moreRequest === pending) moreRequest = null })
+    moreRequest = pending
     return moreRequest
   }
   async function fetchMore() {
     const within = projectId.value
     if (!within || !cursor.value || loading.value) return
     const request = generation
+    const current = filters.value
     loadingMore.value = true; moreError.value = ''
     try {
       const after = cursor.value
-      const { page, sent } = await trusted(() => fetchList(apiParams(within, filters.value, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
+      const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
       if (!page) return
       const seen = new Set(rows.value.map(row => row.id))
       learn(page.items)
@@ -176,7 +196,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const asked = new Map<string, Promise<void>>()
   function requestFacet(facet: string): Promise<void> {
     const within = projectId.value
-    if (!within || facets.value[facet] || extraFacets.value[facet]) return Promise.resolve()
+    if (!within || releaseScope(filters.value.ships_in).kind === 'repair' || facets.value[facet] || extraFacets.value[facet]) return Promise.resolve()
     const request = generation
     const key = `${request}:${facet}`
     if (asked.has(key)) return asked.get(key)!
@@ -201,20 +221,22 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (!within) return Promise.resolve()
     if (epicsFor === within && epicsLoad) return epicsLoad
     epicsFor = within
+    const request = epicsGeneration
     epicsLoad = listNodes({ within, kind: ['epic'], sort: 'key', limit: 500 })
-      .then(page => { if (epicsFor === within) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
-      .catch(() => { epicsLoad = null })
+      .then(page => { if (epicsFor === within && request === epicsGeneration) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
+      .catch(() => { if (request === epicsGeneration) epicsLoad = null })
     return epicsLoad
   }
 
   async function resolveNames(ids: string[]) {
     const within = projectId.value
     if (!within) return
+    const request = generation
     await Promise.all(ids.filter(id => id !== 'none' && !names.has(id)).map(async id => {
       try {
         const page = await listNodes({ within, kind: WORK_KINDS, assignee: [id], limit: 1 })
         const person = page.items[0]?.assignee
-        if (person) names.set(id, person.name)
+        if (person && request === generation) names.set(id, person.name)
       } catch { /* the menu shows "Unknown person" */ }
     }))
   }

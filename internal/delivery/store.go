@@ -27,10 +27,17 @@ var (
 // Store owns releases-mode writes only. It never adopts projects, writes the
 // journey archive, mounts endpoints, or authorizes spending.
 type Store struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	pool                          *pgxpool.Pool
+	now                           func() time.Time
+	productTenant, productProject string
 }
 
+// WithProductProject pins the explicitly bound product; names never infer a product from a project title.
+func (s *Store) WithProductProject(tenantID, projectID string) *Store {
+	copy := *s
+	copy.productTenant, copy.productProject = tenantID, projectID
+	return &copy
+}
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, now: time.Now} }
 
 // WithClock returns a store using the trusted server clock supplied by its

@@ -7,6 +7,7 @@
 // Filter values may carry a leading "!" (excluded). Within one filter the plain
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
+import { releaseScope, scopeParameter, scopeValuesFromQuery } from './releaseScope.ts'
 import { estimateHours } from './estimates.ts'
 import { compareRevision } from './liveUpdates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
@@ -54,7 +55,6 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native journey membership.
-  { key: 'ships_in', title: 'In release', facet: 'ships_in', primary: false, none: 'No release (backlog)' },
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
 ]
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
@@ -132,7 +132,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
     release: list(query.release),
-    ships_in: list(query.ships_in).filter(value => bare(value) === 'none' || VIEW_ID.test(bare(value))).slice(0, 100),
+    ships_in: scopeValuesFromQuery(query.ships_in),
     human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
@@ -146,6 +146,7 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
   const out: Record<string, string> = {}
   if (filters.q.trim()) out.q = filters.q.trim()
   for (const key of DIMENSION_KEYS) if (filters[key].length) out[key] = filters[key].join(',')
+  if (filters.ships_in.length) out.ships_in = filters.ships_in.join(',')
   if (filters.date) out.date = serializeDate(filters.date)
   if (filters.showClosed) out.closed = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
@@ -160,7 +161,7 @@ export function activeDimensions(filters: ListFilters): Dimension[] {
   return DIMENSION_KEYS.filter(key => filters[key].length > 0)
 }
 export function hasFilters(filters: ListFilters): boolean {
-  return !!filters.q.trim() || activeDimensions(filters).length > 0 || !!filters.date
+  return !!filters.q.trim() || activeDimensions(filters).length > 0 || !!filters.date || filters.ships_in.length > 0
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
@@ -296,7 +297,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     epic: take('epic'),
     cost_unit: take('cost'),
     release: take('release'),
-    ships_in: take('ships_in'),
+    ...(omit !== 'ships_in' && scopeParameter(releaseScope(filters.ships_in)) ? { ships_in: [scopeParameter(releaseScope(filters.ships_in))!] } : {}),
     ...(take('human_check').length ? { human_check: take('human_check') } : {}),
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
@@ -330,7 +331,7 @@ function labelOptions(dimension: Dimension, counts: Record<string, number>, sele
     if (value !== 'none' && !byName.has(value.toLowerCase())) byName.set(value.toLowerCase(), { value, label: value, count: 0, color: colors.get(value.toLowerCase()) })
   }
   const options = [...byName.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.label.localeCompare(b.label))
-  return [{ value: 'none', label: DIMENSION_BY_KEY.get(dimension)!.none, count: counts.none ?? 0 }, ...options]
+  return [{ value: 'none', label: (dimension === 'ships_in' ? 'Backlog' : DIMENSION_BY_KEY.get(dimension)!.none), count: counts.none ?? 0 }, ...options]
 }
 export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
   const selected = selectedValues.map(bare)
@@ -388,7 +389,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 }
 // The words a chip or a view name uses for one value.
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
-  if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
+  if (value === 'none' && (dimension === 'ships_in' ? 'Backlog' : DIMENSION_BY_KEY.get(dimension)!.none)) return (dimension === 'ships_in' ? 'Backlog' : DIMENSION_BY_KEY.get(dimension)!.none)
   switch (dimension) {
     case 'ships_in': return context.releases?.[value] ?? 'Release'
     case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'

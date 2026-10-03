@@ -16,13 +16,16 @@ const positions: Record<string, DeliveryOrder> = {
 const serverOrder = ['n-3', 'n-1', 'n-2', 'n-5', 'n-4', 'n-6', 'n-epic']
 const rows = (page: Page) => page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row:not(.ghost)')
 const keys = (page: Page) => rows(page).locator('.key')
-const shot = (name: string) => { const dir = resolve('test-results/aeon-596-p5'); mkdirSync(dir, { recursive: true }); return resolve(dir, name) }
+const shot = (name: string) => { const dir = resolve('test-results/aeon-596-int'); mkdirSync(dir, { recursive: true }); return resolve(dir, name) }
 const matches = (values: string[], actual: string) => {
   const positive = values.filter(value => !value.startsWith('!'))
   return (!positive.length || positive.includes(actual)) && !values.includes(`!${actual}`)
 }
-async function world(page: Page, state = { failFacet: false }) {
+async function world(page: Page, state = { failFacet: false }, theme: "light" | "dark" = "light") {
   const data = fixtures()
+  data.preferences.theme = { choice: theme }
+  for (const node of data.nodes) if (['n-1', 'n-2'].includes(node.id)) node.title = 'Freigabeplanung mit nachvollziehbaren Prüfungen und ausführlichem deutschem Projekttitel'
+  await page.addInitScript(value => { document.addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.theme = value }, { once: true }) }, theme)
   await mockWork(page, data)
   function item(node: MockNode): ListItem {
     return { ...node, kind_id: `k-${node.kind_slug}`, position: '0', deleted_at: null, kind_label: node.kind_slug,
@@ -56,72 +59,53 @@ async function world(page: Page, state = { failFacet: false }) {
   })
   return queries
 }
-async function desktopFacet(page: Page) {
-  await page.getByRole('button', { name: 'Filter by more' }).click()
-  await page.getByRole('menuitem', { name: 'In release', exact: true }).click()
-  const menu = page.getByRole('dialog', { name: 'Filter by In release' })
-  await expect(menu.getByRole('checkbox', { name: /Release 122/ })).toBeVisible()
-  return menu
-}
 const start = '/p/PHAROS?view=list&type=!epic&closed=1&sort=order'
-
-test('1440: UUID filter, exclusions, reload and stationary facet controls', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  const errors = watchErrors(page), queries = await world(page)
-  await page.goto(start)
-  await expect(keys(page)).toHaveText(['PHAROS-13', 'PHAROS-11', 'PHAROS-12', 'PHAROS-15', 'PHAROS-14', 'PHAROS-16'])
-  const menu = await desktopFacet(page), release = menu.locator('.facet-option').filter({ hasText: 'Release 122' })
-  await expectStableControls({ controls: { options: menu.locator('.facet-options'), row: release, selector: release.getByRole('checkbox'), exclude: release.getByRole('button', { name: 'Exclude Release 122' }) }, interactions: [
-    { name: 'include release', run: async () => { await release.getByRole('checkbox').check(); await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12']); await expect.poll(() => queries.filter(query => query.get('limit') === '200').at(-1)?.get('ships_in')).toBe(releaseA) } },
-    { name: 'exclude release', run: async () => { await release.getByRole('button', { name: 'Exclude Release 122' }).click(); await expect(keys(page)).toHaveText(['PHAROS-13', 'PHAROS-15', 'PHAROS-14', 'PHAROS-16']) } },
-    { name: 'clear exclusion', run: async () => { await release.getByRole('button', { name: 'Exclude Release 122' }).click(); await expect(rows(page)).toHaveCount(6) } },
-  ] })
-  await release.getByRole('checkbox').check()
-  await expect(page).toHaveURL(new RegExp(`ships_in=${releaseA}`))
-  await page.screenshot({ path: shot('list-facet-1440.png'), fullPage: true })
-  await page.keyboard.press('Escape')
-  await expect(page.getByLabel('Applied filters')).toContainText('In releaseRelease 122')
-  await page.getByRole('button', { name: 'Filter by more' }).click()
-  await expect(page.getByRole('menuitem', { name: 'Imported release', exact: true })).toBeVisible()
-  await page.keyboard.press('Escape')
-  await page.reload()
-  await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12'])
-  await expect(page.getByLabel('Applied filters')).toContainText('Release 122')
-  expect(errors).toEqual([])
-})
-test('390: full-height sheet, pinned action and stable option rows', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  const errors = watchErrors(page)
-  await world(page); await page.goto(start); await expect(rows(page)).toHaveCount(6)
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
-  const section = sheet.locator('section').filter({ has: page.getByText('In release', { exact: true }) })
-  const release = section.locator('.facet-option').filter({ hasText: 'Release 122' })
-  await release.scrollIntoViewIfNeeded(); await expect(release.getByRole('checkbox')).toBeVisible()
-  await expectStableControls({ controls: { frame: sheet, action: sheet.locator('footer button'), options: section.locator('.facet-options'), row: release, selector: release.getByRole('checkbox') }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
-    { name: 'choose release', run: async () => { await release.getByRole('checkbox').check(); await expect(sheet.locator('footer button')).toHaveText('Show 2 tickets') } },
-    { name: 'clear release', run: async () => { await release.getByRole('checkbox').uncheck(); await expect(sheet.locator('footer button')).toHaveText('Show 6 tickets') } },
-  ] })
-  await release.getByRole('checkbox').check(); await expect(sheet.locator('footer button')).toHaveText('Show 2 tickets')
-  await page.screenshot({ path: shot('list-facet-390.png') })
-  await sheet.locator('footer button').click(); await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12'])
-  await page.screenshot({ path: shot('list-filtered-390.png') }); expect(errors).toEqual([])
-})
-test('failed facet read is visible and reopening retries it', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  const state = { failFacet: true }; await world(page, state); await page.goto(start)
-  await expect(rows(page)).toHaveCount(6)
-  await page.getByRole('button', { name: 'Filter by more' }).click()
-  await page.getByRole('menuitem', { name: 'In release', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('Release counts could not be loaded')
-  await page.keyboard.press('Escape'); state.failFacet = false
-  await desktopFacet(page); await expect(page.getByRole('alert')).toHaveCount(0)
-})
-test('Display offers Release order and sends the complete key', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  const queries = await world(page); await page.goto(start.replace('sort=order', 'sort=priority'))
-  await expect(rows(page)).toHaveCount(6); await page.getByRole('button', { name: /^Display/ }).click()
-  await page.getByRole('dialog', { name: 'Display options' }).getByLabel('Sort key 1').selectOption('order')
-  await expect.poll(() => queries.filter(query => query.get('limit') === '200').at(-1)?.get('sort')).toBe('order')
-  await expect(keys(page)).toHaveText(['PHAROS-13', 'PHAROS-11', 'PHAROS-12', 'PHAROS-15', 'PHAROS-14', 'PHAROS-16'])
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`${width} ${theme}: scope bookmarks, removed facet and stable ordinary controls`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const errors = watchErrors(page), queries = await world(page, { failFacet: false }, theme)
+    await page.goto(`${start}&ships_in=${releaseA}`)
+    await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12'])
+    await page.reload()
+    await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12'])
+    expect(queries.filter(query => query.get('limit') === '200').at(-1)?.get('ships_in')).toBe(releaseA)
+    if (width === 390) {
+      await page.getByRole('button', { name: 'Filters', exact: true }).click()
+      const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+      await expect(sheet.getByText('In release', { exact: true })).toHaveCount(0)
+      const option = sheet.getByRole('checkbox', { name: /^High /  })
+      await option.scrollIntoViewIfNeeded()
+      const row = option.locator('xpath=ancestor::div[contains(@class,"facet-option")][1]')
+      await expectStableControls({ controls: { frame: sheet, action: sheet.locator('footer button'), selector: option, row }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+        { name: 'ordinary priority', run: async () => { await option.check() } },
+        { name: 'clear priority', run: async () => { await option.uncheck() } },
+      ] })
+      await sheet.locator('footer button').click()
+    } else {
+      await page.getByRole('button', { name: 'Filter by more' }).click()
+      await expect(page.getByRole('menuitem', { name: 'In release', exact: true })).toHaveCount(0)
+      await expect(page.getByRole('menuitem', { name: 'Imported release', exact: true })).toBeVisible()
+      await page.keyboard.press('Escape')
+      const display = page.getByRole('button', { name: /^Display/ })
+      await display.click()
+      const dialog = page.getByRole('dialog', { name: 'Display options' }), selector = dialog.getByLabel('Sort key 1')
+      await expectStableControls({ controls: { action: display, selector }, interactions: [
+        { name: 'ordinary sort', run: async () => { await selector.selectOption('priority') } },
+        { name: 'release order', run: async () => { await selector.selectOption('order') } },
+      ] })
+      await page.keyboard.press('Escape')
+    }
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    await page.screenshot({ path: shot(`release-scope-${width}-${theme}.png`), fullPage: true })
+    await page.goto(`${start}&ships_in=none`)
+    await expect(keys(page)).toHaveText(['PHAROS-14', 'PHAROS-16'])
+    await page.screenshot({ path: shot(`backlog-scope-${width}-${theme}.png`), fullPage: true })
+    expect(errors).toEqual([])
+  })
+}
+test('ambiguous saved scope gives visible repair and no hidden list request', async ({ page }) => {
+  const queries = await world(page)
+  await page.goto(`${start}&ships_in=${releaseA},!none`)
+  await expect(page.getByText('Choose a release scope', { exact: true })).toBeVisible()
+  expect(queries.filter(query => query.get('limit') === '200')).toHaveLength(0)
 })

@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { releaseScope } from '../lib/releaseScope'
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -175,7 +176,7 @@ async function fetchWorkList(query: ListQuery) {
   if (!snapshot || queue.errors[id]) throw new Error(queue.errors[id] || 'The work queue could not be loaded.')
   return queueFilteredNodes(query, snapshot)
 }
-const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
+const list = useTicketList(projectId, filters, { identity: () => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`, review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
 type ViewMode = TicketView | 'journey' | 'knowledge'
@@ -417,7 +418,7 @@ function sheetOpened() {
   if (graphActive.value) return
   void list.resolveNames(options('assignee').map(o => o.value))
   void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release', 'ships_in', 'human_check']) void list.requestFacet(facet)
+  for (const facet of ['tag', 'cost_unit', 'release', 'human_check']) void list.requestFacet(facet)
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -549,7 +550,13 @@ watch(projectId, async id => {
   entryResolved.value = true
 }, { immediate: true })
 
-const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
+const queryKey = computed(() => {
+  if (!projectId.value || !entryResolved.value) return ''
+  const identity = [session.identity?.tenant.id, session.identity?.principal.id]
+  return JSON.stringify([identity, releaseScope(filters.value.ships_in).kind === 'repair'
+    ? ['repair', projectId.value, filters.value.ships_in]
+    : apiParams(projectId.value, filters.value)])
+})
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
 const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')

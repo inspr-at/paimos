@@ -25,20 +25,23 @@ test('release tail and journey order retain microseconds in both directions befo
   }
 })
 
-test('ships_in is distinct from imported release and survives URL, API, exclusions and saved views', () => {
-  const filters = filtersFromQuery({ ships_in: `${releaseA},!none`, release: 'imported-v1', sort: 'order' })
-  assert.deepEqual(filters.ships_in, [releaseA, '!none'])
-  assert.deepEqual(filtersToQuery(filters), { ships_in: `${releaseA},!none`, release: 'imported-v1', sort: 'order' })
-  const params = apiParams('project', filters)
-  assert.deepEqual(params.ships_in, [releaseA, '!none'])
-  assert.deepEqual(params.release, ['imported-v1'])
-  assert.equal(params.sort, 'order')
-  assert.deepEqual(apiParams('project', filters, { omit: 'ships_in' }).ships_in, [])
-  assert.deepEqual(apiParams('project', filters, { omit: 'ships_in' }).release, ['imported-v1'])
-  assert.deepEqual(filtersFromView({ id: releaseB, ...viewShape(filters) }).ships_in, filters.ships_in)
+test('single release/Backlog scopes survive views and intersect ordinary filters; ambiguous legacy scopes require repair', () => {
+  for (const scope of [releaseA, 'none']) {
+    const filters = filtersFromQuery({ ships_in: scope, release: 'imported-v1', status: '!done', sort: 'order' })
+    assert.deepEqual(apiParams('project', filters).ships_in, [scope])
+    assert.deepEqual(apiParams('project', filters).release, ['imported-v1'])
+    assert.deepEqual(filtersFromView({ id: releaseB, ...viewShape(filters) }).ships_in, [scope])
+    assert.equal(filtersToQuery(filters).ships_in, scope)
+    assert.equal(apiParams('project', filters, { omit: 'ships_in' }).ships_in, undefined)
+  }
+  assert.equal(apiParams('project', filtersFromQuery({})).ships_in, undefined)
+  for (const raw of [`${releaseA},${releaseB}`, `!none`, `bad`, `${releaseA},!none`]) {
+    const filters = filtersFromQuery({ ships_in: raw, priority: 'high' })
+    assert.equal(filtersToQuery(filters).ships_in, raw)
+    assert.throws(() => apiParams('project', filters), /Choose a release scope/)
+    assert.deepEqual(filters.priority, ['high'])
+  }
   assert.deepEqual(clearedFilters().ships_in, [])
-  assert.deepEqual(filtersFromQuery({ ships_in: `bad,!bad,${releaseA},none` }).ships_in, [releaseA, 'none'])
-  assert.deepEqual(effectiveSort(filters), [{ field: 'order', desc: false }])
   assert.deepEqual(parseSort('-order'), [{ field: 'order', desc: true }])
 })
 
@@ -69,7 +72,7 @@ test('facet choices retain UUID identity and positions while counts change', () 
   const changed = facetOptions('ships_in', { [releaseA]: 9 }, [releaseA], new Map(), undefined, { releases })
   assert.deepEqual(changed.map(option => option.value), options.map(option => option.value))
   assert.equal(valueLabel('ships_in', releaseB, { releases }), 'Audit sweep')
-  assert.equal(valueLabel('ships_in', 'none'), 'No release (backlog)')
+  assert.equal(valueLabel('ships_in', 'none'), 'Backlog')
   const sameNames = facetOptions('ships_in', { [releaseA]: 2, [releaseB]: 3 }, [], new Map(), undefined, { releases: { [releaseA]: 'Same', [releaseB]: 'Same' } })
   assert.deepEqual(sameNames.map(option => option.value), ['none', releaseA, releaseB])
 })

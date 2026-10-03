@@ -20,9 +20,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workquery"
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
@@ -105,6 +105,7 @@ type sortKey struct {
 }
 type listQuery struct {
 	KindID      *string   `json:"kind_id"`
+	KindsNot    []string  `json:"kinds_not,omitempty"`
 	Kinds       []string  `json:"kinds"`
 	States      []string  `json:"states"`
 	Priorities  []string  `json:"priorities"`
@@ -264,13 +265,17 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		out.KindID = &id
 	}
 	var err error
-	if out.Kinds, err = queryList(r, "kind"); err != nil {
-		return out, err
+	if err = workquery.Bounds(v); err != nil {
+		return out, badRequest(err.Error())
 	}
-	for _, kind := range out.Kinds {
-		if _, ok := parseUUID(kind); !ok && !slugOrID.MatchString(kind) {
-			return out, badRequest("invalid kind")
+	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", func(s string) (string, bool) {
+		id, ok := parseUUID(s)
+		if ok {
+			return id, true
 		}
+		return s, slugOrID.MatchString(s)
+	}); err != nil {
+		return out, err
 	}
 	if out.States, out.StatesNot, err = negatedList(r, "state", nil); err != nil {
 		return out, err
@@ -466,6 +471,15 @@ func listFingerprint(q listQuery) string {
 	return hex.EncodeToString(sum[:])
 }
 func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
+	identity := listFingerprint(q)
+	if len(q.ShipsIn)+len(q.ShipsInNot) > 0 {
+		p, _ := tenant.PrincipalFrom(ctx)
+		identity = workquery.Fingerprint(struct {
+			Tenant    string
+			Principal tenant.Principal
+			Query     string
+		}{tenantID, p, identity})
+	}
 	var mark *listCursor
 	if q.Cursor != "" {
 		env, err := openCursor(q.Cursor)
@@ -476,7 +490,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			return nodePage{}, badRequest("cursor does not match this query")
 		}
 		var c listCursor
-		if json.Unmarshal(env.P, &c) != nil || c.Hash != listFingerprint(q) {
+		if json.Unmarshal(env.P, &c) != nil || c.Hash != identity {
 			return nodePage{}, badRequest("cursor does not match this query")
 		}
 		if _, ok := parseUUID(c.ID); !ok {
@@ -486,6 +500,9 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	}
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := validateReleaseScope(ctx, tx, q); err != nil {
+			return err
+		}
 		var anchor any
 		if mark != nil {
 			anchor = mark.ID
@@ -596,7 +613,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		if len(page.Items) > q.Limit {
 			last := page.Items[q.Limit-1]
 			page.Items = page.Items[:q.Limit]
-			cursor, err := encodeTyped("list", listCursor{listFingerprint(q), last.ID})
+			cursor, err := encodeTyped("list", listCursor{identity, last.ID})
 			if err != nil {
 				return err
 			}
@@ -972,200 +989,11 @@ const tagElems = `(SELECT btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}'
 const tagNamesSQL = `(SELECT coalesce(array_agg(lower(e.name)),ARRAY[]::text[]) FROM ` + tagElems + ` e WHERE coalesce(e.name,'')<>'')`
 
 func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
-	// One tenant transaction supplies RLS to every table in the CTE.
-	array := func(values []string) []string {
-		if values == nil {
-			return []string{}
-		}
-		return values
+	shared := workquery.Query{KindID: q.KindID, Kinds: q.Kinds, KindsNot: q.KindsNot, States: q.States, Priorities: q.Priorities, Assignees: q.Assignees, Q: q.Q, Within: q.Within, ParentSet: q.ParentSet, ParentID: q.ParentID, Descendants: q.Descendants, HideClosed: q.HideClosed, FacetNames: q.FacetNames, Limit: q.Limit, Cursor: q.Cursor, StatesNot: q.StatesNot, PrioritiesNot: q.PrioritiesNot, AssigneesNot: q.AssigneesNot, Tags: q.Tags, TagsNot: q.TagsNot, CostUnits: q.CostUnits, CostUnitsNot: q.CostUnitsNot, Releases: q.Releases, ReleasesNot: q.ReleasesNot, ShipsIn: q.ShipsIn, ShipsInNot: q.ShipsInNot, HumanChecks: q.HumanChecks, HumanChecksNot: q.HumanChecksNot, Epics: q.Epics, EpicsNot: q.EpicsNot, DateField: q.DateField, DateFrom: q.DateFrom, DateTo: q.DateTo, IDs: q.IDs}
+	for _, key := range q.Sort {
+		shared.Sort = append(shared.Sort, workquery.SortKey{Name: key.Name, Desc: key.Desc})
 	}
-	args := []any{q.KindID, array(q.Kinds), array(q.States), array(q.Priorities), array(q.Assignees), q.Q, q.Within, q.ParentSet, q.ParentID, q.Descendants, q.HideClosed}
-	arg := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	// Optional filters join the query only when set, so an unfiltered list
-	// plans exactly as before.
-	conditions := ""
-	add := func(values []string, match func([]string) string) {
-		if len(values) > 0 {
-			conditions += "\n        AND " + match(values)
-		}
-	}
-	not := func(match func([]string) string) func([]string) string {
-		return func(values []string) string { return "NOT (" + match(values) + ")" }
-	}
-	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
-	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
-	add(q.PrioritiesNot, func(v []string) string {
-		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
-	})
-	add(q.AssigneesNot, func(v []string) string {
-		p := arg(v)
-		return `NOT (coalesce(assignee.id::text,'none')=ANY(` + p + `::text[])
-            OR coalesce(assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY(` + p + `::text[])),false))`
-	})
-	tagMatch := func(values []string) string {
-		p := arg(values)
-		return `(SELECT names && ` + p + `::text[] OR ('none'=ANY(` + p + `::text[]) AND cardinality(names)=0) FROM (SELECT ` + tagNamesSQL + ` AS names) tn)`
-	}
-	add(q.Tags, tagMatch)
-	add(q.TagsNot, not(tagMatch))
-	labelMatch := func(field string) func([]string) string {
-		return func(values []string) string {
-			return `coalesce(nullif(lower(` + labelSQL(field) + `),''),'none')=ANY(` + arg(values) + `::text[])`
-		}
-	}
-	add(q.CostUnits, labelMatch("cost_unit"))
-	add(q.CostUnitsNot, not(labelMatch("cost_unit")))
-	add(q.Releases, labelMatch("release"))
-	add(q.ReleasesNot, not(labelMatch("release")))
-	shipsMatch := func(values []string) string {
-		return `coalesce(place.release_node_id::text,'none')=ANY(` + arg(values) + `::text[])`
-	}
-	if len(q.ShipsIn)+len(q.ShipsInNot) > 0 {
-		// No effective placement in journey mode: it must not look like backlog.
-		conditions += "\n        AND place.project_node_id IS NOT NULL"
-		add(q.ShipsIn, shipsMatch)
-		add(q.ShipsInNot, not(shipsMatch))
-	}
-	checkMatch := func(values []string) string {
-		return `(CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END)=ANY(` + arg(values) + `::text[])`
-	}
-	add(q.HumanChecks, checkMatch)
-	add(q.HumanChecksNot, not(checkMatch))
-	// Epic subtrees: members of the named epics, or of every epic when "none"
-	// is asked for. The walk only runs when an epic filter is set.
-	epicCTE := ""
-	if len(q.Epics)+len(q.EpicsNot) > 0 {
-		ids, all := []string{}, false
-		for _, v := range append(append([]string{}, q.Epics...), q.EpicsNot...) {
-			if v == "none" {
-				all = true
-			} else {
-				ids = append(ids, v)
-			}
-		}
-		epicCTE = `, epic_members(id, epic_id) AS (
-        SELECT c.id, e.id FROM node_kinds ek CROSS JOIN LATERAL (
-            SELECT id,tenant_id FROM nodes WHERE tenant_id=ek.tenant_id AND kind_id=ek.id AND deleted_at IS NULL OFFSET 0
-        ) e
-        CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
-        WHERE ek.tenant_id=current_setting('aeon.tenant_id')::uuid AND ek.slug='epic'
-          AND (` + arg(all) + `::bool OR e.id::text=ANY(` + arg(ids) + `::text[]))
-          AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
-        UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
-        ) c
-    )`
-		epicMatch := func(values []string) string {
-			p := arg(values)
-			return `(n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(` + p + `::text[]))
-            OR ('none'=ANY(` + p + `::text[]) AND k.slug<>'epic' AND n.id NOT IN (SELECT id FROM epic_members)))`
-		}
-		add(q.Epics, epicMatch)
-		add(q.EpicsNot, not(epicMatch))
-	}
-	if q.DateField != "" {
-		var from, to any
-		if q.DateFrom != nil {
-			from = *q.DateFrom
-		}
-		if q.DateTo != nil {
-			to = *q.DateTo
-		}
-		switch q.DateField {
-		case "created", "updated":
-			column := "n." + q.DateField + "_at"
-			conditions += "\n        AND " + column + ">=coalesce(" + arg(from) + "::timestamptz,'-infinity') AND " + column + "<coalesce(" + arg(to) + "::timestamptz,'infinity')"
-		default:
-			day := func(t *time.Time) any {
-				if t == nil {
-					return nil
-				}
-				return t.Format("2006-01-02")
-			}
-			value := `aeon_field_date(n.fields->>'` + dateFieldKeys[q.DateField] + `')`
-			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
-		}
-	}
-	from, scopeCondition := "nodes n", ""
-	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
-	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
-	scopeSeed := ""
-	if q.Within != nil || (q.ParentSet && q.Descendants) {
-		if q.Within != nil {
-			scopeSeed = ` AND id=$7::uuid`
-		} else {
-			scopeSeed = ` AND id=$9::uuid`
-		}
-		// Drive scoped lists from the tree. A membership subquery can rescan
-		// every scope ID for every candidate when the bulk-import statistics
-		// change, while a lateral ID lookup stays bounded per tree row.
-		from = `scope s CROSS JOIN LATERAL (
-            SELECT * FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND id=s.id OFFSET 0
-        ) n`
-		// Keep kind lookup dependent on the node. Stale tenant statistics on
-		// node_kinds can otherwise put kinds before scope and repeat the entire
-		// scoped node lookup and its JSON filters once per kind (AEON-248).
-		kindJoin = ` JOIN LATERAL (
-            SELECT slug FROM node_kinds WHERE id=n.kind_id AND tenant_id=n.tenant_id OFFSET 0
-        ) k ON true `
-		if q.Within != nil {
-			scopeCondition = ` AND n.id<>$7::uuid`
-		} else {
-			scopeCondition = ` AND n.id<>$9::uuid`
-		}
-	} else if q.ParentSet {
-		scopeCondition = ` AND n.parent_id IS NOT DISTINCT FROM $9::uuid`
-	}
-	projection := ""
-	if sortFields {
-		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
-            coalesce(n.fields->>'priority','') AS priority_raw,`
-	}
-	deliveryJoin, deliveryProjection := "", "NULL::jsonb AS delivery_order,"
-	if wantsDelivery(q) {
-		deliveryJoin = ` LEFT JOIN ` + delivery.Effective + ` place ON place.tenant_id=n.tenant_id AND place.project_node_id=n.project_id AND place.item_node_id=n.id `
-		deliveryProjection = `CASE WHEN place.project_node_id IS NOT NULL THEN jsonb_build_object('release_id',place.release_node_id,'release_rank',place.release_rank,'rank',place.rank,'expedite',place.expedite) END AS delivery_order,`
-		if sortFields {
-			deliveryProjection += `place.project_node_id AS delivery_project_id,place.expedite AS delivery_expedite,place.release_rank AS delivery_release_rank,place.rank AS delivery_rank,`
-		}
-	}
-	projection += deliveryProjection
-	// Hide closed uses the same buckets as the project counts. Until the filter
-	// is on, the predicate stays the previous literal so an unfiltered list
-	// keeps its plan.
-	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
-	configuredCTE := ""
-	configuredJoin := ""
-	if q.HideClosed {
-		configuredCTE = `, ` + workStateCategoryCTE()
-		configuredJoin = ` LEFT JOIN configured cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state")
-		closedPred = workNotClosedSQL("n.state", "cfg")
-	}
-	return `WITH RECURSIVE scope(id) AS (
-        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
-            ORDER BY updated_at DESC OFFSET 0
-        ) c
-    )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
-		SELECT n.id,n.project_id,` + projection + `
-            assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
-            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + deliveryJoin + `
-        WHERE n.deleted_at IS NULL
-        AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
-        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
-        AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
-        AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
-        AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
-            OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))
-        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%' OR n.body ILIKE '%'||$6::text||'%'
-            OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
-                AND a.key ILIKE '%'||$6::text||'%'))
-        AND (NOT $11::bool OR ` + closedPred + `)` + scopeCondition + conditions + `
-    )`, args
+	return workquery.SQL(shared, sortFields)
 }
 func listOrder(q listQuery) string {
 	parts := []string{}

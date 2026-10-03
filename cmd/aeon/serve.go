@@ -393,7 +393,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
-			releases.New(pool, releases.WithAdoptionReporting(adoptionWorker)),
+			releases.New(pool, releases.WithAdoptionReporting(adoptionWorker), releases.WithProductProject(adoptionWorker.ProductProject())),
 			statusAuto,
 			recurringWork,
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
