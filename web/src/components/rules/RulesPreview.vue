@@ -4,7 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import RulesDialog from './RulesDialog.vue'
-import { vClipTip } from '../../directives/clipTip'
+import HeadingIdentity from '../HeadingIdentity.vue'
 import {
   HARNESS_LABEL, HARNESSES, LAYER_LABEL, ROLE_LABEL, ROLES, RulesError, budgetParts, byteSize, explainRules, mergeQuery, orderPreviewAgents, previewDenial, previewOptionLabel, rulesMessage,
   type ExplainedRule, type ExplainedRules, type ExplainedSet, type HarnessName, type NamedAgent, type RoleName, type RuleScope,
@@ -122,7 +122,7 @@ watch([projectId, role, harness, agentId], load)
   <RulesDialog title="What agents receive" lede="Each rule next to its explanation. Only published rules count." size="sheet" @close="emit('close')">
     <div class="for">
       <span class="for-label">For</span>
-      <span v-clip-tip="forLine" class="for-value" tabindex="0">{{ forLine }}</span>
+      <HeadingIdentity :text="forLine" class="for-value" />
       <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">{{ choosing ? 'Done' : 'Change' }}</button>
     </div>
     <div v-if="choosing" class="choose" role="group" aria-label="Preview for">

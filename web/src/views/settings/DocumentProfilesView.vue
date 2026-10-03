@@ -5,7 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, w
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { contentUrl } from '../../lib/attachments'
 import { setPageTitle } from '../../lib/brand'
-import { vClipTip } from '../../directives/clipTip'
+import HeadingIdentity from '../../components/HeadingIdentity.vue'
 import { confirmAction } from '../../lib/confirm'
 import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
@@ -310,7 +310,7 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
         <RouterLink class="icon-btn sm flat back" to="/settings/business#quote-profiles" aria-label="Back to Business settings" data-tip="Business settings"><AppIcon name="arrow-left" :size="15" /></RouterLink>
         <div class="head-titles">
           <p class="eyebrow" role="status" aria-live="polite">Document profile<template v-if="!loading && (selected || creating)"> · <span v-if="archived">archived</span><span v-else-if="dirty" class="dirty">unsaved changes</span><span v-else-if="selected">revision {{ selected.revision }}</span><span v-else>not saved yet</span></template></p>
-          <h1 id="profiles-title" v-clip-tip="heading" tabindex="0">{{ heading }}</h1>
+          <HeadingIdentity id="profiles-title" as="h1" :text="heading" />
         </div>
       </div>
       <div class="head-right">

@@ -53,7 +53,7 @@ async function profileHeading(page: Page, text: string) {
   await expect(heading).toHaveText(text)
   expect(await heading.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('normal')
   if (await heading.evaluate(el => el.scrollHeight > el.clientHeight + 1)) {
-    await expect(heading).toHaveAttribute('data-tip', text)
+    await expect(heading).toHaveAttribute('data-heading-tip', text)
     await page.keyboard.press('Tab')
     await heading.focus()
     await fittingTip(page.locator('.tooltip'), text)
@@ -62,6 +62,116 @@ async function profileHeading(page: Page, text: string) {
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 }
+
+// These checks also run against 96593019: the existing tooltip must first
+// contain the exact identity, then fail specifically on viewport containment.
+test.describe('bounded heading reader', () => {
+  test.use({ hasTouch: true })
+  for (const surface of ['done-gate', 'rules', 'profile'] as const) {
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      for (const input of (width === 390 ? ['keyboard', 'touch'] : ['keyboard']) as ('keyboard' | 'touch')[]) {
+        test(`short viewport ${surface} heading stays readable by ${input} (${width} ${theme})`, async ({ page, context }) => {
+          await scene(page, width, theme)
+          await page.setViewportSize({ width, height: 400 })
+          await mockWork(page, fixtures())
+          const text = `${longTitle.repeat(12)} Vollständiger Schluss.`
+          let heading: Locator, controls: Record<string, Locator>
+          let shown = text
+          if (surface === 'done-gate') {
+            await page.goto('/p/PHAROS/tickets')
+            await expect(page.locator('dialog.gate')).toBeAttached()
+            await page.evaluate(async title => {
+              const path = '/src/lib/doneGateAsk.ts'
+              const { askDoneGate } = await import(path)
+              void askDoneGate({ key: 'AEON-631', title, state: 'done', fields: {} })
+            }, text)
+            const gate = page.locator('dialog.gate')
+            await expect(gate).toBeVisible()
+            heading = gate.locator('.name')
+            controls = { heading, cancel: gate.getByRole('button', { name: 'Not now' }), submit: gate.getByRole('button', { name: 'Mark done' }) }
+          } else if (surface === 'rules') {
+            await mockRules(page)
+            await page.route('**/api/projects*', route => route.fulfill({ json: { items: [{ id: RULE_PROJECT, key: 'AEON', title: text, state: 'active', open: 1, in_progress: 0, done: 0, cancelled: 0, total: 1, last_activity: '2026-09-28T10:00:00Z', people: [] }] } }))
+            await page.goto('/settings/agent-rules')
+            await page.getByRole('button', { name: 'Preview', exact: true }).click()
+            const preview = page.getByRole('dialog', { name: 'What agents receive' })
+            await expect(preview.locator('.for .btn')).toBeFocused()
+            await expect(preview.locator('.summary')).toBeVisible()
+            heading = preview.locator('.for-value')
+            controls = { heading, change: preview.locator('.for .btn'), close: preview.getByRole('button', { name: 'Close what agents receive' }) }
+            shown = `${text} · Markus Barta · Builder`
+          } else {
+            await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }))
+            await mockSettings(page, settingsData())
+            const world = profileWorld()
+            for (const revision of world.profiles[0]!.revisions) revision.name = text
+            await mockProfiles(page, world)
+            await page.goto(`/settings/business/profiles/${PROFILE.steel}`)
+            heading = page.locator('#profiles-title')
+            controls = { heading, save: page.locator('.head-actions .primary'), back: page.getByRole('link', { name: 'Back to Business settings' }) }
+          }
+          await expect(heading).toHaveText(shown)
+          await heading.evaluate(async () => { await document.fonts.ready })
+          await page.mouse.move(0, 0)
+          if (input === 'keyboard') { await page.keyboard.press('Tab'); await heading.focus() }
+          const reader = page.locator('.tooltip')
+          await expectStableControls({ controls, interactions: [
+            { name: 'reveal complete identity', run: async () => {
+              if (input === 'touch') await heading.tap()
+              else await heading.focus()
+              await expect(reader).toHaveText(shown)
+              await expect.poll(() => reader.evaluate(el => {
+                const box = el.getBoundingClientRect()
+                return box.top >= 8 && box.bottom <= innerHeight - 8 && box.left >= 8 && box.right <= innerWidth - 8
+              }), { message: 'full heading disclosure must remain inside the short viewport' }).toBe(true)
+              expect(await reader.evaluate(el => el.scrollHeight)).toBeGreaterThan(await reader.evaluate(el => el.clientHeight))
+              await expect(reader).toHaveAttribute('tabindex', '0')
+            } },
+            { name: `${input} scroll reaches the last words`, run: async () => {
+              if (input === 'keyboard') {
+                await page.keyboard.press('ArrowDown')
+                await expect(reader).toBeFocused()
+                await page.keyboard.press('ArrowDown')
+                await expect(reader).toHaveText(shown)
+                await expect.poll(() => reader.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+                await page.keyboard.press('End')
+              } else {
+                const cdp = await context.newCDPSession(page)
+                try {
+                  const box = (await reader.boundingBox())!, x = box.x + box.width / 2
+                  const from = box.y + box.height - 20, to = box.y + 20
+                  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: from }] })
+                  for (let step = 1; step <= 8; step++) {
+                    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: from + (to - from) * step / 8 }] })
+                  }
+                  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+                } finally { await cdp.detach() }
+                await expect(reader).toHaveText(shown)
+                await expect.poll(() => reader.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+                await reader.evaluate(el => { el.scrollTop = el.scrollHeight })
+              }
+              await expect.poll(() => reader.evaluate(el => Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight))).toBeLessThanOrEqual(1)
+              expect(await reader.evaluate(el => {
+                const range = document.createRange(), node = el.firstChild!
+                range.setStart(node, (node.textContent?.length ?? 0) - 40)
+                range.setEnd(node, node.textContent?.length ?? 0)
+                const tail = range.getBoundingClientRect(), box = el.getBoundingClientRect()
+                return tail.top >= box.top && tail.bottom <= box.bottom && tail.right <= box.right
+              }), 'last words must be visible after End').toBe(true)
+              await screenshot(page, `${surface}-short-viewport-${input}`, width, theme)
+            } },
+            { name: 'Escape returns to the heading', run: async () => {
+              await page.keyboard.press('Escape')
+              await expect(reader).toHaveCount(0)
+              await expect(heading).toBeFocused()
+            } },
+          ] })
+          await noOverflow(page)
+        })
+        }
+      }
+    }
+  })
 function projectControls(page: Page, width: number) {
   return {
     tabs: page.getByRole('tablist', { name: 'Project sections' }),
@@ -139,7 +249,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     const gate = page.locator('dialog.gate')
     await expect(gate).toBeVisible()
     const name = gate.locator('.name')
-    await expect(name).toHaveAttribute('data-tip', longTitle)
+    await expect(name).toHaveAttribute('data-heading-tip', longTitle)
     await page.keyboard.press('Tab')
     await name.focus()
     await fittingTip(gate.locator('.tooltip'), longTitle)
@@ -148,8 +258,8 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       controls: { cancel: gate.getByRole('button', { name: 'Not now' }), submit: gate.getByRole('button', { name: 'Mark done' }), ...(width === 390 ? { frame: gate.locator('.card') } : {}) },
       scrollAreas: { card: gate.locator('.card'), body: gate.locator('.scroll') },
       interactions: [
-        { name: 'series advances to short title', run: async () => { await ask('Kurzer Titel', 2); await expect(name).toHaveText('Kurzer Titel'); await expect(name).not.toHaveAttribute('data-tip') } },
-        { name: 'series returns to long title', run: async () => { await ask(longTitle, 1); await expect(name).toHaveAttribute('data-tip', longTitle) } },
+        { name: 'series advances to short title', run: async () => { await ask('Kurzer Titel', 2); await expect(name).toHaveText('Kurzer Titel'); await expect(name).not.toHaveAttribute('data-heading-tip') } },
+        { name: 'series returns to long title', run: async () => { await ask(longTitle, 1); await expect(name).toHaveAttribute('data-heading-tip', longTitle) } },
         { name: 'form validation', run: async () => { await gate.getByRole('button', { name: 'Mark done' }).click(); await expect(gate.getByLabel('Pill · English')).toHaveAttribute('aria-invalid', 'true') } },
       ],
     })
@@ -232,7 +342,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await expect(identity).toHaveText(forText)
     const clipped = await identity.evaluate(el => el.scrollHeight > el.clientHeight + 1)
     if (clipped) {
-      await expect(identity).toHaveAttribute('data-tip', forText)
+      await expect(identity).toHaveAttribute('data-heading-tip', forText)
       // The identity immediately precedes Change in the real tab order.
       await page.keyboard.press('Shift+Tab')
       await expect(identity).toBeFocused()
@@ -305,12 +415,12 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(preview.locator('.summary')).toBeVisible()
     await page.mouse.move(0, 0)
     await identity.evaluate(el => { el.style.height = 'auto'; el.style.webkitLineClamp = 'unset' })
-    await expect(identity).not.toHaveAttribute('data-tip')
+    await expect(identity).not.toHaveAttribute('data-heading-tip')
     await page.keyboard.press('Shift+Tab')
     await expect(identity).toBeFocused()
     await expect(tip).toHaveCount(0)
     await identity.evaluate(el => { el.style.removeProperty('height'); el.style.removeProperty('-webkit-line-clamp') })
-    await expect(identity).toHaveAttribute('data-tip', `${longTitle} · Markus Barta · Builder`)
+    await expect(identity).toHaveAttribute('data-heading-tip', `${longTitle} · Markus Barta · Builder`)
     await fittingTip(tip, `${longTitle} · Markus Barta · Builder`)
     await expect(identity).toBeFocused()
   })
@@ -463,7 +573,7 @@ test.describe('touch full-text reveal', () => {
       }, longTitle)
       const gate = page.locator('dialog.gate'), name = gate.locator('.name'), tip = gate.locator('.tooltip')
       await expect(gate).toBeVisible()
-      await expect(name).toHaveAttribute('data-tip', longTitle)
+      await expect(name).toHaveAttribute('data-heading-tip', longTitle)
       await expectStableControls({
         controls: { title: name, cancel: gate.getByRole('button', { name: 'Not now' }), submit: gate.getByRole('button', { name: 'Mark done' }), field: gate.getByLabel('Pill · English'), frame: gate.locator('.card') },
         scrollAreas: { body: gate.locator('.scroll') },
@@ -485,15 +595,15 @@ test.describe('touch full-text reveal', () => {
       await mockProfiles(page, world)
       await page.goto(`/settings/business/profiles/${PROFILE.steel}`)
       const heading = page.locator('#profiles-title'), tip = page.locator('.tooltip'), field = page.getByLabel('Name', { exact: true })
-      await expect(heading).toHaveAttribute('data-tip', longName)
+      await expect(heading).toHaveAttribute('data-heading-tip', longName)
       await expectStableControls({
         controls: { name: field, sections: page.getByRole('navigation', { name: 'Profile sections' }), save: page.locator('.head-actions .primary'), back: page.getByRole('link', { name: 'Back to Business settings' }) },
         scrollAreas: { header: page.locator('.profiles-head') },
         interactions: [
           { name: 'tap full profile name', run: async () => { await heading.tap(); await fittingTip(tip, longName); await twoLineTouchTarget(heading); await screenshot(page, 'profile-touch', 390, theme) } },
           { name: 'dismiss full name', run: async () => { await field.tap(); await expect(field).toBeFocused(); await expect(tip).toHaveCount(0) } },
-          { name: 'short live name', run: async () => { await field.fill('Kurz'); await expect(heading).toHaveText('Kurz'); await expect(heading).not.toHaveAttribute('data-tip') } },
-          { name: 'long live name', run: async () => { await field.fill(longName.slice(0, 100)); await expect(heading).toHaveAttribute('data-tip', longName.slice(0, 100)); await heading.tap(); await fittingTip(tip, longName.slice(0, 100)) } },
+          { name: 'short live name', run: async () => { await field.fill('Kurz'); await expect(heading).toHaveText('Kurz'); await expect(heading).not.toHaveAttribute('data-heading-tip') } },
+          { name: 'long live name', run: async () => { await field.fill(longName.slice(0, 100)); await expect(heading).toHaveAttribute('data-heading-tip', longName.slice(0, 100)); await heading.tap(); await fittingTip(tip, longName.slice(0, 100)) } },
         ],
       })
       await noOverflow(page)
@@ -509,7 +619,7 @@ test.describe('touch full-text reveal', () => {
       await expect(preview.locator('.for .btn')).toBeFocused()
       const identity = preview.locator('.for-value'), tip = preview.locator('.tooltip')
       const text = `${longTitle} · Markus Barta · Builder`
-      await expect(identity).toHaveAttribute('data-tip', text)
+      await expect(identity).toHaveAttribute('data-heading-tip', text)
       await expectStableControls({
         controls: { identity, change: preview.locator('.for .btn'), close: preview.getByRole('button', { name: 'Close what agents receive' }) },
         scrollAreas: { body: preview.locator('.body') },
