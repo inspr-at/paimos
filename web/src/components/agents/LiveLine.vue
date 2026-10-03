@@ -16,10 +16,12 @@ const { appearance } = useAgentAppearance()
 const live = computed(() => props.views.filter(v => !v.session.stopped_at && v.session.phase !== 'stopped'))
 const count = (groups: string[]) => live.value.filter(v => groups.includes(v.status.group)).length
 const states = computed(() => ([
+  { state: 'pausing', label: 'pausing', n: count(['pausing']), tip: 'Show agents handing over' },
   { state: 'working', label: 'working', n: count(['working']), tip: 'Show working sessions' },
   { state: 'waiting', label: 'waiting', n: count(['needs']), tip: 'Show sessions waiting on a tool or a reply' },
   { state: 'throttled', label: 'throttled', n: count(['throttled']), tip: 'Show throttled sessions' },
 ] as { state: AgentState; label: string; n: number; tip: string }[]).filter(s => s.n))
+const paused = computed(() => props.views.filter(v => v.status.state === 'paused').length)
 const trouble = computed(() => live.value.filter(v => v.status.group === 'problem' || v.status.group === 'unresponsive'))
 // How long it has been in this state, as people say it: "12 min", "3 h".
 function since(view: SessionView) {
@@ -32,11 +34,12 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
 <template>
   <div class="live-line" aria-label="Live sessions" role="group">
     <span v-if="!loaded" class="skeleton line-skeleton" />
-    <template v-else-if="live.length">
-      <span class="live-total">{{ live.length }} live</span>
+    <template v-else-if="live.length || paused">
+      <span class="live-total">{{ live.length ? `${live.length} live` : 'Nothing running' }}</span>
       <button v-for="s in states" :key="s.state" type="button" class="state-count" :style="appearance(s.state)" :data-tip="s.tip" :aria-label="`${s.n} ${s.label}. ${s.tip}`" @click="emit('jump', s.state)">
         <AgentStateMark :state="s.state" :size="12" /><b>{{ s.n }}</b>{{ s.label }}
       </button>
+      <button v-if="paused" class="state-count" type="button" :style="appearance('paused')" @click="emit('jump', 'paused')"><AgentStateMark state="paused" :size="12" /><b>{{ paused }}</b>paused</button>
       <span v-if="trouble.length === 1" class="problem-chip" :style="appearance(trouble[0].status.state)" :data-tip="[trouble[0].name, trouble[0].ticket?.key, currentStep(trouble[0])].filter(Boolean).join(' · ')">
         <AgentStateMark :state="trouble[0].status.state" :size="12" />
         <span class="who">{{ trouble[0].name }}</span><span class="what">{{ what(trouble[0]) }} · {{ since(trouble[0]) }}</span>
@@ -76,4 +79,8 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
   .problem-chip .what { flex: 1; }
   .problem-chip .open { height: 34px; padding: 0 14px; }
 }
+</style>
+
+<style scoped>
+@media(max-width:720px){.live-line{flex-wrap:nowrap;overflow-x:auto;min-height:44px;scrollbar-width:none}.live-total{width:auto;flex:none;margin:0 8px 0 0}.state-count{flex:none}.problem-chip{flex:none;width:auto;margin:0 0 0 8px}.live-line:has(>.line-skeleton){min-height:44px}.problem-chip .what{max-width:120px}}
 </style>

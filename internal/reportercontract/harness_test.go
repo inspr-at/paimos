@@ -70,7 +70,7 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 		if finished["type"] != "boolean" || !isRequired(required, "finished") {
 			t.Fatalf("%s finished must be a required response boolean", op)
 		}
-		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings", "pause_progress"} {
+		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings", "pause_progress", "owner_principal_id"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
 			}

@@ -348,7 +348,7 @@ func (m *Module) getLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	for _, item := range items {
 		agents = append(agents, item.ID)
 	}
-	return map[string]any{"deadline_at": deadline, "request_id": id, "items": items, "stop_in_flight": false, "hosts": scope.Hosts, "agents": agents}, nil
+	return map[string]any{"owner_principal_id": p.ID, "deadline_at": deadline, "request_id": id, "items": items, "stop_in_flight": false, "hosts": scope.Hosts, "agents": agents}, nil
 }
 
 func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.6",
-    "sha256": "da031929b5e8199fa22d2b79cf5246038ef4b236a109fe1b47b63e940d884a7c",
+    "version": "harness-session/2.7",
+    "sha256": "dd7c0d8fcb1bf885e3c799198433b724769df3fa7ab23bfa26e46f3db1cb6d59",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1298,6 +1298,14 @@
           },
           "needs_attention": {
             "type": "boolean"
+          },
+          "owner_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "parent_harness_session_id": {
             "format": "uuid",
@@ -2513,6 +2521,14 @@
           },
           "needs_attention": {
             "type": "boolean"
+          },
+          "owner_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "parent_harness_session_id": {
             "format": "uuid",

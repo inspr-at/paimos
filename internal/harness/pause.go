@@ -131,7 +131,7 @@ func pauseController(r *http.Request, tx pgx.Tx, p tenant.Principal, coordinator
 }
 
 func pauseAllowed(s Session, owner string, admin bool, parent string) bool {
-	return admin || owner != "" && s.ownerID != nil && *s.ownerID == owner || parent != "" && s.ParentID != nil && *s.ParentID == parent
+	return admin || owner != "" && s.OwnerPrincipalID != nil && *s.OwnerPrincipalID == owner || parent != "" && s.ParentID != nil && *s.ParentID == parent
 }
 
 func savePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, next Pause, event string) (Session, error) {
@@ -790,7 +790,7 @@ func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, nex
 	if err != nil {
 		return next, err
 	}
-	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,owner_principal_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw), old.ownerID))
+	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,owner_principal_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw), old.OwnerPrincipalID))
 	if err != nil {
 		return next, err
 	}

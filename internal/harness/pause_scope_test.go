@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,6 +19,9 @@ func TestLeavingScopeSelectionRetriesAndReplacement(t *testing.T) {
 		body["host"] = host
 		w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 		expect(t, w, 201)
+		if decode(t, w)["owner_principal_id"] != f.person.ID {
+			t.Fatal("registration omitted the canonical session owner")
+		}
 		return decode(t, w)["id"].(string), body["worker_lease"].(string)
 	}
 	first, _ := register("host-a")
@@ -26,14 +30,35 @@ func TestLeavingScopeSelectionRetriesAndReplacement(t *testing.T) {
 	other, _ := register("host-a")
 	path := func(id string) string { return "/api/projects/" + f.project + "/harness-sessions/" + id }
 	expect(t, f.call(f.agent, "POST", path(ended)+"/stop", map[string]any{"reason": "stopped"}, endedLease), 200)
+	otherOwner := uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		id := uid()
+		id := otherOwner
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other owner')`, f.person.TenantID, id); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, other, id)
 		return err
 	})
+	w := f.call(f.person, "GET", "/api/harness-sessions", nil, "")
+	expect(t, w, 200)
+	owners := map[string]any{}
+	for _, item := range decode(t, w)["items"].([]any) {
+		s := item.(map[string]any)
+		owners[s["id"].(string)] = s["owner_principal_id"]
+	}
+	if owners[first] != f.person.ID || owners[other] != otherOwner {
+		t.Fatal("session list does not distinguish owned and foreign-owned work")
+	}
+	// No recorded owner is never inferred from control permissions.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=NULL WHERE id=$1`, ended)
+		return err
+	})
+	w = f.call(f.person, "GET", path(ended), nil, "")
+	expect(t, w, 200)
+	if decode(t, w)["owner_principal_id"] != nil {
+		t.Fatal("unowned session must not imply an owner")
+	}
 	deadline := time.Now().Add(15 * time.Minute).UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond)
 	put := func(hosts any, agents []string) map[string]any {
 		t.Helper()
@@ -50,13 +75,16 @@ func TestLeavingScopeSelectionRetriesAndReplacement(t *testing.T) {
 	if items := initial["items"].([]any); len(items) != 1 || items[0].(map[string]any)["id"] != first {
 		t.Fatal("explicit selection included ended, foreign-owned or unselected work")
 	}
+	if initial["items"].([]any)[0].(map[string]any)["owner_principal_id"] != f.person.ID {
+		t.Fatal("leaving report omitted the selected generation owner")
+	}
 	if ids := initial["agents"].([]any); len(ids) != 1 || ids[0] != first {
 		t.Fatal("report exposed sessions outside the effective owned selection")
 	}
 	if put([]string{"host-b", "host-b"}, []string{other, ended, strings.ToUpper(first)})["request_id"] != initial["request_id"] {
 		t.Fatal("equivalent normalized scope replaced controls")
 	}
-	w := f.call(f.person, "GET", "/api/me/leaving-at", nil, "")
+	w = f.call(f.person, "GET", "/api/me/leaving-at", nil, "")
 	expect(t, w, 200)
 	if hosts := decode(t, w)["hosts"].([]any); len(hosts) != 1 || hosts[0] != "host-b" {
 		t.Fatal("reload lost the host policy")
@@ -95,5 +123,15 @@ func TestLeavingScopeSelectionRetriesAndReplacement(t *testing.T) {
 	expect(t, w, 200)
 	if decode(t, w)["request_id"] != all["request_id"] {
 		t.Fatal("invalid scope changed the active request")
+	}
+	alias := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name,linked_to) VALUES($1,$2,'person','linked identity',$3)`, alias.TenantID, alias.ID, f.person.ID)
+		return err
+	})
+	w = f.call(alias, "GET", "/api/me/leaving-at", nil, "")
+	expect(t, w, 200)
+	if decode(t, w)["owner_principal_id"] != f.person.ID {
+		t.Fatal("linked identity report must expose the canonical wind-down owner")
 	}
 }

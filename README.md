@@ -10,6 +10,45 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Pause and wind down agents
+
+The Agents header groups Start agent and Attach a running session under New.
+More agent actions includes Pause all, Resume all, Wind down and Agent keys.
+Closing a dialog opened from either menu returns focus to its header trigger.
+
+The Agents page offers Pause and Stop now per controllable session, plus quiet
+Pause all and Resume all actions. Pause asks for a level and an optional handover
+note; Pause all supports per-agent overrides and Keep running. A lead can include
+its workers. Personal settings choose the default pause level. Paused generations
+keep the saved handover, next steps, questions and WIP commit. Resume saves a
+continuation request; a launcher must start the successor, including after a reboot.
+
+Interrupt this step lives in the session menu. Stop now uses the shared pause
+dialog and confirms a saved request, rather than a process exit. Dialog headings
+keep one visible line for long session names; the full name remains available to
+screen readers and on hover, while Close and the action bar stay in place.
+
+Wind down starts only after its host-grouped preview is confirmed. The host picker
+uses personal computer names, tri-state host selection, individual agents and All /
+None quick picks; its State view groups running agents, idle hosts and offline
+hosts, omitting empty sections. Preview and selection count only the caller-owned
+sessions with control permission, matching the session's `owner_principal_id`
+against the canonical owner returned by the leaving report for linked identities.
+The request carries `deadline_at` plus
+`hosts: "all" | [...]` and optional explicit `agents`. Host scope is persisted, but
+new-start blocking remains launcher follow-up work: new agents can still start.
+Missing or stale planning reports never imply a finish estimate. The plan reads
+back durable backend outcomes; a deadline or queued stop alone cannot mark it done.
+Cancellation withdraws pending requests, keeps existing handovers and reports stops
+already in flight, with Undo while the cancelled deadline is still ahead.
+Dismissing a completed report clears its deadline quietly, without withdrawal
+feedback or Undo. Partial batch writes name accepted and failed requests.
+
+Dialogs anchor their controls above variable content on desktop and pin their
+footer on phone sheets. Submit uses Command+Enter on Apple platforms and Ctrl+Enter
+elsewhere; Escape first leaves a field, then closes. API rows pass through the
+canonical session ledger and controls stay bound to the captured generation/run.
+
 ## Code health audits
 
 AEON-571 defines the ongoing code-health workflow. Each run belongs to a child
@@ -1246,7 +1285,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.6`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.7`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -1307,7 +1346,9 @@ request is not a process exit receipt: offline or older launchers can leave an
 unconfirmed request, which remains visible in the deadline report. The server
 never claims such a process has stopped. Existing part-A records without a
 level retain their original cancel-on-expiry behavior. The response contract
-adds optional fields at `harness-session/2.4`; request headers stay unchanged.
+adds optional planning fields at `harness-session/2.4`; contract 2.5 adds the
+optional nullable `owner_principal_id` for ownership-aware previews. Request
+headers and requirements stay unchanged.
 
 Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
 in contract 2.2. `pause.state` distinguishes requested, planned, paused,
@@ -2896,7 +2937,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.6`, declared by the response-only
+The reporter contract is `harness-session/2.7`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
