@@ -174,6 +174,7 @@ type Supervisor struct {
 	loginRequired          map[string]bool
 	signInUnverified       map[string]bool
 	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
+	probeReasonDetails     map[string]string // Allowlisted explanations, protected by mu.
 	harnessHoldReasons     map[string]string
 	dependencyReasons      map[string]string
 	harnessHolds           map[string]string
@@ -604,6 +605,17 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.probeFailureReasons = map[string]string{}
 		}
 		delete(s.probeFailureReasons, account.ID)
+		if s.probeReasonDetails == nil {
+			s.probeReasonDetails = map[string]string{}
+		}
+		delete(s.probeReasonDetails, account.ID)
+		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
+			reason := "probe_failed"
+			if status.Failure == ProbeAuthFailed {
+				reason = "login_required"
+			}
+			s.probeReasonDetails[account.ID] = agentsetup.SafeProbeDetail(reason, status.ReasonDetail)
+		}
 		if captureFailure == "identity_mismatch" {
 			s.probeFailureReasons[account.ID] = ProbeIdentityMismatch
 		}

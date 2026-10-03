@@ -23,7 +23,7 @@ test('automatic columns follow the table width and the data', () => {
   assert.deepEqual(ids(2400, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'release', 'tags', 'estimate', 'created', 'updated'])
 })
 
-test('a saved choice fixes order and visibility across desktop widths', () => {
+test('a saved choice fixes order and visibility across desktop and phone widths', () => {
   const prefs = { order: ['updated', 'status', 'epic'] as const, visible: ['updated', 'status', 'epic', 'estimate'] as const }
   const p = { order: [...prefs.order], visible: [...prefs.visible] }
   assert.deepEqual(ids(2000, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
@@ -31,12 +31,12 @@ test('a saved choice fixes order and visibility across desktop widths', () => {
   assert.deepEqual(ids(900, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
-  assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.deepEqual(ids(390, { phone: true, present: { estimate: true } }), ['key', 'title', 'status', 'priority', 'updated', 'estimate'])
-  assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status', 'priority', 'updated', 'eta', 'estimate'])
+  assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status'])
   // A saved choice that hides Assignee stays hidden when a live worker is present.
   assert.deepEqual(ids(1600, { phone: false, present: { workers: true }, prefs: { visible: ['status', 'updated'] } }), ['key', 'title', 'status', 'updated'])
-  assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
 })
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
@@ -152,8 +152,19 @@ test('planning joins Automatic when filled; saved ticks retain empty columns', (
   assert.deepEqual(ids(1600, { phone: false, prefs, present: {} }), saved)
   assert.deepEqual(ids(700, { phone: false, prefs, present: all }), saved)
   assert.deepEqual(ids(1600, { phone: false, prefs, present: all, costAllowed: false }), saved.filter(id => id !== 'list_cost'))
-  assert.deepEqual(ids(390, { phone: true, prefs, present: all }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, prefs, present: all }), saved)
   assert.equal(COLUMN_BY_ID.get('list_cost')!.label, 'Cost')
   assert.equal(COLUMN_BY_ID.get('list_cost')!.width, 128)
   assert.equal(COLUMN_BY_ID.has('paid'), false)
+})
+
+// AEON-628: the phone picker must change the actual cells, including an empty
+// saved choice and cost visibility. Legacy ids and order use desktop rules.
+test('phone cards honor saved optional columns and cost access', () => {
+  const prefs = { order: ['paid', 'cost', 'assignee'] as ColumnId[], visible: ['paid', 'cost', 'assignee'] as ColumnId[] }
+  assert.deepEqual(ids(390, { phone: true, prefs, costAllowed: true }), ['key', 'title', 'list_cost', 'cost', 'assignee'])
+  assert.deepEqual(ids(390, { phone: true, prefs, costAllowed: false }), ['key', 'title', 'cost', 'assignee'])
+  assert.equal(visibleColumns(390, { phone: true, prefs }).customised, true)
+  assert.deepEqual(ids(390, { phone: true, prefs: { visible: [] }, present: { estimate: true, eta: true, progress: true } }), ['key', 'title'])
+  assert.deepEqual(prefs.visible, ['paid', 'cost', 'assignee'])
 })

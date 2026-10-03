@@ -345,9 +345,13 @@ test('Cost stays behind harness.read even when saved; models and tokens remain v
 
 test('planning fragment implementation in light and dark; phones retain the card layout', async ({ page }) => {
   const data = world(); await mockWork(page, data)
+  const savedColumns = data.preferences['list:p-pharos']!
+  const cards = page.locator('tr.ticket-row:not(.ghost)')
   mkdirSync(shots, { recursive: true })
   for (const theme of ['light', 'dark']) {
     data.preferences.theme = { choice: theme }
+    // Automatic below clears the saved choice; each theme starts with it again.
+    data.preferences['list:p-pharos'] = savedColumns
     await page.setViewportSize({ width: 1600, height: 900 })
     await page.goto('/p/PHAROS?sort=key&closed=1')
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
@@ -365,10 +369,45 @@ test('planning fragment implementation in light and dark; phones retain the card
       const clipped = await row(page, 'PHAROS-12').locator(`.${cls} .plan-figure`).evaluate(el => el.scrollWidth > el.clientWidth + 1)
       expect(clipped, cls).toBe(false)
     }
+    const cardCount = await cards.count()
+    expect(cardCount).toBeGreaterThan(0)
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(page.locator('td.c-model, td.c-tokens, td.c-list-cost')).toHaveCount(0)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
-    await page.screenshot({ path: join(shots, `planning-phone-${theme}.png`) })
+    for (const mode of ['saved', 'automatic']) {
+      if (mode === 'automatic') {
+        await page.getByRole('button', { name: 'Filters', exact: true }).click()
+        const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+        await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
+        await expect.poll(() => data.preferences['list:p-pharos']?.visible).toBeUndefined()
+        await sheet.locator('footer button').click()
+        await expect(page.locator('td.c-model, td.c-tokens, td.c-list-cost')).toHaveCount(0)
+      }
+      await expect(cards).toHaveCount(cardCount)
+      await expect(page.locator('.tickets')).toHaveCSS('display', 'block')
+      await expect(page.locator('.tickets thead')).toBeHidden()
+      for (const card of await cards.all()) {
+        await expect(card).toHaveCSS('display', 'grid')
+        await expect(card.locator('.c-key')).toBeVisible()
+        await expect(card.locator('.c-title')).toBeVisible()
+        if (mode === 'saved') {
+          // Saved planning columns remain visible metadata below the title,
+          // rather than turning the phone card into a scrolling desktop row.
+          await expect(card.locator('td[data-column-label]')).toHaveCount(5)
+          expect(await card.locator('td[data-column-label]').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-label')))).toEqual(['Status', 'Estimate', 'Model', 'Tokens', 'Cost'])
+          const title = (await card.locator('.c-title').boundingBox())!
+          const frame = (await card.boundingBox())!
+          for (const cls of ['c-model', 'c-tokens', 'c-list-cost']) {
+            const cell = card.locator(`.${cls}`)
+            await expect(cell).toBeVisible()
+            const box = (await cell.boundingBox())!
+            expect(box.y).toBeGreaterThanOrEqual(title.y + title.height - .5)
+            expect(box.x).toBeGreaterThanOrEqual(frame.x)
+            expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + .5)
+          }
+        }
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+      await page.screenshot({ path: join(shots, `planning-phone-${mode === 'saved' ? '' : 'automatic-'}${theme}.png`) })
+    }
   }
   if (process.env.PLANNING_FRAGMENT) {
     await page.setViewportSize({ width: 1600, height: 1100 })

@@ -126,6 +126,7 @@ var ProjectDecidedRoutes = map[string]bool{
 // Product release notes are the same for everyone; they are not tenant data.
 var publicProductRoutes = map[string]bool{
 	"GET /api/releases":           true,
+	"GET /api/releases/pending":   true,
 	"GET /api/releases/{version}": true,
 }
 
