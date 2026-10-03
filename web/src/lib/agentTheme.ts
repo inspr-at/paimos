@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref } from 'vue'
 import { api } from './api.ts'
+import type { ActiveTheme, ThemeRecord } from './themes.ts'
 import type { AgentIndicatorStyle, IndicatorRing } from './indicatorVariants.ts'
 import type { AgentPalette } from './agentPalettes.ts'
 
@@ -15,12 +16,26 @@ export const agentTheme = ref<AgentThemeAppearance | null>(null)
 // Legacy preference consumers remain compatible in isolated previews. Once a
 // session is bound, a missing/failed theme never resurrects another person's cache.
 export const agentThemeBound = ref(false)
-let person = '', epoch = 0
+let person = '', epoch = 0, identityEpoch = 0
+let selection: { themeId: string; revision: number; themeRevision: number } | null = null
 export function resetAgentTheme(identity = '') {
-  epoch++; person = identity; agentTheme.value = null; agentThemeBound.value = true
+  epoch++; identityEpoch++; person = identity; selection = null; agentTheme.value = null; agentThemeBound.value = true
 }
-export function installAgentTheme(value: AgentThemeAppearance) {
+export function installAgentTheme(value: AgentThemeAppearance, current?: ActiveTheme) {
+  if (current && selection && (current.revision < selection.revision ||
+      (current.revision === selection.revision && current.theme.id === selection.themeId && current.theme.revision < selection.themeRevision))) return
   epoch++; agentTheme.value = { ...value }
+  selection = current ? { themeId: current.theme.id, revision: current.revision, themeRevision: current.theme.revision } : null
+}
+// A committed write outlives its editor. Reconcile only the same session and
+// selected record/CAS generation, and never overwrite a newer record revision.
+export function captureAgentThemeSave(themeId: string, revision: number) {
+  const started = identityEpoch, owner = person
+  return (saved: ThemeRecord) => {
+    if (started !== identityEpoch || owner !== person || !owner || saved.id !== themeId ||
+        selection?.themeId !== themeId || selection.revision !== revision || selection.themeRevision > saved.revision) return
+    epoch++; selection.themeRevision = saved.revision; agentTheme.value = { ...saved.values.agents }
+  }
 }
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)
@@ -30,7 +45,7 @@ export async function restoreAgentTheme(identity: string) {
     if (!response.ok) return
     const active = await response.json()
     if (started === epoch && person === identity && active?.theme?.values?.agents) {
-      agentTheme.value = { ...active.theme.values.agents }
+      installAgentTheme(active.theme.values.agents, active)
     }
   } catch { /* A failed load leaves the neutral default, never a stale person. */ }
 }

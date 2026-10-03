@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { installAgentTheme } from '../lib/agentTheme'
+import { captureAgentThemeSave, installAgentTheme } from '../lib/agentTheme'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { can } from '../lib/authz'
@@ -22,7 +22,7 @@ export function useThemeEditor() {
   const clone = (theme: ThemeRecord) => JSON.parse(JSON.stringify(theme)) as ThemeRecord
   function install(current: ActiveTheme) {
     active.value = current; draft.value = clone(current.theme)
-    installAgentTheme(current.theme.values.agents)
+    installAgentTheme(current.theme.values.agents, current)
     merge(current.theme)
     if (current.fallback_notice) message.value = `${current.fallback_notice.deleted_theme_name} was deleted. You are using the workspace default.`
   }
@@ -65,10 +65,11 @@ export function useThemeEditor() {
   async function save() {
     if (!draft.value || !dirty.value || !valid.value || !editable(draft.value) || conflict.value) return
     const captured = clone(draft.value)
+    const reconcile = captureAgentThemeSave(captured.id, active.value!.revision)
     await perform(async current => {
       const saved = await themes.updateTheme(captured)
+      reconcile(saved)
       if (!current() || draft.value?.id !== captured.id) return
-      installAgentTheme(saved.values.agents)
       merge(saved); active.value!.theme = saved; draft.value = clone(saved); message.value = 'Saved.'
     })
   }
