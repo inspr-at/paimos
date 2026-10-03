@@ -9,6 +9,17 @@ No Git operation, daemon, production connection or durable payload is involved.
 from pathlib import Path
 import os
 import subprocess
+import sys
+
+# The approved remote Go lane can execute this as its test-binary wrapper.
+# It first runs that binary unchanged, then runs the negative controls in the
+# same disposable checkout/database. Normal invocation remains unchanged.
+if len(sys.argv)>1:
+    if sys.argv[1] != "--exec-test" or len(sys.argv)<3:
+        raise SystemExit("usage: check-attached-policy-mutations.py [--exec-test TEST-BINARY [ARGS...]]")
+    baseline=subprocess.run(sys.argv[2:])
+    if baseline.returncode:
+        raise SystemExit(baseline.returncode)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUTATIONS = [
@@ -16,10 +27,11 @@ MUTATIONS = [
     ("send generation", "internal/attachedmsg/policy.go", 'if in.Generation == "" || in.Generation != g.Binding.Generation {', "if false {", "./internal/agentpairing", "TestAttachedConsentAndTupleNegatives"),
     ("recipient tuple", "internal/attachedmsg/policy.go", "in.Recipient != a.Principal || ", "", "./internal/agentpairing", "TestAttachedSenderAndTenantPolicy"),
     ("consent digest", "internal/attachedmsg/grant.go", 'if g.State != "pending" || generation != g.Binding.Generation || digest != g.Digest {', 'if g.State != "pending" || generation != g.Binding.Generation {', "./internal/agentpairing", "TestAttachedConsentDowngradeAndDefaultCapability"),
+    ("messaging signature", "internal/attachedmsg/grant.go", ' || !VerifyLocalConsent(a.LocalAuthPublicKey, g.Digest, nonce, LocalConsentReason(g), signature)', '', "./internal/agentpairing", "TestAttachedStrictLocalConsentAndNoLeaseRenewal"),
     ("payload tuple", "internal/attachedmsg/store.go", " || p.binding != b", "", "./internal/attachedmsg", "TestVolatileReservationCommitRollbackAndTuple"),
     ("payload replay", "internal/attachedmsg/store.go", "delete(s.entries, key)", "// mutation: retained payload", "./internal/attachedmsg", "TestVolatileReservationCommitRollbackAndTuple"),
     ("agent body clearing", "internal/inbox/attached.go", 'body = ""', '// mutation: retain notification body', "./internal/agentpairing", "TestAttachedAPIIdentityAndLegacyConsumers"),
-    ("disabled explicit fallback", "internal/inbox/attached.go", 'if !m.attached.Enabled() && in.Generation != "" {', 'if false {', "./internal/agentpairing", "TestAttachedDisabledExplicitNotesNeverPersist"),
+    ("disabled explicit fallback", "internal/inbox/attached.go", 'if !m.attached.Enabled() && in.Generation != "" {\n\t\treturn true, msg, compat, attachedmsg.Fail(409, "feature_disabled")\n\t}', 'if !m.attached.Enabled() { return }', "./internal/agentpairing", "TestAttachedDisabledExplicitNotesNeverPersist"),
     ("live session lease", "internal/attachedmsg/grant.go", "WHERE session_id=$1::uuid AND state='active' AND lease_until>clock_timestamp()", "WHERE session_id=$1::uuid", "./internal/agentpairing", "TestAttachedInactiveRoutingPreservesInbox"),
     ("notification memory isolation", "internal/attachedmsg/store.go", 'if (p.grant == "") != (grant == "") {', 'if false {', "./internal/attachedmsg", "TestNotificationMemoryBudgetReservesOwnerCapacity"),
     ("notification rate isolation", "internal/attachedmsg/policy.go", 'if a.Mode == Notification {', 'if false {', "./internal/agentpairing", "TestAttachedNotificationFloodPreservesOwnerBudget"),

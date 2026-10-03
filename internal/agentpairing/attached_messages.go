@@ -54,7 +54,8 @@ func (m *Module) messageApprove(w http.ResponseWriter, r *http.Request, p tenant
 		messageError(w, attachedmsg.Fail(400, "invalid_message_consent"))
 		return
 	}
-	ctx := attachedmsg.BrowserContext(r, m.origin, p)
+	ctx, cancel := context.WithTimeout(attachedmsg.BrowserContext(r, m.origin, p), 10*time.Second)
+	defer cancel()
 	var out attachedmsg.Capability
 	e := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if _, e := m.messages.Approve(ctx, tx, p, r.PathValue("requestId"), in.Generation, in.Digest); e != nil {
@@ -75,7 +76,8 @@ func (m *Module) messageRevoke(w http.ResponseWriter, r *http.Request, p tenant.
 		messageError(w, attachedmsg.Fail(404, "not_found"))
 		return
 	}
-	ctx := attachedmsg.BrowserContext(r, m.origin, p)
+	ctx, cancel := context.WithTimeout(attachedmsg.BrowserContext(r, m.origin, p), 10*time.Second)
+	defer cancel()
 	var grants []string
 	e := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		var e error

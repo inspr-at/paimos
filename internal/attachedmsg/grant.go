@@ -75,7 +75,8 @@ func LoadAttachment(ctx context.Context, tx pgx.Tx, id string) (Attachment, erro
 	a.Principal = principal
 	var bound bool
 	e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE id=$1::uuid AND project_id=$2::uuid AND agent_principal_id=$3::uuid AND harness=$4 AND host=$5 AND ticket_node_id=$7::uuid AND stopped_at IS NULL AND archived_at IS NULL)
- AND EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts ac ON ac.tenant_id=e.tenant_id AND ac.id=e.account_id WHERE e.computer_id=$6::uuid AND e.state='connected' AND ac.harness=$4)`, a.Session, a.Project, principal, a.Snapshot.Harness, host, a.Computer, a.Snapshot.TicketID).Scan(&bound)
+ AND EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts ac ON ac.tenant_id=e.tenant_id AND ac.id=e.account_id WHERE e.computer_id=$6::uuid AND e.state='connected' AND ac.harness=$4)
+ AND EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$2::uuid AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$7::uuid AND t.deleted_at IS NULL)`, a.Session, a.Project, principal, a.Snapshot.Harness, host, a.Computer, a.Snapshot.TicketID).Scan(&bound)
 	if e != nil {
 		return a, e
 	}
@@ -98,7 +99,7 @@ func LoadAttachment(ctx context.Context, tx pgx.Tx, id string) (Attachment, erro
 func tenantID(ctx context.Context) string { p, _ := tenant.PrincipalFrom(ctx); return p.TenantID }
 func loadGrant(ctx context.Context, tx pgx.Tx, request string) (Grant, error) {
 	var g Grant
-	e := tx.QueryRow(ctx, `SELECT g.id::text,g.binding,g.state,g.consent_digest,g.expires_at,g.hook_observed_at,a.snapshot,coalesce(g.local_auth_nonce,'') FROM attached_message_grants g JOIN harness_attach_requests a ON a.tenant_id=g.tenant_id AND a.id=g.attach_request_id WHERE g.attach_request_id=$1::uuid AND g.state<>'revoked' FOR UPDATE OF g`, request).Scan(&g.ID, &g.Binding, &g.State, &g.Digest, &g.ExpiresAt, &g.ObservedAt, &g.Snapshot, &g.LocalAuthNonce)
+	e := tx.QueryRow(ctx, `SELECT g.id::text,g.binding,g.state,g.consent_digest,CASE WHEN g.state='active' THEN a.lease_until ELSE g.expires_at END,g.hook_observed_at,a.snapshot,coalesce(g.local_auth_nonce,'') FROM attached_message_grants g JOIN harness_attach_requests a ON a.tenant_id=g.tenant_id AND a.id=g.attach_request_id WHERE g.attach_request_id=$1::uuid AND g.state<>'revoked' FOR UPDATE OF g`, request).Scan(&g.ID, &g.Binding, &g.State, &g.Digest, &g.ExpiresAt, &g.ObservedAt, &g.Snapshot, &g.LocalAuthNonce)
 	g.Notice = consentNotice
 	return g, e
 }

@@ -94,6 +94,8 @@ func Revoke(ctx context.Context, tx pgx.Tx, p tenant.Principal, request string) 
 // Sweep runs even with the switch off, including after restart. Memory loss
 // cannot recreate payloads; committed metadata remains truthful and body-free.
 func (s *Service) Sweep(ctx context.Context, pool *pgxpool.Pool, tid string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	var purge []string
 	e := db.InTenant(db.AllProjects(ctx, "attached message lifecycle"), pool, tid, func(tx pgx.Tx) error {
 		if e := Lock(ctx, tx); e != nil {

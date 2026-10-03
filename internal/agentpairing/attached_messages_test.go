@@ -713,7 +713,9 @@ func TestAttachedStrictLocalConsentAndNoLeaseRenewal(t *testing.T) {
 	in.MessageLocalAuthSignature = sign(signer, grant.Digest, grant.LocalAuthNonce, "Allow watching")
 	requireRefusal(f.call("POST", "/api/agent-pairing/attach", in, false, key, 403), "message_local_auth_proof_required")
 	in.MessageLocalAuthSignature = sign(signer, grant.Digest, grant.LocalAuthNonce, attachedmsg.LocalConsentReason(grant))
-	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &c)
+	var active attachedmsg.Capability
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &active)
+	c = active
 	if c.Grant.State != "active" || c.Grant.LocalAuthNonce != "" {
 		t.Fatal("challenge not consumed atomically")
 	}
