@@ -334,6 +334,18 @@ jobs:
           tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
           tests/accounts-computers.spec.ts tests/agents-top.spec.ts
           tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
+      - name: Decision Desk keyboard, protected adapters and geometry (AEON-567)
+        working-directory: web
+        env:
+          AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
+        run: npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure
+      - name: Upload Decision Desk captures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aeon-567-desk-shots
+          path: ${{ runner.temp }}/aeon-desk-shots
+          if-no-files-found: ignore
       - name: Session linking, approval and security regressions
         working-directory: web
         env:
