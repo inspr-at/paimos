@@ -360,10 +360,10 @@ func TestDeliveryCutRequiresTimestamp(t *testing.T) {
 			return nil
 		})
 	})
-	for _, origin := range []string{"planned", "adopted_planned", "backfill"} {
+	for i, origin := range []string{"planned", "adopted_planned", "backfill"} {
 		t.Run("insert/"+origin, func(t *testing.T) {
 			f.run(t, func(ctx context.Context, tx pgx.Tx) error {
-				id := insertNode(ctx, t, tx, f.visibilityFixture, "release", "CUT-"+origin, &f.projectA)
+				id := insertNode(ctx, t, tx, f.visibilityFixture, "release", fmt.Sprintf("CUT-%d", i+1), &f.projectA)
 				deliveryReject(t, ctx, tx, "23514", "project_releases_version_cut_pair", `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state,origin,version,version_scheme)
 					VALUES($1,$2,$3,3,'X','frozen',$4,'1.0.0','legacy')`, f.tenant, f.projectA, id, origin)
 				return nil
@@ -375,7 +375,7 @@ func TestDeliveryCutRequiresTimestamp(t *testing.T) {
 func TestDeliveryAdoptedReleaseMayLackCutTimestamp(t *testing.T) {
 	f := newDeliveryFixture(t, dbtest.Open(t), "delivery-adopted-cut")
 	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
-		id := insertNode(ctx, t, tx, f.visibilityFixture, "release", "HIST-CUT", &f.projectA)
+		id := insertNode(ctx, t, tx, f.visibilityFixture, "release", "HIST-1", &f.projectA)
 		_, err := tx.Exec(ctx, `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state,released_at,origin,version,version_scheme)
 			VALUES($1,$2,$3,3,'X','released',now(),'adopted_released','1.0.0','legacy')`, f.tenant, f.projectA, id)
 		return err
