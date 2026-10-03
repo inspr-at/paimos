@@ -26,7 +26,20 @@ func TestWorkstationPathsSerializeWithPairingLifecycle(t *testing.T) {
 	for _, action := range []string{"mark", "unmark", "authorize"} {
 		for _, first := range []string{"lifecycle", "workstation"} {
 			t.Run(action+"/"+first+"_first", func(t *testing.T) {
-				testWorkstationPairingInterleaving(t, action, first, false)
+				testWorkstationPairingInterleaving(t, action, first, false, "pairing")
+			})
+		}
+	}
+}
+
+// After either real writer acquires tree, a pairing waiter must still leave
+// tenant free. This rejects pairing -> tenant -> tree as well as the original
+// tenant -> pairing inversion, without relying on deadlock detector timing.
+func TestWorkstationPathsAcquireTreeBeforeTenant(t *testing.T) {
+	for _, action := range []string{"mark", "unmark", "authorize"} {
+		for _, first := range []string{"lifecycle", "workstation"} {
+			t.Run(action+"/"+first+"_first", func(t *testing.T) {
+				testWorkstationPairingInterleaving(t, action, first, false, "tree")
 			})
 		}
 	}
@@ -38,12 +51,12 @@ func TestWorkstationPathsSerializeWithPairingLifecycle(t *testing.T) {
 func TestWorkstationWaitersRecheckPairingRevocation(t *testing.T) {
 	for _, action := range []string{"mark", "authorize"} {
 		t.Run(action, func(t *testing.T) {
-			testWorkstationPairingInterleaving(t, action, "lifecycle", true)
+			testWorkstationPairingInterleaving(t, action, "lifecycle", true, "pairing")
 		})
 	}
 }
 
-func testWorkstationPairingInterleaving(t *testing.T, action, first string, revoke bool) {
+func testWorkstationPairingInterleaving(t *testing.T, action, first string, revoke bool, fence string) {
 	t.Helper()
 	f := newWorkstationFixture(t)
 	if action != "mark" {
@@ -86,12 +99,12 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 	beforeReported := count("agent_pairing.reported")
 	beforeDisconnected := count("agent_pairing.disconnected")
 
-	// Pause AFTER the first request acquires pairing, BEFORE it can acquire
-	// tenant. Observing the second request's actual pairing wait establishes
-	// overlap. Neither request may own tenant yet: tenant -> pairing would
-	// create a cycle as soon as the first request resumes.
+	// Pause AFTER the first request acquires the selected advisory fence,
+	// BEFORE tenant. The second request's actual pairing wait proves overlap;
+	// neither request may own tenant until both advisory fences are held.
 	pool, barrier, ctx := dbtest.BarrierPool(t, originalPool, func(query string) bool {
-		return strings.Contains(query, "pg_advisory_xact_lock") && strings.Contains(query, "aeon-pairing:")
+		return strings.Contains(query, "pg_advisory_xact_lock") &&
+			strings.Contains(query, "aeon-pairing:") == (fence == "pairing")
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -167,14 +180,14 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 		t.Fatalf("second request did not wait on the first request's pairing fence: lock=%q", lock)
 	}
 	if err := db.InTenant(ctx, originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, f.owner.TenantID)
+		_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.owner.TenantID)
 		return err
 	}); err != nil {
 		var pe *pgconn.PgError
 		if !errors.As(err, &pe) || pe.Code != "55P03" {
 			t.Fatalf("unexpected tenant probe failure: %v", err)
 		}
-		t.Error("workstation path owns tenant before acquiring pairing, creating a lifecycle lock cycle")
+		t.Errorf("writer owns tenant before completing pairing -> tree entry (paused after %s)", fence)
 	}
 	barrier.Release()
 	dbtest.Await(t, ctx, firstDone)

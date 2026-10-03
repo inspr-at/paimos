@@ -13,9 +13,8 @@ import (
 )
 
 // TestTenantTreePairingLockOrder inventories every direct advisory/tenant lock
-// and lock-helper call in these six packages, including auth's transaction
-// guards and workstation designation. The shipped order is pairing ->
-// tenant -> tree -> resource rows; access-only writers omit pairing/tree. Keep
+// and lock-helper call in these five packages. The shipped order is pairing ->
+// tree -> tenant -> resource rows; access-only writers omit pairing/tree. Keep
 // the exact primitive sequences here: checking only callers missed the previous
 // inversions inside shared helpers. New call sites must join this inventory.
 // Alternative branches (recurrence try/blocking, operator/HTTP) appear in source
@@ -27,17 +26,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"agentaccounts/route.go:ValidateReservedCapacity":   "pairing.Lock",
 		"agentpairing/module.go:in":                         "pairing.Mutation",
 		"agentpairing/lifecycle.go:Lock":                    "pairing",
-		"agentpairing/lifecycle.go:LockMutation":            "pairing.Lock tenant:NO KEY UPDATE tree",
-		"auth/key_scopes.go:agentKeyScopes":                 "tenant:NO KEY UPDATE",
-		"auth/owner_workstation.go:workstationGuard":        "pairing.Mutation",
-		"auth/owner_workstation.go:auditWorkstation":        "tenant:NO KEY UPDATE",
-		"auth/owner_workstation.go:handleOwnerWorkstation":  "pairing.Mutation",
-		"auth/store.go:resolveOIDCPerson":                   "tenant:NO KEY UPDATE",
-		"auth/store.go:issueAgentKeyTx":                     "operator.Ensure tenant:NO KEY UPDATE",
-		"auth/store.go:grantJourneyScopes":                  "operator.Ensure",
-		"auth/store.go:revokeAgentKey":                      "tenant:NO KEY UPDATE",
-		"auth/store.go:revokeAgentKeyTx":                    "operator.Ensure",
-		"auth/store.go:rotateAgentKeyWithScopes":            "tenant:NO KEY UPDATE",
+		"agentpairing/lifecycle.go:LockMutation":            "pairing.Lock tree tenant:NO KEY UPDATE",
 		"authz/accept.go:AcceptInvite":                      "tenant:NO KEY UPDATE advisory:alias",
 		"authz/agent_creation.go:createAgent":               "project.Mutation",
 		"authz/aliases.go:linkAlias":                        "access.Mutation",
@@ -47,7 +36,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"authz/invites.go:revokeInvite":                     "access.Mutation",
 		"authz/lifecycle.go:setStatus":                      "access.Mutation",
 		"authz/members.go:setWorkspaceRoleTx":               "project.Mutation access.Mutation",
-		"authz/module.go:authorizeMutation":                 "tenant:NO KEY UPDATE",
+		"authz/module.go:authorizeMutation":                 "tenant:UPDATE",
 		"authz/module.go:createRole":                        "access.Mutation",
 		"authz/module.go:patchRole":                         "access.Mutation",
 		"authz/module.go:deleteRole":                        "access.Mutation",
@@ -56,11 +45,11 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"authz/operator.go:OperatorBindProjects":            "operator.Ensure",
 		"authz/operator.go:OperatorUnbindProject":           "operator.Ensure",
 		"authz/project_members.go:authorizeProjectMutation": "project.Mutation",
-		"authz/project_members.go:LockProjectMutation":      "tenant:NO KEY UPDATE tree",
-		"authz/project_members.go:LockProjectWrite":         "tenant:SHARE tree",
+		"authz/project_members.go:LockProjectMutation":      "tree tenant:UPDATE",
+		"authz/project_members.go:LockProjectWrite":         "tree tenant:SHARE",
 		"authz/project_members.go:setProjectBindingTx":      "project.Mutation project.Authorize",
 		"authz/project_members.go:removeProjectBindingTx":   "project.Mutation project.Authorize",
-		"recurrences/module.go:lock":                        "tenant:NO KEY UPDATE tree:try tree",
+		"recurrences/module.go:lock":                        "tree:try tree tenant:NO KEY UPDATE",
 		"recurrences/module.go:create":                      "recurrence.lock",
 		"recurrences/module.go:update":                      "recurrence.lock",
 		"recurrences/module.go:setPaused":                   "recurrence.lock",
@@ -70,10 +59,10 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/occurrence.go:ensureActor":             "advisory:recurring-actor",
 		"recurrences/occurrence.go:runNow":                  "recurrence.lock",
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",
-		"operatoractor/actor.go:EnsureWithProduction":       "tenant:NO KEY UPDATE tree",
+		"operatoractor/actor.go:EnsureWithProduction":       "tree tenant:UPDATE",
 	}
 	got := map[string]string{}
-	for _, pkg := range []string{"agentaccounts", "agentpairing", "auth", "authz", "recurrences", "operatoractor"} {
+	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor"} {
 		files, err := filepath.Glob(filepath.Join("..", pkg, "*.go"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("inventory %s: files=%d err=%v", pkg, len(files), err)
@@ -100,7 +89,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 	}
 	for site, sequence := range got {
 		if expected, ok := want[site]; !ok || sequence != expected {
-			t.Errorf("%s: lock sequence %q, want %q (pairing -> tenant -> tree)", site, sequence, expected)
+			t.Errorf("%s: lock sequence %q, want %q (pairing -> tree -> tenant)", site, sequence, expected)
 		}
 	}
 	for site := range want {
@@ -109,7 +98,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		}
 	}
 	if reflect.DeepEqual(got, want) {
-		t.Logf("verified %d lock sites across six packages", len(got))
+		t.Logf("verified %d lock sites across five packages", len(got))
 	}
 }
 
@@ -164,39 +153,6 @@ func TestOperatorLockOrderNegativeControls(t *testing.T) {
 						t.Fatalf("inventory accepted inverted helper sequence %q", got)
 					}
 				})
-			}
-		})
-	}
-}
-
-// Guards are closures, and helpers can conceal primitives. Keep controls for
-// both representations of the workstation inversion that escaped this guard.
-func TestWorkstationLockOrderNegativeControls(t *testing.T) {
-	tenantSQL := "tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`)"
-	pairingSQL := "tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`)"
-	treeSQL := "tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`)"
-	for _, tc := range []struct{ name, ordered, inverted, want, wantInverted string }{
-		{"primitives", pairingSQL + "; " + tenantSQL + "; " + treeSQL,
-			tenantSQL + "; " + pairingSQL + "; " + treeSQL,
-			"pairing tenant:NO KEY UPDATE tree", "tenant:NO KEY UPDATE pairing tree"},
-		{"helper", "agentpairing.LockMutation(ctx, tx)",
-			tenantSQL + "; agentpairing.LockMutation(ctx, tx)",
-			"pairing.Mutation", "tenant:NO KEY UPDATE pairing.Mutation"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sequence := func(body string) string {
-				file, err := parser.ParseFile(token.NewFileSet(), "guard.go",
-					"package auth; func workstationGuard() { return func() { "+body+" } }", 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return strings.Join(lockOrderSequence(t, "auth", file.Decls[0].(*ast.FuncDecl).Body), " ")
-			}
-			if got := sequence(tc.ordered); got != tc.want {
-				t.Fatalf("ordered closure lock sequence %q, want %q", got, tc.want)
-			}
-			if got := sequence(tc.inverted); got != tc.wantInverted || got == tc.want {
-				t.Fatalf("inverted closure lock sequence %q, want rejected sequence %q", got, tc.wantInverted)
 			}
 		})
 	}

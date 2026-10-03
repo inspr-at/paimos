@@ -269,7 +269,7 @@ func canGrantExplicitWatch(p tenant.Principal, own Effective, key string) bool {
 // current binding. This closes the check/write race with concurrent demotion.
 func (m *Module) authorizeMutation(ctx context.Context, tx pgx.Tx, p tenant.Principal, required string, grants []string) error {
 	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&id); err != nil {
 		return err
 	}
 	if err := requireTx(ctx, tx, p, required, Scope{}); err != nil {

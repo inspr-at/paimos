@@ -527,7 +527,7 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 			}
 		} else {
 			var tenantLock string
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
 				return err
 			}
 			if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
@@ -988,7 +988,7 @@ func (m *Module) rotateAgentKeyWithScopes(ctx context.Context, p tenant.Principa
 		// Match creation/access-management lock order: tenant, then resource.
 		// Serializing on the tenant also fences concurrent grants and rotation.
 		var tenantID string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {

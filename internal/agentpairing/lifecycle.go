@@ -26,19 +26,18 @@ func Lock(ctx context.Context, tx pgx.Tx) error {
 }
 
 // LockMutation enters an account/lifecycle transaction in the shipped order:
-// pairing, tenant, tree, then resource rows. The tenant-before-tree order matches
-// project and owner-workstation authorization fences, even if this particular
-// operation does not need tree; callers may later write tree rows. Call only at
-// transaction entry, before resource locks. NO KEY UPDATE permits FK checks
-// while RequireTx sees live grants.
+// pairing, tree, tenant, then resource rows. Take the tree before the new tenant
+// authorization fence, even if this particular operation does not need tree;
+// callers may later write tree rows. Call only at transaction entry, before
+// resource locks. NO KEY UPDATE permits FK checks while RequireTx sees live grants.
 func LockMutation(ctx context.Context, tx pgx.Tx) error {
 	if err := Lock(ctx, tx); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
+	_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`)
 	return err
 }
 
