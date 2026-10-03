@@ -1138,18 +1138,18 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }
   .ticket-row:not(:has(.c-estimate .mono)) .c-estimate { display: none !important; }
-  .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
-  .table-card.selecting .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
+  .table-card:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
+  .table-card.selecting:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
   .c-progress { grid-area: progress; justify-self: end; min-width: 0; }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
-  .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
-  .table-card.selecting .ticket-row:has(.progress-read) {
+  .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
+  .table-card.selecting:not(.customised) .ticket-row:has(.progress-read) {
     grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
-  .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
-  .table-card.selecting .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
+  .table-card:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
+  .table-card.selecting:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
   /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }

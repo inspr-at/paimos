@@ -427,22 +427,29 @@ figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; co
 .thumb:focus-visible { outline: 2px solid #a4e5df; outline-offset: 2px; }
 .thumb-file { font: 700 11px/1 var(--mono); color: #a4e5df; }
 .b-tag { position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; font-size: 10px; }
+@media (pointer: coarse) {
+  .pill-btn { min-width: 44px; min-height: 44px; }
+  .onion input { min-height: 44px; }
+  .slider-handle { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+}
 @media (max-width: 720px) {
   .lb-bar { gap: 6px; min-height: 60px; padding: 8px 10px 8px 14px; }
   .title-block { flex: 1 1 auto; }
   .name { font-size: 15.5px; }
   .zoom, .copy-link { display: none; }
-  .details-btn, .compare-btn { width: 36px; height: 36px; padding: 0; }
+  .details-btn, .compare-btn, .pill-btn.round { width: 44px; height: 44px; padding: 0; }
   .details-btn .label, .compare-btn .label { display: none; }
   .pill-btn.round, .details-btn, .compare-btn { flex: none; }
   .body.with-details { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .details { border-left: 0; border-top: 1px solid var(--lb-edge); max-height: 40dvh; }
   /* Swipe to move on a phone; the arrows sit low so they do not cover the image. */
-  .nav { top: auto; bottom: 12px; width: 40px; height: 40px; margin-top: 0; }
+  .nav { top: auto; bottom: 12px; width: 44px; height: 44px; margin-top: 0; }
   .nav.prev { left: 8px; } .nav.next { right: 8px; }
   .side-by-side { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
   .foot > .pill { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; border-radius: 16px; }
-  .foot > .pill .pill-btn { padding-inline: 4px; }
+  .foot > .pill .pill-btn { min-height: 44px; padding-inline: 4px; }
+  .onion input { min-height: 44px; }
+  .slider-handle { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
   .compare-note { grid-column: 1 / -1; max-width: 100%; min-width: 0; padding: 4px 8px; }
   .onion { grid-column: 1 / -1; justify-content: center; }
 }

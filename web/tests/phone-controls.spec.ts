@@ -4,9 +4,27 @@ import { join } from 'node:path'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, type Fixtures } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 const shots = 'test-results/aeon-628-phone-controls'
 const rows = (page: Page) => page.locator('tr.ticket-row:not(.ghost)')
+
+async function touchTargets(controls: Locator[]) {
+  const boxes = []
+  for (const control of controls) {
+    await expect(control).toBeVisible()
+    const box = (await control.boundingBox())!
+    expect(box.width, `${await control.getAttribute('aria-label')} touch width`).toBeGreaterThanOrEqual(44)
+    expect(box.height, `${await control.textContent()} touch height`).toBeGreaterThanOrEqual(44)
+    boxes.push(box)
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!
+      expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y, `touch targets ${i} and ${j} overlap`).toBe(true)
+    }
+  }
+}
 function germanWorld(theme: string): Fixtures {
   const data = fixtures()
   data.preferences.theme = { choice: theme }
@@ -283,3 +301,128 @@ for (const width of [390, 768]) {
     await expect(dock).toHaveCount(0)
   })
 }
+
+test.describe('fix3: phone regressions', () => {
+  test.use({ hasTouch: true, isMobile: true })
+
+  test('last ticket clears the measured nine-action toolbar without an updates chip', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 })
+    const data = germanWorld('light'), source = data.nodes.find(n => n.id === 'n-1')!
+    for (let i = 0; i < 20; i++) data.nodes.push({ ...source, id: `clearance-${i}`, key: `PHAROS-${100 + i}`, title: `${source.title} ${i}` })
+    await mockWork(page, data)
+    await page.route(/\/api\/me\/permissions(?:\?|$)/, route => {
+      const permissions = mockEffectivePermissions('member', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+      permissions.workspace.permissions.push('run.create')
+      permissions.project?.permissions.push('run.create')
+      return route.fulfill({ json: permissions })
+    })
+    await page.goto('/p/PHAROS')
+    await expect(rows(page)).toHaveCount(25)
+    await page.getByRole('button', { name: 'Select', exact: true }).click()
+    await page.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).click()
+    const dock = page.getByRole('toolbar', { name: '1 selected ticket', exact: true })
+    await expect(dock.getByRole('button')).toHaveCount(9)
+    await expect(dock.getByRole('button', { name: 'Queue', exact: true })).toBeVisible()
+    await expect(dock.getByRole('button', { name: 'Add to release', exact: true })).toBeVisible()
+    await expect(page.locator('.list-view')).not.toHaveClass(/has-live-updates/)
+    const main = page.locator('#main'), last = rows(page).last()
+    expect(await main.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
+    await expectStableControls({ controls: { status: dock.getByRole('button', { name: 'Status', exact: true }), clear: dock.getByRole('button', { name: 'Clear the selection' }) }, scrollAreas: { main }, interactions: [
+      { name: 'scroll to the actual end of the list', run: async () => {
+        await main.evaluate(el => { el.scrollTop = el.scrollHeight })
+        await expect.poll(() => main.evaluate(el => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThanOrEqual(1)
+        await expect.poll(async () => {
+          const row = (await last.boundingBox())!, bar = (await dock.boundingBox())!
+          return row.y + row.height - bar.y
+        }, { message: 'the whole final ticket must clear the toolbar at maximum scroll' }).toBeLessThanOrEqual(-8)
+        await expect(last).toBeInViewport({ ratio: 1 })
+      } },
+    ] })
+    for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await main.evaluate(el => { el.scrollTop = el.scrollHeight })
+      for (const theme of ['light', 'dark']) {
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+        await capture(page, `bulk-clearance-${width}-${theme}`)
+      }
+    }
+  })
+
+  for (const width of [390, 720]) {
+    test(`Compare controls have separate 44px touch targets at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await mockWork(page, germanWorld('light'))
+      await page.goto('/p/PHAROS/PHAROS-11')
+      await page.locator('.tile[data-attachment-id="att-1"]').tap()
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const box = page.locator('dialog.lightbox[open]')
+      const compare = box.getByRole('button', { name: 'Compare', exact: true }), details = box.getByRole('button', { name: 'Details', exact: true }), close = box.getByRole('button', { name: 'Close viewer' })
+      await touchTargets([compare, details, close])
+      await compare.tap()
+      const modes = box.getByRole('radiogroup', { name: 'Compare view' })
+      const side = modes.getByRole('radio', { name: 'Side by side' }), slider = modes.getByRole('radio', { name: 'Slider', exact: true }), onion = modes.getByRole('radio', { name: 'Onion skin' })
+      await touchTargets([side, slider, onion])
+      await expectStableControls({ controls: { box, compare, details, close, modes, side, slider, onion }, scrollAreas: { footer: box.locator('footer') }, interactions: [
+        ...[side, onion, slider].map((mode, i) => ({ name: `tap mode ${i}`, run: async () => { await mode.tap(); await expect(mode).toHaveAttribute('aria-checked', 'true') } })),
+      ] })
+    })
+
+    test(`column reorder controls have separate 44px touch targets at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const data = germanWorld('light')
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      await page.getByRole('button', { name: 'Filters', exact: true }).tap()
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const sheet = page.getByRole('dialog', { name: 'Filters', exact: true }), columns = sheet.getByRole('list', { name: 'Columns', exact: true })
+      const cost = columns.getByRole('checkbox', { name: 'Cost unit', exact: true }), row = columns.locator('.row').filter({ has: page.getByRole('checkbox', { name: 'Cost unit', exact: true }) })
+      const up = row.getByRole('button', { name: 'Move Cost unit up' }), down = row.getByRole('button', { name: 'Move Cost unit down' })
+      await row.scrollIntoViewIfNeeded()
+      await touchTargets([row.locator('.row-label'), up, down])
+      const before = await columns.locator('input[data-column-row]').evaluateAll(els => els.map(el => (el as HTMLElement).dataset.columnRow))
+      await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, row, cost, up, down }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+        { name: 'toggle the column without moving its targets', run: async () => { await cost.tap(); await expect(cost).toBeChecked() } },
+      ] })
+      // Reordering intentionally moves a row; measure the list frame and prove
+      // the taps hit the requested direction rather than its neighbour.
+      await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+        { name: 'tap up', run: async () => { await up.tap(); await expect.poll(() => data.preferences['list:p-pharos']?.order?.indexOf('cost')).toBe(before.indexOf('cost') + 1) } },
+        { name: 'tap down', run: async () => { await down.tap(); await expect.poll(() => data.preferences['list:p-pharos']?.order?.indexOf('cost')).toBe(before.indexOf('cost') + 2) } },
+      ] })
+    })
+  }
+
+  for (const populated of ['estimate', 'progress', 'both']) {
+    test(`customized selection keeps only two tracks with populated ${populated}`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 900 })
+      const data = germanWorld('light'), node = data.nodes.find(n => n.id === 'n-1')!
+      node.fields.estimate_hours = populated === 'progress' ? undefined : 4
+      node.eta = populated === 'estimate' ? undefined : { progress_pct: 42, progress_at: node.updated_at }
+      data.preferences['list:p-pharos'] = { order: ['key', 'title', 'estimate', 'progress'], visible: ['key', 'title', 'estimate', 'progress'] }
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      const card = page.locator('#row-n-1')
+      if (populated !== 'progress') await expect(card.locator('.c-estimate .mono')).toContainText('4')
+      if (populated !== 'estimate') await expect(card.locator('.progress-read')).toBeVisible()
+      await page.getByRole('button', { name: 'Select', exact: true }).tap()
+      await card.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).tap()
+      const check = card.locator('.c-check'), title = card.locator('.c-title')
+      await expectStableControls({ controls: { card, check, title }, scrollAreas: { table: page.locator('.table-card') }, interactions: [
+        { name: 'toggle the selected card', run: async () => { await check.getByRole('checkbox').tap(); await expect(check.getByRole('checkbox')).toHaveAttribute('aria-checked', 'false') } },
+        { name: 'select the card again', run: async () => { await check.getByRole('checkbox').tap(); await expect(check.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true') } },
+      ] })
+      const layout = await card.evaluate(el => ({ tracks: getComputedStyle(el).gridTemplateColumns.split(' ').length, areas: getComputedStyle(el).gridTemplateAreas }))
+      expect(layout, 'customized cards must not inherit automatic named grid tracks').toEqual({ tracks: 2, areas: 'none' })
+      for (const cell of await card.locator('td').all()) await inFrame(cell, card)
+      const cardBox = (await card.boundingBox())!, titleBox = (await title.boundingBox())!
+      expect(titleBox.x + titleBox.width).toBeGreaterThanOrEqual(cardBox.x + cardBox.width - 15)
+      for (const width of [390, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 })
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+          await capture(page, `columns-selection-${populated}-${width}-${theme}`)
+        }
+      }
+    })
+  }
+})

@@ -1947,6 +1947,9 @@ height, columns and model display. Saved column visibility and order also apply
 to phone cards: optional values appear below Key and Title; Automatic restores
 the compact phone layout. Attachment Compare reserves its opacity control slot
 across Side by side, Slider and Onion skin so the mode buttons stay in place.
+Phone Compare and column reorder buttons have separate 44 px touch targets.
+Selection scroll clearance follows the measured bulk toolbar height, including
+Queue and Release, so the final ticket can scroll fully above the toolbar.
 
 The auth adapter is isolated in `web/src/lib/api.ts`. It expects `/api/me` to return
 `{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean, oidc_display_name?: string }`.

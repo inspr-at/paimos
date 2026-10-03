@@ -104,7 +104,7 @@ const emit = defineEmits<{
 .sheet :deep(.reset), .sheet :deep(.add), .sheet :deep(.sort-field), .sheet :deep(.icon-btn) { height: 44px; }
 .sheet :deep(.sort-editor .icon-btn) { width: 44px; flex: none; }
 .sheet :deep(.row:not(.noted)) { height: 44px; }
-.sheet :deep(.moves .icon-btn) { width: 32px; }
+.sheet :deep(.moves .icon-btn) { width: 44px; flex: none; }
 .sheet :deep(.moves) { opacity: 1; }
 .sheet :deep(.fine) { display: none; }
 </style>
