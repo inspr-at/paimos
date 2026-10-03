@@ -357,6 +357,11 @@ and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
 
+Planning details probe only the selected page's subtree, including after bulk
+imports with missing or stale statistics. Whole-list model, token and cost sorts
+retain batch joins. Both paths preserve the same tenant and project visibility
+and child-state filters.
+
 ## Agent start plan
 
 `aeon agents plan` shows the person's planned total, per-harness limits and
