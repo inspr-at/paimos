@@ -5,21 +5,29 @@ import { can } from '../lib/authz'
 import * as themes from '../lib/themes'
 import type { ActiveTheme, ThemeRecord } from '../lib/themes'
 
+type ThemeConflict = { themeID: string; revision: number; operation: 'selection' | 'save' | 'delete' }
+
 export function useThemeEditor() {
   const session = useSession()
   const items = ref<ThemeRecord[]>([]), active = ref<ActiveTheme | null>(null), draft = ref<ThemeRecord | null>(null)
   const cursor = ref<string | null>(null), busy = ref(false), error = ref(''), message = ref('')
-  const conflict = ref(false)
+  const failedOperation = ref<ThemeConflict | null>(null)
+  const conflict = computed(() => {
+    const failed = failedOperation.value, chosen = active.value
+    return !!failed && !!chosen && failed.themeID === chosen.theme.id &&
+      failed.revision === (failed.operation === 'selection' ? chosen.revision : chosen.theme.revision)
+  })
   let epoch = 0
   const identity = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
   const selfWrite = computed(() => session.identity?.principal.kind === 'person' && (can('profile.write') || can('profile.portal_write')))
   // The API's RLS returns only this canonical person's personal themes; linked
-  // aliases may have a different owner UUID. Workspace writes need manage.
-  const editable = (theme: ThemeRecord) => theme.scope === 'workspace' ? session.identity?.principal.kind === 'person' && can('settings.manage') : selfWrite.value
+  // aliases may have a different owner UUID. Both shared scopes need manage.
+  const editable = (theme: ThemeRecord) => theme.scope === 'personal' ? selfWrite.value : session.identity?.principal.kind === 'person' && can('settings.manage')
   const dirty = computed(() => !!draft.value && !!active.value && JSON.stringify({ name: draft.value.name, values: draft.value.values }) !== JSON.stringify({ name: active.value.theme.name, values: active.value.theme.values }))
   const valid = computed(() => !!draft.value?.name.trim() && [...draft.value.name.trim()].length <= 80 && !/[\u0000-\u001f\u007f]/.test(draft.value.name))
   const clone = (theme: ThemeRecord) => JSON.parse(JSON.stringify(theme)) as ThemeRecord
   function install(current: ActiveTheme) {
+    failedOperation.value = null
     active.value = current; draft.value = clone(current.theme)
     merge(current.theme)
     if (current.fallback_notice) message.value = `${current.fallback_notice.deleted_theme_name} was deleted. You are using the workspace default.`
@@ -29,21 +37,24 @@ export function useThemeEditor() {
     if (index < 0) items.value.push(theme)
     else items.value[index] = theme
   }
-  async function perform(fn: (current: () => boolean) => Promise<void>) {
+  async function perform(fn: (current: () => boolean) => Promise<void>, operation?: ThemeConflict) {
     if (busy.value || !identity.value) return
     const started = epoch, person = identity.value
     const current = () => started === epoch && identity.value === person
     busy.value = true; error.value = ''; message.value = ''
     try { await fn(current) }
     catch (failure) {
-      if (current()) { error.value = failure instanceof Error ? failure.message : 'The theme operation failed.'; conflict.value = (failure as { status?: number }).status === 409 }
+      if (current()) {
+        error.value = failure instanceof Error ? failure.message : 'The theme operation failed.'
+        if ((failure as { status?: number }).status === 409 && operation) failedOperation.value = operation
+      }
     } finally { if (current()) busy.value = false }
   }
   async function load() {
     await perform(async current => {
       const [page, chosen] = await Promise.all([themes.listThemes(), themes.getActiveTheme()])
       if (!current()) return
-      items.value = page.items; cursor.value = page.next_cursor; conflict.value = false; install(chosen)
+      items.value = page.items; cursor.value = page.next_cursor; install(chosen)
     })
   }
   async function more() {
@@ -58,7 +69,7 @@ export function useThemeEditor() {
   async function choose(theme: ThemeRecord) {
     if (!active.value || dirty.value || !selfWrite.value) return
     const revision = active.value.revision, id = theme.id
-    await perform(async current => { const chosen = await themes.selectTheme(id, revision); if (current()) install(chosen) })
+    await perform(async current => { const chosen = await themes.selectTheme(id, revision); if (current()) install(chosen) }, { themeID: active.value.theme.id, revision, operation: 'selection' })
   }
   async function save() {
     if (!draft.value || !dirty.value || !valid.value || !editable(draft.value) || conflict.value) return
@@ -67,7 +78,7 @@ export function useThemeEditor() {
       const saved = await themes.updateTheme(captured)
       if (!current() || draft.value?.id !== captured.id) return
       merge(saved); active.value!.theme = saved; draft.value = clone(saved); message.value = 'Saved.'
-    })
+    }, { themeID: captured.id, revision: captured.revision, operation: 'save' })
   }
   function discard() {
     if (busy.value || !active.value) return
@@ -113,11 +124,11 @@ export function useThemeEditor() {
         try { const chosen = await themes.getActiveTheme(); if (current()) { install(chosen); message.value = 'Deleted. You are using the workspace default.' } }
         catch { if (current()) error.value = 'Deleted, but the workspace default could not be loaded. Try again.' }
       }
-    })
+    }, { themeID: captured.id, revision: captured.revision, operation: 'delete' })
   }
   watch(identity, () => {
     epoch++; items.value = []; active.value = null; draft.value = null; cursor.value = null
-    busy.value = false; error.value = ''; message.value = ''; conflict.value = false
+    busy.value = false; error.value = ''; message.value = ''; failedOperation.value = null
     if (identity.value) void load()
   }, { immediate: true })
   onScopeDispose(() => { epoch++ })

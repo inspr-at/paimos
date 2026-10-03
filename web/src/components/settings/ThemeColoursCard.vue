@@ -42,7 +42,7 @@ watch([() => props.draft.id, () => props.editable], () => { picker.value = null 
 <template>
   <SettingsCard title="Colours" icon="sun" anchor="colours">
     <template #lead>Primary and secondary accents, and the mark on recurring tickets. Only the preview changes until Save.</template>
-    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ editable ? (draft.scope === 'workspace' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope === 'workspace' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
+    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ editable ? (draft.scope !== 'personal' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope !== 'personal' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
     <div class="editor-grid">
       <div class="colour-controls">
         <div v-for="accent in accents" :key="accent.key" class="colour-field">
@@ -86,7 +86,7 @@ h3 { font-size: 13px; font-weight: 600; }
 .swatch { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 2px 8px; text-align: left; padding: 8px 10px; min-height: 52px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); }
 .swatch i { width: 20px; height: 20px; border-radius: 50%; grid-row: span 2; box-shadow: inset 0 0 0 1px var(--line-2); }
 .swatch span { font-size: 12px; }.swatch code { font-size: 11px; }
-.derived { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 44px; font-size: 12px; color: var(--ink-2); }
+.derived { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; min-height: 44px; font-size: 12px; color: var(--ink-2); }
 .text-link { padding: 0; min-height: 28px; border: 0; background: none; color: var(--teal-ink); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
 .contrast-lines p { display: flex; align-items: center; gap: 6px; min-height: 32px; font-size: 12px; color: var(--ink-2); }
 .contrast-lines p > span { flex: 1; }.contrast-lines svg { flex-shrink: 0; }.contrast-lines .warning { color: var(--warn-ink); }

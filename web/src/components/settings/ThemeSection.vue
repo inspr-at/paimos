@@ -13,7 +13,7 @@ const editor = useThemeEditor()
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const { items, active, draft, cursor, busy, error, message, conflict, dirty, valid, selfWrite } = editor
 const renaming = ref<string | null>(null), confirming = ref<ThemeRecord | null>(null)
-function scope(theme: ThemeRecord) { return theme.id === active.value?.default_theme_id ? 'Workspace default' : theme.scope === 'workspace' ? 'Workspace' : 'Yours' }
+function scope(theme: ThemeRecord) { return theme.scope === 'default' || theme.id === active.value?.default_theme_id ? 'Workspace default' : theme.scope === 'workspace' ? 'Workspace' : 'Yours' }
 function rename(theme: ThemeRecord) {
   if (busy.value || !editor.editable(theme) || draft.value?.id !== theme.id) return
   renaming.value = theme.id
@@ -48,7 +48,7 @@ watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.va
           <div class="theme-details" :inert="confirming?.id === theme.id">
             <input v-if="renaming === theme.id && draft?.id === theme.id" v-model="draft.name" class="theme-name-input" maxlength="80" aria-label="Theme name" :disabled="busy" @blur="renaming = null" />
             <button v-else type="button" class="theme-name" :data-tip="draft?.id === theme.id ? draft.name : theme.name" @click="toast(draft?.id === theme.id ? draft.name : theme.name)">{{ draft?.id === theme.id ? draft.name || 'Untitled theme' : theme.name }}</button>
-            <span class="scope">{{ scope(theme) }}{{ theme.scope === 'workspace' ? editor.editable(theme) ? ' · you manage it' : ' · read-only' : '' }}</span>
+            <span class="scope">{{ scope(theme) }}{{ theme.scope !== 'personal' ? editor.editable(theme) ? ' · you manage it' : ' · read-only' : '' }}</span>
           </div>
           <div class="row-actions" :inert="confirming?.id === theme.id">
             <button type="button" class="text-link" :aria-label="`Duplicate ${theme.name}`" :disabled="busy || dirty || !selfWrite" @click="editor.duplicate(theme)">Duplicate</button>

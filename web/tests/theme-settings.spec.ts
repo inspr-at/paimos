@@ -8,8 +8,8 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 const record = (id: string, name: string, scope: ThemeRecord['scope']): ThemeRecord => ({ id, name, scope, tenant_id: 't1', owner_principal_id: scope === 'personal' ? me.id : null, revision: 3, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
 async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean } = {}) {
   await mockWork(page, fixtures(), { admin: options.admin })
-  const data = { items: [record('default', 'Porcelain', 'default' as ThemeRecord['scope']), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
-  const active = (): ActiveTheme => ({ theme: data.items.find(item => item.id === data.selected)!, default_theme_id: 'default', selected_theme_id: data.selected, revision: data.revision, fallback_notice: null })
+  const data = { items: [record('default', 'Porcelain', 'default'), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
+  const active = (): ActiveTheme => ({ theme: data.items.find(item => item.id === data.selected)!, default_theme_id: 'default', selected_theme_id: data.selected === 'default' ? null : data.selected, revision: data.revision, fallback_notice: null })
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     if (!(path.startsWith('/api/themes') || path === '/api/me/theme')) return route.fallback()
@@ -144,6 +144,24 @@ test('workspace themes are read-only to members; duplicate and delete use captur
   await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
   await expect(page.locator('.theme-status')).toContainText('Deleted.')
   await expect(card(page).locator('.permission-note')).toContainText('Porcelain'); expect(data.items).toHaveLength(3)
+})
+test('selection after a deletion conflict restores editable Colours and Save', async ({ page }) => {
+  const data = await setup(page, { fail: 409 }); await page.goto('/settings/theme')
+  await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
+  await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+  await expect(page.locator('.theme-status')).toContainText('changed elsewhere')
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: 'Keep theme', exact: true }).click()
+  data.fail = 0
+  await page.getByRole('button', { name: 'Use High contrast', exact: true }).click()
+  await page.getByRole('button', { name: 'Use Copper', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeEnabled()
+  await expect(page.locator('.theme-status')).not.toContainText('changed elsewhere')
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.locator('.theme-status')).toContainText('Saved.')
+  expect(data.items.find(item => item.id === 'copper')!.values.primary.light).toBe('#3a5fc4')
 })
 test('New theme duplicates the default even on a later list page; managers may edit it', async ({ page }) => {
   const data = await setup(page, { admin: true, defaultLater: true }); await page.goto('/settings/theme')

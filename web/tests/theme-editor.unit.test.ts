@@ -46,14 +46,16 @@ it('a permission loss stops personal writes and workspace themes remain read-onl
   expect(api.updateTheme).not.toHaveBeenCalled()
 })
 it('API-shaped default themes need settings.manage, including save and delete attempts', async () => {
-  const shared = { ...theme(), id: 'default', name: 'Porcelain', scope: 'default' as ThemeRecord['scope'], owner_principal_id: null }
+  const shared: ThemeRecord = { ...theme(), id: 'default', name: 'Porcelain', scope: 'default', owner_principal_id: null }
   vi.mocked(api.getActiveTheme).mockResolvedValue({ ...chosen(), theme: shared, selected_theme_id: null })
   await editor.load()
   expect(editor.editable(shared)).toBe(false)
-  editor.draft.value!.name = 'Changed default'; await editor.save(); await editor.remove(shared)
+  editor.draft.value!.name = 'Changed default'; await editor.save()
+  editor.discard(); await editor.remove(shared)
   expect(api.updateTheme).not.toHaveBeenCalled(); expect(api.deleteTheme).not.toHaveBeenCalled()
   mocks.permissions.add('settings.manage')
   expect(editor.editable(shared)).toBe(true)
+  editor.draft.value!.name = 'Changed default'
   vi.mocked(api.updateTheme).mockImplementation(async record => ({ ...record, revision: 5 }))
   await editor.save()
   expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'default', scope: 'default', revision: 4 }))
@@ -73,6 +75,24 @@ it('successful selection clears a deletion conflict and allows the fresh theme t
   await editor.save()
   expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'other', revision: 9, name: 'Edited other' }))
   expect(editor.message.value).toBe('Saved.')
+})
+it('a deletion conflict on another record does not disable the selected theme', async () => {
+  vi.mocked(api.deleteTheme).mockRejectedValue(Object.assign(new Error('Other theme changed'), { status: 409 }))
+  await editor.remove({ ...theme(), id: 'other' })
+  expect(editor.error.value).toBe('Other theme changed'); expect(editor.conflict.value).toBe(false)
+  editor.draft.value!.name = 'Still editable'
+  vi.mocked(api.updateTheme).mockImplementation(async record => ({ ...record, revision: 5 }))
+  await editor.save()
+  expect(api.updateTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'personal', revision: 4 }))
+})
+it('a failed reload keeps an unresolved save conflict from allowing a blind resave', async () => {
+  editor.draft.value!.name = 'Changed'
+  vi.mocked(api.updateTheme).mockRejectedValue(Object.assign(new Error('Theme changed'), { status: 409 }))
+  await editor.save()
+  vi.mocked(api.getActiveTheme).mockRejectedValue(new Error('Reload failed'))
+  await editor.load(); await editor.save()
+  expect(editor.conflict.value).toBe(true); expect(editor.error.value).toBe('Reload failed')
+  expect(api.updateTheme).toHaveBeenCalledTimes(1)
 })
 it('identity change resets drafts and drops a delayed save result', async () => {
   let release!: (record: ThemeRecord) => void
