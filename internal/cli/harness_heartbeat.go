@@ -1172,7 +1172,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			delete(body, "display_label")
 		}
 	}
-	putHeartbeatModel(ctx, o, session, body)
+	modelUpdate := putHeartbeatModel(ctx, o, session, body)
 
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
@@ -1304,7 +1304,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
 	}
-	acceptHeartbeatModel(session, body)
+	acceptHeartbeatModel(session, body, modelUpdate)
 	rt.printEstimateWarnings(response.Warnings, &session.disk.WarningAt, time.Now())
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA

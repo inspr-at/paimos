@@ -109,8 +109,8 @@ func TestHeartbeatModelAcknowledgementAndRestart(t *testing.T) {
 		}
 	}
 	body := map[string]any{}
-	putHeartbeatModel(context.Background(), opts, &s, body)
-	acceptHeartbeatModel(&s, body)
+	update := putHeartbeatModel(context.Background(), opts, &s, body)
+	acceptHeartbeatModel(&s, body, update)
 	hold, err := openHeartbeatHold(filepath.Join(dir, "state"))
 	if err != nil {
 		t.Fatal(err)
@@ -216,11 +216,11 @@ func TestHeartbeatModelEffortOnlyAndModelOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := map[string]any{}
-	putHeartbeatModel(context.Background(), opts, &s, body)
+	update := putHeartbeatModel(context.Background(), opts, &s, body)
 	if len(body) != 1 || body["reasoning_effort"] != "max" {
 		t.Fatal("effort-only change incorrect", body)
 	}
-	acceptHeartbeatModel(&s, body)
+	acceptHeartbeatModel(&s, body, update)
 	if err := os.WriteFile(path, []byte(`{"type":"assistant","message":{"model":"claude-sonnet"}}`+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -13,10 +13,19 @@ import (
 	"strings"
 )
 
+// heartbeatModelUpdate holds proposed request/observation state. Building the
+// POST must not consume a request before the server acknowledges its identity.
+type heartbeatModelUpdate struct {
+	requestedModel, requestedEffort string
+	baseline                        *heartbeatModelBaseline
+}
+
 // Flags seed registration only. Missing evidence preserves the last accepted
 // value, including across a helper restart. A failed beat does not acknowledge
 // its identity, so the next beat retries the same change.
-func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSession, body map[string]any) {
+func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSession, body map[string]any) heartbeatModelUpdate {
+	next := *s
+	s = &next
 	model, effort := s.disk.SentModel, s.disk.SentEffort
 	// Legacy helper state has no accepted identity cache. Only new transcript
 	// evidence may fill it; stale launch flags must not overwrite server data.
@@ -45,9 +54,15 @@ func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSess
 	if effort != "" && (!s.disk.ModelSent || effort != s.disk.SentEffort) {
 		body["reasoning_effort"] = effort
 	}
+	return heartbeatModelUpdate{
+		requestedModel: s.disk.RequestedModel, requestedEffort: s.disk.RequestedEffort,
+		baseline: s.disk.RequestedModelBaseline,
+	}
 }
 
-func acceptHeartbeatModel(s *heartbeatSession, body map[string]any) {
+func acceptHeartbeatModel(s *heartbeatSession, body map[string]any, update heartbeatModelUpdate) {
+	s.disk.RequestedModel, s.disk.RequestedEffort = update.requestedModel, update.requestedEffort
+	s.disk.RequestedModelBaseline = update.baseline
 	if model, ok := body["model"].(string); ok {
 		s.disk.SentModel = model
 	}
@@ -87,7 +102,7 @@ func heartbeatModelTarget(ctx context.Context, o heartbeatOptions, s *heartbeatS
 	if ctx.Err() != nil || o.Harness != "claude" && o.Harness != "codex" {
 		return usageTarget{}, 0, false
 	}
-	target, err := resolveSessionHeartbeatUsage(o, s)
+	target, err := resolveSessionHeartbeatUsageWithBinding(o, s, false)
 	if err != nil || target.Source != o.Harness || target.Path == "" {
 		return usageTarget{}, 0, false
 	}

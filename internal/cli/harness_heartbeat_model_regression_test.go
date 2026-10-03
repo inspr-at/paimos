@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHeartbeatAppServerModelRequiresThreadBinding(t *testing.T) {
@@ -103,12 +104,12 @@ func TestHeartbeatAppliedModelRequestFencesHistoricalTranscript(t *testing.T) {
 				applyHeartbeatRequests(o, heartbeatDeps{}, &s, []heartbeatControl{request}, context.Background())
 				for attempt := range 3 {
 					body := map[string]any{}
-					putHeartbeatModel(context.Background(), o, &s, body)
+					update := putHeartbeatModel(context.Background(), o, &s, body)
 					if attempt < 2 && (body["model"] != "fixture-model" || body["reasoning_effort"] != "high") {
 						t.Fatalf("history discarded applied request or mixed identities: %#v", body)
 					}
 					if attempt == 1 {
-						acceptHeartbeatModel(&s, body)
+						acceptHeartbeatModel(&s, body, update)
 					}
 					if attempt == 2 && len(body) != 0 {
 						t.Fatalf("unchanged request resent after restart: %#v", body)
@@ -128,7 +129,8 @@ func TestHeartbeatAppliedModelRequestFencesHistoricalTranscript(t *testing.T) {
 					t.Fatal(err)
 				}
 				body := map[string]any{}
-				putHeartbeatModel(context.Background(), o, &s, body)
+				update := putHeartbeatModel(context.Background(), o, &s, body)
+				acceptHeartbeatModel(&s, body, update)
 				if body["model"] != "observed-model" || body["reasoning_effort"] != "max" || s.disk.RequestedModel != "" {
 					t.Fatalf("subsequent evidence failed to supersede request: %#v", body)
 				}
@@ -165,21 +167,21 @@ func TestHeartbeatAppliedEffortSurvivesModelOnlyObservationAndRestart(t *testing
 			request.Payload.Model = "original-model"
 			applyHeartbeatRequests(o, heartbeatDeps{}, &s, []heartbeatControl{request}, context.Background())
 			body := map[string]any{}
-			putHeartbeatModel(context.Background(), o, &s, body)
+			update := putHeartbeatModel(context.Background(), o, &s, body)
 			if len(body) != 1 || body["reasoning_effort"] != "high" {
 				t.Fatalf("applied effort-only change missing: %#v", body)
 			}
-			acceptHeartbeatModel(&s, body)
+			acceptHeartbeatModel(&s, body, update)
 			history += line("")
 			if err := os.WriteFile(path, []byte(history), 0600); err != nil {
 				t.Fatal(err)
 			}
 			body = map[string]any{}
-			putHeartbeatModel(context.Background(), o, &s, body)
+			update = putHeartbeatModel(context.Background(), o, &s, body)
 			if len(body) != 0 {
 				t.Fatalf("model-only observation changed accepted effort: %#v", body)
 			}
-			acceptHeartbeatModel(&s, body)
+			acceptHeartbeatModel(&s, body, update)
 
 			hold, err := openHeartbeatHold(filepath.Join(dir, "state"))
 			if err != nil {
@@ -199,11 +201,11 @@ func TestHeartbeatAppliedEffortSurvivesModelOnlyObservationAndRestart(t *testing
 			}
 			for beat := range 2 {
 				body = map[string]any{}
-				putHeartbeatModel(context.Background(), o, &resumed, body)
+				update = putHeartbeatModel(context.Background(), o, &resumed, body)
 				if len(body) != 0 {
 					t.Fatalf("heartbeat %d after restart replayed historical effort: %#v", beat+1, body)
 				}
-				acceptHeartbeatModel(&resumed, body)
+				acceptHeartbeatModel(&resumed, body, update)
 				if resumed.disk.SentModel != "original-model" || resumed.disk.SentEffort != "high" {
 					t.Fatal("accepted identity lost after restart")
 				}
@@ -294,6 +296,9 @@ func TestHeartbeatAppliedIdentityRetriesAfterFailedPostAndRestart(t *testing.T) 
 				if len(beats) != 1 || beats[0]["reasoning_effort"] != "high" {
 					t.Fatalf("failed POST did not contain applied effort: %#v", beats)
 				}
+				if s.disk.SentModel != "original-model" || s.disk.SentEffort != "low" || s.disk.RequestedModel != requestedModel || s.disk.RequestedEffort != "high" || s.disk.AppliedModelSequence != request.Sequence {
+					t.Fatal("failed POST consumed pending identity or changed accepted identity")
+				}
 				if err := saveHeartbeatSession(&s); err != nil {
 					t.Fatal(err)
 				}
@@ -321,6 +326,55 @@ func TestHeartbeatAppliedIdentityRetriesAfterFailedPostAndRestart(t *testing.T) 
 				}
 			})
 		}
+	}
+}
+
+func TestHeartbeatModelPreviewDoesNotPersistDiscoveredSourceOrFence(t *testing.T) {
+	dir := t.TempDir()
+	o := heartbeatOptions{Harness: "codex", Model: "original-model", Effort: "low", CodexHome: dir}
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	path := codexDiscoveryFixture(t, dir, "first", "/work/exact", start.Add(time.Second))
+	hold, err := openHeartbeatHold(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.release()
+	s := heartbeatSession{id: transcriptSessionID, hold: hold, disk: heartbeatDisk{
+		ModelSent: true, SentModel: "original-model", SentEffort: "low",
+		RequestedModel: "fixture-model", RequestedEffort: "high",
+		ModelFlagAtRequest: o.Model, EffortFlagAtRequest: o.Effort,
+		BoundWorktree: "/work/exact", RegisteredAt: start,
+	}}
+	if err := saveHeartbeatSession(&s); err != nil {
+		t.Fatal(err)
+	}
+	before, err := hold.readFile("state.json", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		body := map[string]any{}
+		update := putHeartbeatModel(context.Background(), o, &s, body)
+		if body["model"] != "fixture-model" || body["reasoning_effort"] != "high" || update.baseline == nil || update.baseline.Offset != info.Size() {
+			t.Fatal("preview did not discover source and propose the observation fence")
+		}
+		if s.disk.RequestedModelBaseline != nil || s.disk.UsagePath != "" || s.disk.UsageSource != "" {
+			t.Fatal("preview consumed the source or observation fence before acknowledgement")
+		}
+		after, err := hold.readFile("state.json", 1<<20)
+		if err != nil || string(after) != string(before) {
+			t.Fatal("source discovery saved proposed state before acknowledgement")
+		}
+	}
+	body := map[string]any{}
+	update := putHeartbeatModel(context.Background(), o, &s, body)
+	acceptHeartbeatModel(&s, body, update)
+	if s.disk.RequestedModelBaseline == nil || s.disk.SentModel != "fixture-model" || s.disk.SentEffort != "high" {
+		t.Fatal("acknowledgement did not commit observation fence and identity together")
 	}
 }
 
