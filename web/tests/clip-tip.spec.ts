@@ -67,7 +67,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
         scrollAreas: { page: page.locator('.harness') },
       })
       if (width === 390) {
-        await standalone.tap(); await expect(page.locator('.tooltip')).toHaveText(longName)
+        await standalone.tap(); await expect(page.locator('.tooltip')).toHaveCount(0)
       }
       const child = page.locator('.child-row').first()
       await keyboardTip(page, child, longName)
