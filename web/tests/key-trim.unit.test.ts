@@ -41,9 +41,47 @@ it('propagates recent-use and CAS refusal without reporting success', async () =
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'A dropped scope was recently used.' }), { status: 409 })))
   await expect(decideKeyTrim(trimFixture(), 'approve', 'request')).rejects.toThrow('recently used')
 })
-it('reports keyset source truncation and rejects oversized pages', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [], has_more: true, next_cursor: 'next' }))))
-  expect((await readKeyTrims()).warnings).toEqual(['Only the first 100 pending key trim proposals are shown.', 'Only the first 100 decided key trim proposals are shown.'])
+it('exposes bounded continuation independently for pending and decided proposals', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    const state = new URL(url, 'https://test.invalid').searchParams.get('state')!
+    return new Response(JSON.stringify({ items: Array.from({ length: 100 }, (_, i) => ({ ...trimFixture(), id: `${state}-${i}` })), has_more: true, next_cursor: `${state}-99` }))
+  }); vi.stubGlobal('fetch', fetch)
+  const page = await readKeyTrims()
+  expect(page.items).toHaveLength(200)
+  expect(page.next).toEqual({ pending: 'pending-99', decided: 'decided-99' })
+  expect(page.warnings).toEqual(['More pending key trim proposals are available. Use Next key trims in that view.', 'More decided key trim proposals are available. Use Next key trims in that view.'])
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+it('approves and restores proposals beyond the first page through the native CAS endpoints', async () => {
+  for (const decision of ['approve', 'restore'] as const) {
+    const proposal = trimFixture(), state = decision === 'approve' ? 'pending' : 'decided'
+    if (decision === 'restore') { proposal.state = 'applied'; proposal.revision = 2; proposal.restore_until = new Date(Date.now() + 60_000).toISOString() }
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const params = new URL(url, 'https://test.invalid').searchParams
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ...proposal, revision: proposal.revision + 1, state: decision === 'approve' ? 'applied' : 'restored' }))
+      if (params.get('state') !== state) return new Response(JSON.stringify({ items: [], has_more: false }))
+      if (!params.has('cursor')) return new Response(JSON.stringify({ items: Array.from({ length: 100 }, (_, i) => ({ ...proposal, id: `earlier-${i}` })), has_more: true, next_cursor: 'earlier-99' }))
+      expect(params.get('cursor')).toBe('earlier-99')
+      return new Response(JSON.stringify({ items: [proposal], has_more: false }))
+    }); vi.stubGlobal('fetch', fetch)
+    const first = await readKeyTrims()
+    expect(first.items.some(row => row.id === proposal.id)).toBe(false)
+    const next = await readKeyTrims(first.next)
+    expect(next.items).toEqual([proposal])
+    expect(next.next).toEqual({})
+    const item = keyTrimItem(next.items[0]!), sources = emptySources(); sources.keyTrims.set(item.id, proposal)
+    const result = await commitDesk(item, { ...draftFor(item), optionId: decision }, sources, 'request', false)
+    expect(result.keyTrim?.state).toBe(decision === 'approve' ? 'applied' : 'restored')
+    expect(fetch.mock.calls.at(-1)?.[0]).toBe(`/api/key-trim-proposals/proposal/${decision === 'restore' ? 'restore' : 'decision'}`)
+  }
+})
+it('rejects missing, repeated and mismatched continuation and oversized pages', async () => {
+  for (const next_cursor of [undefined, 'old', 'wrong']) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [{ ...trimFixture(), id: 'last' }], has_more: true, next_cursor }))))
+    await expect(readKeyTrims({ pending: 'old' })).rejects.toThrow('continuation is invalid')
+  }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: Array.from({ length: 101 }, trimFixture), has_more: false }))))
+  await expect(readKeyTrims()).rejects.toThrow('page is invalid')
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { headers: { 'Content-Length': String(9 * 1024 * 1024) } })))
   await expect(readKeyTrims()).rejects.toThrow('too large')
 })

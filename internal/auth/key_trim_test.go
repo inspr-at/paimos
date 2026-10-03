@@ -526,44 +526,82 @@ func TestKeyTrimGrantFenceRechecksAfterInFlightUseCommits(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("authentication failed")
 	}
-	grantHeld, commitGrant := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() {
-		select {
-		case <-commitGrant:
-		default:
-			close(commitGrant)
-		}
+	pool, barrier, ctx := dbtest.BarrierPool(t, m.pool, func(sql string) bool {
+		return strings.Contains(sql, "INSERT INTO agent_key_scope_usage")
 	})
 	grantDone := make(chan error, 1)
 	go func() {
-		grantDone <- db.InTenant(t.Context(), m.pool, owner.TenantID, func(tx pgx.Tx) error {
-			if err := authz.RequireTx(t.Context(), tx, agent, "nodes.write", authz.Scope{}); err != nil {
-				return err
-			}
-			close(grantHeld)
-			<-commitGrant
-			return nil
+		// Exercise the usage fence directly, independently of InTenant's
+		// earlier keyed-agent admission fence.
+		grantDone <- db.InTenant(ctx, pool, owner.TenantID, func(tx pgx.Tx) error {
+			return authz.RequireTx(ctx, tx, agent, "nodes.write", authz.Scope{})
 		})
 	}()
-	<-grantHeld
-	entered := make(chan struct{})
-	m.inTenant = func(ctx context.Context, pool *pgxpool.Pool, tid string, fn func(pgx.Tx) error) error {
-		return db.InTenant(ctx, pool, tid, func(tx pgx.Tx) error { close(entered); return fn(tx) })
+	holder := barrier.Wait(t, ctx)
+	approvalDone, finished := make(chan error, 1), make(chan struct{})
+	go func() { _, err := trimMutation(t, m, owner, proposal, "approve"); approvalDone <- err; close(finished) }()
+	// PostgreSQL must show approval waiting for the grant's usage fence.
+	// Entering its callback alone does not prove this interleaving.
+	if lock := dbtest.BlockedOrDone(t, ctx, m.pool, holder, finished); lock != "advisory" {
+		t.Fatalf("approval did not wait on the usage fence: %q", lock)
 	}
-	approvalDone := make(chan error, 1)
-	go func() { _, err := trimMutation(t, m, owner, proposal, "approve"); approvalDone <- err }()
-	<-entered
-	// Both transactions are live, and the committed grant must be visible after
-	// the approval obtains the shared usage fence. No sleep establishes overlap.
-	close(commitGrant)
-	if err := <-grantDone; err != nil {
+	barrier.Release()
+	if err := dbtest.Await(t, ctx, grantDone); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-approvalDone; !errors.Is(err, errTrimRecent) {
+	if err := dbtest.Await(t, ctx, approvalDone); !errors.Is(err, errTrimRecent) {
 		t.Fatalf("usage/approval race: %v", err)
 	}
 	if !slices.Equal(trimScopesStored(t, m, owner, key.ID), key.Scopes) {
 		t.Fatal("racing approval dropped a used scope")
+	}
+}
+
+func TestKeyTrimGrantFenceDeniesStaleGrantAfterApprovalCommits(t *testing.T) {
+	m, owner, key, in := trimFixture(t)
+	proposal := proposeTrim(t, m, owner, key.ID, in)
+	prefix, secret, _ := parseBearer("Bearer " + key.Token)
+	agent, ok, err := m.authenticateAgent(t.Context(), prefix, secret)
+	if err != nil || !ok {
+		t.Fatal("authentication failed")
+	}
+	pool, barrier, ctx := dbtest.BarrierPool(t, m.pool, func(sql string) bool {
+		return strings.Contains(sql, "FOR NO KEY UPDATE OF k")
+	})
+	originalPool := m.pool
+	m.pool = pool
+	approvalDone := make(chan error, 1)
+	go func() { _, err := trimMutation(t, m, owner, proposal, "approve"); approvalDone <- err }()
+	holder := barrier.Wait(t, ctx)
+	grantDone, finished := make(chan error, 1), make(chan struct{})
+	go func() {
+		grantDone <- db.InTenant(ctx, originalPool, owner.TenantID, func(tx pgx.Tx) error {
+			return authz.RequireTx(ctx, tx, agent, "nodes.write", authz.Scope{})
+		})
+		close(finished)
+	}()
+	if lock := dbtest.BlockedOrDone(t, ctx, originalPool, holder, finished); lock != "advisory" {
+		t.Fatalf("grant did not wait on the usage fence: %q", lock)
+	}
+	barrier.Release()
+	if err := dbtest.Await(t, ctx, approvalDone); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbtest.Await(t, ctx, grantDone); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("stale scope granted after approval: %v", err)
+	}
+	if !slices.Equal(trimScopesStored(t, m, owner, key.ID), []string{"nodes.read"}) {
+		t.Fatal("approval did not commit its reduction")
+	}
+	if err := db.InTenant(ctx, originalPool, owner.TenantID, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM agent_key_scope_usage WHERE key_id=$1 AND scope='nodes.write'`, key.ID).Scan(&count)
+		if err == nil && count != 0 {
+			t.Error("denied grant recorded usage")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
