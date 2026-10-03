@@ -189,7 +189,7 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	// probes, allowance windows, approvals, journeys or historical evidence.
 	for _, table := range []string{
 		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
-		"model_profiles", "model_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
+		"model_profiles", "model_role_routes", "model_security_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
 		"work_orders", "work_criteria", "work_evidence", "agent_delivery_votes",
 		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
 		"journey_projects", "journey_releases", "journey_requirements", "journey_features", "journey_tickets", "journey_gates", "journey_action_receipts",
@@ -514,7 +514,12 @@ func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	// An incomplete registry must not borrow another harness's profile or
 	// commit Scribe's completed history before finding Claude unavailable.
 	// Pins are immutable, so create this state rather than updating a pin.
+	// Pin the current catalog: an older catalog would intentionally upgrade
+	// and fill in the missing harness before the demo accesses it.
 	err = db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2)`, tenantID, modelregistry.CatalogVersion); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
 			VALUES($1::uuid,'demo-enabled-codex','1','codex','openai','test-model','high','standard',true),
 			      ($1::uuid,'demo-disabled-claude','1','claude','anthropic','test-model','high','standard',false)`, tenantID)
