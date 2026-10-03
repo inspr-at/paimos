@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261002081219.0.0",
+  "version": "261002171043.0.0",
   "release_channel": "stable",
-  "release_sequence": 119,
-  "codename": "Sunlit Sonde",
-  "reserved_at": "2026-10-02T08:12:19Z",
-  "ticket": "AEON-538",
+  "release_sequence": 120,
+  "codename": "Turbo Tower",
+  "reserved_at": "2026-10-02T17:10:43Z",
+  "ticket": "AEON-606",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",

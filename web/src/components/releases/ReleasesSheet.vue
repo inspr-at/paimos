@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch, type Directive } from 'vue'
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
@@ -164,6 +164,8 @@ const currentKnown = computed(() => byVersion.value.has(current.value))
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
+const candidateCount = computed(() => releases.value.filter(r => r.state === 'candidate').length)
+const publishedCount = computed(() => releases.value.filter(r => r.state === 'published').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
 // One notice. An outdated page says a newer version is live; it does not also
 // warn that this build's history lacks that version. The server is chosen once:
@@ -176,12 +178,54 @@ const notice = computed(() => releaseNotice(pageRuns.value, server.value, missin
 const hero = computed(() => { const v = liveServer(server.value, pageRuns.value); return isCalendarVersion(v) ? v : '' })
 const heroName = computed(() => byVersion.value.get(hero.value)?.codename)
 const eyebrow = computed(() => view.value === 'details'
-  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${releases.value.length - reservedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : [])].join(' · ')
+  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${publishedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : []), ...(candidateCount.value ? [`${candidateCount.value} candidate`] : [])].join(' · ')
   : `${brand.value.wordmark} · Release`)
 // One status line under it: since when it runs here, or that this page is older.
 const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
 const liveLine = computed(() => Number.isNaN(liveAt.value) ? 'Live here' : `Live here since ${clockSince(liveAt.value, now.value)} · ${span(Math.max(60_000, now.value - liveAt.value))}`)
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+
+// Fit each badge's own text, keeping state labels ahead of the New hint.
+// Measure in the real font so a wider version or a narrow rail changes only
+// the labels that cannot fit beside the name's ellipsis and the other badges.
+const badgeFits = new WeakMap<HTMLElement, { fit: () => void; stop: () => void }>()
+const vFitBadges: Directive<HTMLElement> = {
+  mounted(identity) {
+    const fit = () => {
+      if (!identity.isConnected || !identity.getBoundingClientRect().width) return
+      const tags = [...identity.querySelectorAll<HTMLElement>('.tag')]
+      if (!tags.length) return
+      tags.forEach(tag => tag.classList.remove('compact'))
+      const widths = tags.map(tag => tag.getBoundingClientRect().width)
+      const name = identity.querySelector<HTMLElement>('.rn-name')!
+      const ellipsis = document.createElement('span')
+      ellipsis.textContent = '…'
+      ellipsis.style.cssText = 'position:absolute;white-space:nowrap'
+      name.append(ellipsis)
+      const minimumName = ellipsis.getBoundingClientRect().width
+      ellipsis.remove()
+      const style = getComputedStyle(identity)
+      const dotWidth = parseFloat(style.getPropertyValue('--compact-badge-width'))
+      let available = identity.getBoundingClientRect().width - minimumName - parseFloat(style.columnGap) * tags.length - dotWidth * tags.length
+      // Reserve a dot for every sibling before admitting a full label.
+      const priority = tags.map((tag, index) => ({ tag, index })).sort((a, b) => Number(a.tag.classList.contains('new-tag')) - Number(b.tag.classList.contains('new-tag')))
+      for (const { tag, index } of priority) {
+        const extra = widths[index]! - dotWidth
+        const fits = extra <= available
+        tag.classList.toggle('compact', !fits)
+        if (fits) available -= extra
+      }
+    }
+    const observer = new ResizeObserver(fit)
+    observer.observe(identity)
+    document.fonts.addEventListener('loadingdone', fit)
+    void document.fonts.ready.then(fit)
+    badgeFits.set(identity, { fit, stop: () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', fit) } })
+    fit()
+  },
+  updated(identity) { badgeFits.get(identity)?.fit() },
+  beforeUnmount(identity) { badgeFits.get(identity)?.stop(); badgeFits.delete(identity) },
+}
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -492,7 +536,7 @@ const KINDS = [
             </div>
             <p class="result-count" aria-live="polite">
               <template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template>
-              <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
+              <template v-else-if="releases.length">{{ publishedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template><template v-if="candidateCount"> · {{ candidateCount }} candidate</template></template>
             </p>
           </div>
 
@@ -541,13 +585,13 @@ const KINDS = [
                 </span>
                 <span class="main" role="gridcell">
                   <span class="line1">
-                    <span class="row-identity">
-                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
-                      <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
-                      <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
-                      <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
-                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag">From</span>
-                      <span v-if="r.version === compareTo" class="tag end-tag">To</span>
+                    <span v-fit-badges class="row-identity">
+                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name" :title="r.codename || codenameOf(r.version) || r.version"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
+                      <span v-if="r.version === current" class="tag current-tag" title="Current"><span class="live-dot" aria-hidden="true" /><span class="tag-label">Current</span></span>
+                      <span v-if="store.highlight.has(r.version)" class="tag new-tag" title="New"><span class="tag-label">New</span></span>
+                      <span v-if="r.version === rollbackTarget" class="tag" title="Rollback target"><span class="tag-label">Rollback target</span></span>
+                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag" title="From"><span class="tag-label">From</span></span>
+                      <span v-if="r.version === compareTo" class="tag end-tag" title="To"><span class="tag-label">To</span></span>
                     </span>
                     <ReleaseVersionCopy :value="r.version" class="row-version" @click.stop />
                   </span>
@@ -556,7 +600,7 @@ const KINDS = [
                     <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
                     <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
-                  <span v-if="r.state === 'published'" class="counts">
+                  <span v-if="r.state !== 'reserved'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
                       <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>
                     </template>
@@ -722,15 +766,29 @@ const KINDS = [
 .time { display: grid; gap: 1px; padding-top: 1px; }
 .clock { font-size: 13px; font-weight: 600; color: var(--ink); }
 .age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-.main { display: grid; gap: 3px; min-width: 0; }
-.line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.row-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
-.row-name { font-size: 14px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
-.row-name :deep(.rn-name) { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
-/* The name and badges stay together; the fixed-width reveal can wrap as a unit. */
-.row-version { flex: none; margin-left: auto; }
-.row-version :deep(.version-copy) { margin: 0; }
-.row-version :deep(.version-layers) { justify-items: end; }
+.main { display: grid; gap: 3px; min-width: 0; container: release-row / inline-size; }
+/* The version owns its slot, including the canonical reveal and copy icon.
+   Only the name gives way; the 44 px copy target keeps the same position. */
+.line1 { --row-text-size: 14px; --row-line-height: 20px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px; min-width: 0; }
+.row-identity { --compact-badge-width: 8px; display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
+.row-name { flex: 1; min-height: 44px; font-size: var(--row-text-size); line-height: var(--row-line-height); font-weight: 600; letter-spacing: .005em; color: var(--ink); }
+.row-name :deep(.rn-name) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.row-identity .tag { flex: none; align-items: baseline; padding-block: 4.5px; }
+.row-identity .live-dot { align-self: center; }
+.row-version { min-width: max-content; justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: var(--row-line-height); }
+/* The name and Pretty version use the same system-font line box. Align the
+   canonical reveal to that baseline instead of centering different metrics. */
+.row-version :deep(.version-pretty) { font-size: var(--row-text-size); }
+.row-version :deep(.version-layers) { justify-items: end; align-items: baseline; grid-template-rows: var(--row-line-height); }
+/* Only measured overflow compacts a badge; its text remains accessible. */
+.row-identity .tag.compact { position: relative; align-self: center; align-items: center; justify-content: center; width: var(--compact-badge-width); height: 12px; padding: 0; }
+.row-identity .tag.compact:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.row-identity .tag.compact .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@container release-row (max-width: 310px) {
+  .row-identity { gap: 1.5px; }
+  .row-identity .tag:not(.compact) { padding-inline: 5px; }
+}
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .new-tag { background: var(--gold-2); color: #3a2804; }
@@ -844,5 +902,9 @@ const KINDS = [
 
   .row-chev { opacity: 1; }
   .day-h { top: 74px; padding: 4px 8px 6px; }
+}
+@media (max-width: 350px) {
+  .row { grid-template-columns: 40px minmax(0, 1fr) 14px; column-gap: 6px; }
+  .age { overflow: hidden; text-overflow: ellipsis; }
 }
 </style>

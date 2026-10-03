@@ -133,7 +133,12 @@ func TestWaitGroupObserverFailureDoesNotSignal(t *testing.T) {
 	go func() {
 		done <- life.waitOwned(func(int) error { close(observed); return errors.New("injected observation failure") }, true)
 	}()
-	t.Cleanup(func() { _ = in.Close(); <-done })
+	t.Cleanup(func() {
+		_ = in.Close()
+		if err := <-done; !errors.Is(err, ErrCleanupUnconfirmed) {
+			t.Errorf("failed ownership observation lost its cleanup outcome: %v", err)
+		}
+	})
 	<-observed
 	// Wait until the failed observer has revoked signaling under the mutex.
 	deadline := time.Now().Add(time.Second)
