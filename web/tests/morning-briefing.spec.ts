@@ -45,6 +45,10 @@ async function setup(page: Page, options: { failure?: boolean; noCost?: boolean;
     ] : [] : [{ id: 454, node_id: 'work-1', type: 'node.updated', before: { fields: {} }, after: { fields: { merge_commit: 'abcdef1234567' } }, at: AT }]
     return route.fulfill({ json: { items, next_after: null, next_cursor: null, ...(query.get('briefing') === 'true' ? { window: { from: START, to: new Date(NOW).toISOString(), first: false, capped: false } } : {}) } })
   })
+  await page.route('**/api/decision-desk/projection?**', route => route.fulfill({ json: {
+    items: options.empty ? [] : [{ id: uuid, kind: 'approval', revision: 1, title: 'Approval', held: true, created_at: AT, href: `/agents?needs=a:${uuid}`, source: `/api/phone-approvals/approval/${uuid}` }],
+    counts: { open: options.empty ? 0 : 1, held: options.empty ? 0 : 1, chores: 0 }, has_more: false, as_of: new Date(NOW).toISOString(),
+  } }))
   await page.route('**/api/approvals?**', route => route.fulfill({ json: options.empty ? [] : [{ id: uuid, agent_principal_id: uuid, scope: 'nodes.write', resource_kind: 'node', resource_id: 'n-a1', rationale: 'Check the delivery evidence', proposed_at: AT, expires_at: new Date(NOW + 3600_000).toISOString(), decision: null, risk: 'low' }] }))
   await page.route('**/api/projects/*/messages?**', route => route.fulfill({ json: { items: [], next_after: 0 } }))
   await page.route('**/api/journey/next-actions?**', route => route.fulfill({ json: { items: [] } }))

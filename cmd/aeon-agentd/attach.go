@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsecurity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/client"
 	"golang.org/x/term"
 )
 
@@ -62,7 +63,7 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	var registered attachwatch.View
 	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
 	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil {
-		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
+		return nil, fmt.Errorf("paired instance refused attach registration: %w", attachExchangeFailure(err))
 	}
 	if registered.State != "registered" {
 		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance refused attach registration; update agentd and Aeon"}
@@ -79,10 +80,24 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 		},
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 			in.PollKey = pollKey
-			var out attachwatch.View
-			err := pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
-			return out, err
+			return pairedAttachExchange(ctx, &pairedClient, in)
 		}})
+}
+
+func pairedAttachExchange(ctx context.Context, c *client.Client, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+	var out attachwatch.View
+	err := c.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
+	return out, attachExchangeFailure(err)
+}
+
+// Only errors from the remote Do call receive the exchange marker. Preserve
+// HTTP refusals so they keep their specific fixed repair hints.
+func attachExchangeFailure(err error) error {
+	var status *client.StatusError
+	if err == nil || errors.As(err, &status) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", agentd.ErrAttachExchange, err)
 }
 
 func startupAttachIdentities(c agentsetup.RuntimeConfig) map[string]agentsetup.AttachIdentity {
