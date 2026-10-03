@@ -197,7 +197,7 @@ h2 { margin: 0; font-size: 18px; line-height: 1.3; text-wrap: balance; }
 /* Keep actions still between series items; clipped titles remain focusable. */
 .quiet .name { flex: 1; min-width: 0; height: 2lh; line-height: 1.4; overflow: hidden; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .quiet .step { flex: none; font-variant-numeric: tabular-nums; }
-@media (pointer: coarse) { .quiet .name { min-height: 44px; } }
+@media (pointer: coarse) { .quiet .name { line-height: max(1.4em, 22px); } }
 .scroll { flex: 1; min-height: 0; margin-top: 16px; overflow: auto; overscroll-behavior: contain; }
 .languages { display: grid; gap: 14px; }
 .language { display: grid; gap: 6px; min-width: 0; align-content: start; }

@@ -43,6 +43,11 @@ async function fittingTip(tip: Locator, text: string) {
       rects.length > 0 && rects.every(rect => rect.left >= box.left - 1 && rect.right <= box.right + 1 && rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1)
   })).toBe(true)
 }
+async function twoLineTouchTarget(locator: Locator) {
+  expect((await locator.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  const extra = await locator.evaluate(el => Math.abs(el.clientHeight - 2 * parseFloat(getComputedStyle(el).lineHeight)))
+  expect(extra, 'a two-line identity must not expose part of a third line').toBeLessThanOrEqual(1)
+}
 async function profileHeading(page: Page, text: string) {
   const heading = page.locator('#profiles-title')
   await expect(heading).toHaveText(text)
@@ -277,7 +282,7 @@ test.describe('touch full-text reveal', () => {
         controls: { title: name, cancel: gate.getByRole('button', { name: 'Not now' }), submit: gate.getByRole('button', { name: 'Mark done' }), field: gate.getByLabel('Pill · English'), frame: gate.locator('.card') },
         scrollAreas: { body: gate.locator('.scroll') },
         interactions: [
-          { name: 'tap full title', run: async () => { await name.tap(); await fittingTip(tip, longTitle); expect((await name.boundingBox())!.height).toBeGreaterThanOrEqual(44); await screenshot(page, 'done-gate-touch', 390, theme) } },
+          { name: 'tap full title', run: async () => { await name.tap(); await fittingTip(tip, longTitle); await twoLineTouchTarget(name); await screenshot(page, 'done-gate-touch', 390, theme) } },
           { name: 'tap title again to dismiss', run: async () => { await name.tap(); await expect(tip).toHaveCount(0) } },
           { name: 'tap title and then elsewhere', run: async () => { await name.tap(); await fittingTip(tip, longTitle); await gate.locator('h2').tap(); await expect(tip).toHaveCount(0) } },
         ],
@@ -299,7 +304,7 @@ test.describe('touch full-text reveal', () => {
         controls: { name: field, sections: page.getByRole('navigation', { name: 'Profile sections' }), save: page.locator('.head-actions .primary'), back: page.getByRole('link', { name: 'Back to Business settings' }) },
         scrollAreas: { header: page.locator('.profiles-head') },
         interactions: [
-          { name: 'tap full profile name', run: async () => { await heading.tap(); await fittingTip(tip, longName); expect((await heading.boundingBox())!.height).toBeGreaterThanOrEqual(44); await screenshot(page, 'profile-touch', 390, theme) } },
+          { name: 'tap full profile name', run: async () => { await heading.tap(); await fittingTip(tip, longName); await twoLineTouchTarget(heading); await screenshot(page, 'profile-touch', 390, theme) } },
           { name: 'dismiss full name', run: async () => { await heading.tap(); await expect(tip).toHaveCount(0) } },
           { name: 'short live name', run: async () => { await field.fill('Kurz'); await expect(heading).toHaveText('Kurz'); await expect(heading).not.toHaveAttribute('data-tip') } },
           { name: 'long live name', run: async () => { await field.fill(longName.slice(0, 100)); await expect(heading).toHaveAttribute('data-tip', longName.slice(0, 100)); await heading.tap(); await fittingTip(tip, longName.slice(0, 100)) } },
@@ -323,7 +328,7 @@ test.describe('touch full-text reveal', () => {
         controls: { identity, change: preview.locator('.for .btn'), close: preview.getByRole('button', { name: 'Close what agents receive' }) },
         scrollAreas: { body: preview.locator('.body') },
         interactions: [
-          { name: 'tap full identity', run: async () => { await identity.tap(); await fittingTip(tip, text); expect((await identity.boundingBox())!.height).toBeGreaterThanOrEqual(44); await screenshot(page, 'rules-touch', 390, theme) } },
+          { name: 'tap full identity', run: async () => { await identity.tap(); await fittingTip(tip, text); await twoLineTouchTarget(identity); await screenshot(page, 'rules-touch', 390, theme) } },
           { name: 'tap identity again to dismiss', run: async () => { await identity.tap(); await expect(tip).toHaveCount(0) } },
           { name: 'tap identity and then elsewhere', run: async () => { await identity.tap(); await fittingTip(tip, text); await preview.locator('.for-label').tap(); await expect(tip).toHaveCount(0) } },
         ],
