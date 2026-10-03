@@ -1,13 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
 import { draftFor } from '../src/lib/decisionDesk'
-import { commitDesk, decisionPermission, emptySources, keyTrimItem } from '../src/lib/decisionDeskApi'
+import { commitDesk, decisionPermission, emptySources, keyTrimItem, loadDesk, loadMoreQuestions, type Question } from '../src/lib/decisionDeskApi'
 import { decideKeyTrim, readKeyTrims, type KeyTrimProposal } from '../src/lib/keyTrim'
 
 export function trimFixture(): KeyTrimProposal {
   return { id: 'proposal', key_id: 'key', key_name: 'worker', owner_id: 'agent', owner_name: 'Worker owner', previous_scopes: ['nodes.read', 'nodes.write'], snapshot_digest: 'a'.repeat(64), candidate_scopes: ['nodes.read'], candidate_digest: 'b'.repeat(64), evidence: { summary: 'Reviewed ticket workload.', observed_at: '2026-10-02T08:00:00Z', risks: [{ scope: 'nodes.write', evidence: 'No recorded use; earlier use unknown.', risk_if_dropped: 'Creating and editing tickets fails.' }] }, usage: [{ scope: 'nodes.write', last_used_at: null }], created_by: 'coordinator', created_at: '2026-10-03T08:00:00Z', expires_at: new Date(Date.now() + 60_000).toISOString(), state: 'pending', revision: 1, applied_at: null, restore_until: null }
 }
 afterEach(() => vi.unstubAllGlobals())
+it('preserves key trim cursors and an in-flight approval when continuing questions', async () => {
+  const proposal = trimFixture()
+  const question: Question = { id: 'question-1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
+    input: { request_id: 'question-request', question: 'Which index?', options: [], meanwhile: 'parked' }, askers: [], pending: [], created_at: '', updated_at: '' }
+  let release!: (response: Response) => void
+  const fetch = vi.fn((path: string, init?: RequestInit): Promise<Response> => {
+    const url = new URL(path, 'https://test.invalid')
+    if (init?.method === 'POST') return Promise.resolve(Response.json({ ...proposal, revision: 2, state: 'applied' }))
+    if (url.pathname === '/api/decision-desk') {
+      if (url.searchParams.get('state') === 'answered') return Promise.resolve(Response.json({ items: [], has_more: false }))
+      if (url.searchParams.get('offset') === '100') return new Promise(resolve => { release = resolve })
+      return Promise.resolve(Response.json({ items: [question], has_more: true }))
+    }
+    if (url.pathname === '/api/key-trim-proposals') return Promise.resolve(Response.json(url.searchParams.get('state') === 'pending'
+      ? { items: [proposal], has_more: true, next_cursor: proposal.id } : { items: [], has_more: false }))
+    return Promise.resolve(Response.json(url.pathname === '/api/approvals' ? [] : { items: [] }))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const first = await loadDesk(), item = first.items.find(item => item.kind === 'key_trim')!
+  let current = first
+  const pending = loadMoreQuestions(first, 'open', () => current)
+  const applied = await commitDesk(item, { ...draftFor(item), optionId: 'approve' }, first.sources, 'approve-request', false)
+  current = { ...first, items: first.items.map(row => row.id === applied.id ? applied : row) }
+  release(Response.json({ items: [{ ...question, id: 'question-2' }], has_more: false }))
+  const result = await pending
+  expect(result.items.map(item => item.id)).toEqual(['q:question-1', 'q:question-2', item.id])
+  expect(result.items.at(-1)).toEqual(applied)
+  expect(result.sources.keyTrims.get(item.id)?.state).toBe('applied')
+  expect(result.nextKeyTrims).toEqual({ pending: proposal.id })
+  expect(fetch.mock.calls.filter(([path, init]) => path.startsWith('/api/key-trim-proposals') && init?.method !== 'POST')).toHaveLength(2)
+})
 it('routes approve, decline and restore through protected native CAS endpoints', async () => {
   for (const decision of ['approve', 'decline', 'restore'] as const) {
     const proposal = trimFixture()

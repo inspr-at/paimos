@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import { arrivals, kindLabels, newRound, outcomeLabels, type DeskDraft, type DeskItem, type DeskOutcome } from '../lib/decisionDesk'
-import { commitDesk, decisionPermission, emptySources, loadDesk, nativeTierAdapter, MAX_QUESTION_PAGES, type DeskSources } from '../lib/decisionDeskApi'
+import { commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
 import { phoneVerificationAvailable } from '../lib/deskPhoneApproval'
 import { can, onAccessChange } from '../lib/authz'
 import { useSession } from '../stores/session'
@@ -23,6 +23,7 @@ const roundBaseline = ref<string[]>([]), phoneVerification = ref<boolean | undef
 const trimCursors = ref<KeyTrimCursors>({}), nextKeyTrims = ref<KeyTrimCursors>({})
 const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided')
 let sources: DeskSources = emptySources(), generation = 0, alive = true
+let currentRead: DeskRead | undefined
 const fresh = computed(() => arrivals(items.value, roundBaseline.value))
 const visible = computed(() => items.value.filter(item => item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
 const person = computed(() => session.identity?.principal.kind === 'person')
@@ -33,24 +34,35 @@ async function refresh() {
   try {
     const result = await loadDesk(pages.value, adapters, trimCursors.value)
     if (!alive || turn !== generation || identity !== owner.value) return
-    sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
-    nextKeyTrims.value = result.nextKeyTrims
-    // Memo content stays frozen; changed or vanished records require a deliberate reopen.
-    if (opened.value) roundItems.value = roundItems.value.map(item => {
-      const latest = result.items.find(row => row.id === item.id)
-      if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) return { ...item, unavailable: 'This request expired. No permission was granted.' }
-      if (!latest) return { ...item, unavailable: 'The source could not be confirmed. Close and refresh before deciding.' }
-      if (latest.revision !== item.revision || latest.decided !== item.decided) return { ...item, unavailable: 'The source changed. Close and reopen before deciding.' }
-      return item
-    })
+    applyRead(result)
   } catch { if (turn === generation) warnings.value = ['The desk could not be read. Try refreshing.'] }
   finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
 }
+function applyRead(result: DeskRead) {
+  currentRead = result
+  sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
+  nextKeyTrims.value = result.nextKeyTrims
+  pages.value = { open: result.questionPositions.open?.pages ?? pages.value.open, answered: result.questionPositions.answered?.pages ?? pages.value.answered }
+  // Memo content stays frozen; changed or vanished records require a deliberate reopen.
+  if (opened.value) roundItems.value = roundItems.value.map(item => {
+    const latest = result.items.find(row => row.id === item.id)
+    if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) return { ...item, unavailable: 'This request expired. No permission was granted.' }
+    if (!latest) return { ...item, unavailable: 'The source could not be confirmed. Close and refresh before deciding.' }
+    if (latest.revision !== item.revision || latest.decided !== item.decided) return { ...item, unavailable: 'The source changed. Close and reopen before deciding.' }
+    return item
+  })
+}
 async function loadMore() {
   const state = filter.value === 'open' ? 'open' : 'answered'
-  if (loading.value || !more.value[state] || pages.value[state] >= MAX_QUESTION_PAGES) return
-  pages.value = { ...pages.value, [state]: pages.value[state] + 1 }
-  await refresh()
+  if (loading.value || !currentRead || !more.value[state] || pages.value[state] >= MAX_QUESTION_PAGES) return
+  const turn = ++generation, identity = owner.value, previous = currentRead
+  loading.value = true
+  try {
+    const result = await loadMoreQuestions(previous, state, () => currentRead ?? previous)
+    if (!alive || turn !== generation || identity !== owner.value) return
+    applyRead(result)
+  } catch { if (alive && turn === generation && identity === owner.value) warnings.value = [...new Set([...warnings.value, 'More questions could not be read. Try again or refresh.'])] }
+  finally { if (alive && turn === generation) loading.value = false }
 }
 async function pageKeyTrims(first = false) {
   if (loading.value) return
@@ -79,12 +91,14 @@ async function decide(item: DeskItem, draft: DeskDraft, requestId: string) {
 }
 function recorded(item: DeskItem) {
   items.value = items.value.map(row => row.id === item.id ? item : row)
+  if (currentRead) currentRead = { ...currentRead, items: items.value }
   roundItems.value = roundItems.value.map(row => row.id === item.id ? item : row)
 }
 watch(owner, () => {
   generation++; consumedLink.value = ''; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
   sources = emptySources(); adapters = makeAdapters(); filter.value = 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
   trimCursors.value = {}; nextKeyTrims.value = {}
+  currentRead = undefined
   phoneVerification.value = undefined; capabilityError.value = ''
   const identity = owner.value
   void phoneVerificationAvailable().then(available => { if (alive && identity === owner.value) phoneVerification.value = available })
