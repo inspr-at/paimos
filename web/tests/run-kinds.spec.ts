@@ -2,13 +2,88 @@
 // Capture the actual /agents page/component on CI with deterministic API fixtures.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 const now = Date.parse('2026-10-01T14:00:00Z')
 const before = process.env.AEON_501_CAPTURE === 'before'
+
+async function availableHostBadgeWidth(hostCell: Locator) {
+  return hostCell.evaluate(el => {
+    const cell = getComputedStyle(el)
+    const control = getComputedStyle(el.querySelector('.host-control')!)
+    return el.clientWidth - parseFloat(cell.paddingLeft) - parseFloat(cell.paddingRight)
+      - parseFloat(control.paddingLeft) - parseFloat(control.paddingRight)
+  })
+}
+
+function expectHostBadgeFits(width: number, available: number, message: string) {
+  expect(width, message).toBeLessThanOrEqual(available + 0.5)
+}
+
+async function modelGlyphSize(model: Locator) {
+  return model.evaluate(el => {
+    const text = el.firstChild!
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 1)
+    const glyph = range.getBoundingClientRect(), box = el.getBoundingClientRect()
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')!
+    context.font = getComputedStyle(el).font
+    const ellipsis = el.scrollWidth > el.clientWidth ? context.measureText('…').width : 0
+    return { width: glyph.width, required: glyph.width + ellipsis, available: box.right - glyph.left, slot: el.clientWidth }
+  })
+}
+
+function expectModelGlyphFits(glyph: Awaited<ReturnType<typeof modelGlyphSize>>, message: string, soft = false) {
+  const check = soft ? expect.soft : expect
+  check(glyph.width, 'model fixture has a measurable first character').toBeGreaterThan(0)
+  check(glyph.available, message).toBeGreaterThanOrEqual(glyph.required)
+}
+
+// These exercise the same guards as the real table below. The legacy checks
+// accept each deliberately broken layout, so they cannot prove containment or
+// visible model text. No production style is changed by these isolated fixtures.
+test('host capacity guard rejects a spill that the old 160px ceiling accepts', async ({ page }) => {
+  await page.setContent(`<style>
+    .c-host { width: 132px; box-sizing: border-box; padding: 0 8px; }
+    .host-control { display: inline-flex; padding-right: 22px; }
+    .host-badge { display: inline-block; flex: none; width: 94px; }
+  </style><div class="c-host"><span class="host-control"><span class="host-badge">mbp2606</span></span></div>`)
+  const cell = page.locator('.c-host')
+  const badge = page.locator('.host-badge')
+  const available = await availableHostBadgeWidth(cell)
+  expect(available).toBe(94)
+  expectHostBadgeFits((await badge.boundingBox())!.width, available, 'valid badge fits')
+  await badge.evaluate(el => (el as HTMLElement).style.width = '140px')
+  const overflow = (await badge.boundingBox())!
+  const cellBox = (await cell.boundingBox())!
+  expect(overflow.x + overflow.width).toBeGreaterThan(cellBox.x + cellBox.width)
+  expect(overflow.width, 'legacy 160px ceiling wrongly accepts the spill').toBeLessThanOrEqual(160)
+  expect(() => expectHostBadgeFits(overflow.width, available, 'badge spills past actual capacity'))
+    .toThrow(/badge spills past actual capacity/)
+})
+
+test('model glyph guard rejects a separator-only slot that the old positive-width check accepts', async ({ page }) => {
+  await page.setContent(`<style>
+    .exec-model { display: inline-block; width: 200px; font: 12px monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .exec-model::before { content: '·'; margin: 0 .4em; }
+  </style><span class="exec-model" title="gpt-fixture">gpt-fixture</span>`)
+  const model = page.locator('.exec-model')
+  await expect(model).toHaveText('gpt-fixture')
+  expectModelGlyphFits(await modelGlyphSize(model), 'valid model character fits')
+  await model.evaluate(el => (el as HTMLElement).style.width = '8px')
+  const clipped = await modelGlyphSize(model)
+  expect(await model.evaluate(el => getComputedStyle(el, '::before').content)).toBe('"·"')
+  expect(clipped.slot, 'legacy positive-width check wrongly accepts the separator-only slot').toBeGreaterThan(0)
+  expect(clipped.width).toBeGreaterThan(0)
+  expect(clipped.available, 'no part of the real first character fits').toBeLessThanOrEqual(0)
+  expect(() => expectModelGlyphFits(clipped, 'model character cannot fit after the separator'))
+    .toThrow(/model character cannot fit after the separator/)
+})
 
 test('execution kinds and person-specific host names on the real agents table', async ({ page }, info) => {
   await page.clock.install({ time: now })
@@ -60,12 +135,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     // Playwright's action scroll before measuring hover-induced movement.
     await workerHost.scrollIntoViewIfNeeded()
     const original = await workerHost.boundingBox()
-    const availableBadgeWidth = await hostCell.evaluate(el => {
-      const cell = getComputedStyle(el)
-      const control = getComputedStyle(el.querySelector('.host-control')!)
-      return el.clientWidth - parseFloat(cell.paddingLeft) - parseFloat(cell.paddingRight)
-        - parseFloat(control.paddingLeft) - parseFloat(control.paddingRight)
-    })
+    const availableBadgeWidth = await availableHostBadgeWidth(hostCell)
     expect(availableBadgeWidth, 'host cell leaves room for a badge beside the pencil').toBeGreaterThan(0)
     const pencil = page.locator(`[data-row="s:${ai.id}"] .host-pencil`)
     const row = page.locator(`[data-row="s:${ai.id}"]`)
@@ -100,7 +170,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('mbp2607')
     const renamed = await workerHost.boundingBox()
     expect(renamed!.width).toBeGreaterThan(original!.width)
-    expect(renamed!.width, 'renamed badge fits the cell beside the pencil').toBeLessThanOrEqual(availableBadgeWidth + 0.5)
+    expectHostBadgeFits(renamed!.width, availableBadgeWidth, 'renamed badge fits the cell beside the pencil')
     expect(await workerHost.evaluate(el => getComputedStyle(el).width)).not.toBe('104px')
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
@@ -117,7 +187,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
     await expect(workerHost).toHaveAttribute('title', `${longLabel} · mbp2606`)
     const longBadge = await workerHost.boundingBox()
-    expect(longBadge!.width, 'long badge fits the cell beside the pencil').toBeLessThanOrEqual(availableBadgeWidth + 0.5)
+    expectHostBadgeFits(longBadge!.width, availableBadgeWidth, 'long badge fits the cell beside the pencil')
     expect(longBadge!.width).toBeGreaterThan(original!.width)
     const longHostCell = await hostCell.boundingBox()
     expect(longBadge!.x + longBadge!.width).toBeLessThanOrEqual(longHostCell!.x + longHostCell!.width + 0.5)
@@ -161,20 +231,8 @@ test('execution kinds and person-specific host names on the real agents table', 
           await expect(model).toContainText(child.model)
           await expect(model).toHaveAttribute('title', /fixture/)
           if (width > 390) {
-            const glyph = await model.evaluate(el => {
-              const text = el.firstChild!
-              const range = document.createRange()
-              range.setStart(text, 0)
-              range.setEnd(text, 1)
-              const glyph = range.getBoundingClientRect(), box = el.getBoundingClientRect()
-              const canvas = document.createElement('canvas')
-              const context = canvas.getContext('2d')!
-              context.font = getComputedStyle(el).font
-              const ellipsis = el.scrollWidth > el.clientWidth ? context.measureText('…').width : 0
-              return { width: glyph.width, required: glyph.width + ellipsis, available: box.right - glyph.left }
-            })
-            expect.soft(glyph.width, 'model fixture has a measurable first character').toBeGreaterThan(0)
-            expect.soft(glyph.available, `${width}px ${child.display_label}: a whole model character fits after the separator and before any ellipsis`).toBeGreaterThanOrEqual(glyph.required)
+            const glyph = await modelGlyphSize(model)
+            expectModelGlyphFits(glyph, `${width}px ${child.display_label}: a whole model character fits after the separator and before any ellipsis`, true)
           }
         }
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
