@@ -479,6 +479,7 @@ jobs:
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
+      - run: node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
       - run: node --test scripts/release-pin-pr.test.mjs
       - name: Offline code-health audit toolkit and slice ownership
