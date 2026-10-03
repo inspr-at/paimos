@@ -351,12 +351,19 @@ test.describe('touch full-text reveal', () => {
     for (const input of ['touch', 'keyboard'] as const) {
       test(`viewport-long description keeps ${input} scrolling (${width} ${theme})`, async ({ page, context }) => {
         await scene(page, width, theme)
-        const data = fixtures(), text = `${description.repeat(30)} Vollständiger Schluss.`
+        const data = fixtures(), text = `${description.repeat(90)} Vollständiger Schluss.`
         data.views.push(mockView({ id: 'heading-view', name: 'Saved heading view' }))
         data.projects[0]!.description = text
         await mockWork(page, data)
         await page.goto('/p/PHAROS/tickets')
         const more = page.locator('.description-more'), desc = page.locator('#project-description')
+        await expect(desc).toHaveText(text)
+        // Wait for the font/layout and ResizeObserver measurement, so loading
+        // cannot be mistaken for the baseline's deliberately hidden More.
+        await page.evaluate(async () => {
+          await document.fonts.ready
+          await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+        })
         // Exercise the old tooltip too: baseline failures must come from lost
         // scrolling, rather than the absence of the new disclosure button.
         if (await more.isVisible()) {
@@ -484,7 +491,7 @@ test.describe('touch full-text reveal', () => {
         scrollAreas: { header: page.locator('.profiles-head') },
         interactions: [
           { name: 'tap full profile name', run: async () => { await heading.tap(); await fittingTip(tip, longName); await twoLineTouchTarget(heading); await screenshot(page, 'profile-touch', 390, theme) } },
-          { name: 'dismiss full name', run: async () => { await page.locator('.profiles-head .eyebrow').tap(); await expect(tip).toHaveCount(0) } },
+          { name: 'dismiss full name', run: async () => { await field.tap(); await expect(field).toBeFocused(); await expect(tip).toHaveCount(0) } },
           { name: 'short live name', run: async () => { await field.fill('Kurz'); await expect(heading).toHaveText('Kurz'); await expect(heading).not.toHaveAttribute('data-tip') } },
           { name: 'long live name', run: async () => { await field.fill(longName.slice(0, 100)); await expect(heading).toHaveAttribute('data-tip', longName.slice(0, 100)); await heading.tap(); await fittingTip(tip, longName.slice(0, 100)) } },
         ],
