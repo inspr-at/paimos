@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -72,7 +73,7 @@ func (s *Store) Place(ctx context.Context, p tenant.Principal, project string, r
 		return nil, err
 	}
 	var out []Placement
-	err := s.mutate(ctx, p, project, "releases.write", false, func(w *write) error {
+	err := s.mutate(ctx, p, project, "", false, func(w *write) error {
 		before, after, err := w.place(requests, nil)
 		if err != nil {
 			return err
@@ -112,17 +113,22 @@ func (w *write) placementLocks(requests []PlacementRequest) (map[string]Release,
 		}
 		break
 	}
-	rows, err := w.tx.Query(w.ctx, `SELECT coalesce(release_node_id::text,'') FROM ships_in WHERE tenant_id=$1 AND project_node_id=$2 AND item_node_id=ANY($3::uuid[]) LIMIT 100`, w.p.TenantID, w.project, ids)
+	// Cleanup may add one item to the 100-item request. Deduplicate first and
+	// bound discovery by this complete mutation set, not the request limit.
+	ids = sortedIDs(ids)
+	sources := map[string]string{}
+	rows, err := w.tx.Query(w.ctx, `SELECT item_node_id::text,coalesce(release_node_id::text,'') FROM ships_in WHERE tenant_id=$1 AND project_node_id=$2 AND item_node_id=ANY($3::uuid[]) LIMIT $4`, w.p.TenantID, w.project, ids, len(ids))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var itemID, releaseID string
+		if err = rows.Scan(&itemID, &releaseID); err != nil {
 			rows.Close()
 			return nil, nil, nil, err
 		}
-		releaseIDs = append(releaseIDs, id)
+		sources[itemID] = releaseID
+		releaseIDs = append(releaseIDs, releaseID)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -134,7 +140,28 @@ func (w *write) placementLocks(requests []PlacementRequest) (map[string]Release,
 		return nil, nil, nil, err
 	}
 	nodes, placements, err := w.lockItems(ids)
-	return releases, nodes, placements, err
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// The tree fence holds discovery steady. Every existing locked placement
+	// must have contributed its exact source, including backlog and tombstones.
+	for id, placement := range placements {
+		if placement.ProjectID != w.project {
+			return nil, nil, nil, ErrProjectChanged
+		}
+		if placement.Revision == 0 {
+			continue
+		}
+		if source, ok := sources[id]; !ok || source != placement.ReleaseID {
+			return nil, nil, nil, errors.New("incomplete placement source discovery")
+		}
+		if placement.ReleaseID != "" {
+			if _, ok := releases[placement.ReleaseID]; !ok {
+				return nil, nil, nil, errors.New("unlocked placement source release")
+			}
+		}
+	}
+	return releases, nodes, placements, nil
 }
 
 func (w *write) lockItems(ids []string) (map[string]item, map[string]Placement, error) {
@@ -220,13 +247,22 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 	now := w.now().UTC()
 	before, after := []Placement{}, []Placement{}
 	touched := []string{}
-	// Undo can transfer the unique expedite flag back to a different row.
-	// Clear relinquished flags first under the complete sorted lock batch;
-	// the final CAS below increments each revision exactly once and snapshots
-	// retain the true pre-undo values. Failure rolls this temporary step back.
+	// Preserve all original snapshots before either requested or automatic
+	// changes. Cleanup never replaces a requested item's CAS base or snapshot.
+	for _, id := range sortedIDs(mapItemIDs(nodes)) {
+		placements[id], err = w.neighboursFor(placements[id])
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	requested := map[string]bool{}
+	// Release unique expedite flags first without changing revisions. Both a
+	// forward batch and undo may transfer the flag before the old holder's turn;
+	// each requested item still has exactly one final CAS and event member.
 	for _, request := range requests {
+		requested[request.ItemID] = true
 		old := placements[request.ItemID]
-		if restored, ok := restore[request.ItemID]; ok && old.Expedite && !restored.Expedite {
+		if old.Expedite && !request.Expedite {
 			tag, e := w.tx.Exec(w.ctx, `UPDATE ships_in SET expedite=false WHERE tenant_id=$1 AND project_node_id=$2 AND item_node_id=$3 AND revision=$4`, w.p.TenantID, w.project, old.ItemID, old.Revision)
 			if e != nil {
 				return nil, nil, e
@@ -238,7 +274,7 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 	}
 	for _, id := range sortedIDs(mapItemIDs(nodes)) {
 		n, old := nodes[id], placements[id]
-		if !old.Expedite || n.deleted == nil && !Completed(n.state) && !Cancelled(n.state) {
+		if requested[id] || !old.Expedite || n.deleted == nil && !Completed(n.state) && !Cancelled(n.state) {
 			continue
 		}
 		clear := false
@@ -248,10 +284,6 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		if !clear {
 			continue
 		}
-		old, err = w.neighboursFor(old)
-		if err != nil {
-			return nil, nil, err
-		}
 		next := old
 		next.Expedite = false
 		next, err = w.savePlacement(old, next, "build", now)
@@ -260,7 +292,6 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		}
 		before = append(before, old)
 		after = append(after, next)
-		placements[id] = next
 		touched = append(touched, old.ReleaseID)
 	}
 	for _, request := range requests {
@@ -272,7 +303,14 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		if n.project != w.project {
 			return nil, nil, ErrProjectChanged
 		}
-		if n.deleted != nil || !ItemKind(n.kind) {
+		restored, restoring := restore[n.id]
+		// The automatic stale-expedite change retains the existing row's
+		// container, rank and due date. Restoring only that flag is maintenance,
+		// not permission to insert, move or rerank a deleted item.
+		maintenance := restoring && old.Revision > 0 && restored.Revision > 0 &&
+			old.ReleaseID == restored.ReleaseID && old.Rank == restored.Rank &&
+			sameDate(old.DueOn, restored.DueOn) && !old.Expedite && restored.Expedite
+		if n.deleted != nil && !maintenance || !ItemKind(n.kind) {
 			return nil, nil, ErrNotFound
 		}
 		dest := releases[request.ReleaseID]
@@ -280,21 +318,34 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 			return nil, nil, ErrRevisionChanged
 		}
 		history := releases[old.ReleaseID].State == "released" || dest.State == "released"
+		permission := "releases.write"
 		if history {
 			if w.p.Kind != tenant.Person {
 				return nil, nil, ErrHistoryCorrection
 			}
-			if err = w.require("roles.manage"); err != nil {
+			permission = "roles.manage"
+		}
+		if err = w.require(permission); err != nil {
+			if history && errors.Is(err, authz.ErrForbidden) {
 				return nil, nil, ErrHistoryCorrection
 			}
+			return nil, nil, err
+		}
+		hasWrite := !history
+		if history {
+			writeErr := w.require("releases.write")
+			if writeErr != nil && !errors.Is(writeErr, authz.ErrForbidden) {
+				return nil, nil, writeErr
+			}
+			hasWrite = writeErr == nil
 		}
 		if request.ReleaseID != "" {
-			if err = checkAdmission(w.p.Kind, true, dest.State, dest.EntryClosesAt, now, request.ReleaseID != old.ReleaseID, history); err != nil {
+			if err = checkAdmission(w.p.Kind, hasWrite, dest.State, dest.EntryClosesAt, now, request.ReleaseID != old.ReleaseID, history); err != nil {
 				return nil, nil, err
 			}
 		}
 		next := Placement{ItemID: n.id, ProjectID: w.project, ReleaseID: request.ReleaseID, Expedite: request.Expedite, DueOn: request.DueOn}
-		if restored, ok := restore[n.id]; ok {
+		if restoring {
 			next = restored
 			if restored.Revision > 0 {
 				next.Rank, err = w.restoreRank(restored, true)
@@ -312,10 +363,6 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 			if err = CheckAgentMove(position(n, old, releases), position(n, next, releases)); err != nil {
 				return nil, nil, err
 			}
-		}
-		old, err = w.neighboursFor(old)
-		if err != nil {
-			return nil, nil, err
 		}
 		if next.Expedite {
 			var occupied bool

@@ -55,7 +55,9 @@ func (s *Store) undoPlacements(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	if err := fence(ctx, tx, p, before.ProjectID, "releases.write"); err != nil {
+	// place selects history-correction or ordinary move authority from the
+	// current locked containers, just as it does for a forward placement.
+	if err := fence(ctx, tx, p, before.ProjectID, ""); err != nil {
 		return events.Change{}, undoFailure(err)
 	}
 	// The event module's earlier check can become stale while waiting for

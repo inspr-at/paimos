@@ -90,15 +90,19 @@ func transactionLimits(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// fence deliberately uses the canonical, inventoried helper: exclusive tree
-// first, then the tenant SHARE fence. Never substitute a shared tree lock or
-// acquire the tenant before this call. Undo uses this same entry point.
+// fence uses the canonical helper: tree, then tenant (pairing, when needed,
+// belongs before both). Never substitute a shared tree or reverse the order.
+// An empty permission defers RequireTx until the locked operation selects its
+// authority; placement/history and abandon must authorize before any commit.
 func fence(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, permission string) error {
 	if err := transactionLimits(ctx, tx); err != nil {
 		return err
 	}
 	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
 		return err
+	}
+	if permission == "" {
+		return nil
 	}
 	return authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project})
 }

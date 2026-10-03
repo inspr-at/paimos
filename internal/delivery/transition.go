@@ -60,7 +60,8 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 	case "planned", "building":
 		permission, person = "releases.write", true
 	case "abandon":
-		permission, person = "releases.write", true
+		// Its required permission depends on the current fenced state.
+		permission, person = "", true
 	case "freeze", "unfreeze", "close":
 	case "cut":
 		if !ValidProjectVersion(in.VersionScheme, in.Version) {
@@ -88,6 +89,15 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 			return ErrTransition
 		}
 		state := old.State
+		if in.Action == "abandon" {
+			permission := "releases.deploy"
+			if state == "planned" {
+				permission = "releases.write"
+			}
+			if err = w.require(permission); err != nil {
+				return err
+			}
+		}
 		switch in.Action {
 		case "planned":
 			if state != "building" {
@@ -131,11 +141,6 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 		case "abandon":
 			if state == "released" || state == "abandoned" {
 				return ErrTransition
-			}
-			if state != "planned" {
-				if err = w.require("releases.deploy"); err != nil {
-					return err
-				}
 			}
 			state = "abandoned"
 		}

@@ -12,26 +12,27 @@ import (
 	"testing"
 )
 
-// Complements the canonical prefix inventory in agentpairing: every new
-// explicit resource-lock site and every wrapper call must join this table.
+// Complements the unchanged canonical prefix inventory in agentpairing: every
+// delivery fence, mutation wrapper and explicit resource-lock site is covered.
 // Source-order inventories include both branches; runtime barriers cover the
 // actual competing paths. No fresh lock may follow events.Append.
 func TestDeliveryResourceLockInventory(t *testing.T) {
 	want := map[string]string{
-		"store.go:Plan":               "plan",
-		"placement.go:Place":          "placements",
+		"store.go:fence":              "project.Write",
+		"store.go:Plan":               "mutation plan",
+		"placement.go:Place":          "mutation placements",
 		"store.go:mutate":             "fence project events",
 		"store.go:projectWrite":       "project:NO KEY UPDATE",
 		"store.go:lockReleases":       "release:NO KEY UPDATE",
-		"store.go:Rerank":             "releases",
-		"store.go:PromoteRelease":     "releases",
-		"store.go:SetEntryDeadline":   "releases",
+		"store.go:Rerank":             "mutation releases",
+		"store.go:PromoteRelease":     "mutation releases",
+		"store.go:SetEntryDeadline":   "mutation releases",
 		"placement.go:placementLocks": "releases items",
 		"placement.go:lockItems":      "node:SHARE placement:UPDATE",
 		"placement.go:place":          "placements",
-		"transition.go:Transition":    "rollover releases",
+		"transition.go:Transition":    "mutation rollover releases",
 		"transition.go:rollover":      "releases plan items",
-		"transition.go:Publish":       "releases publication",
+		"transition.go:Publish":       "mutation releases publication",
 		"undo.go:undoPlacements":      "fence project placements",
 		"undo.go:undoRank":            "fence project releases",
 	}
@@ -87,7 +88,7 @@ func resourceSequence(t *testing.T, body *ast.BlockStmt) string {
 					name = receiver.Name + "." + f.Sel.Name
 				}
 			}
-			label = map[string]string{"fence": "fence", "s.projectWrite": "project", "w.lockReleases": "releases", "w.lockItems": "items", "w.placementLocks": "placements", "w.place": "placements", "w.rollover": "rollover", "w.plan": "plan", "events.Append": "events", "proof.Settle": "publication"}[name]
+			label = map[string]string{"fence": "fence", "authz.LockProjectWrite": "project.Write", "s.mutate": "mutation", "s.projectWrite": "project", "w.lockReleases": "releases", "w.lockItems": "items", "w.placementLocks": "placements", "w.place": "placements", "w.rollover": "rollover", "w.plan": "plan", "events.Append": "events", "proof.Settle": "publication"}[name]
 		case *ast.BasicLit:
 			if n.Kind != token.STRING {
 				break
@@ -134,6 +135,8 @@ func TestDeliveryResourceLockNegativeControls(t *testing.T) {
 		{"w.lockItems(ids); w.lockReleases(ids)", "items releases"},
 		{"events.Append(ctx,tx,p,change); w.lockItems(ids)", "events items"},
 		{"tx.QueryRow(ctx,`SELECT id FROM tenants FOR SHARE`); fence(ctx,tx,p,project,permission)", "tenant:SHARE fence"},
+		{"events.Append(ctx,tx,p,change); authz.LockProjectWrite(ctx,tx,p.TenantID)", "events project.Write"},
+		{"w.lockItems(ids); authz.LockProjectWrite(ctx,tx,p.TenantID)", "items project.Write"},
 	} {
 		file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", "package delivery; func fixture(){"+tc.body+"}", 0)
 		if err != nil {
