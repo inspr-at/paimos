@@ -99,7 +99,7 @@ func TestViewsShareReadOwnerWriteAndAppendEvents(t *testing.T) {
 	if err := db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&eventCount); err != nil {
 		t.Fatal(err)
 	}
-	if eventCount != 3 {
-		t.Fatalf("events after create/update/delete = %d, want 3", eventCount)
+	if eventCount != baseline+3 {
+		t.Fatalf("events after create/update/delete = %d, want %d", eventCount, baseline+3)
 	}
 }
