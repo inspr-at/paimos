@@ -30,9 +30,26 @@ type job struct {
 	Cleanup                                                 string
 	CleanupAttempts                                         int
 	Journal                                                 Journal
+	LegacyRecoveryUnknown                                   bool
 }
 
-const jobColumns = `project_node_id::text,coalesce(attempt_id::text,''),coalesce(lease_token::text,''),lease_generation,coalesce(attempt_deadline_at,'epoch'),coalesce(lease_until,'epoch'),attempts,state,coalesce(source_fingerprint,''),coalesce(report_ref,''),coalesce(report_digest,''),coalesce(backup_ref,''),coalesce(backup_digest,''),coalesce(restore_evidence_ref,''),coalesce(restore_evidence_digest,''),coalesce(recovery_pin_manifest_ref,''),backup_verified_at,coalesce(resource_attempt_id::text,''),reserved_backup_bytes,cleanup_state,cleanup_attempts,operation_journal`
+// Recovery ambiguity belongs to the immutable operation identity, independently
+// of attempt diagnostics. Claims, failures and explicit retries never clear it.
+func (j job) recoveryUnknown() bool {
+	// Keep pre-fix checkpoints closed until catalog inspection records the
+	// immutable operation marker. Their diagnostic must not be erased on retry.
+	if j.LegacyRecoveryUnknown {
+		return true
+	}
+	for _, op := range j.Journal.Operations {
+		if op.Cleanup == "recovery_unknown" {
+			return true
+		}
+	}
+	return false
+}
+
+const jobColumns = `project_node_id::text,coalesce(attempt_id::text,''),coalesce(lease_token::text,''),lease_generation,coalesce(attempt_deadline_at,'epoch'),coalesce(lease_until,'epoch'),attempts,state,coalesce(source_fingerprint,''),coalesce(report_ref,''),coalesce(report_digest,''),coalesce(backup_ref,''),coalesce(backup_digest,''),coalesce(restore_evidence_ref,''),coalesce(restore_evidence_digest,''),coalesce(recovery_pin_manifest_ref,''),backup_verified_at,coalesce(resource_attempt_id::text,''),reserved_backup_bytes,cleanup_state,cleanup_attempts,operation_journal,coalesce(reason_code='recovery_unknown',false)`
 
 func (s *Service) loadJob(ctx context.Context, tx pgx.Tx, tenantID, project string, locked bool) (job, error) {
 	var j job
@@ -42,7 +59,7 @@ func (s *Service) loadJob(ctx context.Context, tx pgx.Tx, tenantID, project stri
 	if locked {
 		q += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, q, project, s.cfg.Instance).Scan(&project, &attempt, &j.Token, &j.Generation, &j.Deadline, &j.LeaseUntil, &j.Attempts, &j.State, &j.Fingerprint, &j.ReportRef, &j.ReportDigest, &j.BackupRef, &j.BackupDigest, &j.RestoreRef, &j.RestoreDigest, &j.Pin, &j.VerifiedAt, &j.ResourceAttempt, &j.ReservedBytes, &j.Cleanup, &j.CleanupAttempts, &raw)
+	err := tx.QueryRow(ctx, q, project, s.cfg.Instance).Scan(&project, &attempt, &j.Token, &j.Generation, &j.Deadline, &j.LeaseUntil, &j.Attempts, &j.State, &j.Fingerprint, &j.ReportRef, &j.ReportDigest, &j.BackupRef, &j.BackupDigest, &j.RestoreRef, &j.RestoreDigest, &j.Pin, &j.VerifiedAt, &j.ResourceAttempt, &j.ReservedBytes, &j.Cleanup, &j.CleanupAttempts, &raw, &j.LegacyRecoveryUnknown)
 	j.Identity = s.identity(tenantID, project, attempt)
 	j.Identity.Generation = j.Generation
 	if err == nil {
@@ -276,8 +293,12 @@ func (s *Service) fail(ctx context.Context, a Authority, j job, code string, tra
 		}
 	}
 	return s.checkpointDeadline(ctx, a, j, false, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state=$2,reason_code=$3,reason_message=$4,failure_summary=$4,failed_report_ref=report_ref,failed_report_digest=report_digest,failed_attempt_id=attempt_id,refused_at=CASE WHEN $2='refused' THEN $5 ELSE refused_at END,
-		 next_attempt_at=$6,lease_token=NULL,lease_until=NULL,cleanup_state=CASE WHEN reserved_backup_bytes>0 OR jsonb_array_length(operation_journal->'operations')>0 THEN 'pending' ELSE cleanup_state END,next_reconcile_at=CASE WHEN resource_attempt_id IS NOT NULL THEN $5 ELSE next_reconcile_at END,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, j.Identity.Project, state, code, safeReason(code), s.now(), next)
+		current, err := s.loadJob(ctx, tx, a.Executor.TenantID, j.Identity.Project, true)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state=$2,reason_code=CASE WHEN reason_code='recovery_unknown' THEN reason_code ELSE $3 END,reason_message=$4,failure_summary=$4,failed_report_ref=report_ref,failed_report_digest=report_digest,failed_attempt_id=attempt_id,refused_at=CASE WHEN $2='refused' THEN $5 ELSE refused_at END,
+		 next_attempt_at=$6,lease_token=NULL,lease_until=NULL,cleanup_state=CASE WHEN $7 THEN 'blocked' WHEN reserved_backup_bytes>0 OR jsonb_array_length(operation_journal->'operations')>0 THEN 'pending' ELSE cleanup_state END,next_reconcile_at=CASE WHEN resource_attempt_id IS NOT NULL THEN $5 ELSE next_reconcile_at END,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, j.Identity.Project, state, code, safeReason(code), s.now(), next, current.recoveryUnknown())
 		if err != nil {
 			return err
 		}

@@ -123,7 +123,7 @@ func (s *Service) RequestTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return out, ErrLease
 		}
 		if !adopted {
-			if _, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state='pending',revision=revision+1,next_attempt_at=$2,reason_code=NULL,reason_message='',updated_at=$2 WHERE project_node_id=$1`, project, s.now()); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state='pending',revision=revision+1,next_attempt_at=$2,reason_code=CASE WHEN reason_code='recovery_unknown' THEN reason_code ELSE NULL END,reason_message=CASE WHEN reason_code='recovery_unknown' THEN reason_message ELSE '' END,updated_at=$2 WHERE project_node_id=$1`, project, s.now()); err != nil {
 				return out, err
 			}
 		}

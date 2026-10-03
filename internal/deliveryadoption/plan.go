@@ -61,6 +61,7 @@ type sourceRelease struct {
 	DoneAt                   *time.Time
 	DoneEvent                int64
 	Title                    string
+	Visible                  bool
 }
 type sourceMember struct {
 	ID, Release, Kind, Project, State, Priority string
@@ -68,6 +69,7 @@ type sourceMember struct {
 	Created, Updated                            time.Time
 	Position                                    int
 	Journey                                     json.RawMessage
+	Visible                                     bool
 }
 
 // plan is called in a repeatable-read snapshot, or under the exclusive importer
@@ -107,11 +109,19 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 	}
 	// ALL journey members with a release, plus EVERY open live permitted node
 	// without such membership. Neither conversion nor deletion drops a member.
-	memberSQL := `SELECT n.id::text,coalesce(j.release_node_id::text,''),k.slug,coalesce(n.project_id::text,''),n.state,n.deleted_at IS NOT NULL,n.created_at,n.updated_at,
-	 left(coalesce(n.fields->>'priority','none'),16),coalesce(j.walker_position,0),coalesce(to_jsonb(j),'null'::jsonb)
+	// Journey rows are authoritative even when their node has moved outside
+	// the executor's visibility. Retain that ID without bypassing node RLS.
+	memberSQL := `SELECT j.ticket_node_id::text AS id,j.release_node_id::text,coalesce(k.slug,''),coalesce(n.project_id::text,''),coalesce(n.state,''),coalesce(n.deleted_at IS NOT NULL,false),coalesce(n.created_at,'epoch'),coalesce(n.updated_at,'epoch'),
+	 left(coalesce(n.fields->>'priority','none'),16),j.walker_position,to_jsonb(j),n.id IS NOT NULL
+	 FROM journey_tickets j LEFT JOIN nodes n ON n.tenant_id=j.tenant_id AND n.id=j.ticket_node_id
+	 LEFT JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE j.project_node_id=$1 AND j.release_node_id IS NOT NULL
+	 UNION ALL
+	 SELECT n.id::text,'',k.slug,coalesce(n.project_id::text,''),n.state,n.deleted_at IS NOT NULL,n.created_at,n.updated_at,
+	 left(coalesce(n.fields->>'priority','none'),16),coalesce(j.walker_position,0),coalesce(to_jsonb(j),'null'::jsonb),true
 	 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	 LEFT JOIN journey_tickets j ON j.tenant_id=n.tenant_id AND j.ticket_node_id=n.id AND j.project_node_id=$1
-	 WHERE (j.release_node_id IS NOT NULL OR (n.project_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('epic','ticket','task') AND n.state NOT IN ('done','accepted','delivered','cancelled','canceled') AND j.release_node_id IS NULL))`
+	 WHERE n.project_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('epic','ticket','task') AND n.state NOT IN ('done','accepted','delivered','cancelled','canceled') AND j.release_node_id IS NULL`
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM (`+memberSQL+` LIMIT 5001) bounded`, identity.Project).Scan(&r.Counts.Members); err != nil {
 		return r, err
 	}
@@ -124,9 +134,9 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 	sources := []sourceRelease{}
 	cursor := "00000000-0000-0000-0000-000000000000"
 	for {
-		rows, e := tx.Query(ctx, `SELECT j.release_node_id::text,j.number,j.state,coalesce(j.version_scheme,''),coalesce(j.version,''),j.released_at,k.slug,coalesce(n.project_id::text,''),n.state,n.deleted_at IS NOT NULL,n.updated_at,j.revision,
-		 completed.at,coalesce(completed.id,0),n.title
-		 FROM journey_releases j JOIN nodes n ON n.tenant_id=j.tenant_id AND n.id=j.release_node_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+		rows, e := tx.Query(ctx, `SELECT j.release_node_id::text,j.number,j.state,coalesce(j.version_scheme,''),coalesce(j.version,''),j.released_at,coalesce(k.slug,''),coalesce(n.project_id::text,''),coalesce(n.state,''),n.deleted_at IS NOT NULL,coalesce(n.updated_at,'epoch'),j.revision,
+		 completed.at,coalesce(completed.id,0),coalesce(n.title,''),n.id IS NOT NULL
+		 FROM journey_releases j LEFT JOIN nodes n ON n.tenant_id=j.tenant_id AND n.id=j.release_node_id LEFT JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 		 LEFT JOIN LATERAL(SELECT e.at,e.id FROM events e WHERE e.node_id=n.id AND e.after->>'state' IN ('done','accepted','delivered') AND e.before->>'state' IS DISTINCT FROM e.after->>'state' ORDER BY e.id DESC LIMIT 1) completed ON true
 		 WHERE j.project_node_id=$1 AND j.release_node_id>$2::uuid ORDER BY j.release_node_id LIMIT 200`, identity.Project, cursor)
 		if e != nil {
@@ -135,7 +145,7 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 		n := 0
 		for rows.Next() {
 			var v sourceRelease
-			if e = rows.Scan(&v.ID, &v.Number, &v.State, &v.Scheme, &v.Version, &v.ReleasedAt, &v.Kind, &v.Project, &v.NodeState, &v.Deleted, &v.Updated, &v.Revision, &v.DoneAt, &v.DoneEvent, &v.Title); e != nil {
+			if e = rows.Scan(&v.ID, &v.Number, &v.State, &v.Scheme, &v.Version, &v.ReleasedAt, &v.Kind, &v.Project, &v.NodeState, &v.Deleted, &v.Updated, &v.Revision, &v.DoneAt, &v.DoneEvent, &v.Title, &v.Visible); e != nil {
 				rows.Close()
 				return r, e
 			}
@@ -165,7 +175,7 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 		n := 0
 		for rows.Next() {
 			var v sourceMember
-			if e = rows.Scan(&v.ID, &v.Release, &v.Kind, &v.Project, &v.State, &v.Deleted, &v.Created, &v.Updated, &v.Priority, &v.Position, &v.Journey); e != nil {
+			if e = rows.Scan(&v.ID, &v.Release, &v.Kind, &v.Project, &v.State, &v.Deleted, &v.Created, &v.Updated, &v.Priority, &v.Position, &v.Journey, &v.Visible); e != nil {
 				rows.Close()
 				return r, e
 			}
@@ -221,7 +231,10 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 	}
 	counts := map[string]int{}
 	for _, v := range members {
-		if v.Project != identity.Project || !delivery.ItemKind(v.Kind) {
+		if !v.Visible {
+			r.Incomplete = true
+			refuse("member_visibility", v.ID, "Restore access to the referenced member or move it back to this project before adoption.")
+		} else if v.Project != identity.Project || !delivery.ItemKind(v.Kind) {
 			refuse("member_guard", v.ID, "Move the member back to this project or convert it back to epic, ticket or task.")
 		}
 		if v.Release != "" {
@@ -230,7 +243,10 @@ func (s *Service) plan(ctx context.Context, tx pgx.Tx, identity Identity) (Repor
 	}
 	versions := map[string]bool{}
 	for _, v := range sources {
-		if v.Kind != "release" || v.Project != identity.Project || v.Deleted {
+		if !v.Visible {
+			r.Incomplete = true
+			refuse("release_visibility", v.ID, "Restore access to the referenced release or move it back to this project before adoption.")
+		} else if v.Kind != "release" || v.Project != identity.Project || v.Deleted {
 			refuse("release_guard", v.ID, "Restore the release, move it back or convert it back to release.")
 		}
 		m := ReleaseMapping{ID: v.ID, Sequence: v.Number, OriginalSequence: v.Number, State: "planned", Origin: "adopted_planned", Scheme: v.Scheme, Version: v.Version, ReleasedAt: v.ReleasedAt, DefaultTitle: v.Title == fmt.Sprintf("Release %d", v.Number)}

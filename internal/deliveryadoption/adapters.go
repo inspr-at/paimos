@@ -52,6 +52,24 @@ func (p CommandProvider) call(ctx context.Context, in commandRequest, out any) e
 		return errors.New("provider request exceeds bound")
 	}
 	cmd := exec.CommandContext(ctx, p.Executable, "aeon-adoption-v1")
+	// A provider's descendants share our new group. Cancellation terminates
+	// that group; WaitDelay also bounds inherited output descriptors when the
+	// leader exits before its children. Retire remaining children on return.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = time.Second
+	killGroup := func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	cmd.Cancel = killGroup
+	defer func() {
+		if cmd.Process != nil {
+			_ = killGroup()
+		}
+	}()
 	cmd.Stdin = bytes.NewReader(raw)
 	response := &boundedBuffer{limit: 1 << 20}
 	cmd.Stdout = response
@@ -327,18 +345,30 @@ func pruneReports(dir string, m reportManifest) error {
 	if len(entries) >= 128 {
 		return errors.New("report storage directory exceeds bound")
 	}
+	prune := []string{}
 	for _, e := range entries {
 		n := e.Name()
 		if n == ".lock" || n == "manifest.json" || n == m.Current || n == m.Failed {
 			continue
 		}
-		if !reportName.MatchString(n) {
+		// Atomic writes may stop at write/sync/before rename. These are owned,
+		// uncommitted artifacts; the committed manifest remains authoritative.
+		temporary := n == "manifest.json.tmp" || strings.HasSuffix(n, ".tmp") && reportName.MatchString(strings.TrimSuffix(n, ".tmp"))
+		if !reportName.MatchString(n) && !temporary {
 			return errors.New("unexpected report storage item")
 		}
-		if _, err = readPrivate(filepath.Join(dir, n), MaxReportBytes); err != nil {
+		limit := MaxReportBytes
+		if n == "manifest.json.tmp" {
+			limit = 2048
+		}
+		if _, err = readPrivate(filepath.Join(dir, n), limit); err != nil {
 			return err
 		}
-		if err = os.Remove(filepath.Join(dir, n)); err != nil {
+		prune = append(prune, n)
+	}
+	// Validate the whole bounded directory before removing any owned residue.
+	for _, name := range prune {
+		if err = os.Remove(filepath.Join(dir, name)); err != nil {
 			return err
 		}
 	}
@@ -394,6 +424,9 @@ func (f FileReports) RetainFailed(ctx context.Context, ref string) (string, erro
 	defer unlock(lock)
 	m, err := manifest(dir)
 	if err != nil {
+		return "", err
+	}
+	if err = pruneReports(dir, m); err != nil {
 		return "", err
 	}
 	if name == m.Failed {

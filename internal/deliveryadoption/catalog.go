@@ -93,7 +93,15 @@ func (s *Service) reconcileCatalog(ctx context.Context) error {
 				if adopted && v.Pin == j.Pin {
 					return nil
 				}
-				_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET cleanup_state='blocked',reason_code='recovery_unknown',reason_message=$2,resource_attempt_id=coalesce(resource_attempt_id,$3::uuid),reserved_backup_bytes=greatest(reserved_backup_bytes,$4),next_reconcile_at=$5,revision=revision+1,updated_at=$6 WHERE project_node_id=$1`, id.Project, "An external recovery pin lacks authoritative local history; retain it and reconcile the restore record.", id.Attempt, s.cfg.Quota.BundleBytes, s.now().Add(time.Hour), s.now())
+				j.Journal.Operations = append(j.Journal.Operations, Operation{Key: v.Key, Attempt: id.Attempt, Kind: v.Kind, Status: v.State, Handle: v.Handle, Identity: id, Deadline: s.now(), Bytes: s.cfg.Quota.BundleBytes, Pin: v.Pin, Cleanup: "recovery_unknown"})
+				raw, err := json.Marshal(j.Journal)
+				if err != nil {
+					return err
+				}
+				if err = decodeJournal(raw, &Journal{}); err != nil {
+					return err
+				}
+				_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET operation_journal=$7,cleanup_state='blocked',reason_code='recovery_unknown',reason_message=$2,resource_attempt_id=coalesce(resource_attempt_id,$3::uuid),reserved_backup_bytes=greatest(reserved_backup_bytes,$4),next_reconcile_at=$5,revision=revision+1,updated_at=$6 WHERE project_node_id=$1`, id.Project, "An external recovery pin lacks authoritative local history; retain it and reconcile the restore record.", id.Attempt, s.cfg.Quota.BundleBytes, s.now().Add(time.Hour), s.now(), raw)
 				unknown = true
 				return err
 			}
@@ -118,7 +126,7 @@ func (s *Service) reconcileCatalog(ctx context.Context) error {
 			// Catalog entries may arrive in any order or page. Discovering a
 			// scratch restore after an unknown protected pin cannot weaken its
 			// persisted recovery block or make ordinary cleanup appear ready.
-			_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET operation_journal=$2,resource_attempt_id=$3,reserved_backup_bytes=greatest(reserved_backup_bytes,$4),reserved_restore_slots=1,cleanup_state=CASE WHEN reason_code='recovery_unknown' THEN 'blocked' ELSE 'pending' END,next_reconcile_at=CASE WHEN reason_code='recovery_unknown' THEN next_reconcile_at ELSE $5 END,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, id.Project, raw, id.Attempt, s.cfg.Quota.BundleBytes, s.now())
+			_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET operation_journal=$2,resource_attempt_id=$3,reserved_backup_bytes=greatest(reserved_backup_bytes,$4),reserved_restore_slots=1,cleanup_state=CASE WHEN $6 THEN 'blocked' ELSE 'pending' END,next_reconcile_at=CASE WHEN $6 THEN next_reconcile_at ELSE $5 END,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, id.Project, raw, id.Attempt, s.cfg.Quota.BundleBytes, s.now(), j.recoveryUnknown())
 			return err
 		})
 		if err != nil {

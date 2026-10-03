@@ -3,6 +3,7 @@ package deliveryadoption
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -18,6 +19,9 @@ import (
 // apply has no network/storage effects. Every mapping is rebuilt inside its
 // final fenced transaction; only that exact verified source can switch mode.
 func (s *Service) apply(ctx context.Context, a Authority, j job) (bool, error) {
+	if !s.cfg.RecoveryReconciled {
+		return false, ErrPrerequisite
+	}
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(ctx, a.Executor), 120*time.Second)
 	defer cancel()
 	unchanged := false
@@ -47,6 +51,9 @@ func (s *Service) apply(ctx context.Context, a Authority, j job) (bool, error) {
 		current, err := s.loadJob(ctx, tx, a.Executor.TenantID, j.Identity.Project, false)
 		if err != nil {
 			return err
+		}
+		if current.recoveryUnknown() {
+			return capacityError("cleanup_blocked")
 		}
 		if current.Generation != j.Generation || current.Token != j.Token || current.Identity.Attempt != j.Identity.Attempt || !current.LeaseUntil.After(s.now()) || !current.Deadline.After(s.now()) || current.State != "applying" || current.Pin == "" || current.VerifiedAt == nil || current.ResourceAttempt != j.Identity.Attempt {
 			return ErrLease
@@ -181,10 +188,7 @@ func (s *Service) Verify(ctx context.Context, p tenant.Principal, project string
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM journey_tickets WHERE project_node_id=$1 AND release_node_id IS NOT NULL LIMIT 5001) b`, project).Scan(&out.JourneyMembers); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM ships_in WHERE project_node_id=$1 AND source='adopted' LIMIT 5001) b`, project).Scan(&out.AdoptedMembers); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM journey_tickets j LEFT JOIN ships_in s ON s.tenant_id=j.tenant_id AND s.item_node_id=j.ticket_node_id WHERE j.project_node_id=$1 AND j.release_node_id IS NOT NULL AND (s.item_node_id IS NULL OR s.source<>'adopted') LIMIT 5001) b`, project).Scan(&out.MissingArchiveMembers); err != nil {
+		if err := s.verifyMembers(ctx, tx, p, project, &out); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM events WHERE at>$2 AND type LIKE 'journey.%' AND (node_id=$1 OR node_id IN (SELECT release_node_id FROM journey_releases WHERE project_node_id=$1)) LIMIT 1001) b`, project, adoptedAt).Scan(&out.PostAdoptionJourneyEvents); err != nil {
@@ -198,9 +202,69 @@ func (s *Service) Verify(ctx context.Context, p tenant.Principal, project string
 			return err
 		}
 		out.OverCapacity = releases > 50 || members > 1000
-		out.Incomplete = out.JourneyMembers > 5000 || out.AdoptedMembers > 5000 || out.PostAdoptionJourneyEvents > 1000
+		out.Incomplete = out.Incomplete || out.JourneyMembers > 5000 || out.AdoptedMembers > 5000 || out.PostAdoptionJourneyEvents > 1000
 		out.OK = !out.Incomplete && !out.OverCapacity && out.MissingArchiveMembers == 0 && out.PostAdoptionJourneyEvents == 0
 		return nil
 	})
 	return out, err
+}
+
+func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, out *Verification) error {
+	if out.JourneyMembers > 5000 {
+		out.Incomplete = true
+		return nil
+	}
+	// The adoption event binds the immutable report. Placement.source describes
+	// the latest edit, so a legitimate rerank, move or rollover may replace it.
+	var ref, digest string
+	if err := tx.QueryRow(ctx, `SELECT after->>'report_ref',after->>'report_digest' FROM events WHERE node_id=$1 AND type='delivery.adopted' ORDER BY id DESC LIMIT 1`, project).Scan(&ref, &digest); err != nil {
+		return err
+	}
+	if s.reports == nil || !digestRE.MatchString(digest) {
+		return ErrPrerequisite
+	}
+	raw, err := s.reports.Get(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if len(raw) > MaxReportBytes || sum(raw) != digest {
+		return errors.New("adoption report integrity verification failed")
+	}
+	var report Report
+	if err = json.Unmarshal(raw, &report); err != nil {
+		return err
+	}
+	if report.Identity.Tenant != p.TenantID || report.Identity.Project != project || report.Identity.Instance != s.cfg.Instance || report.Identity.Migration != Migration || !report.Eligible || report.Incomplete || len(report.Members) > 5000 {
+		return errors.New("invalid immutable adoption report")
+	}
+	adopted := map[string]string{}
+	for _, member := range report.Members {
+		if member.Source == "adopted" {
+			if !uuidRE.MatchString(member.ID) || !uuidRE.MatchString(member.Release) || adopted[member.ID] != "" {
+				return errors.New("invalid immutable adoption membership")
+			}
+			adopted[member.ID] = member.Release
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT j.ticket_node_id::text,j.release_node_id::text,s.item_node_id IS NOT NULL FROM journey_tickets j LEFT JOIN ships_in s ON s.tenant_id=j.tenant_id AND s.item_node_id=j.ticket_node_id WHERE j.project_node_id=$1 AND j.release_node_id IS NOT NULL ORDER BY j.ticket_node_id LIMIT 5001`, project)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, release string
+		var retained bool
+		if err = rows.Scan(&id, &release, &retained); err != nil {
+			return err
+		}
+		if adopted[id] != release || !retained {
+			out.MissingArchiveMembers++
+		} else {
+			out.AdoptedMembers++
+		}
+		delete(adopted, id)
+	}
+	// A missing archive reference is also a lost part of the adoption evidence.
+	out.MissingArchiveMembers += len(adopted)
+	return rows.Err()
 }

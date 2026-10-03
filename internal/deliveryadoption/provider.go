@@ -278,6 +278,9 @@ func (s *Service) backup(ctx context.Context, a Authority, j *job) error {
 // after fenced database inspection and outside all mutation locks. A database
 // restore erasing that inspection is handled conservatively by catalog sweep.
 func (s *Service) reconcileJob(ctx context.Context, a Authority, project string) error {
+	if s.provider == nil || !s.cfg.RecoveryReconciled {
+		return ErrPrerequisite
+	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	var j job
@@ -298,11 +301,7 @@ func (s *Service) reconcileJob(ctx context.Context, a Authority, project string)
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_delivery WHERE project_node_id=$1),coalesce(lease_until>$2 AND attempt_deadline_at>$2,false),revision FROM delivery_adoption_jobs WHERE project_node_id=$1`, project, s.now()).Scan(&adopted, &live, &revision); err != nil {
 			return err
 		}
-		var ambiguous bool
-		if err = tx.QueryRow(ctx, `SELECT coalesce(reason_code='recovery_unknown',false) FROM delivery_adoption_jobs WHERE project_node_id=$1`, project).Scan(&ambiguous); err != nil {
-			return err
-		}
-		if ambiguous {
+		if j.recoveryUnknown() {
 			return capacityError("cleanup_blocked")
 		}
 		if j.ResourceAttempt == "" {

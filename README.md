@@ -27,6 +27,10 @@ contains `executor`, `authorizer` principal identities and a recorded
 apply. Product counters and source digests are resolved from the binary's
 embedded history/version and exact AEON project binding. Deployment JSON
 cannot replace those inputs. Missing evidence keeps activation closed.
+With recovery reconciliation suspended, passes neither claim attempts nor run
+provider cleanup. Unknown recovery pins remain fenced in their operation journal
+across failures, explicit retries and service restarts; retry does not validate
+restored recovery history.
 
 `provider_command` names an absolute executable, and `reports_directory` names
 private instance-local storage. The command receives `aeon-adoption-v1` as its
@@ -40,12 +44,21 @@ expiry, 24-hour unpinned failure retention and reference-aware protection of
 successful and pre-first-adoption base/WAL recovery chains. Calls run outside
 database mutation locks. A checksum or scheduled backup is insufficient:
 the proof must include an actual isolated restore of the exact source.
+Subprocess calls terminate their owned process group and bound output draining
+when a descendant retains descriptors after the command exits.
 
 The P4a HTTP/CLI module receives the same service as `delivery.AdoptionReporting`:
 `ReadReport` pages immutable metadata with tenant/project/digest-bound cursors;
 `RequestTx` queues preview/retry with revision CAS inside the caller's existing
 tree/access fences; `VerifyReport` provides read-only parity evidence. No backup
 reference is a download link. Current and latest-failed reports are bounded.
+Mapping starts from authoritative journey references; a node hidden by project
+visibility stays in the report with an incomplete-visibility refusal. Report
+storage recovers recognized interrupted atomic writes under the project lock
+while retaining committed payloads and refusing unexpected storage items.
+Verification binds retained memberships to the immutable adoption report, so
+later authorized reranking, release moves and rollover can change placement
+source without losing adoption evidence.
 
 Tests use durable fake providers and private PostgreSQL restore copies. Native
 provider acceptance and the instance release/rollback record remain deployment

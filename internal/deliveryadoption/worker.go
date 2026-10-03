@@ -43,6 +43,12 @@ func (s *Service) Run(ctx context.Context) {
 
 func (s *Service) Pass(ctx context.Context, cursor string) (PassResult, error) {
 	out := PassResult{}
+	if !s.cfg.RecoveryReconciled {
+		// Restored checkpoints are not authority for claims or cleanup while
+		// the restore history is being validated.
+		out.Reason = "rollout_dependency"
+		return out, ErrPrerequisite
+	}
 	next, n, discoveryErr := s.Discover(ctx, cursor)
 	out.NextTenant = next
 	out.Discovered = n
@@ -116,6 +122,9 @@ func (s *Service) Pass(ctx context.Context, cursor string) (PassResult, error) {
 }
 
 func (s *Service) runAttempt(ctx context.Context, a Authority, j *job, prerequisiteErr error) error {
+	if !s.cfg.RecoveryReconciled {
+		return ErrPrerequisite
+	}
 	// A reclaimed generation must preserve the crashed attempt's report before
 	// publishing a fresh current payload, including checking-only crashes.
 	if j.ReportRef != "" && s.reports != nil {
@@ -201,7 +210,7 @@ func classify(err error) (string, bool) {
 // session lock elects the sweeper; no project/tree/resource lock spans an RPC.
 // Terminal jobs, refused jobs and expired generations remain in its inventory.
 func (s *Service) Reconcile(ctx context.Context) error {
-	if s.provider == nil {
+	if s.provider == nil || !s.cfg.RecoveryReconciled {
 		return ErrPrerequisite
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
