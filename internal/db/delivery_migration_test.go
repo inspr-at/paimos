@@ -351,6 +351,37 @@ func TestDeliveryReleaseTransitionGraph(t *testing.T) {
 
 var errDeliveryScenarioRollback = errors.New("delivery scenario rollback")
 
+func TestDeliveryCutRequiresTimestamp(t *testing.T) {
+	f := newDeliveryFixture(t, dbtest.Open(t), "delivery-cut-pair")
+	f.exec(t, `UPDATE project_releases SET state='frozen' WHERE release_node_id=$1`, f.releaseA)
+	t.Run("update", func(t *testing.T) {
+		f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+			deliveryReject(t, ctx, tx, "23514", "project_releases_version_cut_pair", `UPDATE project_releases SET version='1.0.0',version_scheme='legacy' WHERE release_node_id=$1`, f.releaseA)
+			return nil
+		})
+	})
+	for _, origin := range []string{"planned", "adopted_planned", "backfill"} {
+		t.Run("insert/"+origin, func(t *testing.T) {
+			f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+				id := insertNode(ctx, t, tx, f.visibilityFixture, "release", "CUT-"+origin, &f.projectA)
+				deliveryReject(t, ctx, tx, "23514", "project_releases_version_cut_pair", `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state,origin,version,version_scheme)
+					VALUES($1,$2,$3,3,'X','frozen',$4,'1.0.0','legacy')`, f.tenant, f.projectA, id, origin)
+				return nil
+			})
+		})
+	}
+}
+
+func TestDeliveryAdoptedReleaseMayLackCutTimestamp(t *testing.T) {
+	f := newDeliveryFixture(t, dbtest.Open(t), "delivery-adopted-cut")
+	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+		id := insertNode(ctx, t, tx, f.visibilityFixture, "release", "HIST-CUT", &f.projectA)
+		_, err := tx.Exec(ctx, `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,sequence,rank,state,released_at,origin,version,version_scheme)
+			VALUES($1,$2,$3,3,'X','released',now(),'adopted_released','1.0.0','legacy')`, f.tenant, f.projectA, id)
+		return err
+	})
+}
+
 func TestDeliveryCutDeadlineAndBuildAuthorization(t *testing.T) {
 	f := newDeliveryFixture(t, dbtest.Open(t), "delivery-cut")
 	f.exec(t, `UPDATE project_releases SET entry_closes_at=now() WHERE release_node_id=$1`, f.releaseA)
@@ -374,6 +405,7 @@ func TestDeliveryCutDeadlineAndBuildAuthorization(t *testing.T) {
 		}
 		deliveryReject(t, ctx, tx, "P0001", "state transition", `UPDATE project_releases SET state='building' WHERE release_node_id=$1`, f.releaseA)
 		deliveryReject(t, ctx, tx, "P0001", "cut version and scheme", `UPDATE project_releases SET version_scheme='inspr-calendar-v1' WHERE release_node_id=$1`, f.releaseA)
+		deliveryReject(t, ctx, tx, "P0001", "cut version and scheme", `UPDATE project_releases SET cut_at=cut_at+interval '1 second' WHERE release_node_id=$1`, f.releaseA)
 		deliveryReject(t, ctx, tx, "P0001", "cut version and scheme", `UPDATE project_releases SET version=NULL,version_scheme=NULL,cut_at=NULL WHERE release_node_id=$1`, f.releaseA)
 		if _, err := tx.Exec(ctx, `UPDATE project_releases SET state='released',released_at=clock_timestamp(),reservation_basis='attested',reservation_ref='person assertion',released_by=$2 WHERE release_node_id=$1`, f.releaseA, f.actor); err != nil {
 			return err
