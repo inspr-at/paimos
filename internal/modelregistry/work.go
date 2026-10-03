@@ -290,9 +290,11 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 func preferenceStep(ctx context.Context, tx pgx.Tx, profile Profile, role string) (ladderStep, error) {
 	step := ladderStep{Profile: profile, Route: Route{Role: role, ProfileID: profile.ID, State: "available"}}
 	err := tx.QueryRow(ctx, `SELECT coalesce(r.state,'available'),coalesce(r.reason,''),r.valid_until,
-  EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.profile_id=p.id)
+  EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id),
+  o.suppressed_until
   FROM model_profiles p LEFT JOIN model_role_routes r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$2
-  WHERE p.id=$1::uuid`, profile.ID, role).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired)
+  LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
+  WHERE p.id=$1::uuid`, profile.ID, role).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired, &step.SuppressedUntil)
 	if err != nil {
 		return step, fmt.Errorf("preference policy: %w", err)
 	}

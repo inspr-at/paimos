@@ -96,7 +96,9 @@ func (m *Module) control(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	return scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND id=$2`, s.ID, id))
 }
-func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, finish := deferControlEvents(r, tx)
+	defer finish(&err)
 	var in struct{}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -148,7 +150,10 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		if old.Kind == "tier" && s.Activity != "idle" {
 			continue
 		}
-		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp(),expires_at=CASE WHEN kind='tier' THEN least(expires_at,clock_timestamp()+interval '45 seconds') WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN clock_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
+		// The row is already locked. Use one statement timestamp for the claim
+		// and its deadline: separate clock samples can exceed the 45-second
+		// authorization window by the time between evaluations.
+		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=statement_timestamp(),expires_at=CASE WHEN kind='tier' THEN least(expires_at,statement_timestamp()+interval '45 seconds') WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN statement_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
 		if e != nil {
 			return nil, e
 		}
@@ -165,6 +170,11 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			if e != nil {
 				return nil, e
 			}
+			if c.Kind == "tier" {
+				if e = completeTierHistory(ctx, tx, p, s, c); e != nil {
+					return nil, e
+				}
+			}
 			if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
 				return nil, e
 			}
@@ -178,6 +188,11 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			c, e = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='setting_catalog_changed',completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID))
 			if e != nil {
 				return nil, e
+			}
+			if c.Kind == "tier" {
+				if e = completeTierHistory(ctx, tx, p, s, c); e != nil {
+					return nil, e
+				}
 			}
 			if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
 				return nil, e
@@ -221,7 +236,9 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	return map[string]any{"session": s, "controls": claimed}, nil
 }
-func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, finish := deferControlEvents(r, tx)
+	defer finish(&err)
 	var in struct {
 		Outcome string `json:"outcome"`
 		Reason  string `json:"reason"`
@@ -324,6 +341,11 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	c, err = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',claimed_at=coalesce(claimed_at,clock_timestamp()),outcome=CASE WHEN kind IN ('rename_request','model_request') AND expires_at<=statement_timestamp() THEN 'rejected' ELSE $2 END,reason=CASE WHEN kind IN ('rename_request','model_request') AND expires_at<=statement_timestamp() THEN 'request_expired' ELSE $3 END,completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID, in.Outcome, in.Reason))
 	if err != nil {
 		return nil, err
+	}
+	if c.Kind == "tier" {
+		if err = completeTierHistory(ctx, tx, p, s, c); err != nil {
+			return nil, err
+		}
 	}
 	return c, record(ctx, tx, p, s, "control_completed", before, c)
 }

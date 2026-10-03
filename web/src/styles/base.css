@@ -152,12 +152,12 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 @media (hover: hover) { .seg button:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .seg button:active { background: var(--row-selected); }
 
-/* Keep the compact visual controls while giving fingers a full hit area. */
-@media (max-width: 600px) {
+/* Match ticket cards and touch tablets; expand hit areas without resizing controls. */
+@media (max-width: 720px), (pointer: coarse) {
   .btn, .icon-btn, .seg button, .row-menu-item, .status-btn,
   .title-link, .jump, .who, .res-key, .date-trigger, .link-btn,
   .ticket-chip, .more-link, .reach-link, .hours-chip, .prop-btn, .key-chip,
-  .project-link, .ekey, .journey-chip, .row-main {
+  .project-link, .ekey, .journey-chip, .row-main, .twisty, .tier-mark {
     position: relative;
   }
   .btn::before, .icon-btn::before, .seg button::before, .row-menu-item::before,
@@ -166,7 +166,8 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   .ticket-chip::before, .more-link::before, .reach-link::before,
   .hours-chip::before,
   .prop-btn::before, .key-chip::before, .project-link::before,
-  .ekey::before, .journey-chip::before, .row-main::before {
+  .ekey::before, .journey-chip::before, .row-main::before,
+  .twisty::before, .tier-mark::before {
     content: '';
     position: absolute;
     top: 50%; left: 50%;
