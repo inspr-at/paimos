@@ -5012,7 +5012,10 @@ paths:
         use GET /agents/plan. Agents cannot write this plan.
         Plan writes belong to the active canonical person and reconcile existing
         linked alias copies to the saved value; other preferences remain private
-        to the calling principal.
+        to the calling principal. For agents.working, optional expected_updated_at
+        is the exact updated_at from GET /agents/plan (null means no saved plan).
+        The check and save are atomic across linked aliases; a stale revision
+        returns 409 without changing the plan. Omission preserves legacy writes.
       requestBody:
         required: true
         content:
@@ -5023,6 +5026,10 @@ paths:
               required: [value]
               properties:
                 value: {type: object}
+                expected_updated_at:
+                  type: [string, 'null']
+                  format: date-time
+                  description: 'Optional agents.working precondition; null requires an unset plan. Not accepted for other preferences.'
       responses:
         '200':
           description: Stored preference
@@ -5030,6 +5037,7 @@ paths:
         '400': {description: Invalid key or value}
         '401': {description: Authentication required}
         '403': {description: Active person required for agents.working}
+        '409': {description: Agents plan changed since expected_updated_at; re-read before retrying}
         '413': {description: Value too large}
   /views/{viewId}:
     parameters: [{$ref: '#/components/parameters/ViewId'}]
