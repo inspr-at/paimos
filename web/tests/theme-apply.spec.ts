@@ -9,13 +9,13 @@ import { PORCELAIN, deriveDark, inkOn, type ThemeValues } from '../src/lib/theme
 const shots = join(process.cwd(), 'test-results', 'aeon-644')
 const values = (): ThemeValues => ({ ...structuredClone(PORCELAIN), agents: { ...PORCELAIN.agents, palette: 'tritan' }, primary: { light: '#8547b0', dark: null }, secondary: { light: '#bf3d6d', dark: '#f08db1' } })
 async function setup(page: Page) {
+  await page.addInitScript(() => { Object.defineProperty(navigator, 'language', { get: () => 'de-AT' }) })
   await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
   const errors = watchErrors(page), data = fixtures()
   data.nodes.find(n => n.id === 'n-1')!.recurrence = { id: '63700000-0000-4000-8000-000000000001', project_id: 'p-pharos', project_key: 'PHAROS', number: 4, retired: true, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '09:00', timezone: 'Europe/Vienna' } }
   data.nodes.find(n => n.id === 'n-1')!.title = 'Regelmäßige Prüfung der umfangreichen Zugangsberechtigungen und der Website'
   data.live.push(liveAgent({ project_id: 'p-pharos', principal_id: 'p-agent', name: 'Farbenprüfung', ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Farbenprüfung', project_id: 'p-pharos' } }))
   await mockWork(page, data)
-  await page.route('**/api/preferences/profile', route => route.fulfill({ json: { key: 'profile', value: { locale: 'de-AT' } } }))
   return errors
 }
 async function apply(page: Page, theme: ThemeValues) {
@@ -77,6 +77,8 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = page.locator('.ticket-ws .recurring-pill')
     await expect(pill).toBeVisible()
+    const headerBadge = pill.locator('.recurring-pill-mark')
+    expect(await headerBadge.evaluate(el => ({ width: el.getBoundingClientRect().width, color: getComputedStyle(el).color }))).toEqual({ width: 12, color: cssRgb(inkOn(primary)) })
     await expectStableControls({ controls: { 'recurring pill': pill, 'ticket actions': page.locator('.ticket-ws').getByRole('button', { name: 'More actions', exact: true }), 'ticket key': page.locator('.ticket-ws .key-chip') }, interactions: [{ name: 'change light/dark mode', run: async () => {
       await modeChoice(page, isDark ? 'light' : 'dark')
       await expect(page.locator('html')).toHaveAttribute('data-theme', isDark ? 'light' : 'dark')
@@ -115,4 +117,29 @@ test('system mode follows the OS without losing the chosen colours', async ({ pa
   await page.emulateMedia({ colorScheme: 'dark' })
   await expect.poll(() => page.locator('html').evaluate(el => el.style.getPropertyValue('--teal'))).toBe(deriveDark(chosen.primary.light))
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/)
+})
+
+// Exercise the real robot wrapper: its legacy .clock selector used to overwrite
+// the filled state mark. A controlled state keeps that CSS regression independent
+// of the live-feed projection and its placeholder workers.
+test('waiting glyph ink survives the robot clock styles in both modes', async ({ page }) => {
+  await setup(page)
+  const chosen = values()
+  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }))
+  await page.goto('/p/PHAROS?sort=key&group=none')
+  await expect(page.locator('#row-n-1')).toBeVisible()
+  await page.evaluate(async () => {
+    const componentPath = '/src/components/projects/LiveBot.vue', vuePath = '/node_modules/.vite/deps/vue.js'
+    const [{ default: Bot }, { createApp, h }] = await Promise.all([import(/* @vite-ignore */ componentPath), import(/* @vite-ignore */ vuePath)])
+    const host = document.createElement('div'); host.id = 'theme-clock'; document.body.append(host)
+    createApp({ render: () => h(Bot, { state: 'waiting', size: 44 }) }).mount(host)
+  })
+  const mark = page.locator('#theme-clock .agent-state-mark')
+  await expect(mark).toHaveAttribute('data-mark', 'waiting')
+  for (const mode of ['light', 'dark'] as const) {
+    await modeChoice(page, mode)
+    const fill = mode === 'light' ? '#b84a08' : '#f5ae52'
+    expect(await mark.locator('circle').evaluate(el => getComputedStyle(el).fill)).toBe(cssRgb(fill))
+    expect(await mark.locator('path').evaluate(el => getComputedStyle(el).stroke)).toBe(cssRgb(inkOn(fill)))
+  }
 })
