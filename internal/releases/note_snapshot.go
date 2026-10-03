@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// One SQL statement gives membership, revision and fields the same MVCC
-// snapshot without blocking editors or depending on multiple paginated reads.
-// RLS scopes both the project and tenant; every join also binds tenant_id.
+// The journey export remains one MVCC statement. Releases-mode selection,
+// revision, preflight and pages share the store's read-only repeatable-read
+// transaction. Both exports keep tenant and project visibility.
 func (m *module) noteSnapshot(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r, false)
 	if !ok {

@@ -208,6 +208,8 @@ func ReadPermissionCheckerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		return permitEffective(p, permission, effectiveWithCreator(p, g, creator, project), Scope{ProjectID: project})
 	}, nil
 }
+
+// Derived reads use the same project in the acting principal's and creator's grants.
 func effectiveWithCreator(p tenant.Principal, g grants, creator *grants, projectID string) Effective {
 	result := effectiveGrants(g, projectID)
 	if creator != nil {

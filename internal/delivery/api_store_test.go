@@ -388,6 +388,10 @@ func TestOverviewDoesNotLookUpCompletionEvents(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer pool.Close()
+	if _, err := NewStore(pool).Items(t.Context(), f.person, f.project, "", ReadOptions{CompletedUnplaced: true}); err != nil || counter.queries.Load() == 0 {
+		t.Fatalf("trace negative control: %v %d", err, counter.queries.Load())
+	}
+	counter.queries.Store(0)
 	out, e := NewStore(pool).Overview(t.Context(), f.person, f.project, "")
 	if e != nil || len(out.Active) != 2 || counter.queries.Load() != 0 {
 		t.Fatalf("overview=%+v err=%v event queries=%d", out, e, counter.queries.Load())
@@ -423,7 +427,18 @@ func TestAdoptionInventoryIsPermissionScopedAndIncludesDeletedOnlyForOperators(t
 	if len(seen) != 3 || !seen[f.legacy] {
 		t.Fatal("operator lost refused deleted project")
 	}
+	status, e := f.store.Status(t.Context(), f.person, f.legacy)
+	if e != nil || status.Adoption == nil || status.Adoption.State != "refused" {
+		t.Fatalf("operator deleted status: %+v %v", status, e)
+	}
+	reporter := &inventoryReporter{}
+	if _, e := f.store.AdoptionReport(t.Context(), f.person, f.legacy, "", 1, reporter); e != nil || reporter.calls != 1 {
+		t.Fatalf("operator deleted report: %v", e)
+	}
 	dbtest.BindRole(t, f.d, f.tenant, f.person.ID, "member")
+	if _, e := f.store.AdoptionReport(t.Context(), f.person, f.legacy, "", 1, reporter); !errors.Is(e, ErrNotFound) || reporter.calls != 1 {
+		t.Fatalf("deleted report leaked to member: %v", e)
+	}
 	member, e := f.store.Adoptions(t.Context(), f.person, ReadOptions{})
 	if e != nil || len(member.Items) != 2 || member.Counts["refused"] != 0 {
 		t.Fatalf("member inventory=%+v %v", member, e)
@@ -436,7 +451,7 @@ func TestCutLostResponseReplaysOriginalRevisionWithoutEvents(t *testing.T) {
 	f := newStoreFixture(t)
 	f.item(t, "task", "TSK-1", "done", f.release, "V")
 	frozen := f.freeze(t, f.release)
-	in := TransitionRequest{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: frozen.Revision, Action: "cut", VersionScheme: "legacy", Version: "1.2.3"}
+	in := TransitionRequest{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: frozen.Revision, Action: "cut", VersionScheme: "legacy", Version: "26.10.03"}
 	cut, e := f.store.Transition(t.Context(), f.person, in)
 	if e != nil {
 		t.Fatal(e)
@@ -447,7 +462,17 @@ func TestCutLostResponseReplaysOriginalRevisionWithoutEvents(t *testing.T) {
 		t.Fatalf("lost response replay=%+v %v", replayed, e)
 	}
 	in.VersionScheme = "inspr-calendar-v1"
-	if _, e := f.store.Transition(t.Context(), f.person, in); e == nil {
-		t.Fatal("replay silently changed scheme")
+	if _, e := f.store.Transition(t.Context(), f.person, in); !errors.Is(e, ErrTransition) {
+		t.Fatalf("replay scheme refusal: %v", e)
 	}
+}
+
+type inventoryReporter struct{ calls int }
+
+func (r *inventoryReporter) ReadReport(context.Context, tenant.Principal, string, string, int) (AdoptionReport, error) {
+	r.calls++
+	return AdoptionReport{Items: []json.RawMessage{json.RawMessage(`{"reason":"deleted project"}`)}, Revision: 1}, nil
+}
+func (*inventoryReporter) RequestTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64) (AdoptionJob, error) {
+	return AdoptionJob{}, errors.New("read-only fixture")
 }

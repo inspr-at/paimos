@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package releases implements the R3 release walker and planning API.
-// The coordinator mounts New(pool); release creation and stage transitions
-// belong to the journey module. No version or completion state is invented.
+// Package releases serves the project release API and retained journey walker.
+// The instance controller supplies automatic adoption reporting at construction.
 package releases
 
 import (
@@ -32,10 +31,8 @@ type module struct {
 	history  func() (releasehistory.History, error)
 }
 
-// New returns an httpapi.Module serving walker GET and revision-fenced plan
-// PUT and ticket creation POST. No additional plugin registration is needed.
-// Clients retain their own remembered partial feature selections; PUT
-// persists only the complete eligible ticket order and selected ticket set.
+// New mounts releases-mode reads and writes alongside the retained journey
+// routes. WithAdoptionReporting connects P3's persisted reports and job requests.
 func New(pool *pgxpool.Pool, options ...Option) httpapi.Module {
 	m := &module{pool: pool, store: delivery.NewStore(pool), history: releasehistory.Embedded}
 	for _, option := range options {

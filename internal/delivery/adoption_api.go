@@ -94,11 +94,41 @@ func inventoryStatusTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 	out.Adoption = &job
 	return out, nil
 }
+
+// adoptionRead also admits refused deleted/converted project records for
+// workspace operators. Ordinary release reads continue to require live projects.
+func (s *Store) adoptionRead(ctx context.Context, p tenant.Principal, project string, fn func(context.Context, pgx.Tx) error) error {
+	if !uuid(project) {
+		return invalidInput("invalid project identity")
+	}
+	return s.read(ctx, p, "", func(ctx context.Context, tx pgx.Tx) error {
+		if err := authz.RequireTx(ctx, tx, p, "releases.read", authz.Scope{ProjectID: project}); err != nil {
+			return err
+		}
+		var active bool
+		err := tx.QueryRow(ctx, `SELECT n.deleted_at IS NULL AND k.slug='project' FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND n.id=$2 AND (k.slug='project' OR EXISTS(SELECT 1 FROM delivery_adoption_jobs j WHERE j.tenant_id=n.tenant_id AND j.project_node_id=n.id))`, p.TenantID, project).Scan(&active)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !active {
+			if err := authz.RequireTx(ctx, tx, p, "roles.manage", authz.Scope{}); err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					return ErrNotFound
+				}
+				return err
+			}
+		}
+		return fn(ctx, tx)
+	})
+}
 func (s *Store) Status(ctx context.Context, p tenant.Principal, project string) (DeliveryStatus, error) {
 	var out DeliveryStatus
-	err := s.read(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.adoptionRead(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = statusTx(ctx, tx, p, project)
+		out, err = inventoryStatusTx(ctx, tx, p, project, true)
 		return err
 	})
 	return out, err
@@ -267,7 +297,7 @@ func (s *Store) AdoptionReport(ctx context.Context, p tenant.Principal, project,
 	if reporter == nil {
 		return out, ErrAdoptionUnavailable
 	}
-	err = s.read(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error { return nil })
+	err = s.adoptionRead(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error { return nil })
 	if err != nil {
 		return out, err
 	}
@@ -341,7 +371,7 @@ func (s *Store) VerifyAdoption(ctx context.Context, p tenant.Principal, project 
 	if !ok {
 		return nil, ErrAdoptionUnavailable
 	}
-	if err := s.read(ctx, p, project, func(context.Context, pgx.Tx) error { return nil }); err != nil {
+	if err := s.adoptionRead(ctx, p, project, func(context.Context, pgx.Tx) error { return nil }); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(ctx, p), 60*time.Second)
