@@ -148,16 +148,16 @@ func TestRecoveryAmbiguitySurvivesAutomaticAndExplicitRetries(t *testing.T) {
 			if err != nil || out.Project != f.project || out.Reason != "cleanup_blocked" || out.State != "retry_wait" {
 				t.Fatalf("first recovery retry: %+v, %v", out, err)
 			}
+			status, err := f.s.Status(t.Context(), f.p, f.project)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if explicit {
-				status, err := f.s.Status(t.Context(), f.p, f.project)
-				if err != nil {
-					t.Fatal(err)
-				}
 				if _, err = f.s.Request(t.Context(), f.p, f.project, "retry", status.Revision); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				f.clock = f.clock.Add(time.Minute)
+				f.clock = status.NextAttempt
 			}
 			// Diagnostics are replaceable presentation data. Removing the old
 			// reason must not remove unresolved external recovery ownership.
