@@ -719,7 +719,8 @@ function rowClick(event: MouseEvent, id: string) {
   .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
   .row > .c-host { display: flex; grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
-  .row > .c-exec { padding-right: 132px; }
+  /* Reserve the host's 160 px cap and rename control on the shared phone line. */
+  .row > .c-exec { padding-right: 184px; }
   /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
   .exec-copy { flex: 1; display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
   .exec-account { display: contents; }

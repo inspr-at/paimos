@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const now = Date.parse('2026-10-01T14:00:00Z')
 const before = process.env.AEON_501_CAPTURE === 'before'
@@ -13,6 +14,7 @@ test('execution kinds and person-specific host names on the real agents table', 
   await page.clock.install({ time: now })
   await page.setViewportSize({ width: 1600, height: 1000 })
   const work = fixtures()
+  work.preferences.theme = { choice: 'system' }
   await mockWork(page, work, { admin: true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'n-1': { key: 'PHAROS-42', title: 'Ship the execution kinds' } } })
   const lead = data.sessions[0]!
@@ -56,37 +58,80 @@ test('execution kinds and person-specific host names on the real agents table', 
     // Playwright's action scroll before measuring hover-induced movement.
     await workerHost.scrollIntoViewIfNeeded()
     const original = await workerHost.boundingBox()
-    await workerHost.hover()
     const pencil = page.locator(`[data-row="s:${ai.id}"] .host-pencil`)
-    await expect(pencil).toHaveCSS('opacity', '1')
-    expect((await pencil.boundingBox())!.x).toBeGreaterThanOrEqual(original!.x + original!.width)
-    expect(await workerHost.boundingBox()).toEqual(original)
-    await workerHost.click()
+    const row = page.locator(`[data-row="s:${ai.id}"]`)
     const dialog = page.getByRole('dialog', { name: 'Your name for this computer' })
-    await expect(dialog.getByRole('textbox')).toBeEnabled()
-    await dialog.getByRole('textbox').fill('Cancelled name')
-    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expectStableControls({ controls: { host: workerHost, pencil, row }, interactions: [
+      { name: 'hover host', run: async () => {
+        await workerHost.hover()
+        await expect(pencil).toHaveCSS('opacity', '1')
+        expect((await pencil.boundingBox())!.x).toBeGreaterThanOrEqual(original!.x + original!.width)
+      } },
+      { name: 'open and type a proposed label', run: async () => {
+        await workerHost.click()
+        await expect(dialog.getByRole('textbox')).toBeEnabled()
+        await dialog.getByRole('textbox').fill('Cancelled name')
+      } },
+      { name: 'cancel proposed label', run: async () => {
+        await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+        await expect(dialog).toHaveCount(0)
+      } },
+    ] })
     await expect(workerHost).toContainText('mbp2606')
     expect(names.size).toBe(0)
     await workerHost.click()
     await expect(dialog.getByRole('textbox')).toBeEnabled()
     await dialog.getByRole('textbox').fill("David's MacBook")
+    expect(await workerHost.boundingBox()).toEqual(original)
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     for (const child of [ai, xai, media, terminal]) await expect(page.locator(`[data-row="s:${child.id}"] .host-badge`)).toContainText("David's MacBook")
     await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('mbp2607')
-    expect((await workerHost.boundingBox())?.width).toBe(original?.width)
+    const renamed = await workerHost.boundingBox()
+    expect(renamed!.width).toBeGreaterThan(original!.width)
+    expect(renamed!.width).toBeLessThanOrEqual(160)
+    expect(await workerHost.evaluate(el => getComputedStyle(el).width)).not.toBe('104px')
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
     await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
     await expect(workerHost).toContainText('mbp2606')
-    // Long labels remain within the exact same badge, visibly ellipsised.
+    expect((await workerHost.boundingBox())?.width).toBe(original?.width)
+    // Long labels use the available width up to the cap, visibly ellipsised.
+    const longLabel = 'Gemeinsame Entwicklungsstation für teamübergreifende Qualitätssicherung und Agenturkoordination'
     await workerHost.click()
     await expect(dialog.getByRole('textbox')).toBeEnabled()
-    await dialog.getByRole('textbox').fill('A'.repeat(128))
+    await dialog.getByRole('textbox').fill(longLabel)
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog).toHaveCount(0)
-    await expect(workerHost.locator('.host-name')).toHaveText('A'.repeat(128))
+    await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
+    await expect(workerHost).toHaveAttribute('title', `${longLabel} · mbp2606`)
+    const longBadge = await workerHost.boundingBox()
+    expect(longBadge!.width).toBeLessThanOrEqual(160)
+    expect(longBadge!.width).toBeGreaterThan(original!.width)
+    const hostCell = await page.locator(`[data-row="s:${ai.id}"] .c-host`).boundingBox()
+    expect(longBadge!.x + longBadge!.width).toBeLessThanOrEqual(hostCell!.x + hostCell!.width + 0.5)
     expect(await workerHost.locator('.host-name').evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis')).toBe(true)
+
+    const shots = process.env.AEON_657_SHOTS
+    if (shots) {
+      mkdirSync(shots, { recursive: true })
+      for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.mouse.move(0, 0)
+        await workerHost.scrollIntoViewIfNeeded()
+        await expect(workerHost).toBeVisible()
+        const responsiveBadge = await workerHost.boundingBox()
+        const responsiveCell = await page.locator(`[data-row="s:${ai.id}"] .c-host`).boundingBox()
+        expect(responsiveBadge!.x + responsiveBadge!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
+        if (width === 390) {
+          const execution = await page.locator(`[data-row="s:${ai.id}"] .exec-copy`).boundingBox()
+          expect(execution!.x + execution!.width).toBeLessThanOrEqual(responsiveBadge!.x + 0.5)
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+        await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
+      }
+    }
+
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
     await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()

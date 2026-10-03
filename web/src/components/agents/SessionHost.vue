@@ -72,8 +72,8 @@ async function save(reset = false) {
 </template>
 
 <style scoped>
-.host-control { position: relative; display: inline-flex; align-items: center; }
-.host-badge { display: inline-flex; align-items: center; gap: 5px; width: 104px; height: 24px; box-sizing: border-box; padding: 0 7px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ink-3) 8%, transparent); color: var(--ink-3); font: 11px/1 var(--mono); cursor: pointer; }
+.host-control { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
+.host-badge { display: inline-flex; align-items: center; gap: 5px; width: auto; min-width: 0; max-width: 160px; height: 24px; box-sizing: border-box; padding: 0 7px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ink-3) 8%, transparent); color: var(--ink-3); font: 11px/1 var(--mono); cursor: pointer; }
 .host-badge:disabled { opacity: 1; cursor: default; }
 .host-badge svg { flex: none; }
 .host-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
