@@ -64,7 +64,7 @@ test('watch is default-off, including the approving owner', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel.getByRole('textbox')).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: /^(Message|Interrupt|Stop|Recover)$/ })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: /^(Message|Interrupt.*|Pause…|Stop now…|Resume|Recover|More session (?:actions|controls))$/ })).toHaveCount(0)
 })
 test('live text is inert, bounded, cleared on end and never automatically rejoined', async ({ page }) => {
   const worker = await setup(page)

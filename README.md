@@ -19,6 +19,11 @@ its workers. Personal settings choose the default pause level. Paused generation
 keep the saved handover, next steps, questions and WIP commit. Resume saves a
 continuation request; a launcher must start the successor, including after a reboot.
 
+Interrupt this step lives in the session menu. Stop now uses the shared pause
+dialog and confirms a saved request, rather than a process exit. Dialog headings
+keep one visible line for long session names; the full name remains available to
+screen readers and on hover, while Close and the action bar stay in place.
+
 Wind down starts only after its host-grouped preview is confirmed. The host picker
 uses personal computer names, tri-state host selection, individual agents and All /
 None quick picks; its State view groups running agents, idle hosts and offline

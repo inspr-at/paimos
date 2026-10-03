@@ -58,8 +58,10 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   await expect(panel.locator('.head-sub')).toContainText('PHAROS-12')
   await expect(panel).not.toContainText('Not reported')
   await expect(panel).not.toContainText('Account not reported')
-  await expect(panel.getByRole('button', { name: /Interrupt/ })).toBeVisible()
-  await expect(panel.getByRole('button', { name: /Stop/ })).toBeVisible()
+  await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Interrupt this step', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(panel.getByRole('button', { name: 'Stop now…', exact: true })).toBeVisible()
 })
 
 for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {

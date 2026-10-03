@@ -111,7 +111,9 @@ for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     const data = await setup(page)
     data.sessions[0]!.display_label = 'worker-one'
-    data.sessions[1]!.display_label = 'worker-two'
+    // Managed names allow 128 characters: cover wrapping words and a single token.
+    data.sessions[1]!.display_label = 'worker '.repeat(18) + 'xx'
+    data.sessions[2]!.display_label = 'x'.repeat(128)
     await page.goto('/agents')
     async function open(n: number) {
       const row = page.locator(`[data-row="s:${session(n)}"]`)
@@ -125,15 +127,16 @@ for (const width of [1440, 1024, 390]) {
       })
       await stopItem.click()
       await expect(page.getByRole('dialog', { name: `Stop now ${name}`, exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: `Stop now ${name}`, exact: true })).toHaveText(`Stop now ${name}`)
     }
     await open(1)
     const dialog = page.getByRole('dialog', { name: /^Stop now / })
     const cancel = dialog.getByRole('button', { name: /^Cancel/ })
     const stop = dialog.getByRole('button', { name: /^Stop now/ })
     await expectStableControls({
-      controls: { ...(width === 390 ? { dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), actions: dialog.locator('.pause-actions'), cancel, stop },
-      scrollAreas: { body: dialog.locator('.pause-body') },
-      interactions: [2, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(stop).toBeFocused() } })),
+      controls: { ...(width === 390 ? { dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), actions: dialog.locator('.pause-actions'), cancel, stop, heading: dialog.getByRole('heading') },
+      scrollAreas: { body: dialog.locator('.pause-body'), head: dialog.locator('.pause-head') },
+      interactions: [2, 3, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(stop).toBeFocused() } })),
     })
   })
 
