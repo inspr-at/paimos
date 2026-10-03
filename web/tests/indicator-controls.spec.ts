@@ -5,6 +5,8 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ICON_SIZE, indicatorArtScale, indicatorRing, indicatorVariants, nativeIconSize, type AgentIndicatorStyle } from '../src/lib/indicatorVariants'
 import { mockIndicator } from './agent-indicator-fixtures'
+import { saveAgentTheme } from './agent-theme-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const shots = resolve('..', '.agent-shots')
 test.beforeAll(() => mkdirSync(shots, { recursive: true }))
@@ -150,8 +152,9 @@ test('the account ring and size reach every preview; malformed values keep each 
 
 test('every LiveBot caller follows the viewer: cards, list rows, popovers and /agents', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
-  const { data } = await mockIndicator(page)
-  data.preferences['agent-indicator'] = { style: 'robot-4', hovering: true, ring: 'moving', size: 50 }
+  const { data, theme } = await mockIndicator(page)
+  data.preferences['agent-indicator'] = { style: 'sprite', hovering: false }
+  theme.saved.values.agents = { ...theme.saved.values.agents, avatar: 'robot-4', hover: true, ring: 'moving', size: 50 }
   const consistent = async (scope: Locator) => {
     const bots = scope.locator('.live-bot')
     await expect(bots.first()).toBeVisible()
@@ -176,152 +179,160 @@ test('every LiveBot caller follows the viewer: cards, list rows, popovers and /a
   await consistent(page.locator('.agents-page'))
   expect(await loops(page.locator('.agents-page .live-bot[data-state="working"]').first(), ringMotion)).toBeGreaterThan(0)
   expect(await loops(page.locator('.agents-page .live-bot[data-state="waiting"]').first())).toBe(0)
-  expect(data.preferences['agent-indicator']).toEqual({ style: 'robot-4', hovering: true, ring: 'moving', size: 50 })
+  expect(theme.saved.values.agents).toMatchObject({ avatar: 'robot-4', hover: true, ring: 'moving', size: 50 })
+  expect(data.preferences['agent-indicator']).toEqual({ style: 'sprite', hovering: false })
 })
 
 async function settings(page: Page) {
-  await page.goto('/settings/personal#agents')
-  await expect(page.getByRole('radiogroup', { name: 'Agent indicator' })).toBeVisible()
+  await page.goto('/settings/theme#agents')
+  await expect(page.getByRole('radiogroup', { name: 'Agent avatar' })).toBeVisible()
 }
-const option = (page: Page, name: string) => page.getByRole('radiogroup', { name: 'Agent indicator' }).getByRole('radio', { name, exact: true })
-const ringOption = (page: Page, name: string) => page.getByRole('radiogroup', { name: 'Activity ring' }).getByRole('radio', { name, exact: true })
+const option = (page: Page, name: string) => page.getByRole('radiogroup', { name: 'Agent avatar' }).getByRole('radio', { name, exact: true })
+const ringOption = (page: Page, name: string) => page.getByRole('radiogroup', { name: 'Ring', exact: true }).getByRole('radio', { name, exact: true })
 
-test('compact picker: icons with names and descriptions, one caption for the selected style, a matching demo', async ({ page }) => {
+test('avatar families show real artwork, labels and the selected description without moving controls', async ({ page }) => {
   await mockIndicator(page)
   await settings(page)
-  const caption = page.getByTestId('indicator-caption')
+  const card = page.locator('#agents'), caption = card.locator('.avatar-field .detail')
   await expect(caption).toHaveText('Robot 1 · Calm and composed')
   for (const variant of indicatorVariants) {
-    await expect(option(page, variant.name)).toHaveAccessibleDescription(variant.description)
-    const visibleText = await option(page, variant.name).evaluate(el => [...el.querySelectorAll('*')]
-      .filter(node => !node.closest('.sr-only') && [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent!.trim())).length)
-    expect(visibleText, `${variant.name} shows only its icon`).toBe(0)
+    await expect(option(page, variant.name)).toContainText(variant.name)
+    await expect(option(page, variant.name).locator('.live-bot svg').first()).toBeVisible()
+    await expect(option(page, variant.name)).toHaveAccessibleDescription('Robot 1 · Calm and composed')
   }
-  // Browsing does not move the caption; choosing does.
-  await option(page, 'Robot 1').focus()
-  await page.keyboard.press('ArrowRight')
-  await expect(option(page, 'Robot 2')).toBeFocused()
-  await expect(caption).toHaveText('Robot 1 · Calm and composed')
-  await page.keyboard.press('Enter')
-  await expect(caption).toHaveText('Robot 2 · A little more warmth')
-  await expect(page.locator('.demo .live-bot')).toHaveAttribute('data-style', 'robot-2')
-  // Selected and focused stay distinguishable: a tint for the choice, an outline for focus.
-  const look = (name: string) => option(page, name).evaluate(el => { const s = getComputedStyle(el); return { outline: s.outlineStyle, background: s.backgroundImage + s.backgroundColor } })
-  await page.keyboard.press('ArrowRight')
+  await expectStableControls({
+    controls: { group: page.getByRole('radiogroup', { name: 'Agent avatar' }), clicked: option(page, 'Robot 2'), hover: card.getByRole('switch', { name: 'Hover', exact: true }) },
+    scrollAreas: { card },
+    interactions: [{ name: 'keyboard avatar choice', run: async () => {
+      await option(page, 'Robot 1').focus(); await page.keyboard.press('ArrowRight')
+      await expect(option(page, 'Robot 2')).toBeFocused()
+      await expect(option(page, 'Robot 2')).toBeChecked()
+      await expect(caption).toHaveText('Robot 2 · A little more warmth')
+      await expect(card.locator('.live-row .live-bot').first()).toHaveAttribute('data-style', 'robot-2')
+    } }],
+  })
+  // Focus alone remains distinct from selection, even though arrow keys select.
+  await option(page, 'Robot 3').focus()
+  await expect(option(page, 'Robot 2')).toBeChecked()
+  const look = (name: string) => option(page, name).evaluate(el => { const style = getComputedStyle(el); return { outline: style.outlineStyle, background: style.backgroundImage + style.backgroundColor } })
   const [chosen, focused] = [await look('Robot 2'), await look('Robot 3')]
   expect(chosen.outline).toBe('none')
   expect(focused.outline).toBe('solid')
   expect(chosen.background).not.toBe(focused.background)
   await page.setViewportSize({ width: 390, height: 900 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  const tops = await page.getByRole('radiogroup', { name: 'Agent indicator' }).getByRole('radio').evaluateAll(els => els.map(el => el.getBoundingClientRect().bottom))
+  const tops = await page.getByRole('radiogroup', { name: 'Agent avatar' }).getByRole('radio').evaluateAll(els => els.map(el => el.getBoundingClientRect().bottom))
   expect(Math.max(...tops)).toBeLessThan(await caption.evaluate(el => el.getBoundingClientRect().top))
 })
 
-test('Activity ring and Icon size save independently of style and Hovering; every preview follows', async ({ page }) => {
+test('Ring and Size edit independently of avatar and Hover; Save persists and previews follow', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  const { data } = await mockIndicator(page)
-  data.preferences['agent-indicator'] = { style: 'robot-1', hovering: true }
+  const { data, theme } = await mockIndicator(page)
+  theme.saved.values.agents.hover = true
   await settings(page)
-  const saved = () => data.preferences['agent-indicator']
-  // Unset: each style's own ring and drawn size, and nothing is written.
+  const preview = page.locator('#agents .light .live-row')
   await expect(ringOption(page, 'Moving')).toBeChecked()
-  const slider = page.getByRole('slider', { name: 'Icon size' })
+  const slider = page.getByRole('slider', { name: 'Size', exact: true })
   await expect(slider).toHaveValue(String(nativeIconSize('robot-1')))
   await expect(slider).toHaveAttribute('aria-valuetext', `${nativeIconSize('robot-1')}%, as drawn`)
   await option(page, 'Quill').click()
   await expect(ringOption(page, 'Off')).toBeChecked()
   await expect(slider).toHaveValue(String(nativeIconSize('quill')))
-  await expect.poll(saved).toEqual({ style: 'quill', hovering: true })
-  // Arrow keys move through the ring modes and save the choice.
-  await ringOption(page, 'Off').focus()
-  await page.keyboard.press('ArrowLeft')
+  expect(theme.writes).toHaveLength(0)
+  await saveAgentTheme(page)
+  expect(theme.saved.values.agents).toMatchObject({ avatar: 'quill', hover: true, ring: null, size: null })
+  await ringOption(page, 'Off').focus(); await page.keyboard.press('ArrowLeft')
   await expect(ringOption(page, 'Still')).toBeChecked()
   await expect(ringOption(page, 'Still')).toBeFocused()
-  await expect.poll(saved).toEqual({ style: 'quill', hovering: true, ring: 'still' })
-  await expect(page.locator('.indicator-choices .live-bot [data-ring]:not([data-ring="still"])')).toHaveCount(0)
-  await expect(page.locator('.demo [data-ring="still"] .indicator-ring')).toHaveCount(1)
-  // Native slider keys: arrows step by 5, Home and End reach the ends.
-  await slider.focus()
-  await page.keyboard.press('Home')
-  await expect.poll(saved).toEqual({ style: 'quill', hovering: true, ring: 'still', size: ICON_SIZE.min })
+  await expect(preview.locator('.agent-indicator-art')).toHaveAttribute('data-ring', 'still')
+  await expect(preview.locator('.indicator-ring')).toHaveCount(1)
+  await slider.focus(); await page.keyboard.press('Home')
+  await expect(slider).toHaveValue(String(ICON_SIZE.min))
   await page.keyboard.press('ArrowRight')
   await expect(slider).toHaveValue(String(ICON_SIZE.min + ICON_SIZE.step))
-  await expect(slider).toHaveAttribute('aria-valuetext', `${ICON_SIZE.min + ICON_SIZE.step}%`)
-  await expect(page.locator('.demo .inner-art')).toHaveCSS('scale', String(indicatorArtScale('quill', ICON_SIZE.min + ICON_SIZE.step)))
+  await expect(slider).toHaveAttribute('aria-valuetext', `${ICON_SIZE.min + ICON_SIZE.step}%, chosen size`)
+  await expect(preview.locator('.inner-art')).toHaveCSS('scale', String(indicatorArtScale('quill', ICON_SIZE.min + ICON_SIZE.step)))
   await page.keyboard.press('End')
-  await expect.poll(saved).toEqual({ style: 'quill', hovering: true, ring: 'still', size: ICON_SIZE.max })
-  // The same percentage carries to another style without a plateau.
+  await expect(slider).toHaveValue(String(ICON_SIZE.max))
   await option(page, 'Robot 4').click()
   await expect(slider).toHaveValue(String(ICON_SIZE.max))
-  await expect(page.locator('.demo .inner-art')).toHaveCSS('scale', String(indicatorArtScale('robot-4', ICON_SIZE.max)))
-  await page.getByRole('switch', { name: 'Hovering' }).uncheck()
-  await expect.poll(saved).toEqual({ style: 'robot-4', hovering: false, ring: 'still', size: ICON_SIZE.max })
-  await page.getByRole('button', { name: 'Use drawn sizes' }).click()
-  await expect.poll(saved).toEqual({ style: 'robot-4', hovering: false, ring: 'still' })
+  await expect(preview.locator('.inner-art')).toHaveCSS('scale', String(indicatorArtScale('robot-4', ICON_SIZE.max)))
+  await page.getByRole('switch', { name: 'Hover', exact: true }).uncheck()
+  await saveAgentTheme(page)
+  expect(theme.saved.values.agents).toMatchObject({ avatar: 'robot-4', hover: false, ring: 'still', size: ICON_SIZE.max })
+  await page.getByRole('button', { name: 'Use drawn ring and sizes' }).click()
   await expect(slider).toHaveValue(String(nativeIconSize('robot-4')))
-  await expect(page.locator('.demo .inner-art[style*="scale"]')).toHaveCount(0)
+  await expect(preview.locator('.inner-art[style*="scale"]')).toHaveCount(0)
+  await saveAgentTheme(page)
+  expect(theme.saved.values.agents).toMatchObject({ avatar: 'robot-4', hover: false, ring: null, size: null })
   await page.reload()
   await expect(ringOption(page, 'Still')).toBeChecked()
   await expect(option(page, 'Robot 4')).toBeChecked()
+  expect(data.preferences['agent-indicator']).toBeUndefined()
 })
 
-test('inactive opacity is a styled native slider: keyboard, hidden with Dim inactive off', async ({ page }) => {
-  const { data } = await mockIndicator(page)
+test('opacity uses native slider keys and stays in place, disabled with Dim inactive off', async ({ page }) => {
+  const { theme } = await mockIndicator(page)
   await settings(page)
-  const opacity = page.getByRole('slider', { name: 'Inactive opacity' })
+  const opacity = page.getByRole('slider', { name: 'Opacity', exact: true })
   const before = await opacity.inputValue()
-  await opacity.focus()
-  await page.keyboard.press('ArrowRight')
+  await opacity.focus(); await page.keyboard.press('ArrowRight')
   await expect(opacity).toHaveValue(String(Number(before) + 1))
-  await expect(opacity).toHaveAttribute('aria-valuetext', `${Number(before) + 1}%`)
-  await expect.poll(() => (data.preferences['agent-state'] as { inactiveOpacity?: number } | undefined)?.inactiveOpacity).toBe(Number(before) + 1)
-  expect(await opacity.evaluate(el => getComputedStyle(el).appearance)).toBe('none')
-  // With Dim inactive off the opacity has nothing to do, so its slider steps aside.
-  await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
-  await expect(opacity).toHaveCount(0)
-  await page.getByRole('switch', { name: 'Dim inactive' }).check()
-  await expect(opacity).toBeEnabled()
+  expect(theme.writes).toHaveLength(0)
+  await expectStableControls({
+    controls: { opacity, dim: page.getByRole('switch', { name: 'Dim inactive' }) },
+    scrollAreas: { card: page.locator('#agents') },
+    interactions: [
+      { name: 'dim off', run: async () => { await page.getByRole('switch', { name: 'Dim inactive' }).uncheck(); await expect(opacity).toBeDisabled() } },
+      { name: 'dim on', run: async () => { await page.getByRole('switch', { name: 'Dim inactive' }).check(); await expect(opacity).toBeEnabled() } },
+    ],
+  })
+  await saveAgentTheme(page)
+  expect(theme.saved.values.agents.inactive_opacity).toBe(Number(before) + 1)
 })
 
-for (const theme of ['light', 'dark'] as const) test(`${theme} phones: both switches keep the toggle and its whole word inside the row, On and Off`, async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme })
+for (const mode of ['light', 'dark'] as const) test(`${mode} phones: both switches keep the toggle and whole word inside the row, On and Off`, async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: mode })
   await mockIndicator(page)
   await settings(page)
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 2400 })
     for (const on of [true, false]) {
-      for (const name of ['Hovering', 'Dim inactive']) {
-        const control = page.getByRole('switch', { name })
+      for (const name of ['Hover', 'Dim inactive']) {
+        const control = page.getByRole('switch', { name, exact: true })
         await control.setChecked(on)
         await expect(page.locator('.switch').filter({ has: control }).locator('span')).toHaveText(on ? 'On' : 'Off')
         const fit = await control.evaluate(input => {
-          const toggle = input.closest('.switch')!, word = toggle.querySelector('span')!, row = toggle.closest('.setting-row')!, copy = row.querySelector('.setting-copy')!
+          const toggle = input.closest('.switch')!, word = toggle.querySelector('span')!, row = toggle.closest('.control-row')!, copy = row.querySelector('label')!
           const [t, w, r, c] = [toggle, word, row, copy].map(el => el.getBoundingClientRect())
           return { word: word.textContent, toggleRight: t.right, wordRight: w.right, rowRight: r.right, clipped: word.scrollWidth > word.clientWidth, overlap: c.right > t.left, width: t.width, height: t.height }
         })
         expect(fit.clipped, `${name} ${fit.word} ${width}px is clipped`).toBe(false)
-        expect(fit.wordRight, `${name} ${fit.word} ${width}px`).toBeLessThanOrEqual(fit.toggleRight + .5)
-        expect(fit.toggleRight, `${name} ${fit.word} ${width}px`).toBeLessThanOrEqual(fit.rowRight + .5)
-        expect(fit.overlap, `${name} ${width}px copy runs under the toggle`).toBe(false)
-        expect(Math.min(fit.width, fit.height), `${name} ${width}px touch reach`).toBeGreaterThanOrEqual(44)
+        expect(fit.wordRight).toBeLessThanOrEqual(fit.toggleRight + .5)
+        expect(fit.toggleRight).toBeLessThanOrEqual(fit.rowRight + .5)
+        expect(fit.overlap).toBe(false)
+        expect(Math.min(fit.width, fit.height)).toBeGreaterThanOrEqual(44)
       }
-      await page.locator('.indicator-settings').screenshot({ path: resolve(shots, `aeon242-switches-${theme}-${width}-${on ? 'on' : 'off'}.png`) })
+      await page.locator('#agents .motion-field').screenshot({ path: resolve(shots, `aeon242-switches-${mode}-${width}-${on ? 'on' : 'off'}.png`) })
     }
   }
 })
 
-test('a failed ring or size save is visible and can be retried', async ({ page }) => {
-  const { data } = await mockIndicator(page)
-  let fail = true
-  await page.route('**/api/preferences/agent-indicator', route => route.request().method() === 'PUT' && fail ? route.fulfill({ status: 503, json: { error: 'unavailable' } }) : route.fallback())
+test('failed Ring/Size Save preserves both draft and saved theme, and can be retried', async ({ page }) => {
+  const { theme } = await mockIndicator(page)
   await settings(page)
   await ringOption(page, 'Off').click()
-  await expect(page.getByRole('alert')).toContainText('agent indicator setting could not be saved')
-  fail = false
-  await page.getByRole('button', { name: 'Try again', exact: true }).click()
-  await expect.poll(() => data.preferences['agent-indicator']).toEqual({ style: 'robot-1', hovering: false, ring: 'off' })
-  await expect(page.locator('.save-error')).toHaveCount(0)
+  await page.getByRole('slider', { name: 'Size', exact: true }).press('End')
+  theme.fail = true
+  await page.getByRole('button', { name: /^Save/ }).click()
+  await expect(page.getByRole('alert')).toContainText('theme operation failed')
+  expect(theme.saved.values.agents).toMatchObject({ ring: null, size: null })
+  await expect(ringOption(page, 'Off')).toBeChecked()
+  await expect(page.getByRole('slider', { name: 'Size', exact: true })).toHaveValue('100')
+  theme.fail = false
+  await saveAgentTheme(page)
+  expect(theme.saved.values.agents).toMatchObject({ avatar: 'robot-1', hover: false, ring: 'off', size: 100 })
+  await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
 test.describe('zoomed craft details', () => {
@@ -341,32 +352,32 @@ test.describe('zoomed craft details', () => {
   })
 })
 
-for (const theme of ['light', 'dark'] as const) {
-  test(`craft sheets: ${theme}, frozen motion and reduced motion`, async ({ page }) => {
+for (const mode of ['light', 'dark'] as const) {
+  test(`craft sheets: ${mode}, frozen motion and reduced motion`, async ({ page }) => {
     for (const [motion, query] of [['no-preference', ''], ['reduce', '&ring=moving&size=100'], ['reduce', '&ring=off&size=30']] as const) {
       await page.emulateMedia({ reducedMotion: motion })
-      await open(page, `?theme=${theme}${query}`)
+      await open(page, `?theme=${mode}${query}`)
       await page.getByRole('button', { name: 'Send event' }).click()
       await page.evaluate(() => { for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = animation.effect?.getTiming().iterations === 1 ? 180 : 700 } })
-      await page.screenshot({ path: resolve(shots, `aeon242-sheet-${theme}-${motion}${query.replace(/[&=]/g, '-')}.png`), fullPage: true })
+      await page.screenshot({ path: resolve(shots, `aeon242-sheet-${mode}-${motion}${query.replace(/[&=]/g, '-')}.png`), fullPage: true })
     }
   })
-  for (const width of [1280, 390]) test(`real surfaces: ${theme} ${width}px with a chosen ring and size`, async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme })
-    const { data } = await mockIndicator(page)
-    data.preferences['agent-indicator'] = { style: 'robot-5', hovering: false, ring: 'off', size: 60 }
-    data.preferences['agent-state'] = { palette: theme === 'light' ? 'deutan' : 'tritan' }
+  for (const width of [1280, 390]) test(`real surfaces: ${mode} ${width}px with a chosen ring and size`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: mode })
+    const { theme } = await mockIndicator(page)
+    theme.saved.values.agents = { ...theme.saved.values.agents, avatar: 'robot-5', hover: false, ring: 'off', size: 60 }
+    theme.saved.values.agents.palette = mode === 'light' ? 'deutan' : 'tritan'
     await page.setViewportSize({ width, height: 900 })
-    for (const [path, name] of [['/', 'projects'], ['/agents', 'agents'], ['/settings/personal#agents', 'settings']] as const) {
+    for (const [path, name] of [['/', 'projects'], ['/agents', 'agents'], ['/settings/theme#agents', 'settings']] as const) {
       await page.goto(path)
       await expect(page.locator('.live-bot').first()).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name} fits ${width}px`).toBe(true)
-      await page.screenshot({ path: resolve(shots, `aeon242-${name}-${theme}-${width}.png`), fullPage: name !== 'agents' })
+      await page.screenshot({ path: resolve(shots, `aeon242-${name}-${mode}-${width}.png`), fullPage: name !== 'agents' })
     }
     // The agents card alone, with keyboard focus on a style that is not selected.
     await page.setViewportSize({ width, height: 2400 })
     await option(page, 'Robot 5').focus()
     await page.keyboard.press('ArrowRight')
-    await page.locator('.indicator-settings').screenshot({ path: resolve(shots, `aeon242-settings-card-${theme}-${width}.png`) })
+    await page.locator('#agents').screenshot({ path: resolve(shots, `aeon242-settings-card-${mode}-${width}.png`) })
   })
 }

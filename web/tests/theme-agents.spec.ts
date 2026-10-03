@@ -183,3 +183,25 @@ test('visible screenshots and Personal agent behaviour controls stay stable in a
     await personal.screenshot({ path: resolve(shots, `personal-${width}-${mode}.png`), animations: 'disabled' })
   }
 })
+
+test('Save reconciles appearance after navigating away from Theme while the response is pending', async ({ page }) => {
+  const { state } = await mock(page)
+  let release!: () => void, reached!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const requested = new Promise<void>(resolve => { reached = resolve })
+  await page.route(`**/api/themes/${state.theme.id}`, async route => {
+    if (route.request().method() === 'PATCH') { reached(); await held }
+    await route.fallback()
+  })
+  await page.goto('/settings/theme#agents')
+  await page.getByRole('radio', { name: 'Sprite', exact: true }).click()
+  await page.getByRole('button', { name: /^Save/ }).click()
+  await requested
+  await page.getByRole('link', { name: 'Projects', exact: true }).click()
+  await expect(page.locator('.theme-section')).toHaveCount(0)
+  expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+  release()
+  await expect.poll(() => state.theme.values.agents.avatar).toBe('sprite')
+  await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
+  expect(state.writes).toHaveLength(1)
+})

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
+import { mockAgentTheme } from './agent-theme-fixtures'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -43,5 +44,6 @@ export async function mockStateColours(page: Page, theme: 'light' | 'dark' = 'li
     at: new Date(stateNow).toISOString(), fresh_seconds: 120, truncated: false,
     items: agents.sessions.map(s => ({ ...s, session_id: s.id, principal_id: s.agent_principal_id, name: s.display_label, since: s.created_at, ticket: null })),
   } }))
-  return { data, agents }
+  const appearance = await mockAgentTheme(page)
+  return { data, agents, appearance }
 }
