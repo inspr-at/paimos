@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -174,7 +175,7 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 	return tx, pid
 }
 
-func TestResidencyEvidencePairingLockPrecedesTenantLock(t *testing.T) {
+func TestResidencyEvidenceTenantLockPrecedesPairingLock(t *testing.T) {
 	reset(t)
 	owner, host, profile, token, mod := groupFixture(t)
 	a := groupAccount(t, mod, owner, host, token, "lock-order", "daemon", "Order", "test")
@@ -182,26 +183,121 @@ func TestResidencyEvidencePairingLockPrecedesTenantLock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	blocker, pid := evidenceBlocker(t, ctx)
-	if _, err := blocker.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, owner.TenantID); err != nil {
-		t.Fatal(err)
-	}
-	if err := agentpairing.Lock(ctx, blocker); err != nil {
+	if _, err := blocker.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, owner.TenantID); err != nil {
 		t.Fatal(err)
 	}
 	done := startEvidenceRequest(t, ctx, mod, owner, "", "PUT", a.ID, evidenceAt(profile, time.Now()))
 	w, query := evidenceBlockedOrDone(t, ctx, pid, done)
-	if w != nil || !strings.Contains(query, "aeon-pairing:") {
-		t.Fatalf("write did not stop at pairing fence: response=%v query=%s", w, query)
+	if w != nil || !strings.Contains(query, "FROM tenants") {
+		t.Fatalf("write did not stop at tenant fence: response=%v query=%s", w, query)
 	}
-	// A writer waiting on pairing must not already hold the tenant fence.
-	if _, err := blocker.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, owner.TenantID); err != nil {
-		t.Fatalf("pairing waiter holds tenant row: %v", err)
+	// A writer waiting on the tenant must not already own pairing. A raw
+	// advisory try-lock isolates this assertion from the production helper.
+	var free bool
+	if err := blocker.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, owner.TenantID).Scan(&free); err != nil {
+		t.Fatal(err)
+	}
+	if !free {
+		t.Fatal("tenant waiter already holds pairing lock")
 	}
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if w := <-done; w.Code != 200 {
-		t.Fatalf("write failed after pairing released: %d %s", w.Code, w.Body.String())
+		t.Fatalf("write failed after tenant released: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
+	for _, operation := range []string{"check", "probe", "disconnect"} {
+		t.Run(operation, func(t *testing.T) {
+			reset(t)
+			owner, host, profile, token, mod := groupFixture(t)
+			a := groupAccount(t, mod, owner, host, token, "concurrent-evidence", "daemon", "Order", "test")
+			bindEvidenceHost(t, owner, host, a, profile, token)
+			var computer string
+			var revision int64
+			if err := adminPool.QueryRow(t.Context(), `SELECT c.id::text,c.revision FROM agent_pairing_computers c
+ JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id WHERE e.account_id=$1`, a.ID).Scan(&computer, &revision); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			blocker, blockerPID := evidenceBlocker(t, ctx)
+			// Hold only pairing: the first writer must own tenant while queued
+			// here, and the next writer must queue behind that tenant owner.
+			if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, owner.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now()
+			evidence := startEvidenceRequest(t, ctx, mod, owner, "", "PUT", a.ID, evidenceAt(profile, now))
+			w, query := evidenceBlockedOrDone(t, ctx, blockerPID, evidence)
+			if w != nil || !strings.Contains(query, "aeon-pairing:") {
+				t.Fatalf("evidence did not reach pairing barrier: response=%v query=%s", w, query)
+			}
+			var evidencePID int
+			if err := adminPool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+ AND $1=ANY(pg_blocking_pids(pid))`, blockerPID).Scan(&evidencePID); err != nil {
+				t.Fatal(err)
+			}
+			path, body, actor, bearer, handler, want := "/api/agent-accounts/"+a.ID+"/check", requestBody("overlap", a.LinkRevision), owner, "", mod, 202
+			switch operation {
+			case "probe":
+				path, body, actor, bearer, want = "/api/agent-accounts/"+a.ID+"/probe", encoded(t, probeWrite{DaemonID: a.DaemonID, DaemonGeneration: "g1", Available: true}), host, token, 200
+			case "disconnect":
+				path, body, want = "/api/agent-pairing/computers/"+computer+"/disconnect", encoded(t, map[string]any{"expected_revision": revision, "mode": "revoke_now"}), 200
+				handler = agentpairing.New(appPool, "https://pairing.test", "groups")
+			}
+			r := httptest.NewRequest("POST", path, strings.NewReader(body))
+			r = r.WithContext(tenant.WithPrincipal(ctx, actor))
+			r.Header.Set("Origin", "https://pairing.test")
+			if bearer != "" {
+				r.Header.Set("Authorization", "Bearer "+bearer)
+			}
+			mux := http.NewServeMux()
+			handler.Mount(mux)
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() { w := httptest.NewRecorder(); mux.ServeHTTP(w, r); done <- w }()
+			for {
+				var query string
+				var blockers []int
+				err := adminPool.QueryRow(ctx, `SELECT query,pg_blocking_pids(pid) FROM pg_stat_activity
+ WHERE datname=current_database() AND pid<>$1 AND ($1=ANY(pg_blocking_pids(pid)) OR $2=ANY(pg_blocking_pids(pid)))`, evidencePID, blockerPID).Scan(&query, &blockers)
+				if err == nil {
+					if !strings.Contains(query, "FROM tenants") || !slices.Contains(blockers, evidencePID) {
+						t.Fatalf("%s bypassed tenant owner: query=%s blockers=%v evidence_pid=%d", operation, query, blockers, evidencePID)
+					}
+					break
+				}
+				if err != pgx.ErrNoRows {
+					t.Fatal(err)
+				}
+				select {
+				case w := <-done:
+					t.Fatalf("%s crossed held fence: status %d %s", operation, w.Code, w.Body.String())
+				default:
+				}
+			}
+			if err := blocker.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for name, result := range map[string]struct {
+				done <-chan *httptest.ResponseRecorder
+				want int
+			}{"evidence": {evidence, 200}, operation: {done, want}} {
+				select {
+				case w := <-result.done:
+					if w.Code != result.want {
+						t.Fatalf("%s after release: status %d want %d: %s", name, w.Code, result.want, w.Body.String())
+					}
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			if n := evidenceEventCount(t, owner); n != 1 {
+				t.Fatalf("evidence audit count %d, want 1", n)
+			}
+		})
 	}
 }
 
