@@ -463,6 +463,9 @@ func vendorRefConflict(message string, vendor []byte) error {
 }
 
 func registrationConflict(err error, vendor []byte) error {
+	if mapped := nativeContextError(err); mapped != err {
+		return mapped
+	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
 		switch pg.ConstraintName {
@@ -788,6 +791,16 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
+	var owner *string
+	ownerID := p.KeyCreatorID
+	if p.Kind == tenant.Person {
+		ownerID = p.ID
+	}
+	if ownerID != "" {
+		if err = tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE id=$1 AND kind='person'`, ownerID).Scan(&owner); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
 	var expired *Session
 	existing, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL FOR UPDATE`, projectID, ref))
 	if err == nil && subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 && in.Role == "coordinator" && existing.Role == "coordinator" && existing.AgentPrincipalID == in.AgentPrincipalID && existing.Harness == in.Harness {
@@ -796,9 +809,12 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 			return nil, e
 		}
 		if stale {
-			// Release the active-reference uniqueness fence, but defer closure
-			// events until the replacement's native ownership is validated.
-			// A rejected replacement rolls this provisional stop back as well.
+			// The stopped_at trigger can emit reply-obligation events. Validate
+			// and claim the replacement's entire component BEFORE that write.
+			// The same store guards the later INSERT and every replay.
+			if e = StoreNativeContextTx(ctx, tx, in.Harness, ref, vendor, owner, projectID, nil); e != nil {
+				return nil, e
+			}
 			if _, e = tx.Exec(ctx, `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped' WHERE id=$1`, existing.ID); e != nil {
 				return nil, e
 			}
@@ -825,7 +841,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
 			return nil, err
 		}
-		if err = preserveChatOwnership(ctx, tx, existing); err != nil {
+		if err = StoreNativeContextTx(ctx, tx, existing.Harness, existing.refDigest, existing.vendorRefDigest, existing.ownerID, existing.ProjectID, nil); err != nil {
 			return nil, err
 		}
 		if err = rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport); err != nil {
@@ -882,27 +898,15 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command))
+	if predecessor != nil && predecessor.Pause != nil && predecessor.Pause.State == "resume_requested" {
+		owner = predecessor.ownerID
+	}
+	if err = StoreNativeContextTx(ctx, tx, in.Harness, ref, vendor, owner, projectID, nil); err != nil {
+		return nil, err
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner))
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
-	}
-	owner := p.KeyCreatorID
-	if p.Kind == tenant.Person {
-		owner = p.ID
-	}
-	if predecessor != nil && predecessor.Pause != nil && predecessor.Pause.State == "resume_requested" {
-		// Resume retains its predecessor's owner, including admin/agent
-		// requests. Resolve that identity before propagating native aliases.
-		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, predecessor.ownerID).Scan(&s.ownerID, &s.RowVersion); err != nil {
-			return nil, err
-		}
-	} else if owner != "" {
-		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
-			return nil, err
-		}
-	}
-	if err = preserveChatOwnership(ctx, tx, s); err != nil {
-		return nil, err
 	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err

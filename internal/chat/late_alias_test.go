@@ -123,9 +123,7 @@ func TestLateVendorAliasRejectsHistoricalConflict(t *testing.T) {
 			f.bind(t, owner, target, id, "0")
 			if scenario == "transferred_owner" {
 				id, lease, ref, alias = first, firstLease, originalRef, "new-alias-"+uid()
-				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, id, owner.ID); err != nil {
-					t.Fatal(err)
-				}
+				f.preGuardMutation(t, `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, id, owner.ID)
 			}
 			var before, after int64
 			if err := f.d.Admin.QueryRow(t.Context(), `SELECT row_version FROM harness_sessions WHERE id=$1`, id).Scan(&before); err != nil {

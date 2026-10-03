@@ -1357,6 +1357,17 @@ A coordinator registered with the same principal, harness and native session
 reference automatically takes over its stopped or heartbeat-lost predecessor's
 live children. The transaction records one `harness.adopted` event per child and
 `harness.handed_over` on the old lead; stopped children remain historical.
+
+For opt-in chat, a native reference and every linked alias retain one person,
+chat role and project across registrations. Relationships persist even before
+first binding, so binding one reference claims the connected aliases without
+replaying older generations. Registration, replay, renaming and binding share
+one database store and table guards. Conflicting ownership rolls back the whole
+write; components larger than 1024 references fail closed. Ownership is never
+implicitly released by stopping, archiving or handing over a generation.
+Replacement claims precede stop-trigger reply-obligation events as well as
+registration events. This identity groundwork remains disabled by default.
+
 A healthy lead is never replaced. `harness run-heartbeat --role coordinator
 --source-session NATIVE_UUID` uses that stable native reference; use a fresh
 private state directory for the new process generation. After an unclean

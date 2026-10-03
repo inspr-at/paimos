@@ -2,11 +2,12 @@
 
 // Package chat owns the opt-in chat-v1 conversation identity boundary.
 // History, delivery and receiver qualification are separate later packages.
-// Native references retain their first bound person, project and chat role.
-// Harness registration propagates that ownership to both supplied aliases,
-// even for an unbound replacement, and rejects conflicting history atomically.
-// Replays and paused continuations use the same guard before event writes;
-// binding also checks older registrations that predate the creation guard.
+// Native aliases form a durable graph: once owned, the connected references
+// belong to exactly one (person, role, project), with no implicit release.
+// aeon_store_chat_native atomically links, validates and inherits that owner;
+// registration/context triggers close missed application paths. First binding
+// includes aliases from earlier unbound generations, without requiring replay.
+// Components are capped at 1024 digests and oversized components fail closed.
 package chat
 
 type RoleCreate struct {

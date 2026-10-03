@@ -198,7 +198,8 @@ func TestRegistrationAliasExistingReplayPropagatesHistory(t *testing.T) {
 			pending, lease := f.registerNative(t, f.alice, f.project, alias, ref)
 			first, _ := f.registerNative(t, f.alice, f.project, ref, "")
 			f.bind(t, f.alice, thread, first, "0")
-			f.nativeClaims(t, thread, 1)
+			// First binding must claim the earlier alias without waiting for replay.
+			f.nativeClaims(t, thread, 2)
 			vendor := ""
 			if supplied {
 				vendor = ref
@@ -245,10 +246,14 @@ func TestRegistrationAliasStaleCoordinatorBeforeEvents(t *testing.T) {
 			if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET heartbeat_at=clock_timestamp()-interval '1 day' WHERE id=$1`, first.ID); err != nil {
 				t.Fatal(err)
 			}
+			message := f.replyObligation(t, first.ID)
 			// At the first closure event, ownership propagation must already be
 			// complete. This proves ordering without sleeps or timing thresholds.
-			if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION test_registration_claims_before_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- IF NEW.type='harness.stopped' AND (SELECT count(*) FROM chat_native_contexts)<>2 THEN
+			if _, err := f.d.Admin.Exec(t.Context(), `CREATE SEQUENCE test_registration_order_violation;
+ GRANT USAGE ON SEQUENCE test_registration_order_violation TO PUBLIC;
+ CREATE FUNCTION test_registration_claims_before_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.type IN ('harness.stopped','inbox.reply_obligation_closed') AND (SELECT count(*) FROM chat_native_contexts)<>2 THEN
+ PERFORM nextval('test_registration_order_violation');
  RAISE EXCEPTION 'ownership missing before event'; END IF; RETURN NEW; END $$;
  CREATE TRIGGER test_registration_claims_before_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION test_registration_claims_before_event()`); err != nil {
 				t.Fatal(err)
@@ -260,17 +265,33 @@ func TestRegistrationAliasStaleCoordinatorBeforeEvents(t *testing.T) {
 				actor = f.bob
 			}
 			w = f.call(actor, "POST", "/api/projects/"+f.project+"/harness-sessions", in, "")
+			// Sequence increments survive rollback: an unrelated HTTP failure
+			// cannot masquerade as the event-order regression.
+			var outOfOrder bool
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT is_called FROM test_registration_order_violation`).Scan(&outOfOrder); err != nil || outOfOrder {
+				t.Fatalf("closure event ran before native ownership: %v %v", outOfOrder, err)
+			}
+
 			if conflict {
 				expect(t, w, http.StatusConflict)
 				if !strings.Contains(w.Body.String(), "chat binding unavailable") {
 					t.Fatal("stale replacement rejected for the wrong reason")
 				}
+				var pending bool
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT closed_at IS NULL FROM inbox_reply_obligations WHERE message_id=$1`, message).Scan(&pending); err != nil || !pending {
+					t.Fatalf("rejected replacement closed obligation: %v %v", pending, err)
+				}
+
 				var intact bool
 				if err := f.d.Admin.QueryRow(t.Context(), `SELECT stopped_at IS NULL AND handed_over_to_id IS NULL FROM harness_sessions WHERE id=$1`, first.ID).Scan(&intact); err != nil || !intact {
 					t.Fatalf("rejected stale replacement changed predecessor: %v %v", intact, err)
 				}
 			} else {
 				expect(t, w, http.StatusCreated)
+				var closedEvents int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='inbox.reply_obligation_closed' AND after->>'message_id'=$1`, message).Scan(&closedEvents); err != nil || closedEvents != 1 {
+					t.Fatalf("obligation closure events=%d: %v", closedEvents, err)
+				}
 				f.nativeClaims(t, thread, 2)
 				var next harness.Session
 				if err := json.Unmarshal(w.Body.Bytes(), &next); err != nil {

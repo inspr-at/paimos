@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
--- AEON-618 R1. No backfill, native process ownership or delivery activation.
+-- AEON-618 R1. Alias metadata backfill only; no process ownership or delivery activation.
 CREATE TABLE chat_roles (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
     id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -70,11 +70,27 @@ ALTER TABLE chat_native_contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_native_contexts FORCE ROW LEVEL SECURITY;
 CREATE POLICY chat_native_contexts_tenant ON chat_native_contexts USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 CREATE POLICY chat_native_contexts_participant ON chat_native_contexts AS RESTRICTIVE USING (
+    current_setting('aeon.chat_native_store',true)='on' OR
     owner_person_id=ANY((SELECT aeon_current_principals())::uuid[])
     OR EXISTS(SELECT 1 FROM harness_sessions s WHERE s.tenant_id=chat_native_contexts.tenant_id
       AND s.id=NULLIF(current_setting('aeon.chat_session_id',true),'')::uuid
       AND s.harness=chat_native_contexts.harness
       AND chat_native_contexts.ref_digest IN (s.ref_digest,s.vendor_ref_digest)));
+
+-- Durable undirected alias links survive generation changes and first binding.
+-- Edges are immutable: there is deliberately no implicit release operation.
+CREATE TABLE chat_native_aliases (
+    tenant_id uuid NOT NULL REFERENCES tenants(id),
+    harness text NOT NULL,
+    ref_digest bytea NOT NULL CHECK (octet_length(ref_digest)=32),
+    alias_digest bytea NOT NULL CHECK (octet_length(alias_digest)=32),
+    PRIMARY KEY (tenant_id,harness,ref_digest,alias_digest),
+    CHECK (ref_digest<=alias_digest)
+);
+CREATE INDEX chat_native_aliases_reverse ON chat_native_aliases(tenant_id,harness,alias_digest,ref_digest);
+ALTER TABLE chat_native_aliases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_native_aliases FORCE ROW LEVEL SECURITY;
+CREATE POLICY chat_native_aliases_tenant ON chat_native_aliases USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 
 -- Per-registration history refers to the lasting native-context ownership.
 -- Unique keys fence contexts whose previous owner is hidden by RLS.
@@ -220,3 +236,129 @@ LANGUAGE sql IMMUTABLE AS $$
       WHERE candidate=registry.resource || '.' || a.action
     );
 $$;
+
+-- One ownership store for registration, replay, alias learning, renaming and
+-- binding. The caller takes tenant -> hierarchy -> record locks, before events.
+-- Trigger entry also takes the tenant fence, so missed application paths fail
+-- closed. No SECURITY DEFINER: tenant RLS still applies to this narrow internal
+-- visibility scope, including with the production NOBYPASSRLS migration owner.
+CREATE FUNCTION aeon_store_chat_native(p_tenant uuid,p_harness text,p_refs bytea[],
+    p_person uuid,p_project uuid,p_role uuid DEFAULT NULL) RETURNS void
+LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+DECLARE
+    refs bytea[];
+    component bytea[];
+    owner record;
+    owned_role uuid := p_role;
+    prior_store text := current_setting('aeon.chat_native_store',true);
+BEGIN
+    IF cardinality(p_refs)>4 THEN
+        RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+    END IF;
+    -- Attached observation references use 64-byte hex snapshots, not native
+    -- session references. They cannot collide with this 32-byte namespace.
+    SELECT array_agg(DISTINCT r ORDER BY r) INTO refs FROM unnest(p_refs) r WHERE octet_length(r)=32;
+    IF refs IS NULL THEN RETURN; END IF;
+    PERFORM id FROM public.tenants WHERE id=p_tenant FOR NO KEY UPDATE NOWAIT;
+    PERFORM set_config('aeon.chat_native_store','on',true);
+    INSERT INTO public.chat_native_aliases(tenant_id,harness,ref_digest,alias_digest)
+        SELECT p_tenant,p_harness,refs[1],r FROM unnest(refs) r ON CONFLICT DO NOTHING;
+    -- UNION deduplicates cycles; LIMIT bounds traversal before aggregation.
+    -- A component beyond this bound is refused, never partially claimed.
+    WITH RECURSIVE connected(ref) AS (
+        SELECT unnest(refs)
+        UNION
+        SELECT CASE WHEN a.ref_digest=c.ref THEN a.alias_digest ELSE a.ref_digest END
+        FROM connected c JOIN public.chat_native_aliases a ON
+            a.tenant_id=p_tenant AND a.harness=p_harness AND (a.ref_digest=c.ref OR a.alias_digest=c.ref)
+    ) SELECT array_agg(ref) INTO component FROM (SELECT ref FROM connected LIMIT 1025) bounded;
+    IF cardinality(component)>1024 THEN
+        RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+    END IF;
+    FOR owner IN SELECT DISTINCT role_id,owner_person_id,project_id FROM public.chat_native_contexts
+        WHERE tenant_id=p_tenant AND harness=p_harness AND ref_digest=ANY(component)
+    LOOP
+        IF owner.owner_person_id IS DISTINCT FROM p_person OR owner.project_id IS DISTINCT FROM p_project
+            OR (owned_role IS NOT NULL AND owned_role<>owner.role_id) THEN
+            RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+        END IF;
+        owned_role := owner.role_id;
+    END LOOP;
+    IF owned_role IS NOT NULL THEN
+        IF p_person IS NULL OR p_project IS NULL THEN
+            RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+        END IF;
+        INSERT INTO public.chat_native_contexts(tenant_id,harness,ref_digest,role_id,owner_person_id,project_id)
+            SELECT p_tenant,p_harness,r,owned_role,p_person,p_project FROM unnest(component) r ORDER BY r
+            ON CONFLICT (tenant_id,harness,ref_digest) DO NOTHING;
+    END IF;
+    PERFORM set_config('aeon.chat_native_store',coalesce(prior_store,''),true);
+END;
+$$;
+
+-- Raw claims cannot skip graph propagation; only the store writes these rows.
+CREATE FUNCTION aeon_chat_native_store_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('aeon.chat_native_store',true) IS DISTINCT FROM 'on' THEN
+        RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER chat_native_claim_store BEFORE INSERT ON chat_native_contexts FOR EACH ROW EXECUTE FUNCTION aeon_chat_native_store_only();
+CREATE TRIGGER chat_native_alias_store BEFORE INSERT ON chat_native_aliases FOR EACH ROW EXECUTE FUNCTION aeon_chat_native_store_only();
+CREATE TRIGGER chat_native_alias_immutable BEFORE UPDATE OR DELETE ON chat_native_aliases FOR EACH ROW EXECUTE FUNCTION aeon_chat_identity_immutable();
+
+CREATE FUNCTION aeon_chat_registration_store() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE refs bytea[] := ARRAY[NEW.ref_digest,NEW.vendor_ref_digest];
+BEGIN
+    IF TG_OP='UPDATE' THEN
+        IF NEW.tenant_id<>OLD.tenant_id OR NEW.harness<>OLD.harness THEN
+            RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+        END IF;
+        refs := refs || ARRAY[OLD.ref_digest,OLD.vendor_ref_digest];
+    END IF;
+    PERFORM aeon_store_chat_native(NEW.tenant_id,NEW.harness,refs,NEW.owner_principal_id,NEW.project_id);
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER chat_registration_store BEFORE INSERT OR UPDATE OF tenant_id,harness,ref_digest,vendor_ref_digest,owner_principal_id,project_id ON harness_sessions
+    FOR EACH ROW EXECUTE FUNCTION aeon_chat_registration_store();
+
+CREATE FUNCTION aeon_chat_context_store() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE s record;
+BEGIN
+    SELECT * INTO s FROM harness_sessions WHERE tenant_id=NEW.tenant_id AND id=NEW.session_id;
+    IF NOT FOUND OR s.owner_principal_id IS DISTINCT FROM NEW.owner_person_id OR s.project_id<>NEW.project_id
+        OR s.harness<>NEW.harness OR s.ref_digest<>NEW.ref_digest OR s.vendor_ref_digest IS DISTINCT FROM NEW.vendor_ref_digest THEN
+        RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+    END IF;
+    PERFORM aeon_store_chat_native(NEW.tenant_id,NEW.harness,ARRAY[NEW.ref_digest,NEW.vendor_ref_digest],NEW.owner_person_id,NEW.project_id,NEW.role_id);
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER chat_context_store BEFORE INSERT ON chat_session_contexts FOR EACH ROW EXECUTE FUNCTION aeon_chat_context_store();
+
+-- Seed relationships of pre-chat registrations too; no owners or deliveries
+-- are invented. Tenant RLS remains enabled, and all temporary scope is restored.
+CREATE FUNCTION aeon_seed_chat_native_aliases() RETURNS void LANGUAGE plpgsql AS $$
+DECLARE t record;
+    prior_tenant text := current_setting('aeon.tenant_id',true);
+    prior_projects text := current_setting('aeon.visible_projects',true);
+    prior_store text := current_setting('aeon.chat_native_store',true);
+BEGIN
+    PERFORM set_config('aeon.visible_projects','*',true);
+    PERFORM set_config('aeon.chat_native_store','on',true);
+    FOR t IN SELECT id FROM tenants LOOP
+        PERFORM set_config('aeon.tenant_id',t.id::text,true);
+        INSERT INTO chat_native_aliases(tenant_id,harness,ref_digest,alias_digest)
+            SELECT tenant_id,harness,least(ref_digest,coalesce(vendor_ref_digest,ref_digest)),greatest(ref_digest,coalesce(vendor_ref_digest,ref_digest))
+            FROM harness_sessions WHERE tenant_id=t.id AND octet_length(ref_digest)=32
+                AND (vendor_ref_digest IS NULL OR octet_length(vendor_ref_digest)=32) ON CONFLICT DO NOTHING;
+    END LOOP;
+    PERFORM set_config('aeon.tenant_id',coalesce(prior_tenant,''),true);
+    PERFORM set_config('aeon.visible_projects',coalesce(prior_projects,''),true);
+    PERFORM set_config('aeon.chat_native_store',coalesce(prior_store,''),true);
+END;
+$$;
+SELECT aeon_seed_chat_native_aliases();

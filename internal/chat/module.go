@@ -337,7 +337,7 @@ func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal, in B
 	if incompatible {
 		return nil, workorders.Fail(409, "session belongs to another chat role")
 	}
-	if err = claimNativeContext(r.Context(), tx, p, s, role); err != nil {
+	if err = claimNativeContext(r.Context(), tx, s, role); err != nil {
 		return nil, err
 	}
 	var current string
@@ -466,17 +466,13 @@ func nativeReferences(s harness.ExternalRegistration) [][]byte {
 	return refs
 }
 
-func claimNativeContext(ctx context.Context, tx pgx.Tx, p tenant.Principal, s harness.ExternalRegistration, role string) error {
-	for _, ref := range nativeReferences(s) {
-		if len(ref) != sha256.Size {
+func claimNativeContext(ctx context.Context, tx pgx.Tx, s harness.ExternalRegistration, role string) error {
+	if err := harness.StoreNativeContextTx(ctx, tx, s.Harness, s.RefDigest, s.VendorRefDigest, &s.OwnerPersonID, s.ProjectID, &role); err != nil {
+		var denied *workorders.Error
+		if errors.As(err, &denied) && denied.Status == 409 {
 			return unavailable()
 		}
-		// ON CONFLICT also sees a previous owner's RLS-hidden key. Never
-		// overwrite it; the subsequent participant read fails closed.
-		if _, err := tx.Exec(ctx, `INSERT INTO chat_native_contexts(tenant_id,harness,ref_digest,role_id,owner_person_id,project_id)
- VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,harness,ref_digest) DO NOTHING`, p.TenantID, s.Harness, ref, role, s.OwnerPersonID, s.ProjectID); err != nil {
-			return err
-		}
+		return err
 	}
 	return verifyNativeContext(ctx, tx, s, role)
 }

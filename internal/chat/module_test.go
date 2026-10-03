@@ -234,9 +234,7 @@ func TestDurableIdentityAndPrivateRoleHandover(t *testing.T) {
 		t.Fatal("binding history was erased")
 	}
 	// Registration ownership transfer cannot reuse an already tainted context.
-	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, first, f.bob.ID); err != nil {
-		t.Fatal(err)
-	}
+	f.preGuardMutation(t, `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, first, f.bob.ID)
 	expect(t, f.call(f.bob, "POST", "/api/chat-threads/"+bob.ID+"/binding", map[string]string{"expected_epoch": "1", "session_id": first}, ""), 404)
 }
 

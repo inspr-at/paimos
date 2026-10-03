@@ -53,9 +53,7 @@ func (f *fixture) legacyNative(t *testing.T, owner tenant.Principal, project, re
 		sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
 		vendorDigest = sum[:]
 	}
-	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET ref_digest=$2,vendor_ref_digest=$3 WHERE id=$1`, id, refDigest[:], vendorDigest); err != nil {
-		t.Fatal(err)
-	}
+	f.preGuardMutation(t, `UPDATE harness_sessions SET ref_digest=$2,vendor_ref_digest=$3 WHERE id=$1`, id, refDigest[:], vendorDigest)
 	return id, lease
 }
 
