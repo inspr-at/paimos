@@ -18,6 +18,60 @@ const panel = (page: Page) => sheet(page).getByRole('complementary', { name: 'Ti
 const row = (page: Page, version: string) => sheet(page).locator(`#release-${version.replaceAll('.', '-')}`)
 const pendingPane = (page: Page) => sheet(page).getByRole('region', { name: 'Changes waiting for the next release', exact: true })
 
+test.describe('coarse-pointer version copy (AEON-635 fix3)', () => {
+  test.use({ hasTouch: true })
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const width of [390, 1024, 1440]) {
+      test(`44px version-copy targets stay within their rows at ${width} ${colorScheme}`, async ({ page, context }) => {
+        await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+        await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+        const { history, errors } = await open(page)
+        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+        if (width === 390) await sheet(page).getByRole('button', { name: 'All releases', exact: true }).click()
+        const first = row(page, history.releases[0]!.version), second = row(page, history.releases[1]!.version)
+        const copy = first.getByRole('button', { name: `Copy version ${history.releases[0]!.version}`, exact: true })
+        await first.scrollIntoViewIfNeeded()
+        // Measure real button rectangles throughout the list. Touch targets
+        // must stay in their own row rather than expand over a neighbour.
+        const geometry = await rows(page).evaluateAll(elements => elements.map(element => {
+          const bounds = element.getBoundingClientRect()
+          const target = element.querySelector<HTMLButtonElement>('.version-copy')!.getBoundingClientRect()
+          return { width: target.width, height: target.height,
+            inside: target.left >= bounds.left && target.right <= bounds.right && target.top >= bounds.top && target.bottom <= bounds.bottom,
+            top: bounds.top, bottom: bounds.bottom }
+        }))
+        expect(geometry.length).toBe(history.releases.length)
+        for (const [index, target] of geometry.entries()) {
+          expect(target.width, `row ${index} touch width`).toBeGreaterThanOrEqual(44)
+          expect(target.height, `row ${index} touch height`).toBeGreaterThanOrEqual(44)
+          expect(target.inside, `row ${index} target stays inside its row`).toBe(true)
+          if (index > 0) expect(target.top, `row ${index} does not overlap its neighbour`).toBeGreaterThanOrEqual(geometry[index - 1]!.bottom)
+        }
+        const selected = await first.getAttribute('aria-selected')
+        await expectStableControls({
+          controls: { ...headerControls(page, width === 390), liveRow: first, neighbouringRow: second, copy },
+          scrollAreas: { sheet: sheet(page), list: sheet(page).locator('.list-pane') },
+          interactions: [
+            { name: 'tap version copy', run: async () => {
+              await copy.tap()
+              await expect(copy).toHaveAttribute('data-copy-state', 'copied')
+              expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.releases[0]!.version)
+              await expect(first).toHaveAttribute('aria-selected', selected!)
+            } },
+            { name: 'German rows', run: async () => {
+              await radio(page, 'DE').click()
+              await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
+            } },
+          ],
+        })
+        await shot(page, width, colorScheme, 'fix3-touch-list-de')
+        expect(errors).toEqual([])
+      })
+    }
+  }
+})
+
 function data() {
   const history = presentedHistory(NOW) as ReleaseHistory
   history.releases = history.releases.filter(r => r.state === 'published')

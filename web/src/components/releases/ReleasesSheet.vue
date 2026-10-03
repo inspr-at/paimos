@@ -772,7 +772,9 @@ const KINDS = [
 .rail-name > .lang-badge { justify-self:end; }
 .row-foot { display:flex; justify-content:flex-end; margin-top:4px; }
 .row-version { font-size:11.5px; color:var(--ink-3); }
-.row-version :deep(.version-copy) { gap:4px; padding:0; margin:0; min-height:24px; }
+.row-version :deep(.version-copy) { gap:4px; padding:0; margin:0; }
+/* Compact mouse rows; touch keeps the shared 44px button inside its row. */
+@media (pointer:fine) { .row-version :deep(.version-copy) { min-height:24px; } }
 .row-version :deep(.version-pretty) { font-size:11.5px; }
 .row-chev { align-self:center; opacity:.55; color:var(--ink-3); }
 .row[aria-selected="true"] .row-chev { opacity:1; color:var(--teal-ink); }
