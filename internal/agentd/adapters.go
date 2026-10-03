@@ -89,6 +89,7 @@ func firstNonempty(a, b string) string {
 
 // CodexAdapter speaks the app-server thread and turn protocol.
 type CodexAdapter struct {
+	idleUsage   *codexIdleCapability // Release-owned qualification; never configured by enrollment.
 	quotaIDs    sync.Map
 	IdleTimeout time.Duration // Zero uses the ten-minute clean-turn completion window.
 	Path        string
@@ -317,7 +318,10 @@ type PiAdapter struct {
 	Nodes      map[string]piprobe.Node
 	probeMu    sync.Mutex
 	probes     map[string]piProbeResult
-	probeLocks map[string]*sync.Mutex
+	probeLocks map[string]chan struct{}
+	// In a supervised daemon only the durable capacity scheduler owns /key.
+	// Health and launch qualification inspect the local profile and launcher.
+	capacityManaged bool
 }
 
 type piProbeResult struct {
