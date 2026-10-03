@@ -612,9 +612,14 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				return err
 			}
+			recurrences, err := loadNodeRecurrences(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
 				page.Items[i].Queued = queued[page.Items[i].ID]
+				page.Items[i].Recurrence = recurrences[page.Items[i].ID]
 			}
 			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money, q.planPlanner)
 			if err != nil {

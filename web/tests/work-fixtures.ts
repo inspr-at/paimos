@@ -20,6 +20,7 @@ const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 export interface MockNode {
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
+  recurrence?: import('../src/lib/api').NodeRecurrence
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
   estimate?: import('../src/lib/estimates').TicketEstimate
@@ -173,6 +174,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
     // The server always states finished on an estimate; false unless a spec sets it.
     ...(node.eta ? { eta: { finished: false, ...node.eta } } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(node.recurrence ? { recurrence: node.recurrence } : {}),
     ...(node.planning ? { planning: usage ? node.planning : { ...node.planning, cost: undefined } } : {}),
     ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
