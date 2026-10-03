@@ -217,7 +217,7 @@ export interface ListQuery {
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
-  q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  q?: string; hide_closed?: boolean; hide_states?: string[]; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
   work_state?: string[]; work_bucket?: WorkCountBucket[]
   // Only these nodes (at most 200), every other filter still applied (AEON-326).
   ids?: string[]

@@ -12,10 +12,16 @@ import DisplayPanel from './DisplayPanel.vue'
 import FacetMenu from './FacetMenu.vue'
 import FilterMenu from './FilterMenu.vue'
 import FloatingPanel from './FloatingPanel.vue'
+import { hiddenStates, hideLabel, type HideState } from '../../lib/hideStates'
+import type { ProjectSummary } from '../../lib/api'
+import { statusMeta } from '../../lib/work'
+import HideLabel from './HideLabel.vue'
+import HideOptions from './HideOptions.vue'
 import type { ColumnId } from '../../lib/columns'
 
 const props = defineProps<{
   filters: ListFilters
+  summary?: ProjectSummary | null
   options: (dimension: Dimension) => FacetOption[]
   // The words for a selected value (an epic's title, a person's name).
   label: (dimension: Dimension, value: string) => string
@@ -39,6 +45,7 @@ const emit = defineEmits<{
   clear: [dimension: Dimension]
   clearAll: []
   showClosed: [value: boolean]
+  hideStates: [states: HideState[]]
   group: [value: GroupBy]
   sort: [keys: SortKey[]]
   density: [value: 'comfortable' | 'compact']
@@ -72,6 +79,10 @@ const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
 const dateAnchor = ref<HTMLElement | null>(null)
 const menuAnchor = ref<HTMLElement | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
+const hideAnchor = ref<HTMLElement | null>(null)
+const hideName = computed(() => hideLabel(props.filters.hideStates))
+const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
+function closeHide(restore: boolean) { const anchor = hideAnchor.value; hideAnchor.value = null; if (restore) anchor?.focus() }
 let timer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
 watch(draft, value => {
@@ -105,7 +116,7 @@ const filterCount = computed(() => active.value.reduce((sum, key) => sum + props
 const activeFilterCount = computed(() => active.value.length + (!graph.value && presented.value.date ? 1 : 0))
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
 const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
-watch(() => props.view, () => { open.value = null; menuAnchor.value = null; dateAnchor.value = null; displayAnchor.value = null })
+watch(() => props.view, () => { open.value = null; menuAnchor.value = null; dateAnchor.value = null; displayAnchor.value = null; hideAnchor.value = null })
 const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
 
 function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
@@ -216,14 +227,17 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     <Teleport defer :to="settingsTarget ?? 'body'" :disabled="!settingsTarget">
     <div class="view-settings">
-    <label class="switch closed-switch">
-      <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
-      <span>Hide closed</span>
+    <div class="hide-control">
+    <label class="switch closed-switch" :data-tip="hideNames">
+      <input type="checkbox" :aria-label="hideName === 'Hide' ? `Hide ${hideNames}` : hideName" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
+      <HideLabel :states="filters.hideStates" />
     </label>
     <button
-      type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
-      :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
-    ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
+      type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" :aria-label="`${hideName === 'Hide' ? `Hide ${hideNames}` : hideName} tickets`"
+      :data-tip="`${hideNames}: ${filters.showClosed ? 'shown' : 'hidden'}`" @click="emit('showClosed', !filters.showClosed)"
+    ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" /><HideLabel :states="filters.hideStates" /></button>
+    <button type="button" class="hide-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" :aria-expanded="!!hideAnchor" @click="hideAnchor = hideAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon name="gear" :size="14" /></button>
+    </div>
     <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
@@ -247,6 +261,9 @@ defineExpose({ focusSearch, openFilterMenu, input })
     />
     <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
     <DateMenu v-if="dateAnchor" :anchor="dateAnchor" :value="filters.date" @change="value => emit('date', value)" @close="closeDate" />
+    <FloatingPanel v-if="hideAnchor" :anchor="hideAnchor" :width="288" align="end" label="What Hide hides" cycle @close="closeHide">
+      <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
+    </FloatingPanel>
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
       <DisplayPanel
         :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
@@ -356,6 +373,11 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .count-live .count { min-width: 10ch; order: 1; }
 .new-btn { order: 5; flex: none; }
 .filters-btn { order: 4; flex: none; }
+.hide-control { display: inline-flex; align-items: center; gap: 2px; margin-right: 10px; flex: none; }
+.hide-gear { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
+.hide-gear:hover, .hide-gear[aria-expanded="true"] { background: var(--row-hover); color: var(--ink); }
+.hide-gear:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+@media (pointer: coarse) { .hide-gear { width: 44px; height: 44px; } .closed-switch, .closed-pill { min-height: 44px; } }
 .view-settings { display: flex; align-items: center; gap: 10px; flex: none; }
 .phone-break, .date-count { display: none; }
 @media (min-width: 601px) {

@@ -3,6 +3,7 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page, Route } from '@playwright/test'
+import { hideChoice, hiddenStates } from '../src/lib/hideStates'
 import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
@@ -587,7 +588,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
         .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
         .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => query.get('hide_closed') !== 'true' || !['done', 'cancelled', 'archived'].includes(workBucket(n.state)))
+        .filter(n => {
+          if (query.get('hide_closed') !== 'true') return true
+          const choice = hideChoice(n.state, workBucket(n.state))
+          return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
+        })
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {

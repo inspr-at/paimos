@@ -7,6 +7,7 @@
 // Filter values may carry a leading "!" (excluded). Within one filter the plain
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
+import { HIDE_STATES, hiddenStates, parseHiddenStates, type HideState } from './hideStates.ts'
 import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
@@ -37,6 +38,7 @@ export interface ListFilters {
   human_check: string[]
   date: DateFilter | null
   showClosed: boolean
+  hideStates?: HideState[]
   // A temporary status-selection override, distinct from a manual Hide toggle.
   hideRestore?: boolean
   sort: SortKey[]
@@ -139,6 +141,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
+    ...(typeof query.hide_states === 'string' ? { hideStates: parseHiddenStates(query.hide_states) } : {}),
     ...(query.hide_restore === '1' && query.closed === '1' && list(query.status).length ? { hideRestore: true } : {}),
     sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
     group,
@@ -152,6 +155,7 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
   if (filters.q.trim()) out.q = filters.q.trim()
   for (const key of DIMENSION_KEYS) if (filters[key].length) out[key] = filters[key].join(',')
   if (filters.date) out.date = serializeDate(filters.date)
+  if (hiddenStates(filters.hideStates).length !== HIDE_STATES.length) out.hide_states = hiddenStates(filters.hideStates).join(',')
   if (filters.showClosed) out.closed = '1'
   if (filters.showClosed && filters.hideRestore && filters.status.length) out.hide_restore = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
@@ -309,6 +313,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
+    ...(hiddenStates(filters.hideStates).length !== HIDE_STATES.length ? { hide_states: hiddenStates(filters.hideStates) } : {}),
     facets: options.facets,
     sort: serializeSort(effectiveSort(filters)),
     limit: options.limit ?? PAGE_SIZE,

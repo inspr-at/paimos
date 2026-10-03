@@ -13,7 +13,8 @@ import { useOutline } from '../lib/useOutline'
 import { planningPresent } from '../lib/planning'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
 import { useProjectHeader } from '../lib/useProjectHeader'
-import { groupStates, reconcileStatusHide, selectionIsHidden, type HeaderStatusGroup } from '../lib/projectStatusCounts'
+import { selectionHiddenByPolicy, type HideState } from '../lib/hideStates'
+import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../lib/projectStatusCounts'
 import ProjectStatusCounts from '../components/work/ProjectStatusCounts.vue'
 import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
@@ -434,16 +435,17 @@ function modeQuery() {
     ...(ticketKey.value ? ticketSectionQuery() : {}), ...(route.query.panel === 'full' ? { panel: 'full' } : {}) }
 }
 function update(patch: Partial<ListFilters>) {
-  if (patch.status !== undefined) {
-    const nextStatus = patch.status
-    if (!('statusScope' in patch)) patch = { ...patch, statusScope: undefined }
-    const hidden = selectionIsHidden(nextStatus, patch.statusScope, project.value?.status_counts, undefined, project.value?.status_counts_truncated)
+  if (patch.status !== undefined || patch.hideStates !== undefined) {
+    const nextStatus = patch.status ?? filters.value.status
+    if (patch.status !== undefined && !('statusScope' in patch)) patch = { ...patch, statusScope: undefined }
+    const hidden = selectionHiddenByPolicy(nextStatus, patch.statusScope ?? (patch.status === undefined ? filters.value.statusScope : undefined), project.value?.status_counts, patch.hideStates ?? filters.value.hideStates, project.value?.status_counts_truncated)
     const result = reconcileStatusHide(filters.value.showClosed, filters.value.hideRestore ?? false, hidden)
     patch = { ...patch, showClosed: result.showClosed, hideRestore: result.automatic || undefined }
     if (result.note) toast(result.note, { key: 'project-status-hide' })
   }
   void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...modeQuery() } })
 }
+function setHideStates(hideStates: HideState[]) { update({ hideStates }) }
 function manualShowClosed(showClosed: boolean) { update({ showClosed, hideRestore: undefined }) }
 function selectCountGroup(group: HeaderStatusGroup) {
   if (!project.value) return
@@ -456,8 +458,8 @@ function selectCountStatus(state: string) {
 }
 // The temporary override travels with the URL/view, so reload and navigation
 // preserve restoration. There is no per-person or per-project override cache.
-watch(() => [filters.value.status, filters.value.statusScope, filters.value.hideRestore, project.value], () => {
-  if (project.value && filters.value.hideRestore && !selectionIsHidden(filters.value.status, filters.value.statusScope, project.value.status_counts, undefined, project.value.status_counts_truncated)) {
+watch(() => [filters.value.status, filters.value.statusScope, filters.value.hideRestore, filters.value.hideStates, project.value], () => {
+  if (project.value && filters.value.hideRestore && !selectionHiddenByPolicy(filters.value.status, filters.value.statusScope, project.value.status_counts, filters.value.hideStates, project.value.status_counts_truncated)) {
     if (filters.value.showClosed) { update({ showClosed: false, hideRestore: undefined }); toast('Hide is on again.', { key: 'project-status-hide' }) }
   }
 })
@@ -532,7 +534,7 @@ function toggleGroup(key: string) {
 const views = computed(() => viewsOf(projectId.value))
 const activeView = computed(() => filters.value.view ? views.value.items.find(view => view.id === filters.value.view) ?? null : null)
 const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
-const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed)
+const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
 const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
@@ -1658,10 +1660,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
+          ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
-          @show-closed="manualShowClosed" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
+          @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
           :view="viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
@@ -1750,12 +1752,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="ticketsHeader"
         @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
-        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @group="setGroup" @date="setDate"
+        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
       />
       <SaveViewPanel

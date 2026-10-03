@@ -3,7 +3,8 @@
 import { computed, ref, watch } from 'vue'
 import type { ProjectSummary } from '../../lib/api'
 import type { HeaderDensity } from '../../lib/projectHeader'
-import { groupTotal, HEADER_STATUS_GROUPS, statusCount, statusIsHidden, type HeaderStatusGroup } from '../../lib/projectStatusCounts'
+import { groupTotal, HEADER_STATUS_GROUPS, statusCount, type HeaderStatusGroup } from '../../lib/projectStatusCounts'
+import { statusHiddenByPolicy } from '../../lib/hideStates'
 import type { ListFilters } from '../../lib/ticketList'
 import { statusMeta } from '../../lib/work'
 import StatusIcon from './StatusIcon.vue'
@@ -13,7 +14,7 @@ const emit = defineEmits<{ group: [group: HeaderStatusGroup]; status: [state: st
 const unavailable = computed(() => !props.summary.status_counts || props.summary.status_counts_truncated)
 const pressedGroup = (group: HeaderStatusGroup) => props.filters.status.length > 0 && props.filters.statusScope === group.id
 const pressedStatus = (state: string) => props.filters.statusScope === 'canonical' && props.filters.status.length === 1 && props.filters.status[0] === state
-const hidden = (state: string) => !props.filters.showClosed && statusIsHidden(state, props.summary.status_counts)
+const hidden = (state: string) => !props.filters.showClosed && statusHiddenByPolicy(state, props.summary.status_counts, props.filters.hideStates, !!props.summary.status_counts_truncated)
 const number = (count: number) => count.toLocaleString('en-GB')
 // Choose the numeric slots when this project opens, not on every live count.
 // One spare digit accommodates growth without moving controls under the pointer.

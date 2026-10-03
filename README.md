@@ -676,7 +676,17 @@ turns Hide off because an omitted kind category may hide that status; clearing
 the selection restores Hide, and manual toggles still take precedence. Group
 selections retain their exact bucket policy. The additive `work_state` and
 `work_bucket` list parameters share the summary's canonical spellings and
-kind-aware buckets.
+kind-aware buckets. Hide's ghost gear opens “What Hide hides”; phones offer the
+same five choices inside Filters. All five remain the default. The three
+finished choices read “Hide finished”; other subsets show Hide and their status
+icons, with names available on hover and to screen readers. At least one choice
+remains selected; Reset restores all five. Counts use the project summary and
+show unavailable when its detail is missing or partial. Choices travel with the
+URL and saved view even while Hide is off, and the gear and Display stay still.
+The additive `hide_states` list selector applies only with `hide_closed=true`.
+Each kind's bucket wins: Delivered/Accepted retain their names inside Done,
+other Done-bucket statuses use the Done choice, and exit buckets use Cancelled
+or Archived. List, Outline and Graph share this membership policy.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after

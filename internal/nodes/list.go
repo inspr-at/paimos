@@ -389,7 +389,9 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		}
 		for i, state := range out.HideStates {
 			state = normaliseWorkState(state)
-			if state == "canceled" { state = "cancelled" }
+			if state == "canceled" {
+				state = "cancelled"
+			}
 			switch state {
 			case "done", "delivered", "accepted", "cancelled", "archived":
 				out.HideStates[i] = state

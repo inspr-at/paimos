@@ -5,6 +5,11 @@ import { DATE_FIELDS, DATE_PRESETS, DIMENSIONS, type DateField, type DateFilter,
 import type { ColumnId } from '../../lib/columns'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import { plural, type SortKey } from '../../lib/work'
+import type { ProjectSummary } from '../../lib/api'
+import { hiddenStates, hideLabel, type HideState } from '../../lib/hideStates'
+import { statusMeta } from '../../lib/work'
+import HideLabel from './HideLabel.vue'
+import HideOptions from './HideOptions.vue'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
 import DisplayPanel from './DisplayPanel.vue'
@@ -12,16 +17,18 @@ import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
 // Phones and small tablets share every filter and display preference with the toolbar.
 const props = withDefaults(defineProps<{
-  filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
+  summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
   view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean; projectHeader?: boolean
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
 }>(), { view: 'list' })
 const emit = defineEmits<{
-  toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
+  hideStates: [states: HideState[]]; toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
   sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']; columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []; headerGraph: [value: boolean]; expandGroups: []; collapseGroups: []
 }>()
+const hideName = computed(() => hideLabel(props.filters.hideStates))
+const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
 const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
@@ -63,10 +70,11 @@ defineExpose({ open, close })
       <div class="sheet-scroll">
         <div class="sheet-row">
           <label class="switch">
-            <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
-            <span>Hide closed tickets</span>
+            <input type="checkbox" :aria-label="`${hideName === 'Hide' ? `Hide ${hideNames}` : hideName} tickets`" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
+            <HideLabel :states="filters.hideStates" />
           </label>
         </div>
+        <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
         <section v-if="view !== 'graph'" class="sheet-section" aria-labelledby="sheet-display-title">
           <h3 id="sheet-display-title" class="eyebrow">Display</h3>
           <DisplayPanel
