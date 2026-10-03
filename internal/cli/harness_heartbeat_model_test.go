@@ -59,12 +59,12 @@ func TestRunHeartbeatFollowsSessionModel(t *testing.T) {
 						if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 							t.Fatal(err)
 						}
-					case 2:
+					case 3:
 						// Unreadable evidence must not restore the original flags.
 						if err := os.WriteFile(path, []byte("bad JSON\n"), 0600); err != nil {
 							t.Fatal(err)
 						}
-					case 3:
+					case 4:
 						return errOwnerExited
 					}
 					return nil
@@ -74,7 +74,7 @@ func TestRunHeartbeatFollowsSessionModel(t *testing.T) {
 				t.Fatalf("run: %v (%s)", err, stderr.String())
 			}
 			beats := hbWhere(calls, http.MethodPost, "/heartbeat")
-			if len(beats) != 3 {
+			if len(beats) != 4 {
 				t.Fatalf("beats: %d", len(beats))
 			}
 			if beats[0].body["model"] != nil || beats[0].body["reasoning_effort"] != nil {
@@ -83,8 +83,10 @@ func TestRunHeartbeatFollowsSessionModel(t *testing.T) {
 			if beats[1].body["model"] != "claude-opus" || beats[1].body["reasoning_effort"] != "high" {
 				t.Fatal("switch missing", beats[1].body)
 			}
-			if beats[2].body["model"] != nil || beats[2].body["reasoning_effort"] != nil {
-				t.Fatal("bad evidence reverted model", beats[2].body)
+			for _, beat := range beats[2:] {
+				if beat.body["model"] != nil || beat.body["reasoning_effort"] != nil {
+					t.Fatal("unchanged or missing evidence resent identity", beat.body)
+				}
 			}
 			if len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 {
 				t.Fatal("model switch registered a generation")
@@ -135,6 +137,9 @@ func TestHeartbeatModelAcknowledgementAndRestart(t *testing.T) {
 	resumed, ok, err := loadHeartbeatSession(&hold)
 	if err != nil || !ok {
 		t.Fatalf("resume: %v %v", ok, err)
+	}
+	if err := os.WriteFile(path, []byte("invalid JSON\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
 	opts.Model, opts.Effort = "different-start-flag", "max"
 	body = map[string]any{}
@@ -196,5 +201,39 @@ func TestHeartbeatModelLineRejectsUnrelatedAndInvalid(t *testing.T) {
 		if m, e := heartbeatModelLine("codex", []byte(raw), transcriptSessionID); m != "gpt-test" || e != "xhigh" {
 			t.Fatalf("missed %s: %q %q", raw, m, e)
 		}
+	}
+}
+
+func TestHeartbeatModelLegacyStatePreservesServerIdentity(t *testing.T) {
+	opts := heartbeatOptions{Harness: "claude", Model: "stale-start-model", Effort: "low"}
+	s := heartbeatSession{}
+	body := map[string]any{}
+	putHeartbeatModel(context.Background(), opts, &s, body)
+	if len(body) != 0 {
+		t.Fatal("legacy helper restored stale start flags", body)
+	}
+}
+
+func TestHeartbeatModelEffortOnlyAndModelOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := claudeUsagePath(t, dir, "session.jsonl")
+	opts := heartbeatOptions{Harness: "claude", Transcript: path, Model: "stale-start-model", Effort: "low"}
+	s := heartbeatSession{disk: heartbeatDisk{ModelSent: true, SentModel: "claude-opus", SentEffort: "high"}}
+	if err := os.WriteFile(path, []byte(`{"type":"assistant","message":{"model":"claude-opus","reasoning_effort":"max"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{}
+	putHeartbeatModel(context.Background(), opts, &s, body)
+	if len(body) != 1 || body["reasoning_effort"] != "max" {
+		t.Fatal("effort-only change incorrect", body)
+	}
+	acceptHeartbeatModel(&s, body)
+	if err := os.WriteFile(path, []byte(`{"type":"assistant","message":{"model":"claude-sonnet"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	body = map[string]any{}
+	putHeartbeatModel(context.Background(), opts, &s, body)
+	if len(body) != 1 || body["model"] != "claude-sonnet" {
+		t.Fatal("model-only change restored stale effort", body)
 	}
 }

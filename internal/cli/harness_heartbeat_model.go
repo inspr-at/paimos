@@ -16,9 +16,8 @@ import (
 // its identity, so the next beat retries the same change.
 func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSession, body map[string]any) {
 	model, effort := s.disk.SentModel, s.disk.SentEffort
-	if !s.disk.ModelSent {
-		model, effort = heartbeatText(o.Model, 128), heartbeatText(o.Effort, 40)
-	}
+	// Legacy helper state has no accepted identity cache. Only new transcript
+	// evidence may fill it; stale launch flags must not overwrite server data.
 	if s.disk.RequestedModel != "" && o.Model == s.disk.ModelFlagAtRequest && o.Effort == s.disk.EffortFlagAtRequest {
 		model, effort = s.disk.RequestedModel, s.disk.RequestedEffort
 	} else {
