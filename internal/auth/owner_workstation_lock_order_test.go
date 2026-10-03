@@ -50,6 +50,9 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 		f.enable(t)
 	}
 	originalPool := f.m.pool
+	// Read durable effects as the owner, including addressed pairing events.
+	// An anonymous transaction cannot see their audit rows under event RLS.
+	assertCtx := tenant.WithPrincipal(t.Context(), f.owner)
 	if err := db.InTenant(t.Context(), originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
 		proof := sha256.Sum256([]byte(f.deviceProof))
 		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_requests
@@ -71,8 +74,8 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 	count := func(kind string) int {
 		t.Helper()
 		var n int
-		if err := db.InTenant(t.Context(), originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
-			return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type=$1`, kind).Scan(&n)
+		if err := db.InTenant(assertCtx, originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(assertCtx, `SELECT count(*) FROM events WHERE type=$1`, kind).Scan(&n)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -193,11 +196,11 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 	if responses["workstation"].Code != want {
 		t.Fatalf("workstation %s status=%d, want %d", action, responses["workstation"].Code, want)
 	}
-	if err := db.InTenant(t.Context(), originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(assertCtx, originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
 		var marked, revoked, seen bool
 		var state, setup string
 		var roles int
-		if err := tx.QueryRow(t.Context(), `SELECT k.owner_workstation,k.revoked_at IS NOT NULL,c.state,c.setup_state,c.last_seen_at IS NOT NULL
+		if err := tx.QueryRow(assertCtx, `SELECT k.owner_workstation,k.revoked_at IS NOT NULL,c.state,c.setup_state,c.last_seen_at IS NOT NULL
  FROM agent_keys k JOIN agent_pairing_computers c ON c.id=$2 WHERE k.id=$1`, f.key.ID, f.computer).Scan(&marked, &revoked, &state, &setup, &seen); err != nil {
 			return err
 		}
@@ -208,7 +211,7 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 		} else if revoked || state != "connected" || setup != "login_required" || !seen || marked != (action != "unmark") {
 			t.Error("lifecycle report or workstation designation did not persist")
 		}
-		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM roles WHERE name='Concurrent workstation role'`).Scan(&roles); err != nil {
+		if err := tx.QueryRow(assertCtx, `SELECT count(*) FROM roles WHERE name='Concurrent workstation role'`).Scan(&roles); err != nil {
 			return err
 		}
 		wantRoles := 0
