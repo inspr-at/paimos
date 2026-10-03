@@ -139,6 +139,8 @@ func TestNativeStoreDatabaseGuardDeniesBypass(t *testing.T) {
 		{"create", `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,$4,'claude','fixture','unmanaged','worker',$5,$6)`, []any{f.alice.TenantID, f.project, f.agent.ID, f.bob.ID, nativeDigest(ref), nativeDigest(uid())}},
 		{"replay_vendor", `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1`, []any{foreign, nativeDigest(ref)}},
 		{"rename_ref", `UPDATE harness_sessions SET ref_digest=$2 WHERE id=$1`, []any{foreign, nativeDigest(ref)}},
+		{"rename_through_observation_encoding", `UPDATE harness_sessions SET ref_digest=$2 WHERE id=$1`, []any{first, []byte(strings.Repeat("0", 64))}},
+		{"malformed_vendor_encoding", `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1`, []any{first, []byte(strings.Repeat("0", 64))}},
 		{"transfer_person", `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, []any{first, f.bob.ID}},
 		{"transfer_project", `UPDATE harness_sessions SET project_id=$2 WHERE id=$1`, []any{first, f.secondProject}},
 		{"rename_harness", `UPDATE harness_sessions SET harness='codex' WHERE id=$1`, []any{first}},

@@ -258,7 +258,17 @@ BEGIN
     -- Attached observation references use 64-byte hex snapshots, not native
     -- session references. They cannot collide with this 32-byte namespace.
     SELECT array_agg(DISTINCT r ORDER BY r) INTO refs FROM unnest(p_refs) r WHERE octet_length(r)=32;
-    IF refs IS NULL THEN RETURN; END IF;
+    IF refs IS NULL THEN
+        IF p_role IS NOT NULL THEN
+            RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+        END IF;
+        RETURN;
+    END IF;
+    -- Never let a native registration escape its graph through an intermediate
+    -- observation/malformed encoding, then return with a fresh unlinked digest.
+    IF EXISTS(SELECT 1 FROM unnest(p_refs) r WHERE r IS NOT NULL AND octet_length(r)<>32) THEN
+        RAISE EXCEPTION 'chat binding unavailable' USING ERRCODE='23514',CONSTRAINT='chat_native_owner';
+    END IF;
     PERFORM id FROM public.tenants WHERE id=p_tenant FOR NO KEY UPDATE NOWAIT;
     PERFORM set_config('aeon.chat_native_store','on',true);
     INSERT INTO public.chat_native_aliases(tenant_id,harness,ref_digest,alias_digest)

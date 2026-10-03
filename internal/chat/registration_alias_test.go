@@ -122,9 +122,9 @@ func TestRegistrationAliasRejectsConflictingHistoryAtomically(t *testing.T) {
 				if source == "vendor" {
 					ref, alias = alias, ref
 				}
-				var sessions, events, claims, afterSessions, afterEvents, afterClaims int
-				const counts = `SELECT (SELECT count(*) FROM harness_sessions),(SELECT count(*) FROM events),(SELECT count(*) FROM chat_native_contexts)`
-				if err := f.d.Admin.QueryRow(t.Context(), counts).Scan(&sessions, &events, &claims); err != nil {
+				var sessions, events, claims, aliases, afterSessions, afterEvents, afterClaims, afterAliases int
+				const counts = `SELECT (SELECT count(*) FROM harness_sessions),(SELECT count(*) FROM events),(SELECT count(*) FROM chat_native_contexts),(SELECT count(*) FROM chat_native_aliases)`
+				if err := f.d.Admin.QueryRow(t.Context(), counts).Scan(&sessions, &events, &claims, &aliases); err != nil {
 					t.Fatal(err)
 				}
 				w := f.replayNative(actor, f.project, ref, "conflict-creation-lease-"+uid(), alias)
@@ -132,8 +132,8 @@ func TestRegistrationAliasRejectsConflictingHistoryAtomically(t *testing.T) {
 				if !strings.Contains(w.Body.String(), "chat binding unavailable") {
 					t.Fatal("creation rejected for a reason other than historical ownership")
 				}
-				if err := f.d.Admin.QueryRow(t.Context(), counts).Scan(&afterSessions, &afterEvents, &afterClaims); err != nil || sessions != afterSessions || events != afterEvents || claims != afterClaims {
-					t.Fatalf("failed creation left partial state: sessions=%d/%d events=%d/%d claims=%d/%d err=%v", sessions, afterSessions, events, afterEvents, claims, afterClaims, err)
+				if err := f.d.Admin.QueryRow(t.Context(), counts).Scan(&afterSessions, &afterEvents, &afterClaims, &afterAliases); err != nil || sessions != afterSessions || events != afterEvents || claims != afterClaims || aliases != afterAliases {
+					t.Fatalf("failed creation left partial state: sessions=%d/%d events=%d/%d claims=%d/%d aliases=%d/%d err=%v", sessions, afterSessions, events, afterEvents, claims, afterClaims, aliases, afterAliases, err)
 				}
 			})
 		}
