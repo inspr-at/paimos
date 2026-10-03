@@ -1,17 +1,25 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { DATE_FIELDS, DATE_PRESETS, DIMENSIONS, GROUPS, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { DATE_FIELDS, DATE_PRESETS, DIMENSIONS, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import type { ColumnId } from '../../lib/columns'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
-import { plural } from '../../lib/work'
+import { plural, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
+import DisplayPanel from './DisplayPanel.vue'
 
-// Phones: every filter in one sheet, and grouping; the same state as the toolbar.
-const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; view?: 'list' | 'outline' | 'graph'; canSave?: boolean }>(), { view: 'list' })
+// Phones and small tablets share every filter and display preference with the toolbar.
+const props = withDefaults(defineProps<{
+  filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
+  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
+}>(), { view: 'list' })
 const emit = defineEmits<{
   toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
+  sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']; columns: [order: ColumnId[], visible: ColumnId[]]
+  columnsReset: []; headerGraph: [value: boolean]; expandGroups: []; collapseGroups: []
 }>()
 const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
 const dialog = ref<HTMLDialogElement>()
@@ -58,18 +66,17 @@ defineExpose({ open, close })
             <span>Hide closed tickets</span>
           </label>
         </div>
-        <div v-if="view === 'outline'" class="sheet-row group-row">
-          <p class="eyebrow">Outline</p>
-          <div class="outline-actions">
-            <button type="button" class="btn" @click="emit('expandAll'); close()"><AppIcon name="expand-all" :size="14" />Expand all</button>
-            <button type="button" class="btn" @click="emit('collapseAll'); close()"><AppIcon name="collapse-all" :size="14" />Collapse all</button>
-          </div>
-        </div>
-        <section v-else-if="view !== 'graph'" class="sheet-section">
-          <p class="eyebrow">Group by</p>
-          <div class="chip-grid" role="radiogroup" aria-label="Group by">
-            <button v-for="option in GROUPS" :key="option.value" type="button" role="radio" class="choice" :aria-checked="filters.group === option.value" @click="emit('group', option.value)">{{ option.label }}</button>
-          </div>
+        <section v-if="view !== 'graph'" class="sheet-section" aria-labelledby="sheet-display-title">
+          <h3 id="sheet-display-title" class="eyebrow">Display</h3>
+          <DisplayPanel
+            sheet :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns"
+            :grouped="view === 'list' && filters.group !== 'none'" :header-graph="headerGraph"
+            @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
+            @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
+            @header-graph="value => emit('headerGraph', value)"
+            @expand-all="emit('expandAll'); close()" @collapse-all="emit('collapseAll'); close()"
+            @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
+          />
         </section>
         <section v-for="dimension in dimensions" :key="dimension.key" class="sheet-section">
           <p class="eyebrow">{{ dimension.title }}</p>
@@ -110,10 +117,9 @@ header .btn { height: 44px; }
 .sheet-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; overscroll-behavior: contain; }
 .sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-row .switch { min-height: 44px; font-size: 14.5px; color: var(--ink); }
-.outline-actions { display: flex; gap: 8px; }
-.outline-actions .btn { height: 40px; }
 .sheet-section { padding: 14px 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-section .eyebrow { padding: 0 8px 8px; }
+.sheet-section :deep(.facet-options) { grid-template-columns: minmax(0, 1fr); }
 .sheet-section :deep(.facet-option) { min-height: 44px; }
 .sheet-section :deep(.facet-main) { font-size: 15px; }
 .chip-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px; }
