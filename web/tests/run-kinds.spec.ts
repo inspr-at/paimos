@@ -116,9 +116,9 @@ test('execution kinds and person-specific host names on the real agents table', 
     expect(await workerHost.locator('.host-name').evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis')).toBe(true)
 
     const shots = process.env.AEON_657_SHOTS
-    if (shots) {
-      mkdirSync(shots, { recursive: true })
-      for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+    if (shots) mkdirSync(shots, { recursive: true })
+    for (const theme of ['light', 'dark'] as const) for (const width of [390, 768, 1024, 1440]) {
+      await test.step(`${width}px ${theme}: host and execution layout`, async () => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
         await page.emulateMedia({ colorScheme: theme })
         await page.mouse.move(0, 0)
@@ -126,25 +126,53 @@ test('execution kinds and person-specific host names on the real agents table', 
         await expect(workerHost).toBeVisible()
         const responsiveBadge = await workerHost.boundingBox()
         const responsiveCell = await page.locator(`[data-row="s:${ai.id}"] .c-host`).boundingBox()
-        expect(responsiveBadge!.x + responsiveBadge!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
+        expect.soft(responsiveBadge!.x + responsiveBadge!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
         const responsivePencil = await page.locator(`[data-row="s:${ai.id}"] .host-pencil`).boundingBox()
-        expect(responsivePencil!.x + responsivePencil!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
-        if (width === 390) {
-          expect(responsiveBadge!.width).toBeLessThanOrEqual(104)
+        expect.soft(responsivePencil!.x + responsivePencil!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
+        const leadName = page.locator(`[data-row="s:${lead.id}"] .host-name`)
+        await expect(leadName).toHaveText('mbp2607')
+        const leadNameSize = await leadName.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+        expect.soft(leadNameSize.scroll, `${width}px: short host name stays fully visible`).toBeLessThanOrEqual(leadNameSize.client)
+        if (width <= 768) {
+          expect.soft(responsiveBadge!.width, 'compact cap follows the sessions container').toBeLessThanOrEqual(104)
           for (const child of [ai, xai, media, terminal]) {
             const row = page.locator(`[data-row="s:${child.id}"]`)
             const copy = row.locator('.exec-copy')
             const copySize = await copy.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
-            expect(copySize.scrollWidth).toBeLessThanOrEqual(copySize.clientWidth)
-            if (child.model) expect(await row.locator('.exec-model').evaluate(el => el.clientWidth)).toBeGreaterThan(0)
+            expect.soft(copySize.scrollWidth, `${child.display_label}: execution copy does not overflow`).toBeLessThanOrEqual(copySize.clientWidth)
             const harnessBox = await row.locator('.exec-harness').boundingBox()
             const badgeBox = await row.locator('.host-badge').boundingBox()
-            expect(harnessBox!.x + harnessBox!.width).toBeLessThanOrEqual(badgeBox!.x + 0.5)
+            expect.soft(harnessBox!.x + harnessBox!.width, `${child.display_label}: execution stays before host`).toBeLessThanOrEqual(badgeBox!.x + 0.5)
           }
         }
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
-        await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
-      }
+        // The existing 132px phone reservation can hide model text at 390px.
+        // At tablet/desktop sizes, require room for a real glyph: the generated
+        // separator alone must never satisfy this guard.
+        for (const child of [ai, xai]) {
+          const model = page.locator(`[data-row="s:${child.id}"] .exec-model`)
+          await expect(model).toContainText(child.model)
+          await expect(model).toHaveAttribute('title', /fixture/)
+          expect.soft(await model.evaluate(el => el.clientWidth), 'model slot has positive width').toBeGreaterThan(0)
+          if (width > 390) {
+            const glyph = await model.evaluate(el => {
+              const text = el.firstChild!
+              const range = document.createRange()
+              range.setStart(text, 0)
+              range.setEnd(text, 1)
+              const glyph = range.getBoundingClientRect(), box = el.getBoundingClientRect()
+              const canvas = document.createElement('canvas')
+              const context = canvas.getContext('2d')!
+              context.font = getComputedStyle(el).font
+              const ellipsis = el.scrollWidth > el.clientWidth ? context.measureText('…').width : 0
+              return { width: glyph.width, required: glyph.width + ellipsis, available: box.right - glyph.left }
+            })
+            expect.soft(glyph.width, 'model fixture has a measurable first character').toBeGreaterThan(0)
+            expect.soft(glyph.available, `${width}px ${child.display_label}: a whole model character fits after the separator and before any ellipsis`).toBeGreaterThanOrEqual(glyph.required)
+          }
+        }
+        expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+        if (shots) await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
+      })
     }
 
     await workerHost.click()
