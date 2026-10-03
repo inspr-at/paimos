@@ -34,6 +34,8 @@ var nodeChangeTypes = map[string]bool{
 	"status_autopilot.changed": true, "status_autopilot.undone": true,
 	"node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
 	"node.project_moved": true, "node.deleted": true, "node.bulk_changed": true,
+	"knowledge.created": true, "knowledge.updated": true, "knowledge.deleted": true,
+	"knowledge.learning_accepted": true, "knowledge.learning_dismissed": true, "knowledge.learning_drafted": true,
 }
 
 // The node attributes a change names, in this order; custom fields follow
@@ -163,6 +165,13 @@ func summarizeNodeChanges(e Event) []NodeChange {
 		out = append(out, c)
 	}
 	switch e.Type {
+	case "knowledge.learning_dismissed", "knowledge.learning_drafted":
+		// These audit snapshots (including Undo's reopened decision) do not
+		// mutate the source node. Resolve its project under the reader's RLS
+		// below rather than trusting the project named in an audit snapshot.
+		if e.NodeID != nil {
+			out = append(out, NodeChange{ID: *e.NodeID, Change: "updated", Fields: []string{"learning"}})
+		}
 	case "node.project_moved":
 		add(objectOf(objectOf(e.Before)["node"]), objectOf(objectOf(e.After)["node"]), "project_id")
 	case "node.bulk_changed":

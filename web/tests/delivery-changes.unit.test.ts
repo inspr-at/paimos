@@ -14,11 +14,48 @@ function setup() {
 describe('exact own receipts and held changes', () => {
   it('deduplicates an echo before or after commit, while same-actor other actions stay held', () => {
     const h = setup(), identity = h.live.actions.begin()
-    h.live.receive(event(7)); h.live.receive(event(8)); expect(h.live.pending.value).toBe(2)
+    h.live.receive(event(7)); h.live.receive(event(8)); expect(h.live.pending.value).toBe(0)
     expect(h.live.actions.commit(identity, { kind: 'placement', result: move() })).toBe(true)
     expect(h.live.pending.value).toBe(1); expect(h.changes).toHaveLength(1)
     h.live.receive(event(7)); expect(h.live.pending.value).toBe(1)
     h.live.apply(); expect(h.live.pending.value).toBe(0); expect(h.apply).toHaveBeenCalledOnce(); h.scope.stop()
+  })
+  it('subscribes to Knowledge deletion, archive, learning and Undo events through the stream', () => {
+    const listeners = new Map<string, (e: MessageEvent) => void>(), scope = effectScope(), applied = vi.fn()
+    const live = scope.run(() => useDeliveryChanges(ref('project'), ref('person'), { open: () => ({ addEventListener: (type, listener) => { listeners.set(type, listener) }, close: vi.fn(), onerror: null }), applied }))!
+    const types = ['knowledge.deleted', 'knowledge.updated', 'knowledge.created', 'knowledge.learning_accepted', 'knowledge.learning_dismissed', 'knowledge.learning_drafted']
+    for (const [index, type] of types.entries()) {
+      expect(listeners.has(type), type).toBe(true)
+      listeners.get(type)!({ data: JSON.stringify({ id: index + 1, type, node_id: 'note', undo_of: index === 2 ? 1 : null, node_changes: [{ id: 'note', project_id: 'project', change: index === 0 ? 'deleted' : index === 2 ? 'created' : 'updated' }] }) } as MessageEvent)
+      expect(live.pending.value).toBe(index + 1)
+      expect(applied).not.toHaveBeenCalled()
+    }
+    listeners.get('knowledge.deleted')!({ data: JSON.stringify({ id: 99, type: 'knowledge.deleted', node_changes: [{ id: 'private-note', project_id: 'other' }] }) } as MessageEvent)
+    expect(live.pending.value).toBe(types.length)
+    live.apply(); expect(applied).toHaveBeenCalledOnce(); expect(live.pending.value).toBe(0); scope.stop()
+  })
+  it('buffers overlapping writes until both exact receipts reconcile and releases foreign changes after refusal', () => {
+    const h = setup(), first = h.live.actions.begin(), second = h.live.actions.begin()
+    h.live.receive(event(7)); h.live.receive(event(8)); h.live.receive(event(9))
+    expect(h.live.pending.value).toBe(0)
+    h.live.actions.commit(first, { kind: 'placement', result: move(7) })
+    expect(h.live.pending.value).toBe(0)
+    h.live.actions.commit(second, { kind: 'placement', result: move(8) })
+    expect(h.live.pending.value).toBe(1)
+    const refused = h.live.actions.begin(); h.live.receive(event(10))
+    expect(h.live.pending.value).toBe(1)
+    h.live.actions.failed(refused); expect(h.live.pending.value).toBe(2); h.scope.stop()
+  })
+  it('buffers an Undo echo before its response and retains unrelated foreign events', async () => {
+    const h = setup(); h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move(17) })
+    let finish!: (response: Response) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const undo = h.live.undoLast()
+    h.live.receive(event(21)); h.live.receive(event(22))
+    expect(h.live.pending.value).toBe(0)
+    finish(new Response(JSON.stringify({ id: 21, undo_of: 17, type: 'ships_in.changed', after: { members: move().items } }), { status: 201 }))
+    await undo
+    expect(h.live.pending.value).toBe(1); expect(h.live.undo.value).toBeNull(); h.scope.stop()
   })
   it('a refusal changes nothing and gives no Undo; a foreign adoption waits for Apply', () => {
     const h = setup(), identity = h.live.actions.begin()

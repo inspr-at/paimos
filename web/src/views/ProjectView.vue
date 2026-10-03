@@ -152,8 +152,16 @@ function deliveryApplied() {
   if (section.value === 'knowledge') { void knowledge.load(); void knowledgeTab.value?.reloadGraph() }
 }
 function deliveryCommitted(change: DeliveryCommit) {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const focusedRow = active?.closest('tr.ticket-row')
+  const captured = deliveryLive.identity.value, capturedSection = section.value
   planningView.value?.committed(change)
   if (change.kind === 'placement') list.committedDelivery(change.result)
+  // Moving a keyed DOM row can blur its button. Restore only that surviving
+  // control in the same view, and never replace focus taken by another control.
+  if (change.kind === 'placement' && active && focusedRow) void nextTick(() => {
+    if (captured === deliveryLive.identity.value && capturedSection === section.value && active.isConnected && active.closest('tr.ticket-row') === focusedRow && document.activeElement === document.body) active.focus({ preventScroll: true })
+  })
 }
 const deliveryLive = useDeliveryChanges(projectId, scopeOwner, { context: () => projectScope.value, applied: deliveryApplied, committed: deliveryCommitted })
 provide(DELIVERY_ACTIONS, deliveryLive.actions)

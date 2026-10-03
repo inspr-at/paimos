@@ -17079,7 +17079,7 @@ components:
           format: int64
         node_changes:
           type: array
-          description: Set on node.* events when read (history and stream), never stored. The nodes the event changed, for live views; values are read through the node routes.
+          description: Set on node.* and knowledge.* events when read (history and stream), never stored. Project identities are resolved under the reader's permissions. Knowledge learning decisions name their source node with a null revision and the learning field; values are read through the resource routes.
           items:
             $ref: '#/components/schemas/NodeChange'
     NodeChange:
@@ -17100,13 +17100,13 @@ components:
           description: A restored node reads as created
         fields:
           type: array
-          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created.'
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move), learning (a Knowledge learning decision) and fields.<name> for custom fields. Empty for created.'
           items:
             type: string
         revision:
           type: [string, 'null']
           format: date-time
-          description: The node's updated_at after the change, the value If-Unmodified-Since takes
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes; null for a Knowledge learning decision that does not mutate its source node
     EventPage:
       type: object
       required: [items, next_after]
@@ -17299,6 +17299,7 @@ components:
         state: {type: string, enum: [planned, building, frozen, released, abandoned]}
         rank: {type: string, maxLength: 32}
         revision: {type: integer, minimum: 1}
+        undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed release.reranked event for this action; null on reads or non-undoable actions. Never inferred from latest event."}
         sequence: {type: integer, minimum: 1}
         recovery:
           type: object

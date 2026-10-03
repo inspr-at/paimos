@@ -16,7 +16,8 @@ export interface DeliveryActions {
   failed(identity: string): void
 }
 export const DELIVERY_ACTIONS: InjectionKey<DeliveryActions> = Symbol('delivery-actions')
-export const DELIVERY_EVENTS = ['ships_in.changed', 'release.reranked', 'release.state_changed', 'project.delivery_adopted', 'project.delivery_changed', 'project.adopted', 'release.planned', 'release.updated', 'release.frozen', 'release.cut', 'release.published', 'release.closed', 'release.abandoned', 'delivery.adopted', ...NODE_EVENTS, 'relation.created', 'relation.deleted', 'relation.undone', ...['registered','bound','heartbeat','yielded','stopped','stop_confirmed','removed','restored','revived','archived','metadata_changed','adopted','handed_over'].map(kind => `harness.${kind}`)]
+const KNOWLEDGE_EVENTS = ['knowledge.created', 'knowledge.updated', 'knowledge.deleted', 'knowledge.learning_accepted', 'knowledge.learning_dismissed', 'knowledge.learning_drafted']
+export const DELIVERY_EVENTS = ['ships_in.changed', 'release.reranked', 'release.state_changed', 'project.delivery_adopted', 'project.delivery_changed', 'project.adopted', 'release.planned', 'release.updated', 'release.frozen', 'release.cut', 'release.published', 'release.closed', 'release.abandoned', 'delivery.adopted', ...NODE_EVENTS, ...KNOWLEDGE_EVENTS, 'relation.created', 'relation.deleted', 'relation.undone', ...['registered','bound','heartbeat','yielded','stopped','stop_confirmed','removed','restored','revived','archived','metadata_changed','adopted','handed_over'].map(kind => `harness.${kind}`)]
 interface ChangeEvent { id: number; type: string; project: string; undoOf?: number }
 interface Source { addEventListener(type: string, listener: (event: MessageEvent) => void): void; close(): void; onerror: (() => void) | null }
 export function parseDeliveryEvent(raw: string, project: string): ChangeEvent | null {
@@ -42,20 +43,32 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
   const pending = ref(0), overflow = ref(false), applied = ref(0), version = ref(0), undoBusy = ref(false), error = ref('')
   const undo = ref<{ id: number; identity: string } | null>(null)
   const identity = computed(() => JSON.stringify([project.value, owner.value, options.context?.()]))
-  const held = new Map<number, ChangeEvent>(), own = new Set<number>()
-  let source: Source | null = null, inFlight = 0, firstOpen = true
+  const held = new Map<number, ChangeEvent>(), buffered = new Map<number, ChangeEvent>(), own = new Set<number>()
+  let source: Source | null = null, inFlight = 0, firstOpen = true, bufferedOverflow = false
   const sync = () => { pending.value = held.size + Number(overflow.value) }
+  function flushBuffered() {
+    if (inFlight || undoBusy.value) return
+    for (const [id, event] of buffered) if (!own.has(id)) held.set(id, event)
+    buffered.clear()
+    overflow.value ||= bufferedOverflow; bufferedOverflow = false
+    sync()
+  }
   function receive(raw: string) {
     if (!project.value) return
     const event = parseDeliveryEvent(raw, project.value)
-    if (!event || own.has(event.id) || held.has(event.id)) return
-    if (held.size >= 500) overflow.value = true
-    else held.set(event.id, event)
+    if (!event || own.has(event.id) || held.has(event.id) || buffered.has(event.id)) return
+    // A stream echo may beat its HTTP receipt. Keep new events unexposed until
+    // every pending write (or Undo) has reconciled its exact committed id.
+    const unresolved = inFlight > 0 || undoBusy.value
+    if (held.size + buffered.size >= 500) {
+      if (unresolved) bufferedOverflow = true
+      else overflow.value = true
+    } else (unresolved ? buffered : held).set(event.id, event)
     sync()
   }
   function reconnect() { if (firstOpen) { firstOpen = false; return }; overflow.value = true; sync() }
   watch(identity, () => {
-    source?.close(); source = null; held.clear(); own.clear(); inFlight = 0; undoBusy.value = false; undo.value = null; error.value = ''; overflow.value = false; sync(); firstOpen = true
+    source?.close(); source = null; held.clear(); buffered.clear(); own.clear(); bufferedOverflow = false; inFlight = 0; undoBusy.value = false; undo.value = null; error.value = ''; overflow.value = false; sync(); firstOpen = true
     if (!project.value || !owner.value) return
     source = options.open ? options.open() : typeof EventSource === 'undefined' ? null : new EventSource('/api/events/stream?after=latest') as unknown as Source
     if (!source) return
@@ -68,7 +81,7 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
   }, { immediate: true, flush: 'sync' })
   function remember(id: number | null) {
     if (!id || !Number.isSafeInteger(id)) return
-    own.add(id); held.delete(id)
+    own.add(id); held.delete(id); buffered.delete(id)
     // Preserve bounded receipts; an old echo is safely held, never auto-applied.
     if (own.size > 500) own.delete(own.values().next().value!)
     sync()
@@ -76,16 +89,17 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
   const actions: DeliveryActions = {
     identity: () => identity.value,
     begin() { inFlight++; return identity.value },
-    failed(captured) { if (captured === identity.value) inFlight = Math.max(0, inFlight - 1) },
+    failed(captured) { if (captured === identity.value) { inFlight = Math.max(0, inFlight - 1); flushBuffered() } },
     commit(captured, change) {
       if (captured !== identity.value) return false
-      inFlight = Math.max(0, inFlight - 1); error.value = ''
+      error.value = ''
       if (change.kind !== 'lifecycle') {
         const result = change.result
         if ('items' in result ? result.items.some(it => it.project_id !== project.value) : result.project_id !== project.value) { error.value = 'The committed action belongs to another project'; return false }
         remember(result.undo_event_id)
         undo.value = result.undo_event_id ? { id: result.undo_event_id, identity: captured } : null
       } else undo.value = null
+      inFlight = Math.max(0, inFlight - 1); flushBuffered()
       options.committed?.(change); version.value++; return true
     },
   }
@@ -109,7 +123,7 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
       else if (body.type === 'release.reranked' && body.after?.release_id) options.committed?.({ kind: 'rank', result: { ...body.after, undo_event_id: null } })
       undo.value = null; version.value++
     } catch (e) { if (receipt.identity === identity.value) error.value = e instanceof Error ? e.message : 'Undo failed' }
-    finally { if (receipt.identity === identity.value) undoBusy.value = false }
+    finally { if (receipt.identity === identity.value) { undoBusy.value = false; flushBuffered() } }
   }
   onScopeDispose(() => source?.close())
   return { identity, actions, pending, overflow, applied, version, undo, undoBusy, error, receive, apply, undoLast }

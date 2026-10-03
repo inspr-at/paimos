@@ -10,6 +10,34 @@ import type { ListPage, ListQuery, ListItem } from '../src/lib/api'
 const release = '11111111-1111-4111-8111-111111111111'
 afterEach(() => { vi.restoreAllMocks(); rowStore.clear() })
 
+for (const sort of ['order', '-order']) it(`repositions own placement and Undo by ${sort}, retaining the page cursor and held foreign row`, async () => {
+  const row = (id: string, rank: string): ListItem => ({ id, key: id, title: id, kind_slug: 'ticket', state: 'open', updated_at: '2026-10-03T12:00:00Z', created_at: '2026-10-01T12:00:00Z', fields: {}, delivery_order: { release_id: release, release_rank: 'V', rank, expedite: false } }) as ListItem
+  const a = row('a', 'B'), b = row('b', 'V'), foreign = row('foreign', 'W')
+  const list = useTicketList(ref('project'), ref(filtersFromQuery({ sort })), { fetchList: async () => ({ items: sort === 'order' ? [a, b, foreign] : [foreign, b, a], next_cursor: 'page-two' }) })
+  await list.load()
+  const original = [...list.rows.value], edge = list.edge.value
+  const receipt = (rank: string) => ({ items: [{ item_id: 'b', project_id: 'project', release_id: release, rank, revision: 2, expedite: false, due_on: null }], release_ranks: { [release]: 'V' }, undo_event_id: 42 })
+  // A newer foreign layout stays held in the store until Apply.
+  rowStore.adopt({ ...foreign, title: 'Foreign change held', updated_at: '2026-10-03T13:00:00Z', delivery_order: { ...foreign.delivery_order!, rank: 'A' } })
+  list.committedDelivery(receipt('A'))
+  expect(list.rows.value.map(it => it.id)).toEqual(sort === 'order' ? ['b', 'a', 'foreign'] : ['foreign', 'a', 'b'])
+  expect(list.rows.value.find(it => it.id === 'foreign')?.title).toBe('foreign')
+  list.committedDelivery({ ...receipt('V'), undo_event_id: null })
+  expect(list.rows.value.map(it => it.id)).toEqual(original.map(it => it.id))
+  expect(list.rows.value.find(it => it.id === 'b')).toBe(original.find(it => it.id === 'b'))
+  expect(list.cursor.value).toBe('page-two'); expect(list.edge.value).toBe(edge)
+})
+
+it('inserts an undone scoped row at its original delivery position', async () => {
+  const rows = ['A', 'V'].map(rank => ({ id: rank, key: rank, title: rank, kind_slug: 'ticket', state: 'open', updated_at: '2026-10-03T12:00:00Z', fields: {}, delivery_order: { release_id: release, release_rank: 'V', rank, expedite: false } }) as ListItem)
+  const list = useTicketList(ref('project'), ref(filtersFromQuery({ ships_in: release, sort: 'order' })), { fetchList: async () => ({ items: rows, next_cursor: null }) })
+  await list.load()
+  list.committedDelivery({ items: [{ item_id: 'A', project_id: 'project', rank: 'V', revision: 2, expedite: false, due_on: null }], undo_event_id: 42 })
+  expect(list.rows.value.map(it => it.id)).toEqual(['V'])
+  list.committedDelivery({ items: [{ item_id: 'A', project_id: 'project', release_id: release, rank: 'A', revision: 3, expedite: false, due_on: null }], release_ranks: { [release]: 'V' }, undo_event_id: null })
+  expect(list.rows.value.map(it => it.id)).toEqual(['A', 'V'])
+})
+
 it('release scope reads do not fan out to a selectable membership facet', async () => {
   const fetchList = vi.fn(async (_query: ListQuery): Promise<ListPage> => ({ items: [], next_cursor: null }))
   const list = useTicketList(ref('project'), ref(filtersFromQuery({ ships_in: release, sort: 'order' })), { fetchList })

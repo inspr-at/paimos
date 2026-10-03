@@ -5,7 +5,7 @@ import type { PlacementReceipt } from './deliveryChanges'
 import { releaseScope } from './releaseScope'
 import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
-import { activeDimensions, apiParams, filtersToQuery, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
+import { activeDimensions, apiParams, compareRows, effectiveSort, filtersToQuery, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { askDoneGate } from './doneGateAsk'
 import { benefitGateError, benefitRetryFields, completionFields, needsBenefitPrompt } from './doneGate'
 import { toast } from './toast'
@@ -361,6 +361,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     // In-flight pages cannot put the old placement back after this own commit.
     generation++; identityGeneration++; loading.value = false; loadingMore.value = false
     const scope = releaseScope(filters.value.ships_in)
+    const compare = compareRows(effectiveSort(filters.value))
     for (const placement of result.items) {
       if (placement.project_id !== projectId.value) continue
       const row = rows.value.find(it => it.id === placement.item_id) ?? deliveryRows.get(placement.item_id)
@@ -371,8 +372,15 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       rowStore.committedDelivery(row.id, order, result.undo_event_id)
       const matches = scope.kind === 'all' || scope.kind === 'backlog' && !placement.release_id || scope.kind === 'release' && placement.release_id === scope.id
       const present = rows.value.some(it => it.id === row.id)
+      // Reposition only the committed row against the displayed layout. Foreign
+      // revisions remain held; the cursor, page edge and row object stay intact.
+      const next = rows.value.filter(it => it.id !== row.id)
+      if (matches) {
+        const at = next.findIndex(it => compare(row, it) < 0)
+        next.splice(at < 0 ? next.length : at, 0, row)
+      }
+      rows.value = next
       if (present === matches) continue
-      rows.value = matches ? [...rows.value, row] : rows.value.filter(it => it.id !== row.id)
       for (const [facet, key] of [['kind', row.kind_slug], ['state', row.state]] as const) {
         const values = facets.value[facet]
         if (values) values[key] = Math.max(0, (values[key] ?? 0) + (matches ? 1 : -1))

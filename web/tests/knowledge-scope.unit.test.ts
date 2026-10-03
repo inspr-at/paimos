@@ -10,6 +10,20 @@ vi.mock('../src/lib/knowledge', async original => ({ ...await original<object>()
 afterEach(() => vi.clearAllMocks())
 const page = (id: string, cursor = ''): KnowledgePage => ({ items: [{ id, type: 'runbook', status: 'active', updated_at: '2026-10-03T12:00:00Z', title: id, slug: id, key: id } as KnowledgeItem], total: 250, next_cursor: cursor, truncated: false, counts: { type: { runbook: 250 }, status: { active: 250 } } })
 const flush = async () => { await nextTick(); await nextTick() }
+it('restores Knowledge after a Tickets round trip with different per-tab filters', async () => {
+  vi.mocked(listKnowledge).mockResolvedValue(page('retained-note'))
+  const scoped = effectScope(), active = ref(true), filters = ref(filtersFromQuery({ type: 'runbook' }))
+  const state = scoped.run(() => useKnowledge(ref('project'), filters, active, ref<ReleaseScope>({ kind: 'backlog' }), ref('person')))!
+  await flush()
+  expect(state.items.value.map(item => item.id)).toEqual(['retained-note'])
+  active.value = false; filters.value = filtersFromQuery({}); await flush()
+  expect(state.items.value).toEqual([])
+  filters.value = filtersFromQuery({ type: 'runbook' }); active.value = true; await flush()
+  expect(listKnowledge).toHaveBeenCalledTimes(2)
+  expect(state.items.value.map(item => item.id)).toEqual(['retained-note'])
+  expect(state.loaded.value).toBe(true); expect(state.loading.value).toBe(false); expect(state.error.value).toBe('')
+  scoped.stop()
+})
 it('scoped reads intersect own filters/counts on 200-row pages and load more explicitly', async () => {
   vi.mocked(listKnowledge).mockResolvedValueOnce(page('first', 'next')).mockResolvedValueOnce(page('second'))
   const scoped = effectScope(), project = ref<string | null>('project'), filters = ref(filtersFromQuery({ status: 'all', type: 'runbook' })), active = ref(true), scope = ref<ReleaseScope>({ kind: 'backlog' })

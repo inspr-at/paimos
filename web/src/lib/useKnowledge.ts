@@ -70,7 +70,7 @@ export function useKnowledge(projectId: Ref<string | null>, filters: Ref<Knowled
   const renderLimited = computed(() => !!cursor.value && items.value.length >= 2000)
   watch([identity, active], ([key, on], before) => {
     clearTimeout(timer); generation++; controller?.abort(); loading.value = false; searching.value = false
-    if (key !== before?.[0]) { items.value = []; loaded.value = false; cursor.value = ''; truncated.value = false; serverTotal.value = 0; serverCounts.value = { type: {}, status: {} }; error.value = '' }
+    if (key !== before?.[0]) { loadedFor = ''; items.value = []; loaded.value = false; cursor.value = ''; truncated.value = false; serverTotal.value = 0; serverCounts.value = { type: {}, status: {} }; error.value = '' }
     if (on && projectId.value && key !== loadedFor) {
       if (filters.value.q.trim()) { searching.value = true; timer = setTimeout(() => void load(), 180) }
       else void load()

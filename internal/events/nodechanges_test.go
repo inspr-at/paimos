@@ -86,3 +86,42 @@ func TestNodeChangesAreOmittedFromOtherEvents(t *testing.T) {
 		t.Fatalf("node_changes on a non-node event: %s", b)
 	}
 }
+
+func TestKnowledgeNodeChangesIncludeArchiveDeletionAndUndo(t *testing.T) {
+	id := changeNode
+	for _, typ := range []string{"knowledge.created", "knowledge.updated", "knowledge.deleted", "knowledge.learning_accepted"} {
+		t.Run(typ, func(t *testing.T) {
+			before, after := nodeSnapshot(""), nodeSnapshot(`"state":"archived"`)
+			want := "updated"
+			if typ == "knowledge.created" {
+				before = nil
+				want = "created"
+			}
+			if typ == "knowledge.deleted" {
+				after = nodeSnapshot(`"deleted_at":"2026-10-04T00:00:00Z"`)
+				want = "deleted"
+			}
+			changes := summarizeNodeChanges(Event{Type: typ, NodeID: &id, Before: before, After: after})
+			if len(changes) != 1 || changes[0].ID != id || changes[0].Change != want {
+				t.Fatalf("missing Knowledge summary: %+v", changes)
+			}
+			if typ == "knowledge.deleted" {
+				undoOf := int64(1)
+				changes = summarizeNodeChanges(Event{Type: typ, NodeID: &id, Before: after, After: before, UndoOf: &undoOf})
+				if len(changes) != 1 || changes[0].Change != "created" {
+					t.Fatalf("missing restore summary: %+v", changes)
+				}
+			}
+		})
+	}
+	for _, typ := range []string{"knowledge.learning_dismissed", "knowledge.learning_drafted"} {
+		t.Run(typ, func(t *testing.T) {
+			for _, after := range []json.RawMessage{json.RawMessage(`{"node_id":"` + id + `","project_id":"untrusted"}`), json.RawMessage(`{"decision":"reopened"}`)} {
+				changes := summarizeNodeChanges(Event{Type: typ, NodeID: &id, After: after})
+				if len(changes) != 1 || changes[0].ID != id || changes[0].ProjectID != nil || changes[0].Change != "updated" || changes[0].Revision != nil {
+					t.Fatalf("learning summary must use the authorized node, not audit project: %+v", changes)
+				}
+			}
+		})
+	}
+}

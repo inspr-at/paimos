@@ -25,7 +25,7 @@ async function setup(page: Page, theme = 'light') {
       for (const source of sources) if (!source.closed) for (const fn of source.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) })
     } })
   })
-  const calls: { path: string; query: URLSearchParams }[] = [], state = { reverse: false, mode: 'releases', graphChanged: false }
+  const calls: { path: string; query: URLSearchParams }[] = [], state = { reverse: false, mode: 'releases', graphChanged: false, noteDeleted: false, noteArchived: false }
   await page.route('**/api/projects/p-pharos/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname, query = url.searchParams
     calls.push({ path, query })
@@ -56,6 +56,8 @@ async function setup(page: Page, theme = 'light') {
     calls.push({ path: url.pathname, query })
     let items = [{ id: 'note-release', title: 'Notiz zur langfristigen Release-Planung', type: 'runbook', kind: 'runbook', status: 'active', state: 'active', slug: 'release-plan', key: 'RUN-1', excerpt: '', link_count: 1, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, created_at: '2026-10-03T12:00:00Z', updated_at: '2026-10-03T12:00:00Z', updated_by: null, imported: false }, { id: 'note-backlog', title: 'Backlog context', type: 'memory', kind: 'memory', status: 'proposed', state: 'proposed', slug: 'backlog-context', key: 'MEM-1', excerpt: '', link_count: 1, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, created_at: '2026-10-03T12:00:00Z', updated_at: '2026-10-03T12:00:00Z', updated_by: null, imported: false }]
     const scope = query.get('ships_in')
+    if (state.noteDeleted) items = items.filter(it => it.id !== 'note-release')
+    if (state.noteArchived) items = items.map(it => it.id === 'note-release' ? { ...it, status: 'archived', state: 'archived' } : it)
     if (scope) items = items.filter(it => it.id === (scope === 'none' ? 'note-backlog' : 'note-release'))
     if (query.get('type')) items = items.filter(it => it.type === query.get('type'))
     if (query.get('status')) items = items.filter(it => query.get('status')!.split(',').includes(it.status))
@@ -127,12 +129,42 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await pick(page, width, 'Backlog'); await expect(page.locator('.k-row')).toHaveCount(1); await expect(page.locator('.k-title')).toHaveText('Backlog context')
     await page.getByRole('tab', { name: 'Tickets', exact: true }).click(); await expect(page).toHaveURL(url => url.pathname.endsWith('/tickets') && url.searchParams.get('ships_in') === 'none')
     await page.goBack(); await expect(page).toHaveURL(url => url.pathname.endsWith('/knowledge') && url.searchParams.get('ships_in') === 'none' && url.searchParams.get('sort') === 'title')
+    await expect(page.locator('.k-title')).toHaveText('Backlog context')
     expect(h.calls.filter(c => c.path === '/api/knowledge' && c.query.has('ships_in')).every(c => c.query.get('limit') === '200')).toBe(true)
     await page.getByRole('tab', { name: 'Releases', exact: true }).click(); await expect(page.locator('.release-name')).toHaveCount(2)
     await page.screenshot({ path: `test-results/aeon-596-p6b/releases-${width}-${theme}.png` })
     expect(h.errors).toEqual([])
   })
 }
+test('foreign Knowledge archive, deletion and Undo remain held until Apply', async ({ page }) => {
+  const h = await setup(page); await page.goto(`/p/PHAROS/knowledge?ships_in=${id}`)
+  const rows = page.locator('.k-row'), count = page.locator('.k-count')
+  const total = page.getByRole('button', { name: /^All knowledge/ }).locator('.k-kind-count')
+  await expect(rows).toHaveCount(1); await expect(count).toContainText('1 entry in')
+  const send = async (event: unknown) => page.evaluate(event => { (window as unknown as { emitDelivery: (event: unknown) => void }).emitDelivery(event) }, event)
+  const changes = [
+    { id: 71, type: 'knowledge.updated', archive: true, deleted: false, undo_of: null, change: 'updated', expected: 0 },
+    { id: 72, type: 'knowledge.updated', archive: false, deleted: false, undo_of: 71, change: 'updated', expected: 1 },
+    { id: 73, type: 'knowledge.deleted', archive: false, deleted: true, undo_of: null, change: 'deleted', expected: 0 },
+    { id: 74, type: 'knowledge.deleted', archive: false, deleted: false, undo_of: 73, change: 'created', expected: 1 },
+  ]
+  let shown = 1
+  for (const change of changes) {
+    h.state.noteArchived = change.archive; h.state.noteDeleted = change.deleted
+    await send({ id: change.id, type: change.type, undo_of: change.undo_of, node_id: 'note-release', node_changes: [{ id: 'note-release', project_id: 'p-pharos', change: change.change }] })
+    const apply = page.getByRole('button', { name: /1 change · Apply/ })
+    await expect(apply).toBeVisible(); await expect(rows).toHaveCount(shown)
+    // Apply occupies the toolbar's count slot by design; the kind rail keeps
+    // the displayed population's total and must not adopt the foreign count.
+    await expect(count).toContainText('1 change · Apply')
+    await expect(total).toHaveText(String(shown))
+    await apply.click(); await expect(rows).toHaveCount(change.expected)
+    await expect(count).toContainText(`${change.expected} ${change.expected === 1 ? 'entry' : 'entries'} in`)
+    await expect(total).toHaveText(String(change.expected))
+    shown = change.expected
+  }
+  expect(h.errors).toEqual([])
+})
 test('release names scope and expand; chevrons only expand; foreign reorder/adoption wait for Apply', async ({ page }) => {
   const h = await setup(page); await page.goto('/p/PHAROS/releases'); const names = page.locator('.release-name')
   await expect(names).toHaveCount(2)

@@ -60,6 +60,29 @@ async function world(page: Page, state = { failFacet: false }, theme: "light" | 
   return queries
 }
 const start = '/p/PHAROS?view=list&type=!epic&closed=1&sort=order'
+test('own placement and Undo reorder Tickets while preserving cursor, selection and row focus', async ({ page }) => {
+  const queries = await world(page)
+  await page.goto(`${start}&ships_in=${releaseA}`)
+  await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12'])
+  await page.keyboard.press('j'); await page.keyboard.press('j')
+  const moved = page.locator('#row-n-2'), selected = moved.getByRole('checkbox', { name: 'Select PHAROS-12' }), copy = moved.getByRole('button', { name: 'Copy PHAROS-12' })
+  await expect(moved).toHaveAttribute('aria-selected', 'true')
+  await selected.check(); await copy.focus()
+  await page.locator('.project-page').evaluate((el, result) => {
+    const instance = (el as unknown as { __vueParentComponent: { provides: Record<symbol, unknown> } }).__vueParentComponent
+    const key = Object.getOwnPropertySymbols(instance.provides).find(key => key.description === 'delivery-actions')!
+    const actions = instance.provides[key] as { begin(): string; commit(identity: string, change: unknown): boolean }
+    if (!actions.commit(actions.begin(), { kind: 'placement', result })) throw new Error('Receipt refused')
+  }, { items: [{ item_id: 'n-2', project_id: 'p-pharos', release_id: releaseA, rank: 'A', revision: 2, expedite: false, due_on: null }], release_ranks: { [releaseA]: 'B' }, undo_event_id: 42 })
+  await expect(keys(page)).toHaveText(['PHAROS-12', 'PHAROS-11'])
+  await expect(copy).toBeFocused(); await expect(selected).toBeChecked(); await expect(moved).toHaveAttribute('aria-selected', 'true')
+  const reads = queries.filter(query => query.get('limit') === '200').length
+  await page.route('**/api/events/42/undo', route => route.fulfill({ status: 201, json: { id: 43, undo_of: 42, type: 'ships_in.changed', after: { members: [{ item_id: 'n-2', project_id: 'p-pharos', release_id: releaseA, rank: 'a', revision: 3, expedite: false, due_on: null }], release_ranks: { [releaseA]: 'B' } } } }))
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12'])
+  await expect(selected).toBeChecked(); await expect(moved).toHaveAttribute('aria-selected', 'true')
+  expect(queries.filter(query => query.get('limit') === '200')).toHaveLength(reads)
+})
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: scope bookmarks, removed facet and stable ordinary controls`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
