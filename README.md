@@ -2573,6 +2573,15 @@ restores exact source bytes after each owner/tuple/digest/replay mutation.
 The local credential-free hook and offer/receipt broker are separate dependent
 packages; this change does not activate delivery or managed controls.
 
+Package validation (2026-10-03): the approved remote `go test -count=1 ./...`
+run passed 123 packages; its only failure was a new unquoted OpenAPI description.
+After correction, the payload, inbox and reporter-contract packages passed.
+The final attachment run passed all 16 tests and killed all 15 security
+mutations at their intended assertions, including an actual durable-body leak
+when the disabled-note guard was removed. Exact source bytes were restored.
+The migration guard passed against `v261003065316.0.0`: 230 unique migration
+numbers, immutable published files, and expand-safe additions 1210–1212.
+
 
 ### Removing ghost sessions (AEON-265)
 
