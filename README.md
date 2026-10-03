@@ -686,7 +686,10 @@ URL and saved view even while Hide is off, and the gear and Display stay still.
 The additive `hide_states` list selector applies only with `hide_closed=true`.
 Each kind's bucket wins: Delivered/Accepted retain their names inside Done,
 other Done-bucket statuses use the Done choice, and exit buckets use Cancelled
-or Archived. List, Outline and Graph share this membership policy.
+or Archived. List, Outline and Graph share this membership policy, including
+the default and Reset. Graph retains closed topology until the list query
+decides membership, so a kind's Open Accepted or Done QA follows its configured
+bucket rather than the graph's spelling-based category.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after

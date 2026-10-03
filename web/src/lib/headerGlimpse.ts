@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Gates for the project-header ticket graph. The glimpse is a decoration:
 // wide screens, motion allowed, enough tickets and at least one link.
-import { hiddenStates, HIDE_STATES } from './hideStates.ts'
 import { listNodes } from './api.ts'
 import { apiParams, hasFilters, type ListFilters } from './ticketList.ts'
 import { fetchTicketGraph, type TicketGraph } from './ticketGraph.ts'
@@ -13,9 +12,11 @@ import { fetchTicketGraph, type TicketGraph } from './ticketGraph.ts'
 // matches. No module or plugin wiring is required; both APIs already exist.
 export async function loadTicketGraphContext(projectId: string, filters: ListFilters, signal: AbortSignal): Promise<{ data: TicketGraph; visible: TicketGraph }> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(20_000)])
-  const customHide = hiddenStates(filters.hideStates).length !== HIDE_STATES.length && !filters.showClosed
-  const data = await fetchTicketGraph(projectId, filters.showClosed || customHide, signal)
-  if ((!hasFilters(filters) && !customHide) || !data.nodes.length) return { data, visible: data }
+  // Graph categories are spelling-based; a kind can put Accepted in Open or
+  // QA in Done. Keep all topology and let the shared list policy decide Hide
+  // membership, including the default five choices and Reset.
+  const data = await fetchTicketGraph(projectId, true, signal)
+  if ((!hasFilters(filters) && filters.showClosed) || !data.nodes.length) return { data, visible: data }
   const remaining = new Set(data.nodes.map(node => node.id)), matches = new Set<string>()
   let cursor: string | undefined
   const seen = new Set<string>()

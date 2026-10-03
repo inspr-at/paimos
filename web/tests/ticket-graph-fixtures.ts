@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
-import { fixtures, mockWork } from './work-fixtures'
+import { fixtures, mockWork, type MockOptions } from './work-fixtures'
 import type { TicketGraph, TicketGraphLink, TicketGraphNode } from '../src/lib/ticketGraph'
 
 const workstreams = [
@@ -31,8 +31,8 @@ export function ticketGraphWorld() {
   for (const link of links) for (const id of [link.source, link.target]) nodes.find(n => n.id === id)!.link_count++
   return { work, graph: { nodes, links, truncated: false } as TicketGraph }
 }
-export async function mockTicketGraph(page: Page, world = ticketGraphWorld()) {
-  await mockWork(page, world.work)
+export async function mockTicketGraph(page: Page, world = ticketGraphWorld(), options: MockOptions = {}) {
+  await mockWork(page, world.work, options)
   const calls: URLSearchParams[] = []
   await page.route('**/api/tickets/graph?*', route => {
     const query = new URL(route.request().url()).searchParams; calls.push(query)

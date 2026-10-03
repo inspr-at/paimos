@@ -121,6 +121,56 @@ test('custom Hide and automatic restoration persist with a saved view and manual
 })
 
 test.describe('shared view membership', () => {
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    test(`default and Reset Graph Hide honour kind categories at ${width}px ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const world = ticketGraphWorld()
+      world.work.preferences.theme = { choice: theme }
+      world.work.preferences['list:display'] = { headerGraph: false }
+      const accepted = world.graph.nodes.find(node => node.status_category === 'done')!
+      const qa = world.graph.nodes.find(node => node.type === 'ticket' && node.status_category === 'open')!
+      accepted.status = 'accepted'; qa.status = 'qa'; qa.status_category = 'doing'
+      world.work.nodes.find(node => node.id === accepted.id)!.state = 'accepted'
+      world.work.nodes.find(node => node.id === qa.id)!.state = 'qa'
+      const { calls } = await mockTicketGraph(page, world, { workBuckets: { ticket: { accepted: 'open', qa: 'done' } } })
+      await page.goto('/p/PHAROS?view=graph')
+      const canvas = page.locator('.ticket-graph-canvas')
+      const membership = async () => {
+        await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/50 tickets · 5 epics/)
+        await expect(canvas).toHaveAttribute('data-ready', 'true')
+        await expect(canvas.locator(`[data-node-id="${accepted.id}"]`)).toHaveCount(1)
+        await expect(canvas.locator(`[data-node-id="${qa.id}"]`)).toHaveCount(0)
+        expect(calls.at(-1)!.get('include_closed')).toBe('true')
+      }
+      await membership()
+      await shot(page, `${width}-${theme}-graph-default`)
+      const panel = await open(page, width)
+      const options = panel.getByRole('region', { name: 'What Hide hides', exact: true })
+      const done = options.getByRole('checkbox', { name: 'Done', exact: true })
+      const reset = options.getByRole('button', { name: 'Reset', exact: true })
+      await expectStableControls({ controls: {
+        done, reset, accepted: options.getByRole('checkbox', { name: 'Accepted', exact: true }),
+        group: options.getByRole('group', { name: 'Finished' }), row: options.locator('.hide-option[data-state="done"]'),
+        ...(width === 390 ? { frame: panel, action: panel.locator('footer button') } : { hide: hide(page), gear: gear(page) }),
+      }, scrollAreas: { body: width === 390 ? panel.locator('.sheet-scroll') : panel }, interactions: [
+        { name: 'include Done-bucket work', run: async () => {
+          await done.uncheck()
+          await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/60 tickets · 5 epics/)
+          await expect(canvas.locator(`[data-node-id="${accepted.id}"]`)).toHaveCount(1)
+          await expect(canvas.locator(`[data-node-id="${qa.id}"]`)).toHaveCount(1)
+        } },
+        { name: 'Reset preserves kind-aware default membership', run: async () => {
+          await reset.click()
+          await expect(page).not.toHaveURL(/hide_states=/)
+          await expect(done).toBeChecked()
+          await membership()
+        } },
+      ] })
+      await close(page, width)
+      await shot(page, `${width}-${theme}-graph-reset`)
+    })
+  }
+
   test('Graph and Outline use the chosen Hide membership', async ({ page }) => {
     const world = ticketGraphWorld()
     const finished = world.graph.nodes.filter(node => node.status_category === 'done')

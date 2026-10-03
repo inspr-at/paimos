@@ -40,6 +40,9 @@ export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'nam
   }
 }
 export interface MockOptions {
+  // Kind-specific status buckets, as configured on the server. Omitted
+  // entries retain the normal spelling-based fallback.
+  workBuckets?: Record<string, Record<string, ReturnType<typeof workBucket>>>
   conflictAlways?: string
   delayChildren?: number
   readOnly?: boolean
@@ -283,6 +286,7 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
+  const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
   await page.route('**/api/**', async arrived => {
     const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
     const held = options.hold?.({ path, method, query })
@@ -541,7 +545,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0, archived: 0 }
         const statusCounts = new Map<string, { state: string; bucket: ReturnType<typeof workBucket>; count: number }>()
         for (const node of work) {
-          const bucket = workBucket(node.state)
+          const bucket = bucketOf(node)
           tally[bucket]++
           const state = canonicalWorkStatus(node.state)
           const key = `${state}:${bucket}`, previous = statusCounts.get(key)
@@ -578,7 +582,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
-        .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(workBucket(n.state)))
+        .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
         .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
@@ -590,7 +594,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
         .filter(n => {
           if (query.get('hide_closed') !== 'true') return true
-          const choice = hideChoice(n.state, workBucket(n.state))
+          const choice = hideChoice(n.state, bucketOf(n))
           return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
         })
       const sort = (query.get('sort') ?? 'position').split(',')
