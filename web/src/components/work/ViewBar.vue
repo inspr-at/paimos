@@ -81,7 +81,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
   <nav class="view-bar" aria-label="Saved views">
     <div ref="strip" class="strip" :class="{ 'fade-start': edges.start, 'fade-end': edges.end }" @scroll.passive="measure">
       <a class="view-tab plain" :href="hrefFor(null)" :aria-current="activeId ? undefined : 'page'" @click="click($event, null)">
-        <AppIcon name="list" :size="13" class="lead" /><span class="name">All tickets</span>
+        <AppIcon name="list" :size="13" class="lead" /><span v-clip-tip class="name">All tickets</span>
       </a>
       <span v-for="view in views" :key="view.id" class="tab" :class="{ active: view.id === activeId }">
         <a
@@ -90,7 +90,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
           @click="click($event, view.id)" @contextmenu.prevent="openMenu(view, $event.currentTarget as HTMLElement)"
         >
           <AppIcon v-if="view.id === defaultId" name="star" :size="12" class="lead star" />
-          <span class="name">{{ view.name }}</span>
+          <span v-clip-tip class="name">{{ view.name }}</span>
           <AppIcon v-if="view.shared" name="users" :size="12" class="shared" />
           <span :style="{ visibility: view.id === activeId && dirty ? 'visible' : 'hidden' }" class="dirty" role="img" aria-label="changed since saved" />
         </a>

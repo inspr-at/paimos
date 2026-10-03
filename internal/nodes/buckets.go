@@ -22,6 +22,13 @@ func workStateNormSQL(expr string) string {
 	return `regexp_replace(lower(btrim(` + expr + `)), '[[:space:]-]+', '_', 'g')`
 }
 
+// workStatusSQL identifies the status shown in the header without losing the
+// bucket assigned by the node's own kind. The list's legacy state filter stays exact.
+func workStatusSQL(expr string) string {
+	norm := workStateNormSQL(expr)
+	return `CASE ` + norm + ` WHEN 'active' THEN 'in_progress' WHEN 'inprogress' THEN 'in_progress' WHEN 'canceled' THEN 'cancelled' ELSE ` + norm + ` END`
+}
+
 // workStateCategoryCTE reads a category from each work kind's field_schema.states
 // when those entries carry one. An unknown category is ignored so the fixed
 // mapping still applies. Ticket, task and epic catalogs stay separate.
@@ -81,6 +88,15 @@ func workCountBucketSQL(stateExpr, categoryAlias string) string {
 // Done, cancelled and archived are closed; open and in progress stay visible.
 func workNotClosedSQL(stateExpr, categoryAlias string) string {
 	return workCountBucketSQL(stateExpr, categoryAlias) + ` NOT IN ('done','cancelled','archived')`
+}
+
+// workHideStateSQL splits the done bucket into its three Hide choices. Custom
+// done-bucket states use Done; per-kind bucket overrides still take precedence.
+func workHideStateSQL(stateExpr, categoryAlias string) string {
+	return `CASE ` + workCountBucketSQL(stateExpr, categoryAlias) + `
+		WHEN 'done' THEN CASE ` + workStatusSQL(stateExpr) + `
+			WHEN 'delivered' THEN 'delivered' WHEN 'accepted' THEN 'accepted' ELSE 'done' END
+		WHEN 'cancelled' THEN 'cancelled' WHEN 'archived' THEN 'archived' ELSE '' END`
 }
 
 // workStateKnownSQL is 0 for a workflow state and 1 otherwise. It stays

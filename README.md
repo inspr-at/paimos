@@ -661,6 +661,49 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+The Tickets project header defaults to Compact: project details, sections with
+saved views and Hide/Display, then the toolbar. Comfortable gives the title and
+description more reading room; Collapsed retains the toolbar. The centered
+app-bar switch selects all three on desktop. Phones fold with the project badge
+and chevron, and choose Comfortable/Compact in the Filters sheet's Display
+section. Command+Shift+Period on macOS or Ctrl+Shift+Period elsewhere toggles
+Collapsed and restores the last roomy choice, including while typing. It uses
+the physical Period key; Escape and scrolling do not unfold or fold the header.
+The choice stays on this device, separately for each person and workspace,
+across projects; row height and saved views remain independent. Active filter
+buttons show their values (counts on narrower desktops), with individual remove
+actions and Clear all; their labels, including names arriving asynchronously,
+update after the filter popover closes. The phone fold badge keeps its full
+44 px touch height and an unclipped keyboard focus ring. Open, doing and done
+counts filter by the server's work buckets; clicking again clears the choice.
+Comfortable adds the eleven status counts in four groups (Open, Doing, Done,
+Closed); phones retain the three group buttons. Status clicks include legacy
+spellings. Selecting a status hidden by Hide temporarily shows closed work and
+announces why; clearing it or choosing visible statuses restores Hide. A manual
+Hide toggle takes precedence. These selections and automatic Hide restoration
+survive URL links and saved views. The project summary carries bounded
+`status_counts` and their buckets;
+missing or truncated detail is labelled unavailable or partial, while group
+totals remain exact. With partial detail, a single-status selection temporarily
+turns Hide off because an omitted kind category may hide that status; clearing
+the selection restores Hide, and manual toggles still take precedence. Group
+selections retain their exact bucket policy. The additive `work_state` and
+`work_bucket` list parameters share the summary's canonical spellings and
+kind-aware buckets. Hide's ghost gear opens “What Hide hides”; phones offer the
+same five choices inside Filters. All five remain the default. The three
+finished choices read “Hide finished”; other subsets show Hide and their status
+icons, with names available on hover and to screen readers. At least one choice
+remains selected; Reset restores all five. Counts use the project summary and
+show unavailable when its detail is missing or partial. Choices travel with the
+URL and saved view even while Hide is off, and the gear and Display stay still.
+The additive `hide_states` list selector applies only with `hide_closed=true`.
+Each kind's bucket wins: Delivered/Accepted retain their names inside Done,
+other Done-bucket statuses use the Done choice, and exit buckets use Cancelled
+or Archived. List, Outline and Graph share this membership policy, including
+the default and Reset. Graph retains closed topology until the list query
+decides membership, so a kind's Open Accepted or Done QA follows its configured
+bucket rather than the graph's spelling-based category.
+
 Model estimates learn from completed-ticket outcomes, actual session profiles and
 frozen work placements. Fully reported worker runs with measured active time feed
 the newest 30 samples per model version, effort, kind and complexity bucket.
