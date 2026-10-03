@@ -56,6 +56,10 @@
 // members.manage again.
 // Project binding changes append binding.set and binding.removed events on the
 // project node, so they are visible exactly with the project.
+// Project mutation/write fences acquire the tenant with NO KEY UPDATE before
+// the tree and resource rows, matching pairing writers' tenant/pairing/tree
+// order. They retain the fence through transactional authorization and commit,
+// while allowing tenant foreign-key checks from other resource writers.
 // Every authorizing route must use Handle or Require with a declared registry
 // permission. RoutePermissions names the permission for every current API
 // pattern, including explicit public paths; RequirePattern denies an unknown
