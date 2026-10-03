@@ -92,7 +92,7 @@ function keys(event: KeyboardEvent) {
 <style scoped>
 .menu-title { padding: 6px 10px 4px; }
 .picker-search { height: 32px; margin: 0 0 6px; font-size: 13px; }
-.picker-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.picker-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; }
 .picker-option { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 4px 10px; border-radius: 8px; color: var(--ink); font-size: 13.5px; cursor: pointer; }
 .picker-option.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .picker-option.disabled { cursor: not-allowed; color: var(--ink-3); }

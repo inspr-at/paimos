@@ -58,7 +58,7 @@ function move(event: KeyboardEvent) {
 <style scoped>
 .find { margin: 2px 2px 6px; }
 .find .field { height: 34px; font-size: 13px; }
-.menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; overflow: auto; }
+.menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .choice { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; font-weight: 600; text-align: left; }
 @media (hover: hover) { .choice:hover { background: var(--row-hover); } }
 .choice:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }

@@ -59,7 +59,7 @@ function move(event: KeyboardEvent) {
 <style scoped>
 .menu-title { padding: 6px 10px 4px; }
 .menu-search { height: 30px; margin: 0 0 6px; font-size: 13px; }
-.menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; overflow: auto; }
+.menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 @media (hover: hover) { .menu-item:hover { background: var(--row-hover); } }
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }

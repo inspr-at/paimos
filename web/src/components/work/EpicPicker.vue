@@ -71,7 +71,7 @@ function keydown(event: KeyboardEvent) {
 <style scoped>
 .menu-title { padding: 6px 10px 4px; }
 .picker-search { height: 32px; margin: 0 0 6px; font-size: 13px; }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 320px; overflow: auto; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .option { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; text-align: left; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .key { flex-shrink: 0; font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }

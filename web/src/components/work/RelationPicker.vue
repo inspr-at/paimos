@@ -207,7 +207,7 @@ let lastChoice = 'relates'
 .refusal { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); font-size: 12.5px; line-height: 1.45; }
 .refusal svg { flex-shrink: 0; margin-top: 2px; }
 .refusal span { color: var(--ink); }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; overflow: auto; transition: opacity .12s ease; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; transition: opacity .12s ease; }
 .options.stale { opacity: .6; }
 .group-label { padding: 4px 8px 2px; }
 .option { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }

@@ -83,7 +83,7 @@ const optionId = (index: number) => `${id}-option-${index}`
 <style scoped>
 .menu-title { padding: 6px 10px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-search { height: 34px; margin: 0 0 6px; font-size: 13.5px; }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 320px; overflow: auto; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .option.off { color: var(--ink-2); cursor: default; }

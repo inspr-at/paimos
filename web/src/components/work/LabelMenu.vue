@@ -95,7 +95,7 @@ function keydown(event: KeyboardEvent) {
 .label-menu { display: grid; gap: 6px; padding: 2px 2px 4px; }
 .label-menu .eyebrow { padding: 4px 8px 0; }
 .label-search { height: 30px; font-size: 13px; }
-.options { display: grid; gap: 1px; max-height: 300px; overflow: auto; }
+.options { display: grid; gap: 1px; }
 .option { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
@@ -106,7 +106,7 @@ function keydown(event: KeyboardEvent) {
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .on { font-size: 11px; color: var(--ink-3); }
 .none { padding: 8px 10px; font-size: 12.5px; color: var(--ink-3); }
-.foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; padding: 8px 6px 0; border-top: 1px solid var(--line); }
+.foot { position: sticky; bottom: -6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; padding: 8px 6px 6px; border-top: 1px solid var(--line); background: var(--surface-raised); }
 .summary { font-size: 12px; color: var(--ink-2); }
 .foot .btn { gap: 6px; }
 .tag-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }

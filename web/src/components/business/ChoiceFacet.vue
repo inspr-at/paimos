@@ -66,7 +66,7 @@ function keys(event: KeyboardEvent) {
 .clear { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .clear:hover { background: var(--row-selected); }
 .facet-search { height: 30px; margin: 0 0 6px; font-size: 13px; }
-.options { display: grid; gap: 1px; max-height: 300px; overflow: auto; }
+.options { display: grid; gap: 1px; }
 .option { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option:focus-within { background: var(--row-selected); }
