@@ -37,7 +37,9 @@ create tickets, run models, schedule work or publish pages.
 
 The tools in `scripts/audit/` use Python 3.10+ and the standard library, Git,
 and Node for the optional renderer smoke check. They run offline, without
-installing packages or invoking analysis tools. Supply locally collected,
+installing packages or invoking analysis tools. The renderer smoke check retains
+its content assertions and a ten-second VM hang guard; it does not assert rendering
+speed on shared runners. Supply locally collected,
 sanitized diagnostics in the shared `T` manifest; never include credentials
 or raw secret scanner output. Tool installation, advisory downloads and
 analysis run separately on the approved build/test runner.
