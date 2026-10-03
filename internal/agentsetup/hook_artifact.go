@@ -3,6 +3,7 @@
 package agentsetup
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"golang.org/x/sys/unix"
 )
 
@@ -25,6 +27,33 @@ var errHookArtifact = errors.New("artifact_untrusted")
 // owning release-signing work supplies its reviewed public key and manifest.
 const hookManifestPublicKey = ""
 const hookAppleRequirement = `anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"`
+
+// The signer proves origin; this separate, compiled release ceiling proves
+// that these exact bytes were reviewed for hook use. A receipt, environment,
+// downloaded checksum or a new release by the same signer cannot extend it.
+type hookRelease struct {
+	VersionScheme, Version, OS, Arch, SHA256 string
+}
+
+func approvedHookReleases() []hookRelease {
+	// No artifact has completed native S2-4/S2-5 qualification. The coordinator
+	// must add exact published digests with that evidence before activation.
+	return nil
+}
+
+func approvedHookRelease(digest, goos, arch string, ceiling []hookRelease) (hookRelease, bool) {
+	for _, r := range ceiling {
+		if r.SHA256 == digest && r.OS == goos && r.Arch == arch && validHookRelease(r) {
+			return r, true
+		}
+	}
+	return hookRelease{}, false
+}
+
+func validHookRelease(r hookRelease) bool {
+	return hashPattern.MatchString(r.SHA256) && releasehistory.CalendarScheme(r.VersionScheme) && releasehistory.ValidVersion(r.Version) &&
+		(r.OS == "darwin" || r.OS == "linux") && (r.Arch == "arm64" || r.Arch == "amd64")
+}
 
 // HookPin is safe public identity metadata for the daemon's loaded-image check.
 // A matching pathname alone is insufficient: compare kernel-observed image
@@ -110,22 +139,52 @@ func checkHookSource(p HookPin) error {
 }
 
 func (p HookPin) MatchesLoadedImage(device, inode uint64) bool {
-	return p.Device == device && p.Inode == inode && p.Check() == nil
+	return p.matchesLoadedImage(context.Background(), device, inode, authenticateHook) == nil
+}
+
+func (p HookPin) matchesLoadedImage(ctx context.Context, device, inode uint64, authenticate func(context.Context, string, string) error) error {
+	if p.Device != device || p.Inode != inode {
+		return errors.New("artifact_changed")
+	}
+	return p.authenticate(ctx, authenticate)
+}
+
+func (p HookPin) authenticate(ctx context.Context, verify func(context.Context, string, string) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer cancel()
+	if err := p.Check(); err != nil {
+		return err
+	}
+	if verify(ctx, p.Path, p.Digest) != nil || ctx.Err() != nil {
+		return errHookArtifact
+	}
+	// Signature verification uses a pathname. Re-observe the pinned bytes and
+	// inode after it returns, so a swap during the external check cannot pass.
+	return p.Check()
 }
 
 func authenticateHook(ctx context.Context, path, digest string) error {
+	return authenticateHookRelease(ctx, path, digest, runtime.GOOS, runtime.GOARCH, approvedHookReleases(), authenticateHookSignature)
+}
+
+func authenticateHookRelease(ctx context.Context, path, digest, goos, arch string, ceiling []hookRelease, verify func(context.Context, string, hookRelease) error) error {
+	release, ok := approvedHookRelease(digest, goos, arch, ceiling)
+	if !ok {
+		return errHookArtifact
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if runtime.GOOS == "darwin" {
-		cmd := exec.CommandContext(ctx, "/usr/bin/codesign", "--verify", "--strict", "--all-architectures", "-R="+hookAppleRequirement, path)
-		cmd.Env = []string{"PATH=/usr/bin:/bin"}
-		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-		if cmd.Run() != nil {
-			return errHookArtifact
-		}
-		return nil
+	if verify(ctx, path, release) != nil || ctx.Err() != nil {
+		return errHookArtifact
 	}
-	if runtime.GOOS != "linux" {
+	return nil
+}
+
+func authenticateHookSignature(ctx context.Context, path string, release hookRelease) error {
+	if release.OS == "darwin" {
+		return verifyHookAppleSignature(ctx, path)
+	}
+	if release.OS != "linux" {
 		return errHookArtifact
 	}
 	key, err := base64.StdEncoding.DecodeString(hookManifestPublicKey)
@@ -141,15 +200,30 @@ func authenticateHook(ctx context.Context, path, digest string) error {
 	if err != nil {
 		return errHookArtifact
 	}
-	return verifyHookManifest(manifest, signature, key, digest, runtime.GOOS, runtime.GOARCH)
+	return verifyHookManifest(manifest, signature, key, release)
 }
 
-func verifyHookManifest(raw, signature, key []byte, digest, goos, arch string) error {
-	if len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, raw, signature) {
+func verifyHookAppleSignature(ctx context.Context, path string) error {
+	cmd := exec.CommandContext(ctx, "/usr/bin/codesign", "--verify", "--strict", "--all-architectures", "-R="+hookAppleRequirement, path)
+	cmd.Env = []string{"PATH=/usr/bin:/bin"}
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	if cmd.Run() != nil {
 		return errHookArtifact
 	}
-	var m struct{ Schema, Artifact, Version, OS, Arch, SHA256 string }
-	if json.Unmarshal(raw, &m) != nil || m.Schema != "aeon.hook-release.v1" || m.Artifact != "aeon-cli" || m.Version == "" || m.OS != goos || m.Arch != arch || m.SHA256 != digest {
+	return nil
+}
+
+func verifyHookManifest(raw, signature, key []byte, release hookRelease) error {
+	if len(raw) > 8192 || len(signature) != ed25519.SignatureSize || len(key) != ed25519.PublicKeySize || !validHookRelease(release) || !ed25519.Verify(key, raw, signature) {
+		return errHookArtifact
+	}
+	var m struct {
+		Schema, Artifact string
+		hookRelease
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if !uniqueHookJSON(raw) || d.Decode(&m) != nil || m.Schema != "aeon.hook-release.v1" || m.Artifact != "aeon-cli" || m.hookRelease != release {
 		return errHookArtifact
 	}
 	return nil
@@ -201,14 +275,36 @@ func pinHook(ctx context.Context, source string, store *Store, authenticate func
 		return HookPin{}, errHookArtifact
 	}
 	path := filepath.Join(store.Path(), name)
+	if runtime.GOOS == "linux" {
+		// Runtime must authenticate independently after installation, including
+		// after the original release directory/profile disappears. Retain the
+		// public signed evidence alongside the copied bytes, never a receipt key.
+		for suffix, max := range map[string]int64{".manifest.json": 8192, ".manifest.sig": 256} {
+			if err := pinHookPublicFile(store, resolved+suffix, name+suffix, max); err != nil {
+				return HookPin{}, errHookArtifact
+			}
+		}
+	}
 	_, pin, err := readHookImage(path)
 	if err != nil || pin.Digest != initial.Digest || checkHookSource(initial) != nil {
 		return HookPin{}, errors.New("artifact_changed")
 	}
-	// Darwin verifies the copied code signature too. Linux's authenticated
-	// manifest already bound these exact bytes; it need not be copied beside it.
-	if runtime.GOOS == "darwin" && authenticate(ctx, path, pin.Digest) != nil {
+	if authenticate(ctx, path, pin.Digest) != nil || checkHookSource(initial) != nil || pin.Check() != nil {
 		return HookPin{}, errHookArtifact
 	}
 	return pin, nil
+}
+
+func pinHookPublicFile(store *Store, source, name string, max int64) error {
+	raw, err := readHookPublicFile(source, max)
+	if err != nil {
+		return errHookArtifact
+	}
+	if err = store.Write(name, raw, true); errors.Is(err, ErrCollision) {
+		existing, e := store.Read(name, max)
+		if e == nil && bytes.Equal(existing, raw) {
+			return nil
+		}
+	}
+	return err
 }

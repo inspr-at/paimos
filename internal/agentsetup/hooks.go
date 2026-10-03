@@ -310,7 +310,12 @@ func (e *Engine) setupHooks(ctx context.Context, s *snapshot, uninstall bool) er
 		if capability.Verified {
 			s.HookHome = home
 		}
-		s.HookCapabilities = append(s.HookCapabilities, capability)
+		// New enrollment kinds must not make the additive hook report invalid
+		// and interrupt ordinary pairing. Only the hook contract's harnesses
+		// participate; unsupported integrations confer no hook capability.
+		if hookcap.Valid(capability) {
+			s.HookCapabilities = append(s.HookCapabilities, capability)
+		}
 	}
 	return e.save(s, false)
 }
@@ -348,10 +353,11 @@ func (e *Engine) removeUserHook(ctx context.Context, s *snapshot, harness string
 	}
 }
 
-// ReadUserHookIdentity gives the future peer-only runtime the public pin and
-// owned configuration digest, without opening pairing tokens/API config. It
-// does not establish harness qualification, launch ancestry or a message grant.
-// Callers must still match the observed loaded image with MatchesLoadedImage.
+// ReadUserHookIdentity independently authenticates the pinned release and
+// returns its public pin and owned configuration digest, without opening
+// pairing tokens/API config. It does not establish harness qualification,
+// launch ancestry or a message grant. Callers must also match the kernel-observed
+// loaded image with MatchesLoadedImage at each exchange.
 func ReadUserHookIdentity(computer, harness, workspace string) (HookPin, string, error) {
 	home, err := hookOwnerHome()
 	if err != nil {
@@ -367,6 +373,10 @@ func ReadUserHookIdentity(computer, harness, workspace string) (HookPin, string,
 }
 
 func readUserHookIdentity(home, computer, harness string) (HookPin, string, error) {
+	return readUserHookIdentityVerified(context.Background(), home, computer, harness, authenticateHook)
+}
+
+func readUserHookIdentityVerified(ctx context.Context, home, computer, harness string, authenticate func(context.Context, string, string) error) (HookPin, string, error) {
 	fail := func() (HookPin, string, error) { return HookPin{}, "", errors.New("repair_required") }
 	if harness != "claude" && harness != "codex" {
 		return fail()
@@ -381,7 +391,7 @@ func readUserHookIdentity(home, computer, harness string) (HookPin, string, erro
 		return fail()
 	}
 	var receipt HookReceipt
-	if !uniqueHookJSON(raw) || json.Unmarshal(raw, &receipt) != nil || receipt.Schema != "aeon.user-hook.v2" || receipt.ComputerID != computer || receipt.Home != home || receipt.Harness != harness || receipt.Pin.Check() != nil {
+	if !uniqueHookJSON(raw) || json.Unmarshal(raw, &receipt) != nil || receipt.Schema != "aeon.user-hook.v2" || receipt.ComputerID != computer || receipt.Home != home || receipt.Harness != harness || receipt.Pin.Path != filepath.Join(store.Path(), "aeon-"+receipt.Pin.Digest) || receipt.Pin.Check() != nil {
 		return fail()
 	}
 	settings, err := openDirectory(filepath.Join(home, "."+harness), false, false)
@@ -402,6 +412,15 @@ func readUserHookIdentity(home, computer, harness string) (HookPin, string, erro
 	expected, err := mergePairedHooks(raw, receipt, receipt.Pin, false)
 	if err != nil || !sameHookJSON(raw, expected) {
 		return fail()
+	}
+	if err := receipt.Pin.authenticate(ctx, authenticate); err != nil {
+		return HookPin{}, "", err
+	}
+	// Verification may invoke the system signer. A settings edit during that
+	// check must invalidate this exchange, just like an executable replacement.
+	current, _, err := settings.readHookSettings(file, 4<<20)
+	if err != nil || !sameHookJSON(raw, current) {
+		return HookPin{}, "", errHookSettings
 	}
 	var groups []json.RawMessage
 	for _, event := range hookEvents {

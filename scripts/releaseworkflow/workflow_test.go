@@ -112,6 +112,43 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	}
 }
 
+func TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly(t *testing.T) {
+	w := readWorkflow(t, "release.yml")
+	dry := readWorkflow(t, "release-image-check.yml")
+	buildAt, build := named(t, w.Jobs["agentd-darwin"], "Build darwin paimos-agentd with LocalAuthentication")
+	signAt, sign := named(t, w.Jobs["agentd-darwin"], "Sign and notarize paimos-agentd")
+	_, rehearsal := named(t, dry.Jobs["agentd-rehearsal"], "Build darwin paimos-agentd with LocalAuthentication")
+	if buildAt >= signAt || build.Run != rehearsal.Run || !reflect.DeepEqual(build.Env, rehearsal.Env) || !strings.Contains(build.Run, "build-release-binaries.sh cli-darwin") {
+		t.Fatal("native rehearsal must build the same CLI and daemon as production")
+	}
+	for _, fragment := range []string{
+		`sign-notarize.sh --identifier aeon-cli "dist/aeon-cli-darwin-${{ matrix.arch }}"`,
+		`codesign --verify --strict -R='anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"'`,
+	} {
+		if !strings.Contains(sign.Run, fragment) {
+			t.Fatal("CLI signing requirement missing")
+		}
+	}
+	for _, j := range []job{w.Jobs["agentd-darwin"], dry.Jobs["agentd-rehearsal"]} {
+		found := false
+		for i, s := range j.Steps {
+			if strings.HasPrefix(s.Uses, "actions/upload-artifact@") {
+				found = true
+				if !strings.Contains(s.With["path"], "dist/aeon-cli-darwin-${{ matrix.arch }}") || (j.Environment == "release-signing" && i <= signAt) {
+					t.Fatal("CLI uploaded before signing or omitted")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("missing native artifact handoff")
+		}
+	}
+	_, assemble := named(t, w.Jobs["assets"], "Build linux paimos-agentd and aeon-cli")
+	if !strings.Contains(assemble.Run, "build-release-binaries.sh cli-linux") || strings.Contains(assemble.Run, "build-release-binaries.sh cli\n") {
+		t.Fatal("assets assembly can overwrite signed Darwin CLI bytes")
+	}
+}
+
 func TestRehearsalEmbedsItsCandidateVersion(t *testing.T) {
 	j := readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"]
 	historyIndex, history := named(t, j, "Release history fixture")

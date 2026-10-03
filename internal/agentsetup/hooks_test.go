@@ -37,6 +37,13 @@ func newHookFixture(t *testing.T) hookFixture {
 	if err := os.WriteFile(f.source, []byte("#!/bin/sh\nexit 0\n"), 0500); err != nil {
 		t.Fatal(err)
 	}
+	// Public Linux evidence is retained with the pin. This fixture verifier
+	// checks its executable digest; native signed-manifest tests run separately.
+	for suffix, raw := range map[string]string{".manifest.json": "public-fixture-manifest", ".manifest.sig": "public-fixture-signature"} {
+		if err := os.WriteFile(f.source+suffix, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.settings = filepath.Join(f.home, ".claude", "settings.json")
 	if err := os.WriteFile(f.settings, []byte(`{"env":{"PRIVATE":"`+hookCanary+`"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"unrelated"}]}]}}`), 0640); err != nil {
 		t.Fatal(err)
@@ -116,14 +123,14 @@ func TestPairedHooksPinIgnoresPATHAndMovingProfile(t *testing.T) {
 	receiptRaw, _ := store.Read("claude.json", 64<<10)
 	var receipt HookReceipt
 	_ = json.Unmarshal(receiptRaw, &receipt)
-	publicPin, configDigest, err := readUserHookIdentity(f.home, testComputer, "claude")
+	publicPin, configDigest, err := readUserHookIdentityVerified(t.Context(), f.home, testComputer, "claude", f.installer.authenticate)
 	if err != nil || publicPin != receipt.Pin || len(configDigest) != 64 {
 		t.Fatal("runtime identity projection unavailable")
 	}
-	if _, _, err = readUserHookIdentity(f.home, "other-computer", "claude"); err == nil {
+	if _, _, err = readUserHookIdentityVerified(t.Context(), f.home, "other-computer", "claude", f.installer.authenticate); err == nil {
 		t.Fatal("another pairing acquired hook identity")
 	}
-	if !receipt.Pin.MatchesLoadedImage(receipt.Pin.Device, receipt.Pin.Inode) || receipt.Pin.MatchesLoadedImage(receipt.Pin.Device, receipt.Pin.Inode+1) {
+	if receipt.Pin.matchesLoadedImage(t.Context(), receipt.Pin.Device, receipt.Pin.Inode, f.installer.authenticate) != nil || receipt.Pin.matchesLoadedImage(t.Context(), receipt.Pin.Device, receipt.Pin.Inode+1, f.installer.authenticate) == nil {
 		t.Fatal("loaded image identity not enforced")
 	}
 	if err := os.Chmod(receipt.Pin.Path, 0700); err != nil {
@@ -187,9 +194,10 @@ func TestPairedHooksRejectChecksumOnlyAndWrongSigner(t *testing.T) {
 	}
 	other, _, _ := ed25519.GenerateKey(rand.Reader)
 	digest := Hash([]byte("artifact"))
-	raw, _ := json.Marshal(map[string]string{"Schema": "aeon.hook-release.v1", "Artifact": "aeon-cli", "Version": "260930000000.0.0", "OS": "linux", "Arch": "arm64", "SHA256": digest})
+	release := hookRelease{VersionScheme: "inspr-calendar-v2", Version: "260930000000.0.0", OS: "linux", Arch: "arm64", SHA256: digest}
+	raw, _ := json.Marshal(map[string]string{"Schema": "aeon.hook-release.v1", "Artifact": "aeon-cli", "VersionScheme": release.VersionScheme, "Version": release.Version, "OS": release.OS, "Arch": release.Arch, "SHA256": digest})
 	sig := ed25519.Sign(private, raw)
-	if verifyHookManifest(raw, sig, pub, digest, "linux", "arm64") != nil {
+	if verifyHookManifest(raw, sig, pub, release) != nil {
 		t.Fatal("valid release rejected")
 	}
 	for _, test := range []struct {
@@ -204,7 +212,9 @@ func TestPairedHooksRejectChecksumOnlyAndWrongSigner(t *testing.T) {
 		{"wrong-arch", sig, pub, digest, "linux", "amd64"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if verifyHookManifest(raw, test.signature, test.key, test.digest, test.goos, test.arch) == nil {
+			want := release
+			want.SHA256, want.OS, want.Arch = test.digest, test.goos, test.arch
+			if verifyHookManifest(raw, test.signature, test.key, want) == nil {
 				t.Fatal("unauthenticated release accepted")
 			}
 		})
@@ -214,7 +224,7 @@ func TestPairedHooksRejectChecksumOnlyAndWrongSigner(t *testing.T) {
 	if got := f.apply(t, false); got != "artifact_untrusted" {
 		t.Fatal("unsigned native artifact accepted", got)
 	}
-	if runtime.GOOS == "darwin" && authenticateHook(t.Context(), "/bin/ls", "") == nil {
+	if runtime.GOOS == "darwin" && verifyHookAppleSignature(t.Context(), "/bin/ls") == nil {
 		t.Fatal("Apple system signer substituted for Aeon release signer")
 	}
 }
