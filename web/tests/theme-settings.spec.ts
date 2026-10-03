@@ -5,10 +5,10 @@ import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
-const record = (id: string, name: string, scope: 'personal' | 'workspace'): ThemeRecord => ({ id, name, scope, tenant_id: 't1', owner_principal_id: scope === 'personal' ? me.id : null, revision: 3, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
+const record = (id: string, name: string, scope: ThemeRecord['scope']): ThemeRecord => ({ id, name, scope, tenant_id: 't1', owner_principal_id: scope === 'personal' ? me.id : null, revision: 3, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
 async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean } = {}) {
   await mockWork(page, fixtures(), { admin: options.admin })
-  const data = { items: [record('default', 'Porcelain', 'workspace'), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
+  const data = { items: [record('default', 'Porcelain', 'default' as ThemeRecord['scope']), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
   const active = (): ActiveTheme => ({ theme: data.items.find(item => item.id === data.selected)!, default_theme_id: 'default', selected_theme_id: data.selected, revision: data.revision, fallback_notice: null })
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
@@ -61,8 +61,12 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await mkdir('test-results/aeon-642', { recursive: true })
     const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
     await primary.scrollIntoViewIfNeeded()
-    await expectStableControls({ controls: { primary, secondary: page.getByRole('button', { name: 'Secondary accent, light', exact: true }), markerGroup: page.getByRole('radiogroup', { name: 'Recurring marker colour' }), markerPrimary: page.getByRole('radio', { name: 'Primary', exact: true }), markerSecondary: page.getByRole('radio', { name: 'Secondary', exact: true }), markerNeutral: page.getByRole('radio', { name: 'Neutral grey', exact: true }), markerCustom: page.getByRole('radio', { name: 'Custom', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    await expectStableControls({ controls: { primary, derivedPrimary: page.getByRole('button', { name: 'Use derived primary dark' }), derivedSecondary: page.getByRole('button', { name: 'Use derived secondary dark' }), secondary: page.getByRole('button', { name: 'Secondary accent, light', exact: true }), markerGroup: page.getByRole('radiogroup', { name: 'Recurring marker colour' }), markerPrimary: page.getByRole('radio', { name: 'Primary', exact: true }), markerSecondary: page.getByRole('radio', { name: 'Secondary', exact: true }), markerNeutral: page.getByRole('radio', { name: 'Neutral grey', exact: true }), markerCustom: page.getByRole('radio', { name: 'Custom', exact: true }) }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
       { name: 'edit opens overlay without moving controls', run: async () => { await colour(page, 'Primary accent, light', '#ffffff', `test-results/aeon-642/picker-${width}-${mode}.png`); await expect(bar(page)).toBeVisible() } },
+      { name: 'set primary dark by hand', run: async () => { await colour(page, 'Primary accent, dark', '#123456'); await expect(page.getByRole('button', { name: 'Use derived primary dark' })).toBeEnabled() } },
+      { name: 'reset primary dark to derived', run: async () => { await page.getByRole('button', { name: 'Use derived primary dark' }).click(); await expect(page.getByRole('button', { name: 'Use derived primary dark' })).toBeDisabled() } },
+      { name: 'reset secondary dark to derived', run: async () => { await page.getByRole('button', { name: 'Use derived secondary dark' }).click(); await expect(page.getByRole('button', { name: 'Use derived secondary dark' })).toBeDisabled() } },
+      { name: 'set secondary dark by hand', run: async () => { await colour(page, 'Secondary accent, dark', '#123456'); await expect(page.getByRole('button', { name: 'Use derived secondary dark' })).toBeEnabled() } },
       { name: 'Suggest only failing light', run: async () => { await page.getByRole('button', { name: 'Suggest readable primary light' }).click(); await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below') } },
       { name: 'marker Primary', run: async () => { await page.getByRole('radio', { name: 'Primary', exact: true }).click() } },
       { name: 'marker Secondary', run: async () => { await page.getByRole('radio', { name: 'Secondary', exact: true }).click() } },
@@ -119,6 +123,12 @@ test('Suggest touches only a failing mode and warnings never block Save', async 
 })
 test('workspace themes are read-only to members; duplicate and delete use captured revisions', async ({ page }) => {
   const data = await setup(page); await page.goto('/settings/theme')
+  await page.getByRole('button', { name: 'Use Porcelain', exact: true }).click()
+  await expect(card(page)).toContainText('Read-only workspace theme')
+  await expect(card(page)).not.toContainText('only you see it')
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Rename Porcelain' })).toHaveCount(0)
+  await expect(page.locator('[data-theme-id="default"] .scope')).toHaveText('Workspace default · read-only')
   await page.getByRole('button', { name: 'Use High contrast', exact: true }).click()
   await expect(card(page)).toContainText('Read-only workspace theme')
   await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeDisabled()
@@ -143,6 +153,8 @@ test('New theme duplicates the default even on a later list page; managers may e
   expect(data.writes.find(write => write.method === 'POST')!.path).toBe('/api/themes/default/duplicate')
   await page.getByRole('button', { name: 'Use Porcelain', exact: true }).click()
   await expect(card(page)).toContainText('you manage it')
+  await expect(card(page)).not.toContainText('only you see it')
+  await expect(page.locator('[data-theme-id="default"] .scope')).toHaveText('Workspace default · you manage it')
   await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeEnabled()
 })
 for (const failure of [500, 409]) test(`failed Save (${failure}) retains edits and does not report success`, async ({ page }) => {
