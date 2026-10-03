@@ -179,12 +179,16 @@ func TestAgentsPlanRevisionCheckedSaves(t *testing.T) {
 		}
 		// Read both physical rows: the API prefers the canonical copy and
 		// cannot by itself prove that the alias revision was reconciled.
+		var currentValue any
+		must(json.Unmarshal(current.Value, &currentValue))
 		for _, p := range []tenant.Principal{owner, alias} {
 			var saved []byte
+			var savedValue any
 			var updatedAt time.Time
 			must(d.Admin.QueryRow(ctx, `SELECT value,updated_at FROM user_preferences
 				WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, p.ID).Scan(&saved, &updatedAt))
-			if string(saved) != string(current.Value) || !updatedAt.Equal(*current.UpdatedAt) {
+			must(json.Unmarshal(saved, &savedValue))
+			if !reflect.DeepEqual(savedValue, currentValue) || !updatedAt.Equal(*current.UpdatedAt) {
 				t.Fatalf("persisted family row %s differs from the winning save", p.ID)
 			}
 		}
