@@ -53,6 +53,7 @@ type portalWish struct {
 }
 
 type portalDocument struct {
+	productID      string
 	Product        *portalProduct        `json:"product"`
 	Catalog        []portalFeature       `json:"catalog"`
 	Wishes         []portalWish          `json:"wishes"`
@@ -136,16 +137,12 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal read"), m.pool, tenantID, func(tx pgx.Tx) error {
 		ctx := context.WithValue(r.Context(), productSlugContextKey{}, r.PathValue("productSlug"))
 		loaded, loadErr := loadPortal(ctx, tx)
-		if loaded.Product != nil {
-			product, err := publicProduct(ctx, tx, r.PathValue("productSlug"), false)
-			if err != nil {
-				return err
-			}
-			ctx = context.WithValue(ctx, productContextKey{}, product.ProductID)
-		}
 		if loadErr != nil {
 			return loadErr
 		}
+		// Resolve the default once for the whole response. A concurrent default
+		// change must not pair one product's catalog with another's roadmap.
+		ctx = context.WithValue(ctx, productContextKey{}, loaded.productID)
 		doc = loaded
 		if doc.Product != nil && kind != publicReleasesKind {
 			roadmapItems, loadErr = loadPublicRoadmap(ctx, tx)
@@ -218,6 +215,7 @@ func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {
 		return doc, err
 	}
 	id := product.ProductID
+	doc.productID = id
 	ctx = context.WithValue(ctx, productContextKey{}, id)
 	var key, title, body string
 	err = tx.QueryRow(ctx, `SELECT key,left(title,300),left(body,4000) FROM nodes WHERE id=$1::uuid`, id).Scan(&key, &title, &body)

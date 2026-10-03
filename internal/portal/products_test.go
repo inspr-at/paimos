@@ -57,6 +57,16 @@ func TestProductPortalDefaultAndIsolation(t *testing.T) {
 	configureFixtureProduct(t, d, a, p1, "first", "legacy", true)
 	configureFixtureProduct(t, d, a, p2, "second", "disabled", true)
 	configureFixtureProduct(t, d, b, pb, "first", "legacy", true)
+	projectB := insertNode(t, d, b, "PRJ-1", "project", "Other tenant project", "private to B", "active", "", "{}")
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, b, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO portal_product_pace(tenant_id,product_id,project_node_id,revision) VALUES($1::uuid,$2::uuid,$3::uuid,1)`, b, pb, projectB)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	setPortal(t, d, a, true)
 	setPortal(t, d, b, true)
 	insertNode(t, d, a, "PWS-1", "portal_wish", "Wish one", "public wish", "published", p1, "{}")
@@ -102,6 +112,7 @@ func TestProductPortalDefaultAndIsolation(t *testing.T) {
 	}
 	beforeWishes := wishCount(t, d, a)
 	beforeVotes := voteCount(t, d, a)
+	beforeCorrections := correctionCount(t, d, a)
 	for _, entry := range []struct{ suffix, body string }{
 		{"/wishes", `{"title":"Blocked","summary":"No write"}`},
 		{"/wishes", `{"title":"Blocked","summary":"No write","website":"honeypot"}`},
@@ -113,7 +124,7 @@ func TestProductPortalDefaultAndIsolation(t *testing.T) {
 			t.Fatalf("disabled %s: %d %s", entry.suffix, rec.Code, rec.Body)
 		}
 	}
-	if wishCount(t, d, a) != beforeWishes || voteCount(t, d, a) != beforeVotes {
+	if wishCount(t, d, a) != beforeWishes || voteCount(t, d, a) != beforeVotes || correctionCount(t, d, a) != beforeCorrections {
 		t.Fatal("disabled participation wrote data")
 	}
 	path := "/api/portal/products/" + p2 + "/settings"
@@ -140,6 +151,20 @@ func TestProductPortalDefaultAndIsolation(t *testing.T) {
 	}
 	if rec := f.do("POST", base+"/wishes/PWS-2/votes", "{}", "203.0.113.152:1", nil, nil, nil); rec.Code != 403 {
 		t.Fatalf("old URL bypass %d", rec.Code)
+	}
+	// Keep actual foreign rows behind both policies, so zero is evidence of
+	// isolation rather than an empty fixture.
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, b, func(tx pgx.Tx) error {
+		var products, links int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM portal_products),(SELECT count(*) FROM portal_product_pace)`).Scan(&products, &links); err != nil {
+			return err
+		}
+		if products != 1 || links != 1 {
+			t.Fatalf("foreign RLS fixture has %d products and %d links", products, links)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, a, func(tx pgx.Tx) error {
 		var n int
