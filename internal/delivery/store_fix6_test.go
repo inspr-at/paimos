@@ -14,7 +14,8 @@ func TestStoreFix6ReleasedTombstoneMaintenanceUndoUsesWrite(t *testing.T) {
 	for _, change := range []string{"none", "revision", "permission"} {
 		t.Run(change, func(t *testing.T) {
 			f := newStoreFixture(t)
-			p, role := f.permissionPerson(t, "releases.write")
+			// nodes.read supplies visibility; releases.write is the sole write grant.
+			p, role := f.permissionPerson(t, "nodes.read", "releases.write")
 			f.requirePermission(t, p, "releases.write", nil)
 			f.requirePermission(t, p, "roles.manage", authz.ErrForbidden)
 			stale := f.item(t, "ticket", "TK-1", "open", f.release, "V")
@@ -68,7 +69,7 @@ func TestStoreFix6ReleasedTombstoneMaintenanceUndoUsesWrite(t *testing.T) {
 
 func TestStoreFix6LiveHistoryFlagUndoStillNeedsManage(t *testing.T) {
 	f := newStoreFixture(t)
-	p, role := f.permissionPerson(t, "releases.write", "roles.manage")
+	p, role := f.permissionPerson(t, "nodes.read", "releases.write", "roles.manage")
 	id := f.item(t, "ticket", "TK-1", "open", f.release, "V")
 	f.exec(t, `UPDATE ships_in SET expedite=true WHERE item_node_id=$1`, id)
 	f.releaseHistory(t, f.release)
