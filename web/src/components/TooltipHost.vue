@@ -8,6 +8,7 @@ const text = ref('')
 const x = ref(0)
 const y = ref(0)
 const below = ref(false)
+const clip = ref(false)
 const tip = ref<HTMLElement>()
 // Inside a modal dialog the tooltip moves into it, above the page (the top layer);
 // otherwise it sits at the end of <body>, above popovers and menus (which leave
@@ -17,15 +18,18 @@ let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 
 function find(node: EventTarget | null): HTMLElement | null {
-  return node instanceof Element ? node.closest<HTMLElement>('[data-tip]') : null
+  return node instanceof Element ? node.closest<HTMLElement>('[data-tip], [data-clip-tip]') : null
 }
 async function show(element: HTMLElement) {
-  const value = element.dataset.tip
+  const value = element.dataset.clipTip ?? element.dataset.tip
   if (!value) return
   target = element
   layer.value = element.closest<HTMLElement>('dialog[open]')
   text.value = value
+  clip.value = element.hasAttribute('data-clip-tip')
   await nextTick()
+  if (target !== element) return
+  if (!element.isConnected) { hide(); return }
   const rect = element.getBoundingClientRect()
   const width = tip.value?.offsetWidth ?? 0
   const height = tip.value?.offsetHeight ?? 0
@@ -42,11 +46,14 @@ async function show(element: HTMLElement) {
   }
   below.value = rect.top - height - 8 < 8
   x.value = Math.round(Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8))
-  y.value = Math.round(below.value ? rect.bottom + 8 : rect.top - height - 8)
+  y.value = Math.round(Math.min(Math.max(8, below.value ? rect.bottom + 8 : rect.top - height - 8), innerHeight - height - 8))
 }
 function hide() { clearTimeout(timer); target = null; text.value = '' }
 function over(event: PointerEvent) {
   if (event.pointerType === 'touch') return
+  // Layout settling can send pointer-over while a keyboard user reads a row.
+  // Its full text stays until focus changes or a pointer activation takes over.
+  if (clip.value && target === document.activeElement && target?.matches(':focus-visible')) return
   const element = find(event.target)
   if (element === target) return
   hide()
@@ -56,28 +63,45 @@ function focusIn(event: FocusEvent) {
   const element = find(event.target)
   if (element && element.matches(':focus-visible')) void show(element)
 }
+// Clipped content opts into tap-to-read as well as hover/focus. Ordinary action
+// hints keep their existing pointer behavior. Full decision text also remains
+// in the caller's keyboard-scrollable preview rather than only in a tooltip.
+function click(event: MouseEvent) {
+  const element = find(event.target)
+  if (element?.hasAttribute('data-clip-tip')) { clearTimeout(timer); void show(element) }
+}
+function keydown(event: KeyboardEvent) {
+  if (!clip.value || event.key === 'Escape') hide()
+}
+function scroll(event: Event) {
+  if (tip.value?.contains(event.target as Node)) return
+  if (clip.value && target === document.activeElement && target?.matches(':focus-visible')) void show(target)
+  else hide()
+}
 onMounted(() => {
   document.addEventListener('pointerover', over)
   document.addEventListener('focusin', focusIn)
   document.addEventListener('focusout', hide)
   document.addEventListener('pointerdown', hide)
-  document.addEventListener('keydown', hide)
-  document.addEventListener('scroll', hide, true)
+  document.addEventListener('click', click)
+  document.addEventListener('keydown', keydown)
+  document.addEventListener('scroll', scroll, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('pointerover', over)
   document.removeEventListener('focusin', focusIn)
   document.removeEventListener('focusout', hide)
   document.removeEventListener('pointerdown', hide)
-  document.removeEventListener('keydown', hide)
-  document.removeEventListener('scroll', hide, true)
+  document.removeEventListener('click', click)
+  document.removeEventListener('keydown', keydown)
+  document.removeEventListener('scroll', scroll, true)
   clearTimeout(timer)
 })
 </script>
 
 <template>
   <Teleport :to="layer ?? 'body'">
-    <div v-if="text" ref="tip" class="tooltip" :class="{ below }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
+    <div v-if="text" ref="tip" class="tooltip" :class="{ below, clip }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
   </Teleport>
 </template>
 
@@ -87,4 +111,5 @@ onBeforeUnmount(() => {
   background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; white-space: pre-line;
   box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px rgba(0, 0, 0, .5);
 }
+.tooltip.clip { max-width: min(640px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); box-sizing: border-box; overflow: auto; overflow-wrap: anywhere; }
 </style>

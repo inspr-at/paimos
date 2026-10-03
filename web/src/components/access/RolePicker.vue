@@ -48,13 +48,16 @@ const changed = computed(() => (picked.value === NONE ? null : picked.value) !==
 const pickedReason = computed(() => reasonFor(picked.value === NONE ? null : pickedRole.value))
 const labelFor = (role: Role | null) => role ? `Give ${props.subject} ${role.name}${props.place ? ` on ${props.place}` : ''}` : `Remove ${props.subject}’s workspace role`
 const applyLabel = computed(() => labelFor(pickedRole.value))
+const shortLabelFor = (role: Role | null) => role ? `Give ${role.name}` : 'Remove role'
 // Reserve the labels this picker can show, at the actual font and available
 // width. The descriptive action stays readable without changing button geometry.
-const actionLabels = computed(() => [...new Set(['Choose a role', ...options.value.map(option => labelFor(option.role))])])
+const actionLabels = computed(() => [...new Set(['Choose a role', ...options.value.map(option => shortLabelFor(option.role))])])
 const whom = computed(() => props.place ? `${props.subject} on ${props.place}` : props.subject)
 const roleDetail = (role: Role) => props.roleDetails.get(role.id) || role.description
+const fullOptionText = (role: Role | null) => [role?.name ?? props.noneLabel, role ? roleDetail(role) : '', reasonFor(role)].filter(Boolean).join('\n')
 const risky = (keys: string[]) => keys.filter(key => byKey.value.get(key)?.risk === 'high')
 function keys(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
   const ids = options.value.map(option => option.id)
   const at = ids.indexOf(picked.value)
   // Arrows choose a role in the list; elsewhere (the preview) they scroll.
@@ -63,7 +66,7 @@ function keys(event: KeyboardEvent) {
     picked.value = ids[(at + (event.key === 'ArrowDown' ? 1 : -1) + ids.length) % ids.length]!
     document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true })
     void nextTick(reveal)
-  } else if (event.key === 'Enter' && changed.value && !pickedReason.value) { event.preventDefault(); apply() }
+  } else if (event.key === 'Enter' && (event.target as HTMLElement).closest('[role="radio"]') && changed.value && !pickedReason.value) { event.preventDefault(); apply() }
 }
 function apply() { if (!changed.value || pickedReason.value || props.busy || !props.canApply) return; emit('choose', picked.value === NONE ? null : picked.value) }
 onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true }); void nextTick(reveal) })
@@ -86,7 +89,7 @@ function reveal() {
 <template>
   <FloatingPanel :anchor="anchor" :tallest="960" :label="`Role of ${whom}`" sheet cycle @close="restore => emit('close', restore)">
     <div class="picker" @keydown="keys">
-      <p class="eyebrow title">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ whom }}</p>
+      <p class="eyebrow title" tabindex="0" :data-clip-tip="`${scope === 'workspace' ? 'Workspace role' : 'Project role'} · ${whom}`">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ whom }}</p>
       <div ref="body" class="picker-body">
         <p v-if="lockReason" :id="`${id}-locked`" class="locked"><AppIcon name="shield" :size="14" /><span>{{ lockReason }}</span></p>
         <div ref="list" class="options" role="radiogroup" :aria-label="`Role for ${whom}`">
@@ -94,20 +97,23 @@ function reveal() {
             v-for="option in options" :id="`${id}-${option.id}`" :key="option.id" type="button" role="radio" class="option"
             :aria-checked="picked === option.id" :tabindex="picked === option.id ? 0 : -1" :class="{ off: !!reasonFor(option.role) }"
             :data-autofocus="picked === option.id ? '' : undefined"
+            :data-clip-tip="fullOptionText(option.role)"
             :aria-describedby="reasonFor(option.role) ? (lockReason ? `${id}-locked` : `${id}-${option.id}-why`) : undefined" @click="picked = option.id"
           >
             <span class="dot" aria-hidden="true"><span /></span>
             <span class="text">
-              <span class="name"><span class="role-name" :data-tip="option.role?.name ?? noneLabel">{{ option.role?.name ?? noneLabel }}</span><span v-if="option.id === (current ?? (allowNone ? NONE : ''))" class="now">now</span><span v-if="option.role && !option.role.builtin" class="custom">Custom</span></span>
-              <span v-if="!reasonFor(option.role) || lockReason" class="desc" :data-tip="option.role ? roleDetail(option.role) : undefined">{{ option.role ? roleDetail(option.role) : scope === 'workspace' ? 'Only the projects they are given.' : 'No role on this project.' }}</span>
+              <span class="name"><span class="role-name">{{ option.role?.name ?? noneLabel }}</span><span v-if="option.id === (current ?? (allowNone ? NONE : ''))" class="now">now</span><span v-if="option.role && !option.role.builtin" class="custom">Custom</span></span>
+              <span v-if="!reasonFor(option.role) || lockReason" class="desc">{{ option.role ? roleDetail(option.role) : scope === 'workspace' ? 'Only the projects they are given.' : 'No role on this project.' }}</span>
               <!-- While the last owner is locked the reason is said once, above; otherwise per role. -->
-              <span v-if="reasonFor(option.role) && !lockReason" :id="`${id}-${option.id}-why`" class="why" :data-tip="reasonFor(option.role)"><AppIcon name="info" :size="12" /><span>{{ reasonFor(option.role) }}</span></span>
+              <span v-if="reasonFor(option.role) && !lockReason" :id="`${id}-${option.id}-why`" class="why"><AppIcon name="info" :size="12" /><span>{{ reasonFor(option.role) }}</span></span>
             </span>
           </button>
         </div>
         <!-- Always in place, so the menu opens where the full preview will fit. -->
         <div v-if="!lockReason" class="preview" :class="{ idle: !changed }" role="region" aria-label="What changes" tabindex="0" aria-live="polite">
           <p class="eyebrow">What changes</p>
+          <p v-if="pickedRole" class="role-context"><strong>{{ pickedRole.name }}</strong><span>{{ roleDetail(pickedRole) }}</span></p>
+          <p v-if="pickedReason" class="refusal"><AppIcon name="info" :size="13" /><span>{{ pickedReason }}</span></p>
           <p v-if="!canApply" class="refusal" role="alert"><AppIcon name="shield" :size="13" /><span>{{ lostPermission('members.manage') }}</span></p>
           <p v-if="refusal" :id="`${id}-error`" class="refusal" role="alert"><AppIcon name="alert" :size="13" /><span>{{ refusal }}</span></p>
           <p v-if="!changed" class="effect idle-text">Pick another role to see what it adds or takes away.</p>
@@ -130,8 +136,8 @@ function reveal() {
         <template v-if="lockReason"><button type="button" class="btn sm" @click="emit('close', true)">Close</button></template>
         <template v-else>
           <button type="button" class="btn sm" @click="emit('close', true)">Cancel</button>
-          <button type="button" class="btn sm primary" :disabled="!changed || !!pickedReason || busy || !canApply" :data-tip="canApply ? pickedReason || undefined : lostPermission('members.manage')" @click="apply">
-            <span class="action-label"><span v-for="label in actionLabels" :key="label" class="reserve" aria-hidden="true">{{ label }}</span><span>{{ changed ? applyLabel : 'Choose a role' }}</span></span>
+          <button type="button" class="btn sm primary" :aria-label="changed ? applyLabel : 'Choose a role'" :disabled="!changed || !!pickedReason || busy || !canApply" :data-tip="canApply ? pickedReason || undefined : lostPermission('members.manage')" @click="apply">
+            <span class="action-label"><span v-for="label in actionLabels" :key="label" class="reserve" aria-hidden="true">{{ label }}</span><span>{{ changed ? shortLabelFor(pickedRole) : 'Choose a role' }}</span></span>
             <kbd class="keycap" aria-hidden="true"><AppIcon name="enter" :size="12" /></kbd>
           </button>
         </template>
@@ -145,11 +151,11 @@ function reveal() {
 .picker { display: flex; flex-direction: column; gap: 8px; max-height: calc(var(--floating-max, 960px) - 12px); padding: 4px 4px 2px; }
 .picker > * { flex-shrink: 0; }
 .picker > .picker-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.title { padding: 2px 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; padding: 2px 6px 0; overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.45; }
 .locked { display: grid; grid-template-columns: 14px 1fr; gap: 8px; margin: 0 2px; padding: 9px 10px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 .locked svg { margin-top: 2px; color: var(--teal-ink); }
 .options { display: grid; align-content: start; gap: 1px; }
-.option { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; height: 60px; padding: 7px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; }
+.option { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; height: 76px; padding: 7px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option[aria-checked="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .option:focus-visible { box-shadow: var(--focus-ring); }
@@ -162,16 +168,17 @@ function reveal() {
 .now, .custom { flex-shrink: 0; }
 .now, .custom { height: 17px; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/17px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .custom { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
-/* One line each, so the list and what changes both fit; the full text is the tooltip. */
-.desc { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Two detail lines in equal rows; focus, hover or tap reveals the full text. */
+.desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; height: 2.8em; font-size: 12.5px; line-height: 1.4; color: var(--ink-2); overflow: hidden; overflow-wrap: anywhere; white-space: normal; }
 .why { display: flex; gap: 5px; align-items: flex-start; min-width: 0; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
-.why > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.why > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; height: 2.8em; overflow: hidden; overflow-wrap: anywhere; white-space: normal; }
 .why svg { flex-shrink: 0; }
 .why svg { margin-top: 2px; color: var(--ink-3); }
 .option.off .name { color: var(--ink-2); }
 .preview { display: flex; flex-direction: column; gap: 6px; height: 160px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; margin: 8px 2px 0; padding: 10px 12px; border-top: 1px solid var(--line); }
 .preview > * { flex-shrink: 0; }
-.effect { font-size: 13px; line-height: 1.45; color: var(--ink); }
+.effect, .role-context { font-size: 13px; line-height: 1.45; color: var(--ink); }
+.role-context { display: grid; gap: 4px; overflow-wrap: anywhere; }
 .idle-text { color: var(--ink-3); }
 .refusal { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 7px; margin: 0 4px; font-size: 12.5px; line-height: 1.45; color: var(--danger); }
 .refusal svg { margin-top: 2px; }

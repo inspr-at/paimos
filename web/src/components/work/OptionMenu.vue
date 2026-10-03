@@ -40,6 +40,7 @@ function move(event: KeyboardEvent) {
       <div ref="list" class="menu" role="menu" :aria-label="`${title} of ${subject}`">
         <button
           v-for="(option, index) in shown" :key="option.value" type="button" role="menuitemradio" class="menu-item" :aria-checked="option.value === current"
+          :data-clip-tip="option.label"
           :data-autofocus="!searchable && option.value === current ? '' : undefined" @click="emit('choose', option.value)"
         >
           <template v-if="kind === 'priority'"><PriorityIcon v-if="option.value" :priority="option.value" /><span v-else class="none-mark" /></template>

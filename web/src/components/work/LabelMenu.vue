@@ -74,6 +74,7 @@ function keydown(event: KeyboardEvent) {
         <button v-if="term.trim() && !exact" type="button" class="option create" @click="create"><AppIcon name="plus" :size="13" />Add “{{ term.trim() }}”</button>
         <button
           v-for="label in shown" :key="label.name" type="button" role="checkbox" class="option" :aria-checked="state(label) === 'all' ? 'true' : state(label) === 'some' ? 'mixed' : 'false'"
+          :data-clip-tip="label.name"
           :class="{ changed: pending.has(label.name.toLowerCase()) }" @click="toggle(label)"
         >
           <span class="box" :class="state(label)" aria-hidden="true"><AppIcon v-if="state(label) === 'all'" name="check" :size="11" /><AppIcon v-else-if="state(label) === 'some'" name="minus" :size="11" /></span>
@@ -92,10 +93,10 @@ function keydown(event: KeyboardEvent) {
 </template>
 
 <style scoped>
-.label-menu { display: grid; gap: 6px; padding: 2px 2px 4px; }
+.label-menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 2px 2px 4px; }
 .label-menu .eyebrow { padding: 4px 8px 0; }
 .label-search { height: 30px; font-size: 13px; }
-.options { display: grid; gap: 1px; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .option { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }

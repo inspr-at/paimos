@@ -72,6 +72,7 @@ function keys(event: KeyboardEvent) {
       <li
         v-for="(option, index) in shown" :id="`${listId}-${index}`" :key="option.value" role="option" class="picker-option"
         :class="{ active: index === active, disabled: option.disabled }" :aria-selected="index === active" :aria-disabled="option.disabled || undefined"
+        :tabindex="index === active ? 0 : -1" :data-clip-tip="[option.label, option.note, option.hint].filter(Boolean).join('\n')" @keydown.enter.prevent="pick(index)"
         @pointerenter="active = index" @click="pick(index)"
       >
         <AppIcon v-if="option.icon" :name="option.icon" :size="14" class="opt-icon" />

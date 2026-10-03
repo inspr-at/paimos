@@ -55,6 +55,7 @@ function keydown(event: KeyboardEvent) {
       <button
         v-for="(epic, index) in epics" :id="`epic-option-${index + (allowNone ? 1 : 0)}`" :key="epic.id" type="button" role="option" class="option"
         :aria-selected="active === index + (allowNone ? 1 : 0)" @click="emit('choose', { id: epic.id, key: epic.key, title: epic.title })" @pointermove="active = index + (allowNone ? 1 : 0)"
+        :data-clip-tip="`${epic.key} · ${epic.title}`"
       >
         <StatusIcon :state="epic.state" :size="12" />
         <span class="key">{{ epic.key }}</span>

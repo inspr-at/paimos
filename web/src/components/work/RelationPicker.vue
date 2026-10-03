@@ -168,6 +168,7 @@ let lastChoice = 'relates'
         <div
           v-for="(result, index) in results" :id="`relation-option-${index}`" :key="result.id" role="option" class="option"
           :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
+          :tabindex="index === active ? 0 : -1" :data-clip-tip="`${result.key} · ${result.title}`" @keydown.enter.prevent="choose(result)"
           @pointermove="active = index" @click="choose(result)"
         >
           <StatusIcon :state="result.state" :size="12" />

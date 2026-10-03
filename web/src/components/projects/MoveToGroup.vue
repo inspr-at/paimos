@@ -57,6 +57,7 @@ const optionId = (index: number) => `${id}-option-${index}`
       <button
         v-for="(option, index) in shown" :id="optionId(index)" :key="option.group.id" type="button" role="option" class="option" tabindex="-1"
         :class="{ off: option.current || !!option.reason }" :aria-selected="active === index" :aria-disabled="option.current || !!option.reason ? 'true' : undefined"
+        :data-clip-tip="[option.group.name, option.reason].filter(Boolean).join('\n')"
         @click="choose(index)" @pointermove="active = index"
       >
         <GroupMarker :group="option.group" />

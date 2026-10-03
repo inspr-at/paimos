@@ -42,6 +42,7 @@ function move(event: KeyboardEvent) {
       <div ref="list" class="menu" role="listbox" :aria-label="label">
         <button
           v-for="choice in shown" :key="choice.value" type="button" role="option" class="choice" :aria-selected="choice.value === current"
+          :data-clip-tip="[choice.label, choice.detail].filter(Boolean).join('\n')"
           @click="emit('choose', choice.value)"
         >
           <span class="text"><span class="label">{{ choice.label }}</span><span v-if="choice.detail" class="detail">{{ choice.detail }}</span></span>

@@ -39,11 +39,11 @@ function keys(event: KeyboardEvent) {
     <div @keydown="keys">
       <div class="facet-head">
         <p class="eyebrow">{{ label }}</p>
-        <button v-if="selected.length" type="button" class="clear" @click="emit('clear')">Clear</button>
+        <button type="button" class="clear" :style="{ visibility: selected.length ? undefined : 'hidden' }" :disabled="!selected.length" @click="emit('clear')">Clear</button>
       </div>
       <input v-if="options.length > 8" v-model="term" class="field facet-search" :placeholder="`Find ${label.toLowerCase()}…`" :aria-label="`Find ${label.toLowerCase()}`" data-autofocus />
       <div class="options" role="group" :aria-label="label">
-        <label v-for="option in shown" :key="option.value" class="option" :class="{ muted: !option.count && !selected.includes(option.value) }">
+        <label v-for="option in shown" :key="option.value" class="option" :data-clip-tip="option.label" :class="{ muted: !option.count && !selected.includes(option.value) }">
           <input class="check-box" type="checkbox" :checked="selected.includes(option.value)" @change="emit('toggle', option.value)" />
           <QuoteStatusIcon v-if="option.state" :status="option.state as QuoteStatus" :label="false" />
           <span class="option-label">{{ option.label }}</span>
@@ -66,7 +66,7 @@ function keys(event: KeyboardEvent) {
 .clear { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .clear:hover { background: var(--row-selected); }
 .facet-search { height: 30px; margin: 0 0 6px; font-size: 13px; }
-.options { display: grid; gap: 1px; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .option { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option:focus-within { background: var(--row-selected); }
