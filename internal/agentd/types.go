@@ -227,6 +227,10 @@ type API interface {
 }
 
 type StartRequest struct {
+	// Lifetime is the accepted run budget rooted in the supervisor lifetime.
+	// The Start call's context only covers dispatch/startup and may end as soon
+	// as polling finishes. Adapters without a supervisor use the caller context.
+	Lifetime      context.Context
 	ManagedPolicy bool
 	Capabilities  []string // Exact capabilities advertised for this session.
 	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.

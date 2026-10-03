@@ -1611,25 +1611,54 @@ func TestRunHeartbeatFinalUsageFlush(t *testing.T) {
 }
 
 func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
-	repo, _ := gitRepo(t)
+	// Keep the fixture independent of the host's Git configuration and clock.
+	// In particular, no background maintenance may outlive its temporary repo.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "gc.auto")
+	t.Setenv("GIT_CONFIG_VALUE_0", "0")
+	t.Setenv("GIT_CONFIG_KEY_1", "maintenance.auto")
+	t.Setenv("GIT_CONFIG_VALUE_1", "false")
+	started := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	commitDate := started.Add(time.Second).Format(time.RFC3339)
+	t.Setenv("GIT_AUTHOR_DATE", commitDate)
+	t.Setenv("GIT_COMMITTER_DATE", commitDate)
+	repo, base := gitRepo(t)
+	branch := strings.TrimSpace(gitCmd(t, repo, "symbolic-ref", "HEAD"))
+	for i := 1; i <= 21; i++ {
+		gitCommit(t, repo, fmt.Sprintf("c%02d", i))
+	}
+	tip := strings.TrimSpace(gitCmd(t, repo, "rev-parse", "HEAD"))
+	gitCmd(t, repo, "update-ref", "-m", "fixture: hide history", branch, base, tip)
+	// Retain the real oldest-first Git walk and reflog attribution, but inject
+	// its time cutoff rather than depending on registration's wall clock.
+	disk := heartbeatDisk{
+		BoundWorktree: repo,
+		BoundBranch:   strings.TrimPrefix(branch, "refs/heads/"),
+		StartRev:      base,
+		StartedUnix:   started.Unix(),
+	}
 	var calls []hbCall
 	srv := heartbeatFixture(t, &calls, "", "")
 	defer srv.Close()
 	rt, _, stderr := heartbeatRuntime(t, srv)
 	opts := heartbeatTestOptions(t.TempDir())
 	opts.Worktree = repo
-	made := false
 	beats := 0
 	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
 		alive: func(int) bool { return true },
 		label: func() (string, bool) { return "worker", true },
+		commits: func(worktree, since string) ([]heartbeatCommit, error) {
+			disk.CommitCursor = since
+			batch, _ := localHeartbeatCommits(context.Background(), worktree, &disk)
+			return batch, nil
+		},
 		wait: func(context.Context, int, time.Duration) error {
 			beats++
-			if beats == 1 && !made {
-				for i := 1; i <= 21; i++ {
-					gitCommit(t, repo, fmt.Sprintf("c%02d", i))
-				}
-				made = true
+			if beats == 1 {
+				// The wait callback is a synchronous barrier: all objects and
+				// reflog entries exist before the next beat can read them.
+				gitCmd(t, repo, "update-ref", "-m", "fixture: expose history", branch, tip, base)
 			}
 			if beats >= 3 {
 				return errOwnerExited
@@ -1644,6 +1673,9 @@ func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
 	if len(heartbeats) != 3 {
 		t.Fatalf("beats %d", len(heartbeats))
 	}
+	if _, ok := heartbeats[0].body["commits"]; ok {
+		t.Fatal("history was sent before the wait barrier exposed it")
+	}
 	first := commitSubjects(t, heartbeats[1].body["commits"])
 	second := commitSubjects(t, heartbeats[2].body["commits"])
 	if len(first) != 20 || first[0] != "c01" || first[19] != "c20" {
@@ -1652,9 +1684,9 @@ func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
 	if len(second) != 1 || second[0] != "c21" {
 		t.Fatalf("second batch %v", second)
 	}
-	for _, subject := range first {
-		if subject == "c21" {
-			t.Fatal("later commit was sent before the cursor advanced")
+	for i, subject := range first {
+		if want := fmt.Sprintf("c%02d", i+1); subject != want {
+			t.Fatalf("first batch commit %d: got %q, want %q", i, subject, want)
 		}
 	}
 }

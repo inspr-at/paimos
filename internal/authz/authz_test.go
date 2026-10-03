@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,6 +62,23 @@ func TestRegistryAndBuiltins(t *testing.T) {
 		for _, key := range strings.Split(declaration, "|") {
 			if _, ok := Lookup(key); !ok {
 				t.Errorf("route %q declares unknown permission %q", pattern, key)
+			}
+		}
+	}
+}
+
+func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage"}) {
+		t.Fatal("built-in agent exclusions drifted from the explicit recurrence policy")
+	}
+	for _, key := range builtinAgentExclusions {
+		permission, ok := Lookup(key)
+		if !ok || !permission.AgentGrantable {
+			t.Fatal("an explicit custom-role permission must remain agent-grantable")
+		}
+		for _, role := range []string{"owner", "admin", "member"} {
+			if !contains(builtinPermissions(role), key) {
+				t.Fatalf("agent exclusions must leave person %s grants intact", role)
 			}
 		}
 	}
