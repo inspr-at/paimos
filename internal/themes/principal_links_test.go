@@ -85,6 +85,13 @@ func TestLinkedThemeOwnershipAuditAndUndo(t *testing.T) {
 	undo(t, f, f.member, lastEvent(t, f, "theme.deleted"), 201)
 	assertPrivate(t, f, f.owner, old, f.member.ID)
 	assertPrivate(t, f, f.agent, old, f.member.ID)
+	creatorAgent := f.agent
+	creatorAgent.KeyCreatorID = f.other.ID
+	assertPrivate(t, f, creatorAgent, old, f.member.ID)
+	agentChoice, err := f.s.Active(t.Context(), creatorAgent)
+	if err != nil || agentChoice.Theme.Scope != "default" || agentChoice.Revision != 0 {
+		t.Fatalf("agent inherited linked creator's choice: %+v %v", agentChoice, err)
+	}
 	newTheme := mustTheme(t, f.s, f.member, "Created while linked", "personal")
 	if newTheme.OwnerPrincipalID == nil || *newTheme.OwnerPrincipalID != f.other.ID {
 		t.Fatalf("new theme did not use canonical owner: %+v", newTheme)
