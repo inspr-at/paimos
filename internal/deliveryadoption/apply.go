@@ -327,8 +327,9 @@ func (s *Service) verifyMembersWithAuthority(ctx context.Context, tx pgx.Tx, p t
 // The latest membership mutation after the immutable adoption event must
 // explain each absent row; an old removal cannot excuse a later lost placement.
 // Move and Undo snapshots record actual removals, including descendants and
-// placements created after the original move. Earlier Undo events also bind to
-// the original snapshot; placement Undo records a zero-revision after image.
+// placements created after the original move. An Undo with no removals cannot
+// supersede an intervening placement for a descendant that left the subtree.
+// Placement Undo records a zero-revision after image.
 func verifyRemovedMembers(ctx context.Context, tx pgx.Tx, tenantID string, adoptionEvent int64, missing []string) (int, error) {
 	if len(missing) == 0 {
 		return 0, nil
@@ -342,13 +343,11 @@ func verifyRemovedMembers(ctx context.Context, tx pgx.Tx, tenantID string, adopt
 	   SELECT CASE WHEN e.type='ships_in.changed' THEN
 	     e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text,'revision',0))
 	     ELSE true END AS removed
-	   FROM events e LEFT JOIN events original ON original.tenant_id=e.tenant_id AND original.id=e.undo_of
-	     AND original.type=e.type AND original.id>$2 AND original.id<e.id
+	   FROM events e
 	   WHERE e.tenant_id=$3 AND e.id>$2 AND (
 	     (e.type='ships_in.changed' AND e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text)))
 	     OR (e.type IN ('node.moved','node.project_moved','node.bulk_changed') AND
-	       (e.before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text))
-	        OR original.before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text)))))
+	       e.before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text))))
 	   ORDER BY e.id DESC LIMIT 1
 	 ) latest ON true LIMIT 5000`, missing, adoptionEvent, tenantID)
 	if err != nil {

@@ -147,3 +147,40 @@ func TestVerificationDoesNotAttributeDepartedDescendantToAncestorUndo(t *testing
 	requireAdoptionVerification(t, f, f.p, 1, 1)
 	requireAdoptionVerification(t, f, reader, 1, 1)
 }
+
+func TestVerificationRecordsPlacementRemovedByBulkUndo(t *testing.T) {
+	f, reader, member := adoptedReaderFixture(t)
+	root := f.node(t, "epic", "EP-1", f.project, "open")
+	destination := f.node(t, "project", "DST-1", "", "open")
+	j := f.prepare(t, destination)
+	if _, err := f.s.apply(t.Context(), f.a, j); err != nil {
+		t.Fatal(err)
+	}
+	store := delivery.NewStore(f.d.App)
+	if _, err := store.Place(t.Context(), f.p, f.project, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: f.project, ExpectedRevision: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	nodes.New(f.d.App, nil).Mount(mux)
+	events.New(f.d.App, events.WithUndoHandlers(nodes.UndoHandlers())).Mount(mux)
+	adoptionMutationRequest(t, mux, f.p, "/api/nodes/bulk", `{"ids":["`+member+`"],"parent_id":"`+root+`"}`, http.StatusOK)
+	var batch int64
+	f.exec(t, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id FROM events WHERE type='node.bulk_changed' AND undo_of IS NULL ORDER BY id DESC LIMIT 1`).Scan(&batch)
+	})
+	if f.count(t, `SELECT count(*) FROM nodes WHERE id=$1 AND parent_id=$2`, member, root) != 1 {
+		t.Fatal("bulk change did not reparent the adopted member")
+	}
+	// Bulk moves stay within a project, but moving the new ancestor later
+	// changes the project that the bulk Undo must return this member from.
+	adoptionMove(t, f, mux, "subtree", root, destination)
+	if _, err := store.Place(t.Context(), f.p, destination, []delivery.PlacementRequest{{ItemID: member, ExpectedProjectID: destination, ExpectedRevision: 0}}); err != nil {
+		t.Fatal(err)
+	}
+	adoptionMutationRequest(t, mux, f.p, fmt.Sprintf("/api/events/%d/undo", batch), "", http.StatusCreated)
+	if f.count(t, `SELECT count(*) FROM nodes WHERE id=$1 AND project_id=$2`, member, f.project) != 1 || f.count(t, `SELECT count(*) FROM ships_in WHERE item_node_id=$1`, member) != 0 || f.count(t, `SELECT count(*) FROM events WHERE undo_of=$1 AND before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',$2::text,'project_id',$3::text,'revision',1))`, batch, member, destination) != 1 {
+		t.Fatal("bulk Undo did not record its destination placement removal")
+	}
+	requireAdoptionVerification(t, f, f.p, 1, 0)
+	requireAdoptionVerification(t, f, reader, 1, 0)
+}
