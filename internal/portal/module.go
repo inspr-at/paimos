@@ -219,6 +219,17 @@ func (m *Module) decodeAdminInput(w http.ResponseWriter, r *http.Request, decode
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return false
 	}
+	// Preserve permission-denial precedence without holding a transaction open
+	// across body reads. manage/moderate still recheck under the write fence.
+	err := authz.Require(authz.BindPool(r.Context(), m.pool), "settings.manage", authz.Scope{})
+	if errors.Is(err, authz.ErrForbidden) {
+		fail(w, http.StatusForbidden, "permission denied")
+		return false
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
 	return decodePortalInput(w, r, decode)
 }
 

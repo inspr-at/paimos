@@ -294,3 +294,82 @@ func TestPortalProductMoveAndRestoreRegistersOnce(t *testing.T) {
 		t.Fatalf("restore changed publication/default %+v", settings)
 	}
 }
+
+func TestPortalPermissionRevokedDuringBodyRead(t *testing.T) {
+	f := productFixture(t)
+	tid := makeTenant(t, f.d, "body-revoke", "Body revoke")
+	admin := makePerson(t, f.d, tid, "Admin", "admin")
+	p := insertNode(t, f.d, tid, "PPR-1", "portal_product", "Product", "summary", "published", "", "{}")
+	body := &controlledPortalBody{
+		entered: make(chan struct{}), release: make(chan struct{}), expired: make(chan struct{}),
+		reader: strings.NewReader(`{"revision":1,"slug":"changed","published":true,"participation_policy":"legacy"}`),
+	}
+	req := httptest.NewRequest("PUT", "/api/portal/products/"+p+"/settings", nil)
+	req.Body = body
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(tenant.WithPrincipal(t.Context(), admin))
+	writer := &controlledDeadlineWriter{httptest.NewRecorder(), make(chan time.Time, 3)}
+	done := make(chan struct{})
+	go func() { defer close(done); f.h.ServeHTTP(writer, req) }()
+	t.Cleanup(func() {
+		select {
+		case <-body.release:
+		default:
+			close(body.release)
+		}
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("handler did not finish")
+		}
+	})
+	select {
+	case <-body.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("body reader did not start")
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE NOWAIT`, tid); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1::uuid AND project_id IS NULL`, admin.ID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("fixture did not revoke exactly one workspace binding")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("revocation blocked by body read: %v", err)
+	}
+	close(body.release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("handler did not finish after body release")
+	}
+	if writer.Code != 403 || !strings.Contains(writer.Body.String(), "permission denied") {
+		t.Fatalf("revoked writer %d %s", writer.Code, writer.Body)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, tid, func(tx pgx.Tx) error {
+		settings, err := loadProductSettings(t.Context(), tx, p, false)
+		if err != nil {
+			return err
+		}
+		if settings.Revision != 1 || settings.Slug != "ppr-1" {
+			return errors.New("revoked writer mutated settings")
+		}
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='portal.product_settings_updated'`).Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			return errors.New("revoked writer appended a settings event")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
