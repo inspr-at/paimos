@@ -22,7 +22,9 @@ Create with `POST /api/themes`, duplicate with `POST /api/themes/{id}/duplicate`
 rename or replace values with `PATCH /api/themes/{id}`, and delete with
 `DELETE /api/themes/{id}?revision=N`. Updates, copies and deletes require the
 record's revision; `PUT /api/me/theme` requires the independent selection
-revision (initially 0) and a `theme_id` or null to follow the default. Stale
+generation in `revision` (initially 0) and a `theme_id` or null to follow the
+default. Return the generation unchanged; it is an opaque CAS value, not a
+counter to increment. The first explicit default is saved and audited. Stale
 revisions return 409. Personal writes require the owner and `profile.write`
 (or the portal equivalent); workspace/default writes require `settings.manage`.
 Personal records and their events remain owner-only, including for managers.
@@ -34,8 +36,11 @@ owner's privacy. The canonical person's saved choice wins (including an explicit
 default); otherwise the alias choice with the lowest principal UUID wins. Choice
 edits update that winning row and keep other rows for unlink. If unlink makes a
 chosen theme private, the API returns the default without that theme's ID/name,
-retaining the selection revision for the next choice. Existing audit snapshots
-remain append-only and their audience follows current links.
+retaining the selection generation for the next choice. Changing the winning
+identity changes that generation, even when both physical row revisions match.
+Undo issues a fresh generation. The migration preserves physical row revisions
+and existing audit snapshots; audit remains append-only and its audience follows
+current links.
 
 Each tenant starts with Porcelain, using the shipped light/dark accents and
 native agent artwork settings. Null accent dark means derived by the consumer;

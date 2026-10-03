@@ -9558,7 +9558,7 @@ components:
       required: [theme_id, revision]
       properties:
         theme_id: {type: [string, 'null'], format: uuid}
-        revision: {type: integer, minimum: 0}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation from GET /api/me/theme. Use the returned value unchanged; do not increment it.'}
     ActiveTheme:
       type: object
       required: [theme, default_theme_id, selected_theme_id, revision, fallback_notice]
@@ -9566,7 +9566,7 @@ components:
         theme: {$ref: '#/components/schemas/Theme'}
         default_theme_id: {type: string, format: uuid}
         selected_theme_id: {type: [string, 'null'], format: uuid}
-        revision: {type: integer, minimum: 0, description: 'Selection revision, independent of theme revision'}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation, independent of theme and physical row revisions. Zero means no saved choice; saved choices have unique generations, including explicit default. Link/unlink can change the winning generation.'}
         fallback_notice:
           type: [object, 'null']
           required: [deleted_theme_id, deleted_theme_name]

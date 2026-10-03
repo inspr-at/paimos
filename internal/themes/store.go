@@ -314,14 +314,14 @@ func selection(ctx context.Context, tx pgx.Tx, tenantID, principalID string, loc
 	// Preserve physical ownership across links. A canonical saved choice (even
 	// explicit default) wins; otherwise choose the lowest alias UUID. LIMIT keeps
 	// the result bounded and every identity sees the same winning row.
-	q := `SELECT principal_id::text,theme_id::text,revision FROM theme_selections
+	q := `SELECT principal_id::text,theme_id::text,revision,generation FROM theme_selections
 		WHERE tenant_id=$1 AND principal_id IN (SELECT id FROM principals
 			WHERE tenant_id=$1 AND kind='person' AND status='active' AND coalesce(linked_to,id)=$2::uuid)
 		ORDER BY (principal_id=$2::uuid) DESC,principal_id LIMIT 1`
 	if lock {
 		q += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, q, tenantID, principalID).Scan(&out.PrincipalID, &out.ThemeID, &out.Revision)
+	err := tx.QueryRow(ctx, q, tenantID, principalID).Scan(&out.PrincipalID, &out.ThemeID, &out.Revision, &out.generation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -350,7 +350,7 @@ func active(ctx context.Context, tx pgx.Tx, p tenant.Principal) (Active, error) 
 	if err != nil {
 		return out, err
 	}
-	out.SelectedThemeID, out.Revision = s.ThemeID, s.Revision
+	out.SelectedThemeID, out.Revision = s.ThemeID, s.generation
 	if s.ThemeID == nil {
 		return out, nil
 	}
@@ -385,7 +385,7 @@ func (s Store) Active(ctx context.Context, p tenant.Principal) (Active, error) {
 }
 func (s Store) Select(ctx context.Context, p tenant.Principal, in SelectionInput) (Active, error) {
 	var out Active
-	if in.Revision < 0 || (in.ThemeID != nil && !validUUID(*in.ThemeID)) {
+	if in.Revision < 0 || in.Revision > 9007199254740991 || (in.ThemeID != nil && !validUUID(*in.ThemeID)) {
 		return out, ErrInvalid
 	}
 	err := s.transaction(ctx, p, true, func(ctx context.Context, tx pgx.Tx) error {
@@ -412,12 +412,14 @@ func (s Store) Select(ctx context.Context, p tenant.Principal, in SelectionInput
 		if err != nil {
 			return err
 		}
-		if before.Revision != in.Revision {
+		if before.generation != in.Revision {
 			return ErrConflict
 		}
 		after := before
 		after.ThemeID = in.ThemeID
-		if same(before, after) {
+		// A missing row is not an explicit default. Persist that first choice
+		// so it can take precedence over an alias's preference after linking.
+		if before.Revision > 0 && same(before, after) {
 			out, err = active(ctx, tx, p)
 			return err
 		}

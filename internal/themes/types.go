@@ -67,6 +67,9 @@ type Selection struct {
 	PrincipalID string  `json:"principal_id"`
 	ThemeID     *string `json:"theme_id"`
 	Revision    int64   `json:"revision"`
+	// generation is the public CAS value. Keep physical revisions in audit
+	// snapshots so historical undo remains valid after the additive migration.
+	generation int64
 }
 type FallbackNotice struct {
 	DeletedThemeID   string `json:"deleted_theme_id"`

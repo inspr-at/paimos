@@ -200,16 +200,19 @@ func TestLifecycleCASAuditFallbackAndUndo(t *testing.T) {
 	if err != nil || chosen.FallbackNotice != nil {
 		t.Fatalf("replace fallback: %+v %v", chosen, err)
 	}
+	newChoiceGeneration := chosen.Revision
+	assertActive(t, f, f.member, workspace.ID, 2)
 	undo(t, f, f.member, deleted, 201)
 	chosen, err = f.s.Active(ctx, f.member)
-	if err != nil || chosen.Theme.ID != workspace.ID || chosen.Revision != 2 {
+	if err != nil || chosen.Theme.ID != workspace.ID || chosen.Revision != newChoiceGeneration {
 		t.Fatalf("undo overwrote choice: %+v %v", chosen, err)
 	}
 	undo(t, f, f.member, lastEvent(t, f, "theme.selected"), 201)
 	chosen, err = f.s.Active(ctx, f.member)
-	if err != nil || chosen.Theme.ID != personal.ID || chosen.Revision != 3 {
+	if err != nil || chosen.Theme.ID != personal.ID || chosen.Revision == newChoiceGeneration {
 		t.Fatalf("selection undo: %+v %v", chosen, err)
 	}
+	assertActive(t, f, f.member, personal.ID, 3)
 	created := mustTheme(t, f.s, f.member, "Undo creation", "personal")
 	undo(t, f, f.member, lastEvent(t, f, "theme.created"), 201)
 	if _, err := f.s.Get(ctx, f.member, created.ID); !errors.Is(err, pgx.ErrNoRows) {

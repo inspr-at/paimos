@@ -33,12 +33,25 @@ func unlinkPerson(t *testing.T, f fixture, p tenant.Principal) {
 	dbtest.BindRole(t, f.d, p.TenantID, p.ID, "member")
 }
 
-func assertActive(t *testing.T, f fixture, p tenant.Principal, themeID string, revision int64) {
+func assertActive(t *testing.T, f fixture, p tenant.Principal, themeID string, revision int64) Active {
 	t.Helper()
 	a, err := f.s.Active(t.Context(), p)
-	if err != nil || a.Theme.ID != themeID || a.Revision != revision {
+	if err != nil || a.Theme.ID != themeID {
 		t.Fatalf("active for %s: %+v %v; want theme %s revision %d", p.ID, a, err, themeID, revision)
 	}
+	// Preserve the physical-revision assertions while checking the public CAS
+	// against the exact generation stored for that row, independent of gaps.
+	if revision == 0 {
+		if a.Revision != 0 {
+			t.Fatalf("unexpected saved choice: %+v", a)
+		}
+	} else {
+		var physical int64
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT revision FROM theme_selections WHERE tenant_id=$1 AND generation=$2`, p.TenantID, a.Revision).Scan(&physical); err != nil || physical != revision {
+			t.Fatalf("selection generation %d: physical revision %d want %d: %v", a.Revision, physical, revision, err)
+		}
+	}
+	return a
 }
 
 func assertPrivate(t *testing.T, f fixture, p tenant.Principal, theme Theme, audienceID string) {
@@ -116,42 +129,52 @@ func TestLinkedThemeOwnershipAuditAndUndo(t *testing.T) {
 }
 
 func TestLinkedSelectionsUseDeterministicAliasPriorityAndExplicitDefault(t *testing.T) {
-	f := setup(t)
-	a := mustTheme(t, f.s, f.member, "First alias", "personal")
-	b := mustTheme(t, f.s, f.other, "Second alias", "personal")
-	for _, c := range []struct {
-		person tenant.Principal
-		theme  Theme
-	}{{f.member, a}, {f.other, b}} {
-		if _, err := f.s.Select(t.Context(), c.person, SelectionInput{ThemeID: &c.theme.ID}); err != nil {
-			t.Fatal(err)
-		}
+	for _, explicitDefault := range []bool{false, true} {
+		t.Run(map[bool]string{false: "alias priority", true: "explicit canonical default"}[explicitDefault], func(t *testing.T) {
+			f := setup(t)
+			a := mustTheme(t, f.s, f.member, "First alias", "personal")
+			b := mustTheme(t, f.s, f.other, "Second alias", "personal")
+			for _, c := range []struct {
+				person tenant.Principal
+				theme  Theme
+			}{{f.member, a}, {f.other, b}} {
+				if _, err := f.s.Select(t.Context(), c.person, SelectionInput{ThemeID: &c.theme.ID}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			def, err := f.s.Active(t.Context(), f.owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if explicitDefault {
+				def, err = f.s.Select(t.Context(), f.owner, SelectionInput{ThemeID: nil, Revision: def.Revision})
+				if err != nil || def.Revision == 0 {
+					t.Fatalf("save canonical default through public path: %+v %v", def, err)
+				}
+			}
+			linkPeople(t, f, f.member, f.owner)
+			linkPeople(t, f, f.other, f.owner)
+			winner := a
+			if f.other.ID < f.member.ID {
+				winner = b
+			}
+			if explicitDefault {
+				winner = def.Theme
+			}
+			for _, p := range []tenant.Principal{f.owner, f.member, f.other} {
+				assertActive(t, f, p, winner.ID, 1)
+			}
+			unlinkPerson(t, f, f.member)
+			unlinkPerson(t, f, f.other)
+			assertActive(t, f, f.member, a.ID, 1)
+			assertActive(t, f, f.other, b.ID, 1)
+			canonicalRevision := int64(0)
+			if explicitDefault {
+				canonicalRevision = 1
+			}
+			assertActive(t, f, f.owner, def.Theme.ID, canonicalRevision)
+		})
 	}
-	linkPeople(t, f, f.member, f.owner)
-	linkPeople(t, f, f.other, f.owner)
-	winner := a
-	if f.other.ID < f.member.ID {
-		winner = b
-	}
-	for _, p := range []tenant.Principal{f.owner, f.member, f.other} {
-		assertActive(t, f, p, winner.ID, 1)
-	}
-	// Seed an explicit canonical choice to model the collision without editing
-	// either alias row. A saved null means default, never "no saved choice".
-	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision) VALUES($1,$2,NULL,7)`, f.owner.TenantID, f.owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	def, err := f.s.Active(t.Context(), f.owner)
-	if err != nil || def.Theme.Scope != "default" || def.Revision != 7 {
-		t.Fatalf("explicit canonical default lost to aliases: %+v %v", def, err)
-	}
-	assertActive(t, f, f.member, def.Theme.ID, 7)
-	assertActive(t, f, f.other, def.Theme.ID, 7)
-	unlinkPerson(t, f, f.member)
-	unlinkPerson(t, f, f.other)
-	assertActive(t, f, f.member, a.ID, 1)
-	assertActive(t, f, f.other, b.ID, 1)
-	assertActive(t, f, f.owner, def.Theme.ID, 7)
 }
 
 func TestLinkedSelectionInheritanceCollisionAndUndo(t *testing.T) {
@@ -183,11 +206,11 @@ func TestLinkedSelectionInheritanceCollisionAndUndo(t *testing.T) {
 				assertActive(t, f, f.member, old.ID, 1)
 				assertActive(t, f, f.other, old.ID, 1)
 				undo(t, f, f.other, selected, 201)
-				assertActive(t, f, f.other, def.Theme.ID, 2)
+				restored := assertActive(t, f, f.other, def.Theme.ID, 2)
 				if _, err := f.s.Select(t.Context(), f.other, SelectionInput{ThemeID: &old.ID, Revision: 1}); !errors.Is(err, ErrConflict) {
 					t.Fatalf("linked selection accepted stale revision: %v", err)
 				}
-				if _, err := f.s.Select(t.Context(), f.other, SelectionInput{ThemeID: &old.ID, Revision: 2}); err != nil {
+				if _, err := f.s.Select(t.Context(), f.other, SelectionInput{ThemeID: &old.ID, Revision: restored.Revision}); err != nil {
 					t.Fatal(err)
 				}
 				assertActive(t, f, f.member, old.ID, 3)
@@ -214,33 +237,37 @@ func TestUnlinkHidesASelectionFromTheFormerLinkedPerson(t *testing.T) {
 	}
 	linkPeople(t, f, f.member, f.other)
 	canonicalTheme := mustTheme(t, f.s, f.other, "Canonical private", "personal")
-	if _, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &canonicalTheme.ID, Revision: 1}); err != nil {
+	choice, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &canonicalTheme.ID, Revision: 1})
+	if err != nil {
 		t.Fatal(err)
 	}
 	selected := lastEvent(t, f, "theme.selected")
 	unlinkPerson(t, f, f.member)
 	a, err := f.s.Active(t.Context(), f.member)
-	if err != nil || a.Theme.Scope != "default" || a.SelectedThemeID != nil || a.FallbackNotice != nil || a.Revision != 2 {
+	if err != nil || a.Theme.Scope != "default" || a.SelectedThemeID != nil || a.FallbackNotice != nil || a.Revision != choice.Revision {
 		t.Fatalf("unlink exposed private choice or failed fallback: %+v %v", a, err)
 	}
 	assertPrivate(t, f, f.member, canonicalTheme, f.other.ID)
 	undo(t, f, f.member, selected, 201) // The alias's row returns to its own theme.
-	assertActive(t, f, f.member, old.ID, 3)
+	restored := assertActive(t, f, f.member, old.ID, 3)
 	// Another link/unlink leaves a before-snapshot that is now private. Undo
 	// must reject that restore, rather than report success or leak the theme.
 	linkPeople(t, f, f.member, f.other)
-	if _, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &canonicalTheme.ID, Revision: 3}); err != nil {
+	choice, err = f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &canonicalTheme.ID, Revision: restored.Revision})
+	if err != nil {
 		t.Fatal(err)
 	}
 	unlinkPerson(t, f, f.member)
-	if _, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: nil, Revision: 4}); err != nil {
+	choice, err = f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: nil, Revision: choice.Revision})
+	if err != nil {
 		t.Fatal(err)
 	}
 	undo(t, f, f.member, lastEvent(t, f, "theme.selected"), 409)
 	current, err := f.s.Active(t.Context(), f.member)
-	if err != nil || current.Theme.Scope != "default" || current.Revision != 5 {
+	if err != nil || current.Theme.Scope != "default" || current.Revision != choice.Revision {
 		t.Fatalf("private restore committed: %+v %v", current, err)
 	}
+	assertActive(t, f, f.member, current.Theme.ID, 5)
 }
 
 func TestThemeWriteRechecksLinkAfterAuthorityFence(t *testing.T) {

@@ -61,6 +61,12 @@
       "sha256": "6ca9500eecd6ccf7804921b275b0e6f51d101edbcae61af75799bfec36428a40",
       "ticket": "AEON-641",
       "reason": "Preserve immutable theme owners, choice rows and append-only audit through current principal links. Only theme-specific policies and guards change; no existing data, non-theme policy, route or column is removed. ALTER POLICY and CREATE OR REPLACE FUNCTION require this exact-byte coordinator-reviewed exception before merge/release, plus normal previous-binary compatibility probes. It grants no approval or release authority."
+    },
+    {
+      "file": "1208_theme_selection_generation.sql",
+      "sha256": "601ae9ff9206769a92e77704e27f0d361f11d24be373b2e7ce0d3af31cef41c5",
+      "ticket": "AEON-641",
+      "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
     }
   ]
 }
