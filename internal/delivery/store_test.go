@@ -561,6 +561,71 @@ func TestStoreExpediteAndBoundedInput(t *testing.T) {
 	}
 }
 
+func TestStoreTerminalRolloverAtOpenReleaseCap(t *testing.T) {
+	f := newStoreFixture(t)
+	var source Release
+	for i := 0; i < 48; i++ {
+		r := f.addRelease(t, f.project, fmt.Sprintf("REL-%d", i+3), "internal", "planned", "E"+string(rankDigits[i+1]))
+		source = r
+	}
+	id := f.item(t, "ticket", "TK-1", "open", source.ID, "V")
+	f.item(t, "task", "TSK-1", "done", source.ID, "W")
+	if n := f.scalar(t, `SELECT count(*) FROM project_releases WHERE state IN ('planned','building','frozen')`); n != 50 {
+		t.Fatalf("fixture open releases=%d", n)
+	}
+	if _, err := f.store.Plan(t.Context(), f.person, PlanRequest{ProjectID: f.project, Visibility: "internal", Title: "Over capacity"}); !errors.Is(err, ErrOpenReleaseCapacity) {
+		t.Fatalf("plan cap: %v", err)
+	}
+	source = f.freeze(t, source.ID)
+	closed, err := f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: source.ID, ExpectedRevision: source.Revision, Action: "close"})
+	if err != nil {
+		t.Fatalf("close should free the slot its successor uses: %v", err)
+	}
+	if closed.State != "released" || f.placed(t, id).ReleaseID == source.ID || f.scalar(t, `SELECT count(*) FROM project_releases WHERE state IN ('planned','building','frozen')`) != 50 {
+		t.Fatal("wrong projected terminal rollover cap")
+	}
+}
+
+func TestStoreRolloverPreservesItemRankOrder(t *testing.T) {
+	f := newStoreFixture(t)
+	a := f.item(t, "ticket", "TK-1", "open", f.release, "V")
+	b := f.item(t, "task", "TSK-1", "open", f.release, "W")
+	// Force source rank order to oppose UUID order, independently of random
+	// fixture identities. Row lock order and display order have different jobs.
+	first, second := a, b
+	if first < second {
+		first, second = second, first
+	}
+	f.exec(t, `UPDATE ships_in SET rank='X' WHERE item_node_id=$1`, a)
+	f.exec(t, `UPDATE ships_in SET rank='Y' WHERE item_node_id=$1`, b)
+	f.exec(t, `UPDATE ships_in SET rank='V' WHERE item_node_id=$1`, first)
+	f.exec(t, `UPDATE ships_in SET rank='W' WHERE item_node_id=$1`, second)
+	r := f.freeze(t, f.release)
+	if _, err := f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: r.Revision, Action: "cut", VersionScheme: "legacy", Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.placed(t, first).Rank >= f.placed(t, second).Rank {
+		t.Fatal("rollover scrambled source rank order")
+	}
+}
+
+func TestStoreUndoRestoresExpediteTransfer(t *testing.T) {
+	f := newStoreFixture(t)
+	stale := f.item(t, "ticket", "TK-1", "done", f.release, "V")
+	id := f.item(t, "ticket", "TK-2", "open", f.release, "W")
+	f.exec(t, `UPDATE ships_in SET expedite=true WHERE item_node_id=$1`, stale)
+	if _, err := f.store.Place(t.Context(), f.person, f.project, []PlacementRequest{{ItemID: id, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.release, ExpectedReleaseRevision: 1, Expedite: true}}); err != nil {
+		t.Fatal(err)
+	}
+	e := f.lastEvent(t, "ships_in.changed")
+	if err := f.undo(t, f.person, e); err != nil {
+		t.Fatalf("undo of atomic expedite transfer: %v", err)
+	}
+	if !f.placed(t, stale).Expedite || f.placed(t, id).Expedite || f.placed(t, stale).Rank != "V" || f.placed(t, id).Rank != "W" {
+		t.Fatal("undo did not restore complete before state")
+	}
+}
+
 func TestProjectVersionTaggedGrammar(t *testing.T) {
 	for _, tc := range []struct {
 		scheme, version string
