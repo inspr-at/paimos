@@ -29,6 +29,7 @@ const firstFree = () => Math.max(0, shown.value.findIndex(option => !option.curr
 const active = ref(firstFree())
 watch(term, () => { active.value = shown.value.length ? firstFree() : 0 })
 function choose(index: number) {
+  active.value = index
   if (index === shown.value.length && newName.value) { emit('create', newName.value); return }
   const option = shown.value[index]
   if (!option || option.current || option.reason) return
