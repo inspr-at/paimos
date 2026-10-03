@@ -138,6 +138,8 @@ test('no accounts yet: one line and the one action that fixes it', async ({ page
   await open(page)
   await expect(band(page)).toContainText('No accounts yet. Sign in to a harness on a connected computer and it appears here.')
   await expect(band(page).getByRole('link', { name: 'Connect your machine' })).toHaveAttribute('href', '/agents/register-agent')
+  await expect(band(page).locator('.account-line')).toHaveCount(0)
+  await expect(band(page).locator('.row')).toHaveCount(0)
   await expect(band(page).locator('.band-foot')).toHaveCount(0)
 })
 

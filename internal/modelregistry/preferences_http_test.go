@@ -177,6 +177,9 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	if restored.ArchivedAt != nil {
 		t.Fatal(restored)
 	}
+	if eventCount(t, admin, "work_kind.restored") != 1 {
+		t.Fatal("restore did not record its own event")
+	}
 	for _, method := range []string{"DELETE", "PATCH", "POST"} {
 		path := "/api/work-kinds/" + kindID(t, doc, "security")
 		body := ""
