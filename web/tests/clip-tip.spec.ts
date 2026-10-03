@@ -10,6 +10,7 @@ const shots = 'test-results/aeon-632a-clip'
 const fixShots = `${shots}/tooltip-fix`
 const overflowShots = `${shots}/overflow-fix4`
 const touchShots = `${shots}/touch-fix5`
+const tableShots = `${shots}/table-fix6`
 const overflowText = Array.from({ length: 20 }, (_, index) => `${index + 1}. ${longName}`).join('\n')
 async function noOverflow(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
@@ -567,6 +568,10 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       const panel = page.getByRole('dialog', { name: 'Epic for PHAROS-14' })
       const row = panel.getByRole('option')
       await expect(row.locator('.title')).toHaveAttribute('data-tip', longName)
+      // Clear autofocus disclosure through ordinary touch input before the
+      // hold. Older hosts must reach the missing 500 ms disclosure assertion,
+      // rather than fail because the search's initial focus already showed it.
+      await panel.getByText('Epic', { exact: true }).tap()
       await expect(page.locator('.tooltip')).toHaveCount(0)
       const writes = () => calls.filter(call => call.method !== 'GET')
       const before = writes().length
@@ -611,6 +616,125 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         const move = calls.filter(call => call.method === 'POST' && call.path === '/api/nodes/n-4/move')
         expect(move).toHaveLength(1)
         expect(move[0]!.body).toMatchObject({ parent_id: 'n-epic' })
+        expect(errors).toEqual([])
+      } finally { await page.clock.resume(); await cdp.detach() }
+    })
+
+    test('production table hold discloses without selection and the next tap opens the ticket', async ({ page }) => {
+      const errors = watchErrors(page)
+      const data = fixtures(); data.preferences.theme = { choice: theme }
+      data.preferences.releases = { last_seen: '260923120000.0.0' }
+      data.nodes.find(node => node.id === 'n-1')!.title = longName
+      const calls = await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      const table = page.getByRole('grid', { name: 'Tickets' })
+      const row = table.locator('#row-n-1')
+      const name = row.locator('.title-text')
+      const selected = table.locator('.ticket-row.selected')
+      const bulk = page.getByRole('toolbar', { name: /selected ticket/ })
+      await expect(name).toHaveAttribute('data-tip', longName)
+      await expect(selected).toHaveCount(0)
+      await page.clock.install()
+      const cdp = await page.context().newCDPSession(page)
+      try {
+        await expectStableControls({ controls: { row, name, copy: row.getByRole('button', { name: 'Copy PHAROS-11' }) }, interactions: [
+          { name: 'clipped-name hold owns disclosure before the table selection threshold', run: async () => {
+            await pauseForGesture(page)
+            const box = (await name.boundingBox())!
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+            await page.clock.runFor(479)
+            await expect(selected).toHaveCount(0)
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await page.clock.runFor(1)
+            await expect(selected).toHaveCount(0)
+            await page.clock.runFor(19)
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            // A native hold can raise contextmenu before its compatibility
+            // click; it must not hand the gesture back to row selection.
+            await name.dispatchEvent('contextmenu', { bubbles: true, cancelable: true })
+            await expect(selected).toHaveCount(0)
+            await page.clock.runFor(1)
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await page.clock.resume()
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await expect(selected).toHaveCount(0)
+            await expect(bulk).toHaveCount(0)
+            await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
+            expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
+          } },
+          { name: 'Escape dismisses disclosure without moving row controls', run: async () => {
+            await page.screenshot({ path: `${tableShots}/disclosure-${width}-${theme}.png` })
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await expect(selected).toHaveCount(0)
+          } },
+        ] })
+        await noOverflow(page)
+        // The compatibility click was consumed, but no row suppression flag
+        // may swallow this fresh native tap on the same record.
+        await name.tap()
+        await expect(page).toHaveURL(/\/p\/PHAROS\/PHAROS-11$/)
+        await expect(page.getByRole('complementary', { name: 'Ticket details' })).toBeVisible()
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+        expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
+        expect(errors).toEqual([])
+      } finally { await page.clock.resume(); await cdp.detach() }
+    })
+
+    if (width === 390) test('production phone selection holds still work and clipped holds preserve an existing selection', async ({ page }) => {
+      const errors = watchErrors(page)
+      const data = fixtures(); data.preferences.theme = { choice: theme }
+      data.preferences.releases = { last_seen: '260923120000.0.0' }
+      data.nodes.find(node => node.id === 'n-1')!.title = longName
+      data.nodes.find(node => node.id === 'n-2')!.title = 'Kurz'
+      const calls = await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      const table = page.getByRole('grid', { name: 'Tickets' })
+      const clippedRow = table.locator('#row-n-1'), shortRow = table.locator('#row-n-2')
+      const name = clippedRow.locator('.title-text'), short = shortRow.locator('.title-text')
+      const selectedKeys = table.locator('.ticket-row.selected .key')
+      await expect(name).toHaveAttribute('data-tip', longName)
+      await expect(short).not.toHaveAttribute('data-clip-tip')
+      await page.clock.install()
+      const cdp = await page.context().newCDPSession(page)
+      try {
+        await pauseForGesture(page)
+        const box = (await short.boundingBox())!
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+        await page.clock.runFor(479)
+        await expect(selectedKeys).toHaveCount(0)
+        await page.clock.runFor(1)
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await page.clock.resume()
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+        // Ordinary taps continue to toggle when selection is already active.
+        await name.tap()
+        await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])
+        await expectStableControls({ controls: { row: clippedRow, name, check: clippedRow.getByRole('checkbox', { name: 'Select PHAROS-11' }), clear: page.getByRole('button', { name: 'Clear the selection' }) }, interactions: [
+          { name: 'hold reads an already selected row without toggling it', run: async () => {
+            await pauseForGesture(page)
+            const box = (await name.boundingBox())!
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+            await page.clock.runFor(500)
+            await expect(page.locator('.tooltip')).toHaveText(longName)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await page.clock.resume()
+            await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])
+          } },
+          { name: 'dismiss retains selection and row controls', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.tooltip')).toHaveCount(0)
+            await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])
+          } },
+        ] })
+        await name.tap()
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
+        await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
+        await noOverflow(page)
+        expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
         expect(errors).toEqual([])
       } finally { await page.clock.resume(); await cdp.detach() }
     })

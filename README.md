@@ -1940,7 +1940,9 @@ Clipped names using the shared clip-tip reveal their full text on mouse hover
 or keyboard focus. On touch, tapping performs the row or link's action; holding
 for 500 ms reveals the text without selecting or navigating. Moving more than
 8 px, scrolling or cancelling the pointer before that threshold cancels the
-hold. The revealed text remains until an outside tap or Escape. Phone list and
+hold. A clipped-name hold takes precedence over phone row selection; a hold
+elsewhere on the row can still start selection. The next tap keeps its normal action.
+The revealed text remains until an outside tap or Escape. Phone list and
 picker names use two lines; picker rows retain their fixed height.
 
 Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
