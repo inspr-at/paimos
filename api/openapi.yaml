@@ -194,7 +194,7 @@ paths:
   /recurrences:
     get:
       operationId: listRecurrences
-      description: Project-visible recurring work managed by the caller. recurrences.manage is required; agents require an explicit custom-role grant and key scope. Results are bounded to 100, with an optional after UUID cursor.
+      description: Project-visible recurring work. People need nodes.read; agents need an explicit recurrences.manage grant and key scope. Deleted definitions are omitted. Results are bounded to 100, with an optional after UUID cursor.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
@@ -217,7 +217,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getRecurrence
-      description: Read a visible recurrence with recurrences.manage in its project. Invisible IDs return 404.
+      description: Read a visible recurrence. People need nodes.read; agents need recurrences.manage. Invisible or deleted IDs return 404.
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: Recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
@@ -241,6 +241,53 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteRecurrence
+      description: Stop and retire a recurrence at expected_revision. Requires recurrences.manage inside the mutation transaction. Its definition, receipts, created tickets and audit history are retained. Appends recurrence.deleted. Deleted definitions cannot be run or edited.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '204': {description: Retired}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/preview:
+    post:
+      operationId: previewRecurrenceDraft
+      description: Validate an unsaved definition and preview the next four dates on the database clock, using the scheduler calendar engine. No definition or event is written. Requires recurrences.manage and a visible valid target. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceInput'}}}}
+      responses:
+        '200': {description: Preview, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrencePreview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/history:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: recurrenceHistory
+      description: Project-visible append-only recurrence events, newest first. Same read permissions as getRecurrence. Each page is bounded to 50; before is the previous next_cursor. Includes current node key, title and state only for visible live occurrence tickets.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: before, in: query, schema: {type: integer, minimum: 1}}
+        - {name: filter, in: query, schema: {type: string, enum: [all, created, skipped, changes], default: all}}
+      responses:
+        '200': {description: History, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RecurrenceHistoryEntry'}}, next_cursor: {type: [integer, 'null']}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/releases:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: recurrenceReleases
+      description: Published releases of this recurrence's project, from journey and immutable product history. Bounded to the newest 100, with truncated explicitly reported. Names are marketing codenames where supplied; version remains canonical. Receipts disable releases already attempted. Same read permissions as getRecurrence.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Release choices, content: {application/json: {schema: {type: object, required: [items, truncated], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RecurrenceRelease'}}, truncated: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /recurrences/{recurrenceId}/pause:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -274,7 +321,7 @@ paths:
       operationId: runRecurrenceNow
       description: Manually attempt one occurrence, including while paused. An idempotency_key is required; retrying it returns the original receipt without creating another ticket, even after template edits. Manual runs do not move the schedule or event cursor. Uses the overlap policy and existing queue readiness. The occurrence number counts both created and skipped attempts. Creates ordinary tickets with Recurring work system-actor provenance; appends recurrence.occurred or recurrence.skipped with a reason.
       security: [{session: []}, {agentKey: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [idempotency_key], properties: {idempotency_key: {type: string, minLength: 1, maxLength: 128}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [idempotency_key], properties: {idempotency_key: {type: string, minLength: 1, maxLength: 128}, expected_revision: {type: integer, minimum: 1}, force_overlap: {type: boolean, default: false, description: Explicitly confirmed manual override of skip policy; does not change the definition.}, release_key: {type: string, maxLength: 256, description: A server-issued release choice key. Event only; renders the trusted release name and version and shares its durable receipt identity with the scheduler.}}}}}}
       responses:
         '200': {description: Durable occurrence receipt, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceOccurrence'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -9734,11 +9781,14 @@ components:
         timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
         start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}
         event: {type: string, enum: [release.published], description: Event only; the project's journey publications and configured product release history. Historical publications before creation and those during pause are ignored.}
+        event_start: {type: string, enum: [now, hour, morning], default: now, description: 'Event only; immediately, one hour later or next local morning at 06:00.'}
+        event_timezone: {type: string, maxLength: 128, description: 'Event only; IANA zone for next morning, default UTC.'}
     RecurrenceTemplate:
       type: object
       additionalProperties: false
       required: [title]
       properties:
+        name: {type: string, maxLength: 80, description: Human name of the recurrence; optional for existing CLI definitions.}
         title: {type: string, minLength: 1, maxLength: 512}
         description: {type: string, maxLength: 65536}
         acceptance_criteria: {type: array, maxItems: 100, items: {type: string, minLength: 1, maxLength: 4096}}
@@ -9774,6 +9824,42 @@ components:
             created_by_principal_id: {type: string, format: uuid}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+            last_result: {$ref: '#/components/schemas/RecurrenceResult'}
+            open_previous: {$ref: '#/components/schemas/RecurrenceResult'}
+    RecurrencePreview:
+      type: object
+      required: [times, trigger_kind]
+      properties:
+        times: {type: array, maxItems: 100, items: {type: string, format: date-time}}
+        trigger_kind: {type: string, enum: [time, event]}
+    RecurrenceResult:
+      allOf:
+        - {$ref: '#/components/schemas/RecurrenceOccurrence'}
+        - type: object
+          properties:
+            key: {type: string}
+            title: {type: string}
+            state: {type: string}
+    RecurrenceHistoryEntry:
+      type: object
+      required: [id, type, at, actor_name, before, after]
+      properties:
+        id: {type: integer}
+        type: {type: string}
+        at: {type: string, format: date-time}
+        actor_name: {type: string}
+        before: {type: [object, 'null']}
+        after: {type: [object, 'null']}
+        node: {type: [object, 'null'], properties: {key: {type: string}, title: {type: string}, state: {type: string}}}
+    RecurrenceRelease:
+      type: object
+      required: [key, name, version, published_at]
+      properties:
+        key: {type: string}
+        name: {type: string}
+        version: {type: string}
+        published_at: {type: string, format: date-time}
+        receipt: {$ref: '#/components/schemas/RecurrenceResult'}
     RecurrenceOccurrence:
       type: object
       required: [recurrence_id, occurrence_key, number, scheduled_at, outcome, reason]
@@ -16529,6 +16615,14 @@ components:
             label: {type: string, const: Queued}
             meaning: {type: string}
             is_status: {type: boolean, const: false}
+        recurring:
+          type: object
+          description: The loop marker denotes occurrence tickets, not a ticket status.
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Recurring}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
         autopilot:
           type: object
           required: [enabled, effective_enabled, project_mode, rules]
@@ -16557,6 +16651,10 @@ components:
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
         queued: {$ref: '#/components/schemas/QueuedTicket'}
+        recurrence:
+          $ref: '#/components/schemas/NodeRecurrence'
+          readOnly: true
+          description: Read-only provenance on node GET and list responses, derived from a visible recurrence_occurrences receipt, never editable fields. Absent for ordinary tickets or an inaccessible source recurrence. Loaded once per bounded page, with no per-row HTTP requests. Retained after recurrence retirement.
         id:
           type: string
           format: uuid
@@ -16659,6 +16757,16 @@ components:
         complexity_by: {type: [string, 'null'], format: uuid, readOnly: true}
         complexity_at: {type: [string, 'null'], format: date-time, readOnly: true}
         complexity_confirmed: {type: boolean, readOnly: true}
+    NodeRecurrence:
+      type: object
+      required: [id, project_id, project_key, number, trigger, retired]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, description: Source recurrence project; may differ from a moved ticket's project.}
+        project_key: {type: string, description: Source project's current key for its settings route.}
+        number: {type: integer, minimum: 1, description: Receipt occurrence number, including skipped attempts.}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
+        retired: {type: boolean, description: Retired sources retain their marker but cannot be managed.}
     NodeCreate:
       type: object
       required: [kind_id, title]
