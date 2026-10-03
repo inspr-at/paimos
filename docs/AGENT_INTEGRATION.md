@@ -918,6 +918,64 @@ synthetic response, not invented vendor fields. No real Grok billing probe or
 Cursor TUI/cookie extraction is used. Native Grok execution bindings and approval
 requirements remain unchanged.
 
+#### Daemon regression execution evidence (AEON-478, fix round 5)
+
+Executed on 2026-10-03 on the approved writable mbp2606 test runner, using
+`remote-test.sh`, its isolated Postgres database and uncached Go tests
+(`-count=1 -v`). The current implementation is
+`b5ce64725b2b3433100a44040441c4c66ad4cdc3`, which merges readiness parent
+`0c4c4b1584d29f88d5fb07e9bab632df638951b8`. All ten top-level `TestFix3` and
+`TestFix4` tests in `internal/agentaccounts` and `internal/agentd` passed.
+The following historical runs compiled and reached the specified assertions;
+runner, compilation and fixture failures were not counted as regressions.
+
+| Regression | Pre-fix implementation | Executed pre-fix failure | Current result |
+| --- | --- | --- | --- |
+| `TestFix3AutomaticHardStopSurvivesFailedDeliveryAndRestart` | `d3a52c4b6cdcf81a9c06909038d1840c8de55814` | `failed automatic hard-stop delivery was not durable` | PASS |
+| `TestFix3CapacityReplayPreservesConcurrentHealthFailure` | same | `measurement replay overwrote concurrent health failure`, for both `auth_failed` and `unavailable` | PASS, both cases |
+| `TestFix3PiHealthPollingCannotOverlapKeyCapture` | same | `health polling overlapped capture: 2 key requests` | PASS |
+| `TestFix3PiHealthPollingRespectsDurableCaptureBackoff` | same | `health poll bypassed persisted retry: 2 calls` | PASS |
+| `TestFix4AutomaticReplayAfterDayOutageAllowsFreshCheckNow` | `1cb669535c92b37b0214bb495bb497523781f7c2` | `aged automatic replay stalled, changed evidence or recaptured: api 400` | PASS |
+| `TestFix4AgedAutomaticFactsKeepFreshnessAndOrdering` | same | HTTP 400, `invalid readiness observation time`, for both 17% and 100% readings | PASS, both cases |
+| `TestFix3RestartFirstReportCarriesOldCheck` | `f867cb6cc24553eba5e4c2a2500799bc890aa415` with the parent's unchanged test file | HTTP 409 without `X-Aeon-Write-Committed` or `stale_binding`, failing `stale completion must report its committed heartbeat` | PASS |
+
+The first four test bodies are byte-for-byte identical between the historical
+run and the current run. The fix-4 test file is also unchanged between its two
+runs; `1cb66953` differs from reviewed `bd37420c` only in this test fixture, so
+its production implementation is the pre-fix implementation. The restart
+compatibility run replaced only `internal/agentaccounts/readiness_test.go` in
+the runner's disposable `f867cb6c` checkout with that file from `b5ce6472`.
+Historical-run adapters changed only the selected Git revision and that
+explicit test overlay; all runner presence, load, reservation and cleanup
+guards remained intact. No source checkout or branch was rewound.
+
+The current targeted command was
+`go test -count=1 -v ./internal/agentaccounts ./internal/agentd -run 'TestFix[34]'`.
+Historical runs selected `TestFix3` at `d3a52c4b`, `TestFix4` at `1cb66953`,
+and `TestFix3RestartFirstReportCarriesOldCheck` at `f867cb6c`; each exited 1
+for the assertion failures above. The current run exited 0. These are
+synthetic regression results, not qualification of live vendor executables.
+
+The merge preserves both protocols: an ordinary heartbeat can commit the new
+daemon generation while explicitly rejecting an old check completion; a
+measurement-only completion with an unestablished or different generation
+still rejects without changing generation or health. Decisions 1C and 2B,
+admission-owned recovery and the idle-launch qualification gates are unchanged.
+
+At the same implementation commit, a separate uncached remote run passed all
+seven affected Go packages: `internal/agentd`, `internal/agentaccounts`,
+`internal/agentsetup`, `internal/openrouter`, `internal/capacity`,
+`cmd/aeon-agentd` and `internal/reportercontract`. The guarded web runner passed
+the Go formatting check, `npm run build`, 652 Node tests and 688 Vitest tests
+across 55 files. Audit slice assignment and `git diff --check` also passed.
+The follow-up evidence commit changes only this documentation.
+
+Browser validation remains open: the approved remote launcher exited 3 before
+launching `usage-dashboard.spec.ts` and `capacity-learning.spec.ts`, because
+the OPS-247 bootstrap and launcher are pending. No Linux Chromium run is
+claimed. No guard was bypassed and no origin push or deployment was performed;
+the coordinator must run these specs on an approved browser lane or hosted CI.
+
 ## Outcome events (AEON-286)
 
 Review verdicts, fix rounds, CI results and reverts are outcome events. Record one with `aeon outcome record`. The agent key needs `outcome.write`. Repeat the same `--idempotency-key` and body after a lost response; a different body for that key conflicts. Keys starting with `auto:` are reserved.
