@@ -94,4 +94,14 @@ func TestListWithoutStatistics(t *testing.T) {
 	if err != nil || len(page.Items) != 50 || page.Facets["kind"]["ticket"] != 2058 {
 		t.Fatalf("list without statistics: %v, items=%d, facets=%v", err, len(page.Items), page.Facets)
 	}
+	ids := make([]string, len(page.Items))
+	for i, item := range page.Items {
+		ids[i] = item.ID
+	}
+	plan := logPagePlanningPerformancePlan(t, member, ids)
+	found, rows, visits := planningSubtreeWork(plan, false)
+	t.Logf("page subtree without statistics: rows=%.0f, node visits=%.0f", rows, visits)
+	if !found || rows != float64(len(ids)) || visits > float64(2*len(ids)) {
+		t.Fatalf("page subtree without statistics: found=%t rows=%.0f visits=%.0f, want %d roots and at most %d node visits", found, rows, visits, len(ids), 2*len(ids))
+	}
 }
