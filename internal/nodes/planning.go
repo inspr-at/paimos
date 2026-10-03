@@ -138,15 +138,25 @@ func planningOpenWhere(c string) string {
 // planningSubtreeSQL lists (root, id) for each root in the relation roots
 // (one uuid column named root): the root, its open or done ticket and task
 // children, and theirs. Needs plan_states in scope.
-func planningSubtreeSQL(roots string) string {
+func planningSubtreeSQL(roots string, page bool) string {
 	tenant := `current_setting('aeon.tenant_id')::uuid`
+	child := func(parent, alias string) string {
+		if !page {
+			return ` JOIN nodes ` + alias + ` ON ` + alias + `.tenant_id=` + tenant + ` AND ` + alias + `.parent_id=` + parent
+		}
+		// A page probes only its selected parents. Keep the live-row predicate
+		// and index order inside the fence; skewed parent estimates otherwise
+		// favour rescanning the tenant's tickets for each page root.
+		return ` CROSS JOIN LATERAL (
+   SELECT id,tenant_id,kind_id,state,deleted_at FROM nodes
+   WHERE tenant_id=` + tenant + ` AND parent_id=` + parent + ` AND deleted_at IS NULL
+   ORDER BY updated_at DESC OFFSET 0
+  ) ` + alias
+	}
 	return `SELECT r.root, r.root AS id FROM (` + roots + `) r
-    UNION ALL SELECT r.root, c.id FROM (` + roots + `) r
-    JOIN nodes c ON c.tenant_id=` + tenant + ` AND c.parent_id=r.root` + planningOpenChild("c") + `
+    UNION ALL SELECT r.root, c.id FROM (` + roots + `) r` + child("r.root", "c") + planningOpenChild("c") + `
     WHERE ` + planningOpenWhere("c") + `
-    UNION ALL SELECT r.root, g.id FROM (` + roots + `) r
-    JOIN nodes c ON c.tenant_id=` + tenant + ` AND c.parent_id=r.root` + planningOpenChild("c") + `
-    JOIN nodes g ON g.tenant_id=` + tenant + ` AND g.parent_id=c.id` + planningOpenChild("g") + `
+    UNION ALL SELECT r.root, g.id FROM (` + roots + `) r` + child("r.root", "c") + planningOpenChild("c") + child("c.id", "g") + planningOpenChild("g") + `
     WHERE ` + planningOpenWhere("c") + ` AND ` + planningOpenWhere("g")
 }
 
@@ -969,7 +979,7 @@ func loadPlanUsage(ctx context.Context, tx pgx.Tx, ids []string, cost func(strin
 func planUsageSQL() string {
 	return `WITH ` + planningStatesCTE() + `, ` + planningPricesCTE() + `
     SELECT t.root::text, s.project_id::text, ` + usageLineColumns + `
-    FROM (` + planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`) + `) t` + planningUsageFrom
+    FROM (` + planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`, true) + `) t` + planningUsageFrom
 }
 
 // Hidden source costs cannot enter either spent figures or calibration rates.
@@ -1068,7 +1078,7 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
 	return `, ` + planningStatesCTE() + `, ` + planningPricesCTE() + `, plan_rates AS (
         SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
     ), plan_sub AS MATERIALIZED (
-        ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`) + `
+        ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`, pageUsage) + `
     ), plan_sessions AS MATERIALIZED (
         SELECT t.root AS id, s.id AS session_id, s.project_id
         FROM plan_sub t
