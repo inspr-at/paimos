@@ -26,7 +26,7 @@ func TestEstimateComplexityBucketsAndHints(t *testing.T) {
 		title, role, area string
 		fields            map[string]any
 	}{
-		{"Secure RLS migration", "build-hard", "backend", nil},
+		{"Secure RLS migration", "build-hard", "security", nil},
 		{"UI and API integration", "", "full-stack", nil},
 		{"README cleanup", "mechanical", "docs", nil},
 		{"Investigate Docker deployment", "scout", "infra", nil},
@@ -74,7 +74,7 @@ func TestEstimatedTicketSuggestionsAndConfirmation(t *testing.T) {
 	kind := kindBySlug(t, p, "ticket")
 	n := mustNode(t, agent, fmt.Sprintf(`{"kind_id":%q,"title":"RLS schema migration","fields":{"estimate_hours":2}}`, kind.ID))
 	fields := routeFieldMap(t, n.Fields)
-	for key, want := range map[string]string{"route_role": "build-hard", "area": "backend", "complexity": "M"} {
+	for key, want := range map[string]string{"route_role": "build-hard", "area": "security", "complexity": "M"} {
 		if fields[key] != want || fields[key+"_source"] != "suggested" || fields[key+"_by"] != agent.ID || fields[key+"_confirmed"] != false || fields[key+"_at"] == nil {
 			t.Fatalf("suggestion %s: %#v", key, fields)
 		}
