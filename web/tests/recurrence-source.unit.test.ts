@@ -22,7 +22,7 @@ const provenance: NodeRecurrence = { id: 'source', project_id: project.id, proje
 // production files or changing the assertions.
 function source(path: string) {
   return process.env.AEON_637_BASELINE === '1'
-    ? execFileSync('git', ['show', `a12c21c2:web/src/${path}`], { encoding: 'utf8' })
+    ? execFileSync('git', ['show', `${process.env.AEON_637_BASELINE_REF ?? 'a12c21c2'}:web/src/${path}`], { encoding: 'utf8' })
     : readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 }
 function setup<T>(text: string, props: object, modules: Record<string, unknown>): T {
@@ -87,7 +87,7 @@ it('drops a late source response when the selected source changes', async () => 
   expect(state.chosen.value?.id).toBe('next-source')
 })
 
-function ticket(fields: Record<string, unknown>, recurrence: NodeRecurrence | null = provenance) {
+function ticket(fields: Record<string, unknown>, recurrence: NodeRecurrence | null = provenance, options: { manage?: boolean; getRecurrence?: (id: string, signal: AbortSignal) => Promise<Recurrence> } = {}) {
   const item = Vue.ref({ id: 'occurrence', kind_slug: 'ticket', fields, recurrence: recurrence ? structuredClone(recurrence) : undefined } as unknown as ListItem)
   const props = Vue.reactive({ item: item.value, project: { id: 'destination-project', routeKey: 'DEST' } })
   const text = source('components/work/TicketWorkspace.vue')
@@ -95,16 +95,17 @@ function ticket(fields: Record<string, unknown>, recurrence: NodeRecurrence | nu
   // needed to establish which record/project its source-edit callback targets.
   const block = text.slice(text.indexOf('const repeatSource ='), text.indexOf('const humanCheckPerson ='))
   expect(block.length).toBeGreaterThan(500)
-  const get = vi.fn(async (id: string) => definition(id))
+  const manage = Vue.ref(options.manage ?? true)
+  const get = vi.fn(options.getRecurrence ?? (async (id: string) => definition(id)))
   const state = setup<{ originRecurrence: Vue.Ref<Recurrence | null>; recurrenceEdit: Vue.Ref<Recurrence | null>; sourceProject?: Vue.ComputedRef<typeof project | null>; originLoaded: (value: Recurrence) => void; editRecurrence: () => void }>(`<script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { item, props, ticket, can, getRecurrence, useIdentityScope, recurrenceName, toast, queueRouter } from 'fixture'
 ${block}
 </script>`, {}, {
     vue: Vue,
-    fixture: { item, props, ticket: { gone: Vue.ref(false), readOnly: Vue.ref(false) }, can: () => true, getRecurrence: get, useIdentityScope: identityScope, recurrenceName: Recurrences.recurrenceName, toast: vi.fn(), queueRouter: { push: vi.fn() } },
+    fixture: { item, props, ticket: { gone: Vue.ref(false), readOnly: Vue.ref(false) }, can: (_permission: string, projectId: string) => projectId === project.id ? manage.value : true, getRecurrence: get, useIdentityScope: identityScope, recurrenceName: Recurrences.recurrenceName, toast: vi.fn(), queueRouter: { push: vi.fn() } },
   })
-  return { item, state, get }
+  return { item, state, get, manage }
 }
 
 it('editable metadata cannot create source-edit state without authoritative provenance', () => {
@@ -147,6 +148,50 @@ ${block}
 </script>`, {}, { vue: Vue, fixture: { item, props: Vue.reactive({ item: item.value, project }), ticket: { gone: Vue.ref(false), readOnly: Vue.ref(false) }, can: () => true, getRecurrence: () => new Promise<Recurrence>(resolve => { answer = resolve }), useIdentityScope: identityScope, recurrenceName: Recurrences.recurrenceName, toast: vi.fn(), queueRouter: { push: vi.fn() } } })
   state.originLoaded(definition()); state.editRecurrence()
   item.value.recurrence = undefined
+  answer(definition()); await settle()
+  expect(state.recurrenceEdit.value).toBeNull()
+})
+
+it('delayed source permissions preserve loaded provenance and enable editing', async () => {
+  const { state, get, manage } = ticket({}, provenance, { manage: false })
+  const loaded = definition()
+  state.originLoaded(loaded)
+  expect(state.originRecurrence.value).toEqual(loaded)
+  state.editRecurrence()
+  expect(get).not.toHaveBeenCalled()
+  expect(state.recurrenceEdit.value).toBeNull()
+  manage.value = true
+  expect(state.originRecurrence.value).toEqual(loaded)
+  state.editRecurrence(); await settle()
+  expect(get).toHaveBeenCalledWith('source', expect.any(AbortSignal))
+  expect(state.recurrenceEdit.value).toEqual(loaded)
+})
+
+it('source permission revocation closes the editor and permits a fresh edit after regrant', async () => {
+  const { state, get, manage } = ticket({})
+  state.originLoaded(definition()); state.editRecurrence(); await settle()
+  expect(state.recurrenceEdit.value?.id).toBe('source')
+  manage.value = false
+  expect(state.recurrenceEdit.value).toBeNull()
+  state.editRecurrence()
+  expect(get).toHaveBeenCalledTimes(1)
+  manage.value = true
+  expect(state.recurrenceEdit.value).toBeNull()
+  state.editRecurrence(); await settle()
+  expect(get).toHaveBeenCalledTimes(2)
+  expect(state.recurrenceEdit.value?.id).toBe('source')
+})
+
+it('source permission revocation cancels an in-flight edit even after regrant', async () => {
+  let answer!: (value: Recurrence) => void
+  const { state, get, manage } = ticket({}, provenance, { getRecurrence: () => new Promise(resolve => { answer = resolve }) })
+  state.originLoaded(definition()); state.editRecurrence()
+  expect(get).toHaveBeenCalledWith('source', expect.any(AbortSignal))
+  const signal = get.mock.calls[0]![1]
+  expect(signal.aborted).toBe(false)
+  manage.value = false
+  expect(signal.aborted).toBe(true)
+  manage.value = true
   answer(definition()); await settle()
   expect(state.recurrenceEdit.value).toBeNull()
 })

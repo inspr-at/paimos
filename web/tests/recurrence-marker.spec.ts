@@ -248,3 +248,62 @@ test('a source link for another project exposes the error without selecting a su
   await expect(page.getByRole('region', { name: 'Recurrence history' })).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`delayed source permissions keep the edit action and stable header at ${width}px in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const { data, errors, recurrenceReads } = await setup(page, true, 'de-AT')
+    const ticket = data.nodes.find(node => node.id === 'n-1')!
+    ticket.project = 'p-aeon'; ticket.parent_id = 'p-aeon'; ticket.key = 'AEON-99'
+    let releasePermissions!: () => void
+    const permissionBarrier = new Promise<void>(resolve => { releasePermissions = resolve })
+    let permissionRequested!: () => void
+    const requested = new Promise<void>(resolve => { permissionRequested = resolve })
+    await page.route('**/api/me/permissions**', async route => {
+      if (new URL(route.request().url()).searchParams.get('project_id') !== 'p-pharos') return route.fallback()
+      permissionRequested()
+      await permissionBarrier
+      const grants = mockEffectivePermissions('member', 'p-pharos')
+      grants.workspace.permissions.push('recurrences.manage')
+      await route.fulfill({ json: grants })
+    })
+    try {
+      await page.goto('/p/AEON/AEON-99')
+      await requested
+      const line = workspace(page).locator('.recurrence-provenance')
+      await expect(line).toContainText('Website audit')
+      await expect(line.getByRole('link', { name: 'Website audit' })).toHaveCount(0)
+      const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
+      await more.click()
+      await expect(page.getByRole('menuitem', { name: /Repeat/ })).toBeVisible()
+      await expect(page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true })).toBeVisible()
+      await expect(page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true })).toBeDisabled()
+      await page.keyboard.press('Escape')
+      const sourceReads = () => recurrenceReads.filter(url => new URL(url).pathname === `/api/recurrences/${id}`)
+      expect(sourceReads()).toHaveLength(1)
+      await expectStableControls({
+        controls: { 'header actions': more, 'copy key': workspace(page).getByRole('button', { name: 'Copy AEON-99', exact: true }), 'recurring pill': workspace(page).locator('.recurring-pill') },
+        interactions: [{ name: 'grant delayed source permissions', run: async () => {
+          releasePermissions()
+          await expect(line.getByRole('link', { name: 'Website audit' })).toBeVisible()
+          await expect(workspace(page).locator('a.recurring-pill')).toBeVisible()
+        } }],
+      })
+      await more.click()
+      const edit = page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true })
+      await expect(edit).toBeVisible()
+      await expect(edit).toBeEnabled()
+      // Permission loading uses the already loaded details, with no extra read.
+      expect(sourceReads()).toHaveLength(1)
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: join(shots, `ticket-delayed-permissions-${width}-${theme}.png`) })
+      await edit.click()
+      const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+      await expect(editor).toBeVisible()
+      await expect(editor.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Website audit')
+      expect(sourceReads()).toHaveLength(2)
+      expect(errors).toEqual([])
+    } finally { releasePermissions() }
+  })
+}

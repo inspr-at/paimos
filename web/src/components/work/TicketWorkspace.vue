@@ -115,7 +115,10 @@ const mayRepeat = computed(() => !!item.value && ['epic', 'ticket', 'task'].incl
 const sourceProject = computed(() => item.value?.recurrence ? { id: item.value.recurrence.project_id, routeKey: item.value.recurrence.project_key } : null)
 const mayEditRecurrence = computed(() => !!item.value?.recurrence && !item.value.recurrence.retired && can('recurrences.manage', item.value.recurrence.project_id))
 const recurrenceScope = useIdentityScope()
-watch([() => props.item?.id, () => props.project.id, () => item.value?.recurrence?.id, () => item.value?.recurrence?.project_id, () => item.value?.recurrence?.retired, () => mayEditRecurrence.value, () => recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
+watch([() => props.item?.id, () => props.project.id, () => item.value?.recurrence?.id, () => item.value?.recurrence?.project_id, () => item.value?.recurrence?.retired, () => recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
+// Source details remain valid while permissions load or change. Losing management
+// access still cancels pending edits and closes the editor synchronously.
+watch(mayEditRecurrence, value => { if (!value) { recurrenceScope.reset(); recurrenceEdit.value = null } }, { flush: 'sync' })
 watch(mayRepeat, value => { if (!value) repeatSource.value = null })
 function repeat() { if (mayRepeat.value && item.value) repeatSource.value = { ...item.value, fields: { ...item.value.fields } } }
 function editRecurrence() {

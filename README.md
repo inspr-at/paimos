@@ -251,6 +251,8 @@ partial save responses preserve the current provenance. Source links and editing
 the receipt's project, including after a ticket moves. A linked recurrence is resolved
 directly rather than substituted with the first page's first schedule. Retired
 sources keep their markers; withheld provenance clears the marker and source editor.
+Source editing becomes available when delayed management permissions arrive, without
+reloading the recurrence details; revocation closes the editor and cancels pending edits.
 Status help and `aeon status help --json` share the same marker definition.
 Management requires `recurrences.manage`; agents need an explicit custom-role grant plus
 a key scope, even when bound to Owner/Admin. Saving a definition also requires
