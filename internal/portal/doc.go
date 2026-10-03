@@ -12,6 +12,8 @@
 // its projection never counts browser ballots. A separate no-store participation
 // endpoint exposes unavailable controls and anonymous history, preserving the
 // exact existing catalog, roadmap and release JSON shapes for strict consumers.
+// Each response resolves its product once, so a concurrent default change
+// cannot pair one product's catalog with another product's project projection.
 //
 // A product, its catalog and its wishes are tenant-configured nodes. Anonymous
 // visitors receive no principal and no project visibility. The public handler
