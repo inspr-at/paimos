@@ -661,7 +661,18 @@ across projects; row height and saved views remain independent. Active filter
 buttons show their values (counts on narrower desktops), with individual remove
 actions and Clear all; their labels, including names arriving asynchronously,
 update after the filter popover closes. The phone fold badge keeps its full
-44 px touch height and an unclipped keyboard focus ring.
+44 px touch height and an unclipped keyboard focus ring. Open, doing and done
+counts filter by the server's work buckets; clicking again clears the choice.
+Comfortable adds the eleven status counts in four groups (Open, Doing, Done,
+Closed); phones retain the three group buttons. Status clicks include legacy
+spellings. Selecting a status hidden by Hide temporarily shows closed work and
+announces why; clearing it or choosing visible statuses restores Hide. A manual
+Hide toggle takes precedence. These selections and automatic Hide restoration
+survive URL links and saved views. The project summary carries bounded
+`status_counts` and their buckets;
+missing or truncated detail is labelled unavailable or partial, while group
+totals remain exact. The additive `work_state` and `work_bucket` list parameters
+share the summary's canonical spellings and kind-aware buckets.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after

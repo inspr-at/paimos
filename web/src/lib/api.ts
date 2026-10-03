@@ -218,6 +218,7 @@ export interface ListQuery {
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  work_state?: string[]; work_bucket?: WorkCountBucket[]
   // Only these nodes (at most 200), every other filter still applied (AEON-326).
   ids?: string[]
 }
@@ -230,7 +231,12 @@ export interface ProjectSummary {
   open: number; in_progress: number; done: number; cancelled?: number; total: number; last_activity: string
   // The people (and agents) most recently active in the project, newest first; absent on older servers.
   people?: ProjectPerson[]
+  archived_count?: number
+  status_counts?: ProjectStatusCount[]
+  status_counts_truncated?: boolean
 }
+export type WorkCountBucket = 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived'
+export interface ProjectStatusCount { state: string; bucket: WorkCountBucket; count: number }
 export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent'; has_avatar?: boolean }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}

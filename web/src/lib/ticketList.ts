@@ -9,7 +9,7 @@
 // combine with AND. That is classic Paimos's model, and the list API's.
 import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
-import type { Facets, ListItem, ListQuery } from './api.ts'
+import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
@@ -24,6 +24,9 @@ export interface FacetOption { value: string; label: string; count?: number; hin
 export interface ListFilters {
   q: string
   status: string[]
+  // Header filters use canonical statuses or exact server work buckets. Kept
+  // with URL/saved-view state; ordinary facet edits return to exact spellings.
+  statusScope?: 'canonical' | 'open' | 'in_progress' | 'done' | 'closed'
   priority: string[]
   assignee: string[]
   type: string[]
@@ -34,6 +37,8 @@ export interface ListFilters {
   human_check: string[]
   date: DateFilter | null
   showClosed: boolean
+  // A temporary status-selection override, distinct from a manual Hide toggle.
+  hideRestore?: boolean
   sort: SortKey[]
   group: GroupBy
   // An explicit column set (free columns in order; Key and Title always lead).
@@ -122,6 +127,8 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
   return {
     q: typeof query.q === 'string' ? query.q : '',
     status: list(query.status),
+    ...(list(query.status).length && ['canonical', 'open', 'in_progress', 'done', 'closed'].includes(String(query.status_scope))
+      ? { statusScope: query.status_scope as ListFilters['statusScope'] } : {}),
     priority: list(query.priority),
     assignee: list(query.assignee),
     type: list(query.type).filter(kind => WORK_KINDS.includes(bare(kind))),
@@ -132,6 +139,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
+    ...(query.hide_restore === '1' && query.closed === '1' && list(query.status).length ? { hideRestore: true } : {}),
     sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
     group,
     cols: parseCols(query.cols),
@@ -140,10 +148,12 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
 }
 export function filtersToQuery(filters: ListFilters): Record<string, string> {
   const out: Record<string, string> = {}
+  if (filters.status.length && filters.statusScope) out.status_scope = filters.statusScope
   if (filters.q.trim()) out.q = filters.q.trim()
   for (const key of DIMENSION_KEYS) if (filters[key].length) out[key] = filters[key].join(',')
   if (filters.date) out.date = serializeDate(filters.date)
   if (filters.showClosed) out.closed = '1'
+  if (filters.showClosed && filters.hideRestore && filters.status.length) out.hide_restore = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
   if (filters.group !== 'none') out.group = filters.group
   if (filters.cols?.length) out.cols = filters.cols.join(',')
@@ -160,7 +170,7 @@ export function hasFilters(filters: ListFilters): boolean {
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
-  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], date: null }
+  return { q: '', status: [], statusScope: undefined, hideRestore: undefined, priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], date: null }
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
@@ -285,7 +295,10 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
   return {
     within,
     kind: omit === 'type' ? WORK_KINDS : kindsFor(filters.type),
-    state: [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
+    state: filters.statusScope && omit !== 'status' ? [] : [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
+    ...(status.length && filters.statusScope === 'canonical' ? { work_state: status } : {}),
+    ...(status.length && filters.statusScope && filters.statusScope !== 'canonical'
+      ? { work_bucket: filters.statusScope === 'closed' ? ['cancelled', 'archived'] as WorkCountBucket[] : [filters.statusScope] } : {}),
     priority: take('priority'),
     assignee: take('assignee'),
     tag: take('tag'),

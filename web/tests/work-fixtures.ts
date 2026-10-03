@@ -196,7 +196,11 @@ function projectItem(project: Fixtures['projects'][number]) {
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
 // Same buckets as the project summary: a category is not modelled here.
-// Archived stays in the total only; every other non-closed state is open.
+// Archived has a separate count; every other non-closed state is open.
+function canonicalWorkStatus(state: string) {
+  const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return ['active', 'inprogress'].includes(norm) ? 'in_progress' : norm === 'canceled' ? 'cancelled' : norm
+}
 function workBucket(state: string): 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived' {
   const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
   if (norm === 'cancelled' || norm === 'canceled') return 'cancelled'
@@ -533,12 +537,17 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const archived = query.get('include_archived') === 'true'
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
         const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
-        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
+        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0, archived: 0 }
+        const statusCounts = new Map<string, { state: string; bucket: ReturnType<typeof workBucket>; count: number }>()
         for (const node of work) {
           const bucket = workBucket(node.state)
-          if (bucket !== 'archived') tally[bucket]++
+          tally[bucket]++
+          const state = canonicalWorkStatus(node.state)
+          const key = `${state}:${bucket}`, previous = statusCounts.get(key)
+          statusCounts.set(key, { state, bucket, count: (previous?.count ?? 0) + 1 })
         }
-        return { id: p.id, key: p.key, title: p.title, state: p.state, ...tally, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
+        const { archived: archivedCount, ...counts } = tally
+        return { id: p.id, key: p.key, title: p.title, state: p.state, ...counts, archived_count: archivedCount, status_counts: [...statusCounts.values()], status_counts_truncated: false, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {
@@ -567,6 +576,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
+        .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
+        .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(workBucket(n.state)))
         .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))

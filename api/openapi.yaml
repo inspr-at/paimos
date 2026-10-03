@@ -3736,7 +3736,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total and archived_count. Existing fields retain their meanings; bounded status_counts and status_counts_truncated are additive.
           content:
             application/json:
               schema:
@@ -3755,6 +3755,19 @@ paths:
                         in_progress: {type: integer}
                         done: {type: integer}
                         cancelled: {type: integer}
+                        archived_count: {type: integer, minimum: 0}
+                        status_counts:
+                          type: array
+                          maxItems: 256
+                          description: Live descendant work counts by canonical status and work bucket, in one snapshot. Kind categories take precedence exactly as for Hide. Status spellings are trimmed, lowercased and space/hyphen normalized; active and inprogress map to in_progress, canceled to cancelled. A status used with different kind categories has one entry per bucket. Non-work and deleted nodes are excluded. Older servers may omit this additive field.
+                          items:
+                            type: object
+                            required: [state, bucket, count]
+                            properties:
+                              state: {type: string}
+                              bucket: {type: string, enum: [open, in_progress, done, cancelled, archived]}
+                              count: {type: integer, minimum: 0}
+                        status_counts_truncated: {type: boolean, description: More than 256 status/bucket pairs exist. Group totals remain exact; clients must disclose partial status counts.}
                         total: {type: integer}
                         last_activity: {type: string, format: date-time}
                         people:
@@ -3887,6 +3900,8 @@ paths:
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
         - {name: kind, in: query, description: Repeatable or comma-separated kind slugs or IDs, schema: {type: array, items: {type: string}}}
         - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
+        - {name: work_state, in: query, description: 'Canonical work statuses as in project status_counts. Recognises all stored spelling variants. Repeatable or comma-separated, with ! exclusions; at most 64 values of 64 characters each. Combines with other filters.', schema: {type: array, maxItems: 64, items: {type: string, maxLength: 64}}}
+        - {name: work_bucket, in: query, description: 'Work buckets using the same kind categories and fallback as project counts and Hide. Repeatable or comma-separated; at most five values. Combines with other filters.', schema: {type: array, maxItems: 5, items: {type: string, enum: [open, in_progress, done, cancelled, archived]}}}
         - {name: priority, in: query, description: Repeatable or comma-separated priorities or none; ! excludes, schema: {type: array, items: {type: string}}}
         - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none; ! excludes, schema: {type: array, items: {type: string}}}
         - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}

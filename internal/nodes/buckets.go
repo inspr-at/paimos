@@ -22,6 +22,13 @@ func workStateNormSQL(expr string) string {
 	return `regexp_replace(lower(btrim(` + expr + `)), '[[:space:]-]+', '_', 'g')`
 }
 
+// workStatusSQL identifies the status shown in the header without losing the
+// bucket assigned by the node's own kind. The list's legacy state filter stays exact.
+func workStatusSQL(expr string) string {
+	norm := workStateNormSQL(expr)
+	return `CASE ` + norm + ` WHEN 'active' THEN 'in_progress' WHEN 'inprogress' THEN 'in_progress' WHEN 'canceled' THEN 'cancelled' ELSE ` + norm + ` END`
+}
+
 // workStateCategoryCTE reads a category from each work kind's field_schema.states
 // when those entries carry one. An unknown category is ignored so the fixed
 // mapping still applies. Ticket, task and epic catalogs stay separate.
