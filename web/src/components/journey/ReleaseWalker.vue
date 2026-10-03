@@ -249,7 +249,11 @@ const touch = window.matchMedia('(hover: none)').matches
         <template v-if="item?.body">
           <p class="eyebrow">Description</p>
           <MarkdownBody :id="descriptionId" v-clip-tip="{ text: '', onClip: measureDescription }" class="info-md description" :class="{ clamp: !descriptionExpanded, revealed: descriptionExpanded }" :body="item.body" :tabindex="descriptionExpanded ? 0 : undefined" aria-label="Ticket description" />
-          <button v-if="descriptionClipped" type="button" class="description-toggle" :aria-expanded="descriptionExpanded" :aria-controls="descriptionId" @click="descriptionExpanded = !descriptionExpanded">{{ descriptionExpanded ? 'Show preview' : 'Show full description' }}</button>
+          <button v-if="descriptionClipped" type="button" class="description-toggle" :aria-expanded="descriptionExpanded" :aria-controls="descriptionId" @click="descriptionExpanded = !descriptionExpanded">
+            <!-- Reserve both labels so revealing cannot resize the control. -->
+            <span class="reveal-label" :class="{ active: !descriptionExpanded }" :aria-hidden="descriptionExpanded">Show full description</span>
+            <span class="reveal-label" :class="{ active: descriptionExpanded }" :aria-hidden="!descriptionExpanded">Show preview</span>
+          </button>
         </template>
         <p class="eyebrow">Screens · {{ current.length }}</p>
         <div v-if="current.length" class="thumbs">
@@ -330,7 +334,7 @@ const touch = window.matchMedia('(hover: none)').matches
 .hint-bubble { position: absolute; top: 18px; left: 18px; z-index: 4; display: grid; grid-template-columns: auto auto; gap: 8px 16px; padding: 12px 14px; border-radius: 12px; background: rgba(16, 35, 39, .94); color: #fffefa; font-size: 12.5px; box-shadow: 0 16px 40px -18px rgba(0, 0, 0, .6); cursor: pointer; }
 .hint-bubble span { display: inline-flex; align-items: center; gap: 3px; color: #fffefa; }
 .hint-bubble .keycap { margin-right: 3px; background: rgba(255, 254, 250, .14); color: #fffefa; box-shadow: inset 0 0 0 1px rgba(255, 254, 250, .28); }
-.info { display: grid; align-content: start; gap: 8px; padding: 16px 16px 24px; overflow: auto; background: var(--glass); border-left: 1px solid var(--line); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.info { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; padding: 16px 16px 24px; overflow: auto; background: var(--glass); border-left: 1px solid var(--line); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
 .meta { font-size: 11px; color: var(--ink-3); letter-spacing: .02em; }
 .info-title { font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .info .eyebrow { margin-top: 8px; }
@@ -345,7 +349,10 @@ const touch = window.matchMedia('(hover: none)').matches
 /* A long description scrolls in place once revealed, keeping its toggle and
    the controls below still. Short descriptions retain their natural height. */
 .description.revealed { overflow: auto; }
-.description-toggle { width: 170px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.description-toggle { display: grid; align-items: center; width: max-content; min-width: 44px; max-width: 100%; min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.reveal-label { grid-area: 1 / 1; min-width: 0; overflow-wrap: anywhere; visibility: hidden; }
+.reveal-label.active { visibility: visible; }
+@media (pointer: coarse) { .description-toggle { min-height: 44px; } }
 .description-toggle:focus-visible, .description:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .info-faint { font-size: 12.5px; color: var(--ink-3); }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; }

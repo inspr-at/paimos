@@ -36,6 +36,124 @@ async function textFits(page: Page, selector: string) {
   await expect.poll(() => page.locator(selector).evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
 }
 
+// Include the shared pseudo target when checking adjacent coarse-pointer actions.
+async function hitBox(control: Locator) {
+  return control.evaluate(el => {
+    const rect = el.getBoundingClientRect(), pseudo = getComputedStyle(el, '::before')
+    const width = pseudo.content !== 'none' ? Math.max(rect.width, parseFloat(pseudo.width) || 0) : rect.width
+    const height = pseudo.content !== 'none' ? Math.max(rect.height, parseFloat(pseudo.height) || 0) : rect.height
+    return { left: rect.x + (rect.width - width) / 2, top: rect.y + (rect.height - height) / 2, width, height }
+  })
+}
+async function revealGeometry(control: Locator, neighbors: Locator, coarse: boolean) {
+  const box = await hitBox(control)
+  if (coarse) { expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44) }
+  for (const neighbor of await neighbors.all()) {
+    const other = await hitBox(neighbor)
+    const overlapX = Math.min(box.left + box.width, other.left + other.width) - Math.max(box.left, other.left)
+    const overlapY = Math.min(box.top + box.height, other.top + other.height) - Math.max(box.top, other.top)
+    expect(overlapX > 0 && overlapY > 0, 'reveal target must not overlap neighboring actions or rows').toBe(false)
+  }
+  // Check visible glyph bounds, including wrapped translations.
+  const fits = await control.evaluate(async el => {
+    await document.fonts.ready
+    const button = el.getBoundingClientRect(), walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    let node: Node | null
+    while ((node = walker.nextNode())) {
+      if (getComputedStyle(node.parentElement!).visibility === 'hidden') continue
+      const range = document.createRange(); range.selectNodeContents(node)
+      for (const rect of range.getClientRects()) {
+        if (rect.left < button.left - .5 || rect.right > button.right + .5 || rect.top < button.top - .5 || rect.bottom > button.bottom + .5) return false
+      }
+    }
+    return true
+  })
+  expect(fits, 'visible reveal labels fit without clipping or overflowing').toBe(true)
+}
+async function naturalRevealWidth(control: Locator, labels: string[]) {
+  const sizing = await control.evaluate((el, texts) => {
+    const style = getComputedStyle(el), probe = document.createElement('span')
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${style.font}`
+    document.body.append(probe)
+    const widths = texts.map(text => { probe.textContent = text; return probe.getBoundingClientRect().width })
+    probe.remove()
+    return { actual: el.getBoundingClientRect().width, expected: Math.max(44, ...widths) }
+  }, labels)
+  expect(Math.abs(sizing.actual - sizing.expected), 'button sizes to both labels rather than a fixed width').toBeLessThanOrEqual(1)
+  return sizing.actual
+}
+// Simulate translations without depending on an app-wide locale system.
+// The component still owns visibility, wrapping and the toggle's sizing.
+async function translateReveal(control: Locator, labels: Record<string, string>) {
+  await control.evaluate((el, translations) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    let node: Node | null
+    while ((node = walker.nextNode())) if (translations[node.textContent?.trim() ?? '']) node.textContent = translations[node.textContent!.trim()]!
+  }, labels)
+}
+const translatedAll = 'Den vollständigen Entscheidungsgrund anzeigen'
+const translatedLess = 'Weniger Entscheidungsgrund anzeigen'
+const translatedFull = 'Die vollständige Beschreibung der Sicherheitsprüfung anzeigen'
+const translatedPreview = 'Zur kompakten Vorschau der Beschreibung zurückkehren'
+
+for (const device of [{ width: 390, coarse: true }, { width: 1024, coarse: true }, { width: 1440, coarse: false }]) for (const theme of ['light', 'dark'] as const) {
+  test.describe(`reveal sizing ${device.width} ${device.coarse ? 'coarse' : 'fine'} ${theme}`, () => {
+    test.use({ hasTouch: device.coarse })
+    test('approval and held controls fit both labels with disjoint stable targets', async ({ page }) => {
+      await page.setViewportSize({ width: device.width, height: 1000 })
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(device.coarse)
+      const work = fixtures(); work.preferences.theme = { choice: theme }; await mockWork(page, work, { admin: true })
+      const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
+      const approval = data.approvals.find(a => a.scope === 'nodes.read' && !a.decision)!
+      approval.rationale = description + tail
+      const held = data.messages.find(m => m.is_action_request)!; held.body = description + tail
+      await mockAgents(page, data); await page.goto('/agents')
+      for (const id of [`a:${approval.id}`, `m:${held.id}`]) {
+        const row = page.locator(`[data-row="${id}"]`), reveal = row.locator('.reveal-text')
+        await expect(reveal).toBeVisible(); await reveal.scrollIntoViewIfNeeded()
+        const neighbors = page.locator(`.items button:not([aria-controls="${await reveal.getAttribute('aria-controls')}"])`).filter({ visible: true })
+        await revealGeometry(reveal, neighbors, device.coarse)
+        const englishWidth = await naturalRevealWidth(reveal, ['Show all', 'Show less'])
+        await translateReveal(reveal, { 'Show all': translatedAll, 'Show less': translatedLess })
+        await expect(reveal).toHaveAccessibleName(translatedAll)
+        await revealGeometry(reveal, neighbors, device.coarse)
+        expect((await reveal.boundingBox())!.width).toBeGreaterThan(englishWidth + 10)
+        await shot(page, `${id.startsWith('a:') ? 'approval' : 'held'}-labels-${device.width}-${theme}`)
+        await expectStableControls({ controls: { reveal, actions: row.locator('.row-actions') }, interactions: [
+          { name: 'tap top of translated reveal', run: async () => { await reveal.click({ position: { x: 5, y: 1 } }); await expect(reveal).toHaveAccessibleName(translatedLess); await expect(row.locator('.why .text')).toHaveClass(/full/); await revealGeometry(reveal, neighbors, device.coarse) } },
+          { name: 'tap bottom of translated reveal', run: async () => { const box = (await reveal.boundingBox())!; await reveal.click({ position: { x: 5, y: box.height - 1 } }); await expect(reveal).toHaveAccessibleName(translatedAll); await expect(row.locator('.why .text')).not.toHaveClass(/full/); await revealGeometry(reveal, neighbors, device.coarse) } },
+        ] })
+      }
+      expect(data.controls).toHaveLength(0)
+    })
+    test('release description fits both labels with disjoint stable targets', async ({ page }) => {
+      await page.setViewportSize({ width: device.width, height: 1000 })
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(device.coarse)
+      const work = fixtures(); work.preferences.theme = { choice: theme }; work.nodes.find(n => n.id === 'n-1')!.body = description + tail
+      await mockWork(page, work); const journey = journeyWorld('plan'), calls = await mockJourney(page, journey)
+      await page.goto('/p/PHAROS?view=journey&walk=PHAROS-11')
+      const walker = page.getByRole('dialog', { name: 'Release walker', exact: true })
+      await expect(walker).toBeVisible()
+      if (device.width < 901) await walker.press('i')
+      const reveal = walker.locator('.description-toggle'), text = walker.locator('.description')
+      await expect(reveal).toBeVisible(); await reveal.scrollIntoViewIfNeeded()
+      const neighbors = walker.locator('.info button:not(.description-toggle)')
+      await revealGeometry(reveal, neighbors, device.coarse)
+      const englishWidth = await naturalRevealWidth(reveal, ['Show full description', 'Show preview'])
+      await translateReveal(reveal, { 'Show full description': translatedFull, 'Show preview': translatedPreview })
+      await expect(reveal).toHaveAccessibleName(translatedFull)
+      await revealGeometry(reveal, neighbors, device.coarse)
+      expect((await reveal.boundingBox())!.width).toBeGreaterThan(englishWidth + 10)
+      await shot(page, `walker-labels-${device.width}-${theme}`)
+      await expectStableControls({ controls: { reveal, screens: walker.getByRole('group', { name: 'Screens' }) }, scrollAreas: { description: text, info: walker.locator('.info') }, interactions: [
+        { name: 'tap top of translated description reveal', run: async () => { await reveal.click({ position: { x: 5, y: 1 } }); await expect(reveal).toHaveAccessibleName(translatedPreview); await expect(text).toHaveClass(/revealed/); await revealGeometry(reveal, neighbors, device.coarse) } },
+        { name: 'tap bottom of translated description reveal', run: async () => { const box = (await reveal.boundingBox())!; await reveal.click({ position: { x: 5, y: box.height - 1 } }); await expect(reveal).toHaveAccessibleName(translatedFull); await expect(text).not.toHaveClass(/revealed/); await revealGeometry(reveal, neighbors, device.coarse) } },
+      ] })
+      expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
+    })
+  })
+}
+
 for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`full Decision Desk context and stable series ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
@@ -134,7 +252,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await expect(walker).toBeVisible()
     if (width < 901) await walker.press('i')
     const toggle = walker.locator('.description-toggle'), text = walker.locator('.description')
-    await expect(toggle).toHaveText('Show full description')
+    await expect(toggle).toHaveAccessibleName('Show full description')
     const screens = walker.getByRole('group', { name: 'Screens' })
     const firstScreen = screens.getByRole('button', { name: 'Before: card grid', exact: true })
     await expect(firstScreen).toHaveAttribute('aria-pressed', 'true')
@@ -158,7 +276,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await expect(text).toContainText('Kurze Beschreibung.')
     await expect(text).not.toHaveClass(/revealed/)
     await walker.press('ArrowLeft')
-    await expect(toggle).toHaveText('Show full description')
+    await expect(toggle).toHaveAccessibleName('Show full description')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 }
