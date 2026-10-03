@@ -10,6 +10,50 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Automatic release-model adoption
+
+`internal/deliveryadoption` starts the instance-local discovery loop with the
+server. Projects remain in journey mode until a lossless copy, the mode switch
+and its event commit together. Ineligible projects retain their report and
+retry independently. There is no project opt-in or submitted apply payload.
+
+Deployment provisions `AEON_DELIVERY_ADOPTION_FILE`, an absolute path to a
+private, non-secret JSON evidence file. Its `rollout` describes `instance`
+(the public instance URL), immutable `artifact`, matching `rollback_floor`,
+`pre_first_adoption_pin`, `consumers_ready`, `writers_stopped`,
+`recovery_reconciled`, tenant-local `authorities` and `quota`. Each authority
+contains `executor`, `authorizer` principal identities and a recorded
+`reference`; both must still hold `releases.deploy` and `journey.manage` at
+apply. Product counters and source digests are resolved from the binary's
+embedded history/version and exact AEON project binding. Deployment JSON
+cannot replace those inputs. Missing evidence keeps activation closed.
+
+`provider_command` names an absolute executable, and `reports_directory` names
+private instance-local storage. The command receives `aeon-adoption-v1` as its
+only argument and a bounded JSON request on stdin: `capabilities`, `lookup`,
+`execute` or `list`. Requests and results use the exported types in
+`internal/deliveryadoption/types.go`. It must return quickly with durable
+`pending` operations when work continues asynchronously. Stable ownership
+keys precede every effect; cleanup uses the original attempt/generation.
+The adapter must independently enforce byte/compute quotas, 30-minute restore
+expiry, 24-hour unpinned failure retention and reference-aware protection of
+successful and pre-first-adoption base/WAL recovery chains. Calls run outside
+database mutation locks. A checksum or scheduled backup is insufficient:
+the proof must include an actual isolated restore of the exact source.
+
+The P4a HTTP/CLI module receives the same service as `delivery.AdoptionReporting`:
+`ReadReport` pages immutable metadata with tenant/project/digest-bound cursors;
+`RequestTx` queues preview/retry with revision CAS inside the caller's existing
+tree/access fences; `VerifyReport` provides read-only parity evidence. No backup
+reference is a download link. Current and latest-failed reports are bounded.
+
+Tests use durable fake providers and private PostgreSQL restore copies. Native
+provider acceptance and the instance release/rollback record remain deployment
+prerequisites; this package does not provision infrastructure or operate real
+backups. Once any project adopts, E is the supported image rollback floor.
+Pre-E boot requires restoring the protected pre-first-adoption database and
+proving zero adopted projects while automatic recovery remains suspended.
+
 ## Code health audits
 
 AEON-571 defines the ongoing code-health workflow. Each run belongs to a child

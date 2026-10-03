@@ -267,51 +267,11 @@ func (s *Service) Report(ctx context.Context, p tenant.Principal, project, diges
 // Request queues only preview/retry of the same automatic job, with job CAS.
 // Final authority is checked against actual principal kind and current grants.
 func (s *Service) Request(ctx context.Context, p tenant.Principal, project, action string, expected int64) (Status, error) {
-	if !uuidRE.MatchString(project) || (action != "preview" && action != "retry") || expected < 0 {
-		return Status{}, errors.New("invalid adoption request")
-	}
-	a, ok := s.authority(p.TenantID)
-	if !ok {
-		return Status{}, ErrPrerequisite
-	}
 	err := s.with(ctx, p, func(tx pgx.Tx) error {
 		if err := mutationFence(ctx, tx, p); err != nil {
 			return err
 		}
-		var person bool
-		if err := tx.QueryRow(ctx, `SELECT kind='person' AND status='active' FROM principals WHERE id=$1`, p.ID).Scan(&person); err != nil {
-			return err
-		}
-		if !person || p.Kind != tenant.Person {
-			return authz.ErrForbidden
-		}
-		for _, perm := range []string{"releases.deploy", "journey.manage"} {
-			if err := authz.RequireTx(ctx, tx, p, perm, authz.Scope{ProjectID: project}); err != nil {
-				return err
-			}
-		}
-		var revision int64
-		var adopted, active bool
-		err := tx.QueryRow(ctx, `SELECT revision,state='adopted',coalesce(lease_until>$2,false) FROM delivery_adoption_jobs WHERE project_node_id=$1 FOR NO KEY UPDATE`, project, s.now()).Scan(&revision, &adopted, &active)
-		if errors.Is(err, pgx.ErrNoRows) {
-			if expected != 0 {
-				return delivery.ErrRevisionChanged
-			}
-			return s.discoverProject(ctx, tx, a, project)
-		}
-		if err != nil {
-			return err
-		}
-		if revision != expected {
-			return delivery.ErrRevisionChanged
-		}
-		if adopted {
-			return nil
-		}
-		if active {
-			return ErrLease
-		}
-		_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state='pending',revision=revision+1,next_attempt_at=$2,reason_code=NULL,reason_message='',updated_at=$2 WHERE project_node_id=$1`, project, s.now())
+		_, err := s.RequestTx(ctx, tx, p, project, action, expected)
 		return err
 	})
 	if err != nil {

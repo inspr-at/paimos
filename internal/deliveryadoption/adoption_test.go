@@ -169,6 +169,10 @@ type fakeProvider struct {
 	bundles                         map[string]string
 	clock                           func() time.Time
 	cleanupDown, loseBackupResponse bool
+	lostKind, pendingKind           string
+	pendingKey                      string
+	requests                        map[string]ProviderRequest
+	alter                           func(*ProviderResult)
 	executeCalls                    map[string]int
 	onEffect                        func(string, ProviderRequest)
 }
@@ -179,6 +183,7 @@ func (p *fakeProvider) Capabilities(context.Context) (Capabilities, error) {
 func (p *fakeProvider) Lookup(_ context.Context, op Operation) (ProviderResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.expire()
 	if op.Kind == "pre-first-adoption" {
 		return ProviderResult{State: "complete", Pin: "pre-first-pin", Identity: Identity{Instance: p.instance}, IntegrityVerified: true, ChainVerified: true, Restored: true, Protected: true, Unadopted: true}, nil
 	}
@@ -187,6 +192,23 @@ func (p *fakeProvider) Lookup(_ context.Context, op Operation) (ProviderResult, 
 		v = ProviderResult{Key: op.Key, Kind: op.Kind, Identity: op.Identity, State: "missing"}
 	}
 	return v, nil
+}
+func (p *fakeProvider) expire() {
+	for key, v := range p.results {
+		request, ok := p.requests[key]
+		if !ok || v.State == "reclaimed" {
+			continue
+		}
+		expired := v.Kind == "restore" && !request.RestoreExpiry.IsZero() && !request.RestoreExpiry.After(p.clock()) || v.Kind == "backup" && !v.Protected && !request.PayloadExpiry.IsZero() && !request.PayloadExpiry.After(p.clock())
+		if expired {
+			v.State = "reclaimed"
+			v.Bytes = 0
+			p.results[key] = v
+			if v.Kind == "backup" {
+				delete(p.bundles, v.Identity.Project)
+			}
+		}
+	}
 }
 func (p *fakeProvider) Execute(ctx context.Context, r ProviderRequest) (ProviderResult, error) {
 	if p.onEffect != nil {
@@ -199,6 +221,10 @@ func (p *fakeProvider) Execute(ctx context.Context, r ProviderRequest) (Provider
 		p.executeCalls = map[string]int{}
 	}
 	p.executeCalls[op.Key]++
+	if p.requests == nil {
+		p.requests = map[string]ProviderRequest{}
+	}
+	p.requests[op.Key] = r
 	if v, ok := p.results[op.Key]; ok {
 		return v, nil
 	}
@@ -230,6 +256,10 @@ func (p *fakeProvider) Execute(ctx context.Context, r ProviderRequest) (Provider
 		if op.Kind == "pin" {
 			v.Pin = "pin/" + op.Key
 			v.Protected = true
+			key := operationKey(op.Identity, "backup")
+			chain := p.results[key]
+			chain.Protected = true
+			p.results[key] = chain
 		}
 	case "cancel":
 		v.Bytes = 0
@@ -250,15 +280,22 @@ func (p *fakeProvider) Execute(ctx context.Context, r ProviderRequest) (Provider
 	default:
 		return v, errors.New("unexpected fake provider operation")
 	}
+	if p.alter != nil {
+		p.alter(&v)
+	}
 	p.results[op.Key] = v
-	if op.Kind == "backup" && p.loseBackupResponse {
+	if op.Kind == "backup" && p.loseBackupResponse || op.Kind == p.lostKind {
 		return v, errors.New("injected success-before-response crash")
+	}
+	if op.Kind == p.pendingKind {
+		v.State = "pending"
 	}
 	return v, ctx.Err()
 }
 func (p *fakeProvider) List(_ context.Context, instance, cursor string, limit int) (CatalogPage, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.expire()
 	if instance != p.instance || limit > 100 {
 		return CatalogPage{}, errors.New("invalid namespace")
 	}

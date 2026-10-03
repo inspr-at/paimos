@@ -47,6 +47,11 @@ func (s *Service) loadJob(ctx context.Context, tx pgx.Tx, tenantID, project stri
 	j.Identity.Generation = j.Generation
 	if err == nil {
 		err = decodeJournal(raw, &j.Journal)
+		for _, op := range j.Journal.Operations {
+			if op.Identity.Instance != s.cfg.Instance || op.Identity.Tenant != tenantID || op.Identity.Project != project {
+				return j, errors.New("journal ownership does not match project")
+			}
+		}
 	}
 	return j, err
 }
@@ -61,8 +66,18 @@ func decodeJournal(raw []byte, j *Journal) error {
 		return errors.New("adoption journal exceeds operation bound")
 	}
 	for _, op := range j.Operations {
-		if len(op.Key) > 512 || !uuidRE.MatchString(op.Attempt) || len(op.Handle) > 512 || len(op.Pin) > 512 || op.Identity.Attempt != op.Attempt || op.Identity.Migration != Migration {
+		if !digestRE.MatchString(op.Key) || !uuidRE.MatchString(op.Attempt) || !uuidRE.MatchString(op.Identity.Tenant) || !uuidRE.MatchString(op.Identity.Project) || op.Identity.Instance == "" || len(op.Identity.Instance) > 128 || op.Identity.Generation < 1 || op.Key != operationKey(op.Identity, op.Kind) || op.Bytes < 0 || op.Bytes > 1<<50 || op.Slots < 0 || op.Slots > 1 || op.Deadline.IsZero() || len(op.Handle) > 512 || len(op.Pin) > 512 || op.Identity.Attempt != op.Attempt || op.Identity.Migration != Migration {
 			return errors.New("invalid durable operation identity")
+		}
+		switch op.Kind {
+		case "backup", "restore", "pin", "cancel", "cleanup":
+		default:
+			return errors.New("invalid durable operation kind")
+		}
+		switch op.Status {
+		case "intent", "pending", "missing", "complete", "reclaimed":
+		default:
+			return errors.New("invalid durable operation status")
 		}
 	}
 	return nil
@@ -160,7 +175,7 @@ func (s *Service) Claim(ctx context.Context, a Authority, project string) (job, 
 			out.State = "checking"
 			out.Deadline = s.now().Add(15 * time.Minute)
 			out.LeaseUntil = s.now().Add(16 * time.Minute)
-			_, err = tx.Exec(group, `UPDATE delivery_adoption_jobs SET state='checking',attempt_id=$2,lease_token=$3,lease_generation=$4,attempts=attempts+1,attempt_started_at=$5,attempt_deadline_at=$6,lease_until=$7,checking_at=$5,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, project, out.Identity.Attempt, out.Token, out.Generation, s.now(), out.Deadline, out.LeaseUntil)
+			_, err = tx.Exec(group, `UPDATE delivery_adoption_jobs SET state='checking',attempt_id=$2,lease_token=$3,lease_generation=$4,attempts=attempts+1,attempt_started_at=$5,attempt_deadline_at=$6,lease_until=$7,checking_at=$5,backup_verified_at=NULL,evidence_attempt_id=NULL,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, project, out.Identity.Attempt, out.Token, out.Generation, s.now(), out.Deadline, out.LeaseUntil)
 			return err
 		})
 	})

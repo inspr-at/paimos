@@ -233,6 +233,9 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 	if err := loadImported(ctx, tx, &f, &releaseID); err != nil {
 		return facts{}, err
 	}
+	if f.ReleasesMode {
+		releaseID = nil
+	}
 	if releaseID != nil && *releaseID != "" {
 		rel, err := loadRelease(ctx, tx, *releaseID, lockRelease)
 		if err != nil {
