@@ -328,6 +328,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <template v-else>Connecting…</template>
           </span>
         </p>
+        <RouterLink class="context-link" to="/decision-desk">Decision Desk</RouterLink>
         <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
         </div>

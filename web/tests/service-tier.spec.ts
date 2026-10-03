@@ -288,6 +288,27 @@ test('a rejected write reports the error and offers no false-success Undo', asyn
   await expect(page.locator('.tier-toast')).toHaveCount(0)
 })
 
+for (const width of [320, 390]) test(`${width}: agent request labels keep phone footer controls still`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  await setup(page, { agent: true })
+  await page.goto(`/agents/${id}`)
+  await page.getByRole('button', { name: 'Ask for a tier', exact: true }).click()
+  await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
+  await picker(page).getByRole('textbox', { name: 'Why' }).fill('QA waits on this screen')
+  await expectStableControls({
+    controls: {
+      frame: picker(page), choices: picker(page).getByRole('radiogroup'),
+      default: picker(page).locator('[data-option=default]'), fast: picker(page).locator('[data-option=fast]'), fastest: picker(page).locator('[data-option=fastest]'),
+      cancel: picker(page).getByRole('button', { name: /Cancel/ }), confirm: picker(page).locator('.tp-go'),
+    },
+    scrollAreas: { body: picker(page), notes: picker(page).locator('.tp-notes') },
+    interactions: ['fastest', 'fast', 'default'].map(t => ({ name: `ask for ${t}`, run: async () => {
+      await picker(page).locator(`[data-option=${t}]`).click()
+      await expect(picker(page).locator(`[data-option=${t}]`)).toHaveAttribute('aria-checked', 'true')
+    } })),
+  })
+})
+
 test('an agent asks for its own tier; field shortcuts and the active tier stay intact', async ({ page }) => {
   const { writes, getState } = await setup(page, { agent: true })
   await page.goto(`/agents/${id}`)
