@@ -39,7 +39,7 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
         s.stopped_at IS NULL, usage.tokens,
         coalesce(d.provider,''),coalesce(d.model_display->>'display_name',''),coalesce(d.model_display->>'short_name',''),coalesce(d.model_display->>'model_version',''),
         CASE WHEN lower(btrim(s.reasoning_effort))=lower(btrim(p.effort)) THEN d.effort_level END
-    FROM (`+planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`)+`) t
+    FROM (`+planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`, true)+`) t
     JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
         AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
     LEFT JOIN model_profiles p ON p.tenant_id=s.tenant_id AND p.id=s.model_profile_id
