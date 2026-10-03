@@ -151,18 +151,26 @@ func planningSubtreeSQL(roots string) string {
 	tenant := `current_setting('aeon.tenant_id')::uuid`
 	// Keep child lookups dependent on their selected parent. Stale kind
 	// statistics must not rescan the tenant's tickets once per page root.
+	// Filter live rows inside each lookup so the partial parent index applies;
+	// its existing order keeps even skewed parent estimates on a bounded probe.
 	return `SELECT r.root, r.root AS id FROM (` + roots + `) r
     UNION ALL SELECT r.root, c.id FROM (` + roots + `) r
     CROSS JOIN LATERAL (
-        SELECT * FROM nodes WHERE tenant_id=` + tenant + ` AND parent_id=r.root OFFSET 0
+        SELECT id,tenant_id,kind_id,state,deleted_at FROM nodes
+        WHERE tenant_id=` + tenant + ` AND parent_id=r.root AND deleted_at IS NULL
+        ORDER BY updated_at DESC OFFSET 0
     ) c` + planningOpenChild("c") + `
     WHERE ` + planningOpenWhere("c") + `
     UNION ALL SELECT r.root, g.id FROM (` + roots + `) r
     CROSS JOIN LATERAL (
-        SELECT * FROM nodes WHERE tenant_id=` + tenant + ` AND parent_id=r.root OFFSET 0
+        SELECT id,tenant_id,kind_id,state,deleted_at FROM nodes
+        WHERE tenant_id=` + tenant + ` AND parent_id=r.root AND deleted_at IS NULL
+        ORDER BY updated_at DESC OFFSET 0
     ) c` + planningOpenChild("c") + `
     CROSS JOIN LATERAL (
-        SELECT * FROM nodes WHERE tenant_id=` + tenant + ` AND parent_id=c.id OFFSET 0
+        SELECT id,tenant_id,kind_id,state,deleted_at FROM nodes
+        WHERE tenant_id=` + tenant + ` AND parent_id=c.id AND deleted_at IS NULL
+        ORDER BY updated_at DESC OFFSET 0
     ) g` + planningOpenChild("g") + `
     WHERE ` + planningOpenWhere("c") + ` AND ` + planningOpenWhere("g")
 }

@@ -226,7 +226,7 @@ func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
 	found, rows, visits := planningSubtreeWork(plan, false)
 	t.Logf("page subtree rows=%.0f, node visits=%.0f", rows, visits)
 	if !found || rows != float64(len(ids)) || visits > float64(2*len(ids)) {
-		t.Fatalf("page subtree work: found=%t rows=%.0f visits=%.0f, want %d roots and at most %d child probes", found, rows, visits, len(ids), 2*len(ids))
+		t.Fatalf("page subtree work: found=%t rows=%.0f visits=%.0f, want %d roots and at most %d node visits", found, rows, visits, len(ids), 2*len(ids))
 	}
 }
 
