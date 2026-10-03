@@ -4,6 +4,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -72,7 +73,7 @@ func TestHarnessRunLaunchFailureStops(t *testing.T) {
 func TestHarnessRunSIGTERM(t *testing.T) {
 	if os.Getenv("AEON_TEST_HARNESS_RUN") == "1" {
 		dir := os.Getenv("AEON_TEST_RUN_DIR")
-		code := Run([]string{"aeon", "harness", "run", "--project", "AEON", "--harness", "claude", "--label", "Review", "--role", "reviewer", "--interval", "1", "--state-dir", filepath.Join(dir, "state"), "--", "sh", "-c", `printf ready > "$1"; exec sleep 30`, "sh", filepath.Join(dir, "ready")}, os.Stdin, os.Stdout, os.Stderr)
+		code := Run([]string{"aeon", "harness", "run", "--project", "AEON", "--harness", "claude", "--label", "Review", "--role", "reviewer", "--interval", "1", "--state-dir", filepath.Join(dir, "state"), "--", "sh", "-c", "printf ready; exec sleep 30"}, os.Stdin, os.Stdout, os.Stderr)
 		os.Exit(code)
 	}
 	var calls []hbCall
@@ -82,22 +83,37 @@ func TestHarnessRunSIGTERM(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHarnessRunSIGTERM$")
 	cmd.Env = append(os.Environ(), "AEON_TEST_HARNESS_RUN=1", "AEON_TEST_RUN_DIR="+dir)
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyR.Close()
+	defer readyW.Close()
+	cmd.Stdout = readyW
 	// Do not capture or log inherited credentials or request proofs.
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	_ = readyW.Close()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "ready")); err == nil {
-			break
+	ready := make(chan error, 1)
+	go func() {
+		var marker [5]byte
+		_, err := io.ReadFull(readyR, marker[:])
+		if err == nil && string(marker[:]) != "ready" {
+			err = errors.New("unexpected readiness marker")
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("command did not start")
+		ready <- err
+	}()
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("command readiness: %v", err)
 		}
-		time.Sleep(20 * time.Millisecond)
+	case <-time.After(10 * time.Second):
+		t.Fatal("command did not start")
 	}
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
@@ -111,6 +127,9 @@ func TestHarnessRunSIGTERM(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("SIGTERM failed to settle")
 	}
+	// Waiting for the child does not join this process's HTTP handlers. Close
+	// waits for them to finish before assertions read their recorded calls.
+	srv.Close()
 	regs := hbWhere(calls, http.MethodPost, "/harness-sessions")
 	if len(regs) != 1 || regs[0].body["role"] != "worker" || regs[0].body["display_label"] != "Review" {
 		t.Fatal("review registration missing")
