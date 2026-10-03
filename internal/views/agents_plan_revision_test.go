@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -105,38 +106,66 @@ func TestAgentsPlanRevisionCheckedSaves(t *testing.T) {
 	t.Run("simultaneous canonical and alias saves have one winner", func(t *testing.T) {
 		before := read(owner)
 		bodies := []string{saveBody(9, before), saveBody(10, before)}
-		start := make(chan struct{})
+		// Pause after the first writer has consumed the old revision, before
+		// its upsert acquires a preference-row lock. Only the tenant fence can
+		// prevent the alias from accepting that same revision at this point.
+		pool, barrier, ctx := dbtest.BarrierPool(t, d.App, func(sql string) bool {
+			return strings.Contains(sql, "SELECT pref.value,pref.updated_at FROM user_preferences pref")
+		})
+		mux := http.NewServeMux()
+		New(pool).Mount(mux)
+		write := func(p tenant.Principal, body string) *httptest.ResponseRecorder {
+			r := httptest.NewRequest("PUT", "/api/preferences/agents.working", strings.NewReader(body))
+			r = r.WithContext(tenant.WithPrincipal(ctx, p))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			return w
+		}
 		type result struct {
 			index int
 			w     *httptest.ResponseRecorder
 		}
 		results := make(chan result, 2)
-		for i, p := range []tenant.Principal{owner, alias} {
-			go func() {
-				<-start
-				results <- result{i, request(p, "PUT", "/api/preferences/agents.working", bodies[i])}
-			}()
+		go func() { results <- result{0, write(owner, bodies[0])} }()
+		pid := barrier.Wait(t, ctx)
+		done := make(chan struct{})
+		go func() {
+			results <- result{1, write(alias, bodies[1])}
+			close(done)
+		}()
+		if lock := dbtest.BlockedOrDone(t, ctx, d.Admin, pid, done); lock != "transactionid" {
+			t.Fatalf("alias save did not wait on the tenant fence: lock=%q", lock)
 		}
-		close(start)
+		barrier.Release()
 		winner, conflicts := -1, 0
+		var winningSave preference
 		for range 2 {
-			r := <-results
+			r := dbtest.Await(t, ctx, results)
 			switch r.w.Code {
 			case 200:
 				if winner != -1 {
 					t.Fatal("both stale-revision saves succeeded")
 				}
 				winner = r.index
+				must(json.Unmarshal(r.w.Body.Bytes(), &winningSave))
 			case 409:
+				if !strings.Contains(r.w.Body.String(), "agents plan changed; re-read before saving") {
+					t.Fatalf("save conflicted for the wrong reason: %s", r.w.Body.String())
+				}
 				conflicts++
 			default:
 				t.Fatalf("save status=%d body=%s", r.w.Code, r.w.Body.String())
 			}
 		}
-		if winner < 0 || conflicts != 1 {
+		if winner != 0 || conflicts != 1 {
 			t.Fatalf("winner=%d conflicts=%d", winner, conflicts)
 		}
 		current := read(owner)
+		if current.UpdatedAt == nil || winningSave.UpdatedAt == nil ||
+			!current.UpdatedAt.After(*before.UpdatedAt) || !current.UpdatedAt.Equal(*winningSave.UpdatedAt) ||
+			string(current.Value) != string(winningSave.Value) {
+			t.Fatal("persisted plan does not match the winning save and new revision")
+		}
 		var value struct {
 			Total  int               `json:"total"`
 			Limits map[string]string `json:"limits"`
@@ -147,6 +176,17 @@ func TestAgentsPlanRevisionCheckedSaves(t *testing.T) {
 		}
 		if savedAlias := read(alias); string(savedAlias.Value) != string(current.Value) || !savedAlias.UpdatedAt.Equal(*current.UpdatedAt) {
 			t.Fatal("concurrent writes left inconsistent aliases")
+		}
+		// Read both physical rows: the API prefers the canonical copy and
+		// cannot by itself prove that the alias revision was reconciled.
+		for _, p := range []tenant.Principal{owner, alias} {
+			var saved []byte
+			var updatedAt time.Time
+			must(d.Admin.QueryRow(ctx, `SELECT value,updated_at FROM user_preferences
+				WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, p.ID).Scan(&saved, &updatedAt))
+			if string(saved) != string(current.Value) || !updatedAt.Equal(*current.UpdatedAt) {
+				t.Fatalf("persisted family row %s differs from the winning save", p.ID)
+			}
 		}
 	})
 	t.Run("revoked write permission is rechecked before mutation", func(t *testing.T) {

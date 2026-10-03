@@ -378,8 +378,9 @@ Unknown account or queue readings stay explicit. The visible queue's ready work
 is not reported as starting until the launcher picks it up. Lowering the total
 or turning a harness off never pauses or stops existing work. Launcher
 integration remains a separate AEON-540 part. The approved start-check copy
-requires part D to be live before this UI is released; keep AEON-540's pill and
-benefit out of release notes until enforcement is live.
+requires part D to read `/api/agents/plan` before every start and enforce the
+total, harness limit and account-room checks before this UI is released; keep
+AEON-540's pill and benefit out of release notes until enforcement is live.
 
 ## Local models for in-app AI
 
