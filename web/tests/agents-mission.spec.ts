@@ -7,7 +7,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 
 const now = Date.parse('2026-09-26T16:00:00Z')
-async function setup(page: Page, theme: 'light' | 'dark' = 'light', reportedMetadata = false) {
+async function setup(page: Page, theme: 'light' | 'dark' = 'light', reportedMetadata = false, reportedTier = true) {
   await page.clock.install({ time: now })
   const work = fixtures()
   work.preferences.theme = { choice: theme }
@@ -32,8 +32,19 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', reportedMeta
   data.approvals.splice(0)
   data.messages.splice(0)
   data.targets.splice(0)
+  // Tier reporting is independent of optional model/account/worktree metadata.
+  // Keep the metadata assertions intact and mock the added tier read explicitly.
+  for (const session of data.sessions) Object.assign(session, { service_tier: reportedTier ? 'default' : null, service_tier_revision: 1 })
   await mockAgents(page, data)
-  return { lead, worker, stopped }
+  let tierReads = 0
+  await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/tier$/, async route => {
+    const session = data.sessions.find(s => s.id === new URL(route.request().url()).pathname.split('/').at(-2))
+    expect(route.request().method()).toBe('GET')
+    expect(session).toBeDefined()
+    tierReads++
+    await route.fulfill({ json: { session_id: session!.id, revision: 1, active_tier: reportedTier ? 'default' : null, pending: null, read_only: true, read_only_reason: 'This daemon does not support confirmed tier changes.', reports: [], requests: [] } })
+  })
+  return { lead, worker, stopped, tierReads: () => tierReads }
 }
 
 test('live tiles show current steps and rows nest workers with stopped history collapsed', async ({ page }) => {
@@ -56,12 +67,24 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   await expect(panel).toContainText('Running PDF tests')
   await expect(panel.locator('.activity-timeline li')).toHaveCount(2)
   await expect(panel.locator('.head-sub')).toContainText('PHAROS-12')
+  await expect(panel.locator('.service-tier .tier-head strong')).toHaveText('Default')
   await expect(panel).not.toContainText('Not reported')
   await expect(panel).not.toContainText('Account not reported')
   await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: 'Interrupt this step', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(panel.getByRole('button', { name: 'Stop now…', exact: true })).toBeVisible()
+})
+
+test('an unreported service tier stays explicit while optional setup fields stay absent', async ({ page }) => {
+  const { worker, tierReads } = await setup(page, 'light', false, false)
+  await page.goto(`/agents/${worker.id}`)
+  await expect.poll(tierReads).toBeGreaterThan(0)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await expect(panel.locator('.service-tier .tier-head strong')).toHaveText('Not reported')
+  await expect(panel.locator('.facts dt').filter({ hasText: /^(Model|Account|Worktree|Branch)$/ })).toHaveCount(0)
+  await expect(panel).not.toContainText('Account not reported')
+  await expect(panel).not.toContainText('Unmocked route')
 })
 
 for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {
