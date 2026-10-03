@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"sort"
@@ -204,7 +203,7 @@ func TestRLSAndLegacyProjectionGuards(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.InTenant(db.AllProjects(t.Context()), f.d.App, f.alice.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(db.AllProjects(t.Context(), "chat privacy fixture"), f.d.App, f.alice.TenantID, func(tx pgx.Tx) error {
 		var count int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE id=$1`, id).Scan(&count); err != nil {
 			return err
