@@ -8,7 +8,8 @@ import * as Briefing from '../src/lib/morningBriefing'
 import * as Scope from '../src/lib/identityScope'
 import * as AgentState from '../src/lib/agentState'
 import { APIError } from '../src/lib/api'
-import { usageDashboard } from './usage-data'
+import { usageAllowanceWindow, usageDashboard } from './usage-data'
+import type { UsageDashboard } from '../src/lib/usageFormat'
 
 const START = '2026-09-30T08:00:00.000Z', END = '2026-10-01T08:00:00.000Z'
 type Node = { tag: string; text: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
@@ -26,12 +27,13 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean } = {}, setupPrelude = '') {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean; partialAllowance?: boolean; truncatedAllowance?: boolean } = {}, setupPrelude = '') {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
   const can = (permission: string, project?: string) => !(options.noDecide && permission === 'approvals.decide') && (permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed'))
   const pending = { id: 'approval', resource_kind: 'node', resource_id: 'ticket', scope: 'nodes.write', rationale: 'Review me', decision: null, expires_at: '2099-01-01T00:00:00Z' }
-  const dashboard = usageDashboard('reported')
+  const dashboard = (options as typeof options & { dashboard?: UsageDashboard }).dashboard ?? usageDashboard('reported')
+  if (options.partialAllowance) Object.assign(dashboard.allowance, { state: 'partial', windows: [usageAllowanceWindow()], truncated: !!options.truncatedAllowance })
   dashboard.totals.cost_state = 'known'
   dashboard.totals.cost_unknown_rows = 0; dashboard.totals.unreported_sessions = 0; dashboard.totals.provisional_rows = 0
   const json = async (path: string, _signal?: AbortSignal, init?: RequestInit) => {
@@ -102,6 +104,54 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
   await Vue.nextTick()
   return { root, saves, paths }
 }
+
+function mountAllowance(dashboard: UsageDashboard) {
+  const options = { dashboard, noCost: false }
+  return mount(options)
+}
+
+function allowanceDashboard(state: string, truncated: boolean, visible = true) {
+  const dashboard = usageDashboard('reported')
+  Object.assign(dashboard.allowance, { state, truncated, windows: visible ? [{
+    account_id: 'permitted-account', label: 'Permitted budget', harness: 'codex', account_state: 'ready',
+    window_id: 'permitted-window', unit: 'requests', allowance: 100, used: null, reserved: 2,
+    pace_model: 'steady', burst_ratio: '1', starts_at: START, ends_at: END,
+    provisional: true, pace_cap: 50, headroom: null, hard_remaining: null,
+  }] : [], accounts: [{ account_id: 'withheld-account', label: 'Private account', harness: 'codex', account_state: 'ready' }] })
+  return dashboard
+}
+
+it.each([false, true])('renders permitted partial windows and explains omissions with truncated=%s', async truncated => {
+  const { root, saves } = await mountAllowance(allowanceDashboard('partial', truncated))
+  const text = textOf(root)
+  expect(text).toContain('Accounts now')
+  expect(flatten(root).find(el => el.tag === 'a' && textOf(el) === 'Permitted budget')?.props.href).toBe('/agents')
+  expect(text).toContain('Usage not reported · provisional')
+  expect(text).toContain(`Window ends ${END}`)
+  expect(text).toContain('Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
+  expect(text.includes('Account budget windows are truncated. Additional windows are omitted; account coverage may be incomplete.')).toBe(truncated)
+  expect(text).not.toContain('No account budget windows recorded.')
+  expect(text).not.toContain('Private account')
+  expect(saves[0]?.last_visit).toBe(END)
+})
+
+it('reports truncation when all account budgets are withheld without exposing their details', async () => {
+  const { root } = await mountAllowance(allowanceDashboard('withheld', true, false))
+  const text = textOf(root)
+  expect(text).toContain('Account budgets require account access.')
+  expect(text).toContain('Account budget windows are truncated. Additional windows are omitted; account coverage may be incomplete.')
+  expect(text).not.toContain('No account budget windows recorded.')
+  expect(text).not.toContain('Permitted budget')
+  expect(text).not.toContain('Private account')
+})
+
+it('keeps complete visible budgets free of omission notices', async () => {
+  const { root } = await mountAllowance(allowanceDashboard('visible', false))
+  const text = textOf(root)
+  expect(text).toContain('Permitted budget')
+  expect(text).not.toContain('Account budget coverage is partial.')
+  expect(text).not.toContain('Account budget windows are truncated.')
+})
 
 it('saves the database snapshot cutoff even when the browser clock is ahead', async () => {
   const { saves } = await mount()
@@ -194,4 +244,13 @@ it('preserves held request body, project label and an app Source link', async ()
 it('records calls to the real desk reader export in the briefing harness', async () => {
   const { paths } = await mount({}, "import { readDeskProjection } from '../lib/decisionDesk'\nvoid readDeskProjection(100)\n")
   expect(paths.filter(path => path.startsWith('/decision-desk/projection'))).toEqual(['/decision-desk/projection?limit=100'])
+})
+
+it.each([false, true])('shows returned partial allowance windows and coverage (truncated=%s)', async truncatedAllowance => {
+  const { root } = await mount({ projectCost: true, partialAllowance: true, truncatedAllowance })
+  const text = textOf(root)
+  expect(text).toContain('Accounts now')
+  expect(text).toContain(usageAllowanceWindow().label)
+  expect(text).not.toContain('No account budget windows recorded.')
+  expect(text).toContain(truncatedAllowance ? 'Account budget windows are truncated.' : 'Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
 })

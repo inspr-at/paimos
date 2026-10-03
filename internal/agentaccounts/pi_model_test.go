@@ -30,6 +30,7 @@ func TestPiAccountModelPermissionCatalogAndImmutablePins(t *testing.T) {
 	mod := &Module{pool: appPool, openRouter: openrouter.Catalog{Client: openrouter.Client{Base: server.URL}}}
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"pi-local","harness":"pi","daemon_id":"daemon-pi","label":"Local pi"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET provider='openrouter' WHERE id=$1`, a.ID)
 		return err

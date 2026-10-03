@@ -2,6 +2,7 @@
 package agentaccounts
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -14,41 +15,6 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
-
-func TestEffectiveDenial(t *testing.T) {
-	now := time.Date(2026, 9, 29, 23, 5, 0, 0, time.UTC)
-	named := denial{at: now.Add(-3 * time.Hour), until: now.Add(-125 * time.Minute)}
-	unnamed := denial{at: now.Add(-4 * time.Minute), until: now.Add(56 * time.Minute)}
-	later := denial{at: now.Add(-time.Minute), until: now.Add(2 * time.Hour)}
-	boundary := denial{at: now.Add(-time.Hour), until: now}
-	for _, tt := range []struct {
-		name           string
-		named, unnamed []denial
-		until, epoch   time.Time
-		recover        bool
-	}{
-		{name: "none"},
-		{name: "expired named", named: []denial{named}, epoch: named.at, recover: true},
-		{name: "unnamed only", unnamed: []denial{unnamed}, until: unnamed.until, epoch: unnamed.at},
-		{name: "expired named and fresh unnamed", named: []denial{named}, unnamed: []denial{unnamed}, until: unnamed.until, epoch: unnamed.at},
-		{name: "named later", named: []denial{later}, unnamed: []denial{unnamed}, until: later.until, epoch: later.at},
-		{name: "unnamed later", named: []denial{unnamed}, unnamed: []denial{later}, until: later.until, epoch: later.at},
-		{name: "multiple buckets", named: []denial{named, later, unnamed}, until: later.until, epoch: later.at},
-		{name: "permuted buckets", named: []denial{unnamed, later, named}, until: later.until, epoch: later.at},
-		{name: "exact expiry", unnamed: []denial{boundary}, epoch: boundary.at, recover: true},
-		{name: "latest epoch after all expire", named: []denial{named, boundary}, epoch: boundary.at, recover: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got := effectiveDenial(now, tt.named, tt.unnamed)
-			if got.waiting(now) != !tt.until.IsZero() || got.refreshDue(now) != tt.recover || !got.epoch.Equal(tt.epoch) {
-				t.Fatalf("block=%+v, want until=%s epoch=%s recovery=%v", got, tt.until, tt.epoch, tt.recover)
-			}
-			if !tt.until.IsZero() && (got.until == nil || !got.until.Equal(tt.until)) {
-				t.Fatalf("deadline=%v, want %s", got.until, tt.until)
-			}
-		})
-	}
-}
 
 // Each checkpoint is tested before and after a daemon restart, for both
 // reservation and claim, including Run now. The clock never uses wall time.
@@ -63,34 +29,31 @@ func TestDenialAdmissionInterleavings(t *testing.T) {
 		name  string
 		steps []step
 	}{
-		{"named only", []step{{"named", 0, 60, 60, ""}, {"check", 59, 0, 60, ""}, {"check", 60, 0, 0, "recover:"}}},
+		{"named only", []step{{"named", 0, 60, 60, ""}, {"check", 59, 0, 60, ""}, {"check", 60, 0, 0, "unknown:"}}},
 		{"unnamed only", []step{{"unnamed", 0, 0, 60, ""}, {"check", 59, 0, 60, ""}, {"check", 60, 0, 0, "recover:"}}},
 		{"named then unnamed", []step{{"named", 0, 180, 180, ""}, {"unnamed", 30, 0, 180, ""}, {"check", 90, 0, 180, ""}, {"check", 180, 0, 0, "recover:"}}},
 		{"named then longer unnamed", []step{{"named", 0, 30, 30, ""}, {"unnamed", 20, 0, 80, ""}, {"check", 30, 0, 80, ""}, {"check", 80, 0, 0, "recover:"}}},
 		{"unnamed then named", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 50, 60, ""}, {"check", 50, 0, 60, ""}, {"check", 60, 0, 0, "recover:"}}},
 		{"unnamed then longer named", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 180, 180, ""}, {"check", 60, 0, 180, ""}, {"check", 180, 0, 0, "recover:"}}},
-		{"expired named then unnamed", []step{{"named", 0, 60, 60, ""}, {"check", 60, 0, 0, "recover:"}, {"unnamed", 181, 0, 241, ""}, {"check", 185, 0, 241, ""}, {"check", 241, 0, 0, "recover:"}}},
+		{"expired named then unnamed", []step{{"named", 0, 60, 60, ""}, {"check", 60, 0, 0, "unknown:"}, {"unnamed", 181, 0, 241, ""}, {"check", 185, 0, 241, ""}, {"check", 241, 0, 0, "recover:"}}},
 		// Gate reproduction: reset 21:00, recovery 23:00 fails at 23:01,
 		// restart at 23:05. The required wait ends at 00:01, not 21:00.
 		{"failed recovery then restart", []step{{"named", 0, 60, 60, ""}, {"failure", 180, 181, 241, ""}, {"check", 185, 0, 241, ""}, {"check", 241, 0, 0, "recover:"}}},
-		{"successful recovery then unnamed", []step{{"named", 0, 60, 60, ""}, {"success", 61, 62, 0, "reread:"}, {"unnamed", 181, 0, 241, ""}, {"check", 241, 0, 0, "recover:"}}},
-		{"unnamed named recovery success", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 90, 90, ""}, {"success", 91, 92, 0, "reread:"}, {"unnamed", 100, 0, 160, ""}, {"check", 160, 0, 0, "recover:"}}},
-		{"unnamed named recovery failure", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 90, 90, ""}, {"failure", 91, 92, 152, ""}, {"check", 152, 0, 0, "recover:"}}},
+		{"successful recovery then unnamed", []step{{"named", 0, 60, 60, ""}, {"success", 61, 62, 0, "unknown:"}, {"unnamed", 181, 0, 241, ""}, {"check", 241, 0, 0, "recover:"}}},
+		{"unnamed named recovery success", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 90, 90, ""}, {"success", 91, 92, 0, "unknown:"}, {"unnamed", 100, 0, 160, ""}, {"check", 160, 0, 0, "recover:"}}},
+		{"unnamed named recovery failure", []step{{"unnamed", 0, 0, 60, ""}, {"named", 30, 90, 90, ""}, {"failure", 91, 92, 212, ""}, {"check", 212, 0, 0, "recover:"}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newDenialFixture(t)
 			base := time.Date(2026, 9, 29, 20, 0, 0, 0, time.UTC)
 			at := func(minute int) time.Time { return base.Add(time.Duration(minute) * time.Minute) }
-			var epoch time.Time
 			for _, s := range tt.steps {
 				now := at(s.minute)
 				switch s.kind {
 				case "named":
 					f.named(now, at(s.end))
-					epoch = now
 				case "unnamed":
 					f.stop(now)
-					epoch = now
 				case "success", "failure":
 					outcome := "vendor_limit"
 					if s.kind == "success" {
@@ -98,7 +61,6 @@ func TestDenialAdmissionInterleavings(t *testing.T) {
 					}
 					f.recover(now, at(s.end), outcome)
 					now = at(s.end)
-					epoch = now
 				}
 				for restart := 0; restart < 2; restart++ {
 					if restart == 1 {
@@ -111,27 +73,34 @@ func TestDenialAdmissionInterleavings(t *testing.T) {
 						if wait != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, s.grant) {
 							t.Fatalf("%s at %s restart=%d: wait=%+v windows=%+v", s.kind, now, restart, wait, windows)
 						}
-						if s.grant == "recover:" && windows[0].capacityBucket != fmt.Sprintf("recover:g%d:%s", f.generation, epoch.Format(time.RFC3339Nano)) {
-							t.Fatalf("recovery lost the latest epoch: %s", windows[0].capacityBucket)
-						}
+
 					}
 				}
 			}
-			// The final expired denial offers one recovery in this generation.
-			// Persist it and prove a second grant and a concurrent run are fenced.
-			now := at(tt.steps[len(tt.steps)-1].minute)
-			if _, wait := f.admit(now, 1, false); wait == nil || wait.Code != "reading" {
-				t.Fatalf("concurrent recovery: %+v", wait)
+			// Only unnamed recovery is serialized; named resets restore normal slots.
+			last := tt.steps[len(tt.steps)-1]
+			now := at(last.minute)
+			if last.grant == "recover:" {
+				if _, w := f.admit(now, 1, false); w == nil || w.Code != "capacity" {
+					t.Fatalf("concurrent recovery: %+v", w)
+				}
+			} else {
+				if _, w := f.admit(now, 1, false); w != nil {
+					t.Fatalf("unknown usage serial fence: %+v", w)
+				}
 			}
 			f.recover(now, now.Add(time.Second), "failed")
-			if _, wait := f.admit(now.Add(time.Second), 0, false); wait == nil || wait.Code != "reading" {
-				t.Fatal("spent epoch admitted twice")
-			}
+			_, before := f.admit(now.Add(time.Second), 0, false)
 			f.restart()
-			windows, wait := f.admit(now.Add(time.Second), 0, false)
-			if wait != nil || !containsRecovery(windows) {
-				t.Fatalf("new generation cannot recover expired epoch: %+v", wait)
+			_, after := f.admit(now.Add(time.Second), 0, false)
+			if last.grant == "recover:" {
+				if before == nil || after == nil || before.Code != "vendor" || after.Code != "vendor" || before.Until == nil || after.Until == nil || !before.Until.Equal(*after.Until) {
+					t.Fatalf("restart renewed failed recovery: %+v %+v", before, after)
+				}
+			} else if before != nil || after != nil {
+				t.Fatalf("unknown completion introduced a quota: %+v %+v", before, after)
 			}
+
 		})
 	}
 }
@@ -142,9 +111,9 @@ func TestAdmissionNeverGrantsDuringUnexpiredDenial(t *testing.T) {
 			f := newDenialFixture(t)
 			rng := rand.New(rand.NewSource(seed))
 			now := time.Date(2026, 9, 29, 20, 0, 0, 0, time.UTC)
-			// Independent oracle: unresolved deadlines, cleared only by a
-			// successful recovery. Distinct named buckets retain each denial.
 			var deadlines []time.Time
+			var retry time.Time
+			step := 0
 			for i := 0; i < 60; i++ {
 				now = now.Add(time.Duration(1+rng.Intn(40)) * time.Minute)
 				switch rng.Intn(5) {
@@ -153,39 +122,44 @@ func TestAdmissionNeverGrantsDuringUnexpiredDenial(t *testing.T) {
 					f.named(now, until)
 					deadlines = append(deadlines, until)
 				case 1:
-					f.stop(now)
-					deadlines = append(deadlines, now.Add(time.Hour))
+					if retry.IsZero() {
+						f.stop(now)
+						retry = now.Add(time.Hour)
+						step = 0
+					}
 				case 2:
 					f.restart()
 				case 3:
 					windows, wait := f.admit(now, 0, false)
 					if wait == nil && containsRecovery(windows) {
-						for _, deadline := range deadlines {
+						for _, deadline := range append(deadlines, retry) {
 							if deadline.After(now) {
-								t.Fatalf("recovery granted at %s before %s", now, deadline)
+								t.Fatalf("recovery before oracle deadline: %s < %s", now, deadline)
 							}
 						}
 						success := rng.Intn(2) == 0
-						outcome := "vendor_limit"
+						outcome := "failed"
 						if success {
 							outcome = "completed"
 						}
 						f.recover(now, now.Add(time.Second), outcome)
 						now = now.Add(time.Second)
 						if success {
-							deadlines = nil
+							retry = time.Time{}
+							step = 0
 						} else {
-							deadlines = append(deadlines, now.Add(time.Hour))
+							step = min(step+1, 3)
+							retry = now.Add(time.Hour << step)
 						}
 					}
 				}
-				var latest time.Time
+				latest := retry
 				for _, deadline := range deadlines {
-					if deadline.After(now) && deadline.After(latest) {
+					if deadline.After(latest) {
 						latest = deadline
 					}
 				}
-				if !latest.IsZero() {
+				if latest.After(now) {
 					f.assertWait(now, latest)
 				}
 			}
@@ -205,9 +179,15 @@ func TestClearingOneNamedBucketPreservesAnother(t *testing.T) {
 		return err
 	})
 	f.named(now.Add(time.Hour), now.Add(2*time.Hour))
-	f.assertWait(now.Add(61*time.Minute), now.Add(2*time.Hour))
+	f.assertWait(now.Add(61*time.Minute), now.Add(3*time.Hour))
 	f.restart()
-	f.assertWait(now.Add(61*time.Minute), now.Add(2*time.Hour))
+	f.assertWait(now.Add(61*time.Minute), now.Add(3*time.Hour))
+	f.seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source,ordinary_usage_allowed) VALUES($1,$2,'5h',$3,300,10,$4,$5,'harness',true)`, f.person.TenantID, f.account.ID, now.Format(time.RFC3339Nano), now.Add(3*time.Hour), now.Add(62*time.Minute))
+		return err
+	})
+	f.assertWait(now.Add(63*time.Minute), now.Add(2*time.Hour))
+
 }
 
 type denialFixture struct {
@@ -266,7 +246,14 @@ func (f *denialFixture) stop(at time.Time) {
 			return err
 		}
 		_, err := tx.Exec(f.t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, f.person.TenantID, run, at)
-		return err
+		if err != nil {
+			return err
+		}
+		a, err := getAccount(f.t.Context(), tx, f.account.ID)
+		if err != nil {
+			return err
+		}
+		return reconcileVendorStop(tenant.WithPrincipal(f.t.Context(), f.runner), tx, a, at)
 	})
 }
 
@@ -298,32 +285,31 @@ func (f *denialFixture) assertWait(now, until time.Time) {
 
 func (f *denialFixture) recover(start, finish time.Time, outcome string) {
 	f.t.Helper()
-	windows, wait := f.admit(start, 0, false)
-	if wait != nil || len(windows) != 1 || !containsRecovery(windows) {
-		f.t.Fatalf("recovery at %s: wait=%+v windows=%+v", start, wait, windows)
-	}
-	w := windows[0]
+	mod := fixedClockModule{Module: New(appPool), at: start}
+	callStatus(f.t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(f.t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": fmt.Sprint("g", f.generation), "available": true}), 200, nil)
 	run := insertRun(f.t, f.person, f.runner, f.profile)
-	f.seed(func(tx pgx.Tx) error {
+	mustRoute(f.t, mod, f.runner, f.token, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1})
+	ctx := context.WithValue(tenant.WithPrincipal(dbtest.Seed(f.t.Context()), f.runner), clockKey{}, finish)
+	if err := db.InTenant(ctx, appPool, f.person.TenantID, func(tx pgx.Tx) error {
 		status := "failed"
+		output := 0
 		if outcome == "completed" {
 			status = "completed"
+			output = 1
 		}
-		if _, err := tx.Exec(f.t.Context(), `UPDATE agent_runs SET account_id=$2,status=$3,started_at=$4,ended_at=$5 WHERE id=$1`, run, f.account.ID, status, start, finish); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agent_runs SET status=$2,started_at=$3,ended_at=$4 WHERE id=$1`, run, status, start, finish); err != nil {
 			return err
 		}
-		var windowID string
-		if err := tx.QueryRow(f.t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_kind,capacity_read_at,capacity_bucket)
- VALUES($1,$2,$3,$4,'percent',1,'unrestricted','refresh',$3,$5) RETURNING id::text`, f.person.TenantID, f.account.ID, start, w.EndsAt, w.capacityBucket).Scan(&windowID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(f.t.Context(), `INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units,state,settled_at) VALUES($1,$2,$3,1,'released',$4)`, f.person.TenantID, run, windowID, finish); err != nil {
-			return err
-		}
+		var code *string
 		if outcome == "vendor_limit" {
-			_, err := tx.Exec(f.t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, f.person.TenantID, run, finish)
+			v := "vendor_limit"
+			code = &v
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,output_tokens_delta,error_code,at) VALUES($1,$2,1,'usage',$3,$4,$5)`, f.person.TenantID, run, output, code, finish); err != nil {
 			return err
 		}
-		return nil
-	})
+		return Settle(ctx, tx, f.runner, run)
+	}); err != nil {
+		f.t.Fatal(err)
+	}
 }
