@@ -3547,7 +3547,7 @@ paths:
         '400': {description: Invalid or oversized input}
         '403': {description: Permission denied}
         '404': {description: Key not found in this tenant}
-        '409': {description: Live scopes changed, key inactive, recent scope use, or conflicting replay}
+        '409': {description: 'Live scopes changed, key inactive, recent scope use, or conflicting replay'}
   /key-trim-proposals:
     get:
       operationId: listKeyTrimProposals
@@ -3595,7 +3595,7 @@ paths:
               required: [request_id, expected_digest, decision]
               properties:
                 request_id: {type: string, format: uuid}
-                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Scope snapshot digest, never a credential hash}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Scope snapshot digest, never a credential hash'}
                 decision: {type: string, enum: [approve, decline]}
       responses:
         '200':
@@ -3606,7 +3606,7 @@ paths:
         '400': {description: Invalid input}
         '403': {description: Person key-management or live grant authority denied}
         '404': {description: Proposal not found in this tenant}
-        '409': {description: Proposal expired, scopes changed, key inactive, recent use, or conflicting decision}
+        '409': {description: 'Proposal expired, scopes changed, key inactive, recent use, or conflicting decision'}
   /key-trim-proposals/{proposalId}/restore:
     parameters:
       - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3635,7 +3635,7 @@ paths:
         '400': {description: Invalid input}
         '403': {description: Person key-management or live grant authority denied}
         '404': {description: Proposal not found in this tenant}
-        '409': {description: Restore window closed, scopes changed, key inactive, or conflicting replay}
+        '409': {description: 'Restore window closed, scopes changed, key inactive, or conflicting replay'}
   /agent-keys/{id}/scopes:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -15213,7 +15213,7 @@ components:
         revision: {type: integer, minimum: 1}
         applied_at: {type: [string, 'null'], format: date-time}
         restore_until: {type: [string, 'null'], format: date-time}
-        blocked_reason: {type: string, description: Non-actionable source, rechecked during reads and writes}
+        blocked_reason: {type: string, description: 'Non-actionable source, rechecked during reads and writes'}
     AgentKey:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
