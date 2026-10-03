@@ -6683,7 +6683,7 @@ paths:
   /models/routes:
     get:
       operationId: readModelRoutes
-      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; dispatch additionally applies family order, review floors, platform capability, approved accounts and preferences. At most 50 steps, with explicit truncation; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; dispatch additionally applies family order, review floors, platform capability, approved accounts and preferences. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
       security: *auth
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
@@ -6695,11 +6695,20 @@ paths:
         '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
-      description: Admin atomically replaces the tenant's role ladders. Temporary unavailable/conserved/budget-limited entries require expiry and reason.
+      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 250 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
       security: [{session: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+      parameters:
+        - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: If-Match, in: header, description: Required in role mode; complete strong SHA-256 content token from GET. No wildcard or weak/list form., schema: {type: string, maxLength: 66}}
+        - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 250, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
       responses:
-        '200': {description: Ordered routes, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token in conditional mode, schema: {type: string}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /model-preferences:
     get:
@@ -6716,6 +6725,146 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}:
+    put:
+      operationId: replaceModelPreferenceLevel
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceLevel
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}/rows/{kindId}:
+    put:
+      operationId: setModelPreferenceRow
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceRowWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceRow
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds:
+    get:
+      operationId: listWorkKinds
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}, description: Last ID from the preceding page.}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createWorkKind
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindWrite'}}}}
+      responses:
+        '201': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}:
+    patch:
+      operationId: updateWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPatch'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: archiveWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}/restore:
+    post:
+      operationId: restoreWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /models/resolve:
     get:
       operationId: resolveModelRole
@@ -14287,9 +14436,12 @@ components:
         valid_until: {type: [string, 'null'], format: date-time}
     ModelRoutesRead:
       type: object
-      required: [role, steps, setup, truncated, dispatch_family_order, review_floors]
+      required: [role, steps, routes, edit_token, can_edit, setup, truncated, dispatch_family_order, review_floors]
       properties:
         role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
+        routes: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ModelRoute'}, description: Stored rows matching steps; conditional PUT sends this complete array.}
+        edit_token: {type: [string, 'null'], description: Quoted SHA-256 content token; null when truncated. Time passing alone never changes it.}
+        can_edit: {type: boolean, description: Person with models.manage and a complete initialized snapshot; source authorization still checked on save.}
         steps:
           type: array
           maxItems: 50
@@ -14347,6 +14499,57 @@ components:
         locked: {type: boolean}
         normal: {$ref: '#/components/schemas/ModelSelector'}
         complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceRowWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      description: Both selectors required unless locked=true requests copy-on-lock; project locks are forbidden.
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceLevelWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+    ModelPreferenceWriteResult:
+      type: object
+      required: [person_id, level, revision, running_outside, residency]
+      properties:
+        person_id: {type: [string, 'null'], format: uuid, description: Canonical caller confirmed in the fenced write; session principal remains audit actor.}
+        level: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+        revision: {type: integer, format: int64}
+        running_outside: {type: array, items: {type: string, format: uuid}}
+        residency: {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+    WorkKindWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+    WorkKindPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        position: {type: integer, minimum: -1000000, maximum: 1000000}
+    WorkKindPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkKind'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
     ModelPreferenceLevel:
       type: object
       required: [revision, residency, residency_locked, prefs_locked, rows, updated_by, updated_at]
