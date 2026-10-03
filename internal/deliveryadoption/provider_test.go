@@ -124,21 +124,36 @@ func TestProviderNativeExpiryReclaimsScratchButRetainsSuccessfulRecovery(t *test
 	}
 }
 func TestExternalCatalogRetainsPinsAfterDatabaseCheckpointLoss(t *testing.T) {
-	f := newFixture(t)
-	j := f.prepare(t, f.project)
-	f.sql(t, `UPDATE delivery_adoption_jobs SET state='pending',lease_token=NULL,lease_until=NULL,operation_journal='{"operations":[]}',resource_attempt_id=NULL,reserved_backup_bytes=0,reserved_restore_slots=0,backup_verified_at=NULL,evidence_attempt_id=NULL,backup_ref=NULL,backup_digest=NULL,restore_evidence_ref=NULL,restore_evidence_digest=NULL,recovery_pin_manifest_ref=NULL WHERE project_node_id=$1`, f.project)
-	if err := f.s.reconcileCatalog(t.Context()); err == nil {
-		t.Fatal("unknown external recovery pin was silently accepted")
-	}
-	pin, _ := f.provider.Lookup(t.Context(), Operation{Key: operationKey(j.Identity, "pin")})
-	if !pin.Protected || pin.State != "complete" {
-		t.Fatal("database restore deleted external recovery pin")
-	}
-	if f.count(t, `SELECT count(*) FROM delivery_adoption_jobs WHERE reason_code='recovery_unknown' AND cleanup_state='blocked'`) != 1 {
-		t.Fatal("recovery ambiguity was not persisted")
-	}
-	if err := f.s.reconcileJob(t.Context(), f.a, f.project); err == nil {
-		t.Fatal("ambiguous restore catalog authorized cleanup")
+	for _, reverse := range []bool{false, true} {
+		name := "forward"
+		if reverse {
+			name = "reverse"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			j := f.prepare(t, f.project)
+			// Reconcile the same page in both orders; identity hashes must not
+			// decide whether a later scratch entry weakens the pin's block.
+			for _, order := range []bool{reverse, !reverse} {
+				f.sql(t, `UPDATE delivery_adoption_jobs SET state='pending',lease_token=NULL,lease_until=NULL,operation_journal='{"operations":[]}',resource_attempt_id=NULL,reserved_backup_bytes=0,reserved_restore_slots=0,backup_verified_at=NULL,evidence_attempt_id=NULL,backup_ref=NULL,backup_digest=NULL,restore_evidence_ref=NULL,restore_evidence_digest=NULL,recovery_pin_manifest_ref=NULL,reason_code=NULL,reason_message='',cleanup_state='none',next_reconcile_at=NULL,reconciliation_cursor=NULL WHERE project_node_id=$1`, f.project)
+				f.provider.reverseCatalog = order
+				err := f.s.reconcileCatalog(t.Context())
+				var refusal *failure
+				if !errors.As(err, &refusal) || refusal.code != "cleanup_blocked" {
+					t.Fatalf("unknown pin refused for wrong reason: %v", err)
+				}
+				if f.count(t, `SELECT count(*) FROM delivery_adoption_jobs WHERE reason_code='recovery_unknown' AND cleanup_state='blocked'`) != 1 {
+					t.Fatal("catalog ordering weakened the recovery block")
+				}
+			}
+			pin, _ := f.provider.Lookup(t.Context(), Operation{Key: operationKey(j.Identity, "pin")})
+			if !pin.Protected || pin.State != "complete" {
+				t.Fatal("database restore deleted external recovery pin")
+			}
+			if err := f.s.reconcileJob(t.Context(), f.a, f.project); err == nil {
+				t.Fatal("ambiguous restore catalog authorized cleanup")
+			}
+		})
 	}
 }
 

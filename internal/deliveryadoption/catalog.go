@@ -115,7 +115,10 @@ func (s *Service) reconcileCatalog(ctx context.Context) error {
 			if err = decodeJournal(raw, &Journal{}); err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET operation_journal=$2,resource_attempt_id=$3,reserved_backup_bytes=greatest(reserved_backup_bytes,$4),reserved_restore_slots=1,cleanup_state='pending',next_reconcile_at=$5,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, id.Project, raw, id.Attempt, s.cfg.Quota.BundleBytes, s.now())
+			// Catalog entries may arrive in any order or page. Discovering a
+			// scratch restore after an unknown protected pin cannot weaken its
+			// persisted recovery block or make ordinary cleanup appear ready.
+			_, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET operation_journal=$2,resource_attempt_id=$3,reserved_backup_bytes=greatest(reserved_backup_bytes,$4),reserved_restore_slots=1,cleanup_state=CASE WHEN reason_code='recovery_unknown' THEN 'blocked' ELSE 'pending' END,next_reconcile_at=CASE WHEN reason_code='recovery_unknown' THEN next_reconcile_at ELSE $5 END,revision=revision+1,updated_at=$5 WHERE project_node_id=$1`, id.Project, raw, id.Attempt, s.cfg.Quota.BundleBytes, s.now())
 			return err
 		})
 		if err != nil {

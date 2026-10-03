@@ -188,6 +188,7 @@ type fakeProvider struct {
 	cleanupDown, loseBackupResponse bool
 	lostKind, pendingKind           string
 	pendingKey                      string
+	reverseCatalog                  bool
 	requests                        map[string]ProviderRequest
 	alter                           func(*ProviderResult)
 	executeCalls                    map[string]int
@@ -329,6 +330,11 @@ func (p *fakeProvider) List(_ context.Context, instance, cursor string, limit in
 	}
 	if len(keys) > limit {
 		page.Next = keys[limit-1]
+	}
+	if p.reverseCatalog {
+		for left, right := 0, len(page.Items)-1; left < right; left, right = left+1, right-1 {
+			page.Items[left], page.Items[right] = page.Items[right], page.Items[left]
+		}
 	}
 	return page, nil
 }
