@@ -213,7 +213,7 @@ type ReportPage struct {
 // must be accompanied by the displayed report digest to reject stale pages.
 func (s *Service) Report(ctx context.Context, p tenant.Principal, project, digest string, cursor, limit int) (ReportPage, error) {
 	var out ReportPage
-	if limit < 1 || limit > 200 || cursor < 0 || cursor > 5200 {
+	if limit < 1 || limit > 200 || cursor < 0 || cursor > maxReportItems {
 		return out, errors.New("invalid report page")
 	}
 	v, err := s.Status(ctx, p, project)
@@ -245,7 +245,7 @@ func (s *Service) Report(ctx context.Context, p tenant.Principal, project, diges
 	}
 	out.Fingerprint = r.Fingerprint
 	total := len(r.Releases) + len(r.Members) + len(r.Reasons)
-	if total > 5200 || cursor > total {
+	if len(r.Releases) > 200 || len(r.Members) > 5000 || len(r.Reasons) > 5200 || total > maxReportItems || cursor > total {
 		return out, errors.New("invalid report boundary")
 	}
 	end := min(total, cursor+limit)

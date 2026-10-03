@@ -223,11 +223,8 @@ func (s *Service) saveReport(ctx context.Context, a Authority, j *job, r Report)
 	if s.reports == nil {
 		return ErrPrerequisite
 	}
-	if len(r.Releases)+len(r.Members)+len(r.Reasons) > 5200 {
-		r.Incomplete = true
-		r.Eligible = false
-		room := max(0, 5200-len(r.Releases)-len(r.Reasons))
-		r.Members = r.Members[:min(room, len(r.Members))]
+	if len(r.Releases) > 200 || len(r.Members) > 5000 || len(r.Reasons) > 5200 {
+		return errors.New("dry-run report exceeds bounded item counts")
 	}
 	raw, err := json.Marshal(r)
 	if err != nil {

@@ -16,6 +16,10 @@ import (
 const Migration = "releases-v1"
 const MaxReportBytes = 12 << 20
 
+// Refusal details are additional to the bounded release/member population.
+// A full mapping must still expose every retained offending-row explanation.
+const maxReportItems = 200 + 5000 + 5200
+
 var ErrLease = errors.New("adoption lease superseded or expired")
 var ErrStale = errors.New("adoption source changed since verified recovery point")
 var ErrPrerequisite = errors.New("instance adoption prerequisites are incomplete")

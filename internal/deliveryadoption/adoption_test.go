@@ -679,6 +679,51 @@ func TestEvidenceJSONRejectsDuplicateKeysAndUnknownFields(t *testing.T) {
 	}
 }
 
+func TestReportPagesIncludeRefusalsAfterTheFullMappedPopulation(t *testing.T) {
+	f := newFixture(t)
+	j := f.claim(t, f.project)
+	r := Report{Identity: j.Identity, Fingerprint: sum([]byte("bounded refused population")), CheckedAt: f.clock, Counts: Counts{Releases: 200, Members: 5000}}
+	for range 200 {
+		r.Releases = append(r.Releases, ReleaseMapping{ID: newUUID()})
+	}
+	for range 5000 {
+		r.Members = append(r.Members, MemberMapping{ID: newUUID()})
+	}
+	offender := newUUID()
+	r.Reasons = []Reason{{Code: "member_guard", NodeID: offender, Fix: "Restore the original permitted kind."}}
+	if err := f.s.saveReport(t.Context(), f.a, &j, r); err != nil {
+		t.Fatal(err)
+	}
+	cursor := ""
+	items, sawRefusal := 0, false
+	for range 27 {
+		page, err := f.s.ReadReport(t.Context(), f.p, f.project, cursor, 200)
+		if err != nil {
+			t.Fatal("full report hid the offending row", err)
+		}
+		items += len(page.Items)
+		for _, item := range page.Items {
+			var entry struct {
+				Kind  string `json:"kind"`
+				Value Reason `json:"value"`
+			}
+			if err := json.Unmarshal(item, &entry); err != nil {
+				t.Fatal(err)
+			}
+			if entry.Kind == "refusal" && entry.Value.NodeID == offender {
+				sawRefusal = true
+			}
+		}
+		cursor = page.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	if items != 5201 || !sawRefusal || cursor != "" {
+		t.Fatalf("incomplete report paging: items=%d refusal=%v cursor=%q", items, sawRefusal, cursor)
+	}
+}
+
 func TestPersistedReportRevisionAndVisibility(t *testing.T) {
 	f := newFixture(t)
 	j := f.claim(t, f.project)
