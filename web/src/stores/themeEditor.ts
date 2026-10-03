@@ -45,6 +45,8 @@
 //      runner, for the identity it was loaded for. Results land in the shared
 //      editor whether or not a settings card is mounted, so navigation can
 //      never strand a committed change; drafts are never published.
+//   9. Session restoration uses this same model. It supersedes an older load
+//      with a fresh token, but never interrupts a write or an unsaved draft.
 //
 // Adopting it (AEON-643): read `draft`, gate controls with canEdit, and send
 // changes with editor.update(draft => { draft.values.agents.ring = 'pulse' }).
@@ -53,7 +55,7 @@
 import { computed, effectScope, shallowRef, watch, type EffectScope } from 'vue'
 import { useSession } from './session'
 import { can } from '../lib/authz'
-import { publishAgentTheme } from '../lib/agentTheme'
+import { publishAgentTheme, registerAgentThemeRestoration } from '../lib/agentTheme'
 import * as themes from '../lib/themes'
 import type { ActiveTheme, ThemeRecord, ThemesPage } from '../lib/themes'
 
@@ -102,6 +104,7 @@ export type ThemeEvent =
   | { type: 'enter' }
   | { type: 'leave' }
   | { type: 'reload' }
+  | { type: 'restore'; identity: string }
   | { type: 'more' }
   | { type: 'choose'; id: string }
   | { type: 'edit'; draft: ThemeRecord }
@@ -274,6 +277,9 @@ function apply(state: ThemeEditorState, event: ThemeEvent): ThemeEditorState {
     case 'rights': return { ...state, rights: { ...event.rights } }
     case 'enter':
     case 'reload': return canReload(state) ? start({ ...state, confirming: null }, { kind: 'load' }) : state
+    case 'restore':
+      return event.identity && event.identity === state.identity && !isDirty(state) && (!state.pending || state.pending.op.kind === 'load')
+        ? start({ ...state, confirming: null }, { kind: 'load' }) : state
     case 'leave': return state.confirming || state.renaming ? { ...state, confirming: null, renaming: null } : state
     case 'more': return state.cursor && !state.pending && state.identity ? start(state, { kind: 'more', after: state.cursor }) : state
     case 'choose':
@@ -425,6 +431,8 @@ export function createThemeEditor() {
     /** The section is hidden: close transient UI, keep the draft. */
     leave: () => { dispatch({ type: 'leave' }) },
     load: () => send({ type: 'reload' }),
+    /** Session restoration supersedes older reads, preserving writes and drafts. */
+    restore: (identity: string) => send({ type: 'restore', identity }),
     more: () => send({ type: 'more' }),
     choose: (theme: ThemeRecord) => send({ type: 'choose', id: theme.id }),
     /** Replace the draft with an edited copy of the same record and revision. */
@@ -458,3 +466,12 @@ export function useThemeEditor(): ThemeEditor {
   }
   return shared.editor
 }
+
+/** Restore through the shared editor, reusing its first identity load. */
+export function restoreThemeEditor(identity: string): Promise<void> {
+  const existing = shared
+  const editor = useThemeEditor()
+  if (!identity || editor.state.value.identity !== identity) return Promise.resolve()
+  return existing ? editor.restore(identity) : editor.idle()
+}
+registerAgentThemeRestoration(restoreThemeEditor)

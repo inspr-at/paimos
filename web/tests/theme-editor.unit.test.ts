@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, nextTick, reactive, type EffectScope } from 'vue'
+import { effectScope, nextTick, reactive } from 'vue'
 import type { ActiveTheme, ThemeRecord, ThemesPage } from '../src/lib/themes'
 const mocks = vi.hoisted(() => ({ session: { identity: null as unknown }, permissions: new Set<string>() }))
 vi.mock('../src/stores/session', () => ({ useSession: () => mocks.session }))
@@ -28,6 +28,8 @@ const LATER = record('later', 'Later', 'workspace', 1)
 const chosen = (theme: ThemeRecord, revision = 12): ActiveTheme => ({ theme, default_theme_id: 'default', selected_theme_id: theme.id === 'default' ? null : theme.id, revision, fallback_notice: null })
 const MEMBER: Rights = { selfWrite: true, manage: false }, MANAGER: Rights = { selfWrite: true, manage: true }, READER: Rights = { selfWrite: false, manage: false }
 const ME = 'tenant/person'
+// The detached shared editor observes this one session, just as in the app.
+mocks.session = reactive({ identity: null })
 const conflictOn = (key: string, operation: Recovery['operation'] = 'delete'): Recovery => ({ key, operation, feedback: `${key} changed elsewhere` })
 const named = (theme: ThemeRecord, name: string) => ({ ...theme, name })
 const recoloured = (theme: ThemeRecord, light = '#3a5fc4') => ({ ...theme, values: { ...theme.values, primary: { light, dark: null } } })
@@ -107,6 +109,8 @@ const EVENTS: Record<string, { event: ThemeEvent; accept: Partial<Record<StateNa
   'identity changes': { event: { type: 'identity', identity: 'tenant/someone' }, accept: each(ALL, resets('tenant/someone')) },
   'sign out': { event: { type: 'identity', identity: '' }, accept: each(except('signedOut'), resets('')) },
   'same identity': { event: { type: 'identity', identity: ME }, accept: { signedOut: resets(ME) } },
+  'session restoration': { event: { type: 'restore', identity: ME }, accept: each([...IDLE_CLEAN, 'loading', 'reloading'], starts('load')) },
+  'restoration for another identity': { event: { type: 'restore', identity: 'tenant/elsewhere' }, accept: {} },
   'permission lost': { event: { type: 'rights', rights: READER }, accept: each(ALL, (after, before) => {
     expect(after.rights).toEqual(READER)
     expect(after.renaming).toBeNull(); expect(after.confirming).toBeNull()
@@ -266,17 +270,15 @@ describe('theme editor state model', () => {
 
 // ---- The Vue runner: real promises, identity and permission wiring ----------
 
-let scope: EffectScope | undefined
-afterEach(() => { scope?.stop(); scope = undefined })
+afterEach(() => { mocks.session.identity = null })
 async function editor(options: { manage?: boolean } = {}) {
   vi.resetAllMocks()
   mocks.permissions = new Set(['profile.write', ...(options.manage ? ['settings.manage'] : [])])
-  mocks.session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } })
-  resetAgentTheme(ME)
   vi.mocked(api.listThemes).mockResolvedValue({ items: [DEFAULT, CONTRAST, COPPER, OTHER], next_cursor: 'next' })
   vi.mocked(api.getActiveTheme).mockResolvedValue(chosen(COPPER))
-  scope = effectScope()
-  const created = scope.run(createThemeEditor)!
+  mocks.session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }
+  resetAgentTheme(ME)
+  const created = useThemeEditor()
   await created.idle()
   return created
 }
@@ -430,12 +432,19 @@ const LIFECYCLES: Record<string, { between: Lifecycle; fails?: boolean }> = {
     expect(theme.state.value.pending).toBe(before)
     return 'committed'
   } },
-  'after the session first restores an older appearance': { between: () => {
-    // The session's own /me/theme read starts first and answers only after the commit.
-    const late = deferred<Response>()
-    vi.stubGlobal('fetch', vi.fn(() => late.promise))
+  'when the session restores during a pending operation': { between: theme => {
+    const before = theme.state.value.pending
+    const reads = vi.mocked(api.getActiveTheme).mock.calls.length
     const restoring = restoreAgentTheme(ME)
-    afterCommit = async () => { late.resolve(new Response(JSON.stringify(chosen(R_COPPER)))); await restoring }
+    // The same model cannot start an independent read over a pending write.
+    if (before?.op.kind === 'load') {
+      expect(theme.state.value.pending).toEqual({ token: before.token + 1, op: { kind: 'load' } })
+      expect(api.getActiveTheme).toHaveBeenCalledTimes(reads + 1)
+    } else {
+      expect(theme.state.value.pending).toBe(before)
+      expect(api.getActiveTheme).toHaveBeenCalledTimes(reads)
+    }
+    afterCommit = async () => { await restoring }
     return 'committed'
   } },
   'after signing out': { between: () => { mocks.session.identity = null; resetAgentTheme(); return { runtime: null, shows: null } } },
@@ -476,7 +485,7 @@ describe('runtime appearance follows every confirmed theme', () => {
     // Runtime and the editor never disagree about the confirmed theme.
     if (theme.active.value) expect(agentTheme.value).toEqual(theme.active.value.theme.values.agents)
     if (afterCommit) {
-      // The older read answers last and must not undo the confirmed theme.
+      // Restoration cannot undo the operation's confirmed theme.
       await afterCommit(); afterCommit = null
       expect(agentTheme.value?.avatar).toBe(mutation.committed)
     }
@@ -494,10 +503,10 @@ describe('runtime appearance follows every confirmed theme', () => {
   it('a settings card unmounting never stops the shared editor', async () => {
     vi.resetAllMocks()
     mocks.permissions = new Set(['profile.write'])
-    mocks.session = reactive({ identity: signIn('person') })
     resetAgentTheme(ME)
     vi.mocked(api.listThemes).mockResolvedValue({ items: [R_DEFAULT, R_COPPER, R_OTHER], next_cursor: null })
     vi.mocked(api.getActiveTheme).mockResolvedValue(chosen(R_COPPER))
+    mocks.session.identity = signIn('person')
     const card = effectScope()
     const theme = card.run(useThemeEditor)!
     await theme.idle()
