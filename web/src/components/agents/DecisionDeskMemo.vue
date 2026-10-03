@@ -134,6 +134,9 @@ function openPager() { if (busy.value) return; pager.value = !pager.value; jumpI
 function pickJump(at: number) { if (busy.value) return; index.value = at; pager.value = false; announcement.value = `Memo ${at + 1} of ${props.round.length}. ${props.items.find(item => item.id === props.round[at])?.title ?? 'Unavailable item'}`; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
 function close() { if (viewing.value) return; dialog.value?.close(); emit('close') }
 function keys(event: KeyboardEvent) {
+  // Reading full context must keep native scrolling, including Shift+Space.
+  if (event.target instanceof Element && event.target.closest('.answer-slot') &&
+    ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) return
   if (viewing.value || event.isComposing || event.defaultPrevented || (event.repeat && event.key === 'Enter')) return
   const field = fieldTarget(event.target)
   if (event.key === 'Enter' && submitModifier(event, mac)) { event.preventDefault(); void submit(); return }

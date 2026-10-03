@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Locator } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expectStableControls } from './helpers/stable'
@@ -17,6 +17,20 @@ async function shot(page: Page, name: string) {
   const dir = join(process.cwd(), 'test-results/aeon-629-decision-text')
   await mkdir(dir, { recursive: true })
   await page.screenshot({ path: join(dir, `${name}.png`) })
+}
+const scrollKeys = ['Home', 'ArrowDown', 'PageDown', 'Space', 'End', 'ArrowUp', 'PageUp', 'Shift+Space', 'Home', 'ArrowLeft', 'ArrowRight']
+async function nativeScrollKey(area: Locator, key: string) {
+  await area.focus()
+  await area.evaluate(element => {
+    element.removeAttribute('data-scroll-key-prevented')
+    document.addEventListener('keydown', event => {
+      element.setAttribute('data-scroll-key-prevented', String(event.defaultPrevented))
+    }, { once: true })
+  })
+  await area.press(key)
+  await expect(area, `${key} retains native scrolling`).toHaveAttribute('data-scroll-key-prevented', 'false')
+  if (key === 'Home') await expect.poll(() => area.evaluate(el => el.scrollTop)).toBe(0)
+  if (key === 'ArrowDown' || key === 'End') await expect.poll(() => area.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
 }
 async function textFits(page: Page, selector: string) {
   await expect.poll(() => page.locator(selector).evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
@@ -52,13 +66,19 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       },
       scrollAreas: { body: page.getByTestId('desk-body'), summary },
       interactions: [
+        ...scrollKeys.map(key => ({ name: `read selected details with ${key}`, run: async () => {
+          await nativeScrollKey(summary, key)
+          await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'true')
+          await expect(summary).toContainText(description + tail)
+          expect(world.calls).toHaveLength(0)
+        } })),
         { name: 'read the full selected option', run: async () => { await summary.focus(); await summary.press('End'); await expect.poll(() => summary.evaluate(el => el.scrollTop)).toBeGreaterThan(0) } },
         { name: 'select the second option', run: async () => { await page.getByTestId('choice-1').click(); await expect(summary).toContainText('Use a full index'); await expect(summary).not.toContainText(choiceTitle) } },
         { name: 'select and write a custom answer', run: async () => { await page.getByTestId('choice-2').click(); const field = page.getByRole('textbox', { name: 'Something else' }); await field.fill('Ein mandantenbezogener Schreibzugriff.'); await field.press('Escape'); await expect(summary).toContainText('Ein mandantenbezogener Schreibzugriff.') } },
         { name: 'select the first option again', run: async () => { await page.getByTestId('choice-0').click(); await expect(summary).toContainText(description + tail) } },
         { name: 'skip to a short title', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-full-title')).toHaveCount(0); await expect(heading).not.toHaveAttribute('data-tip') } },
         { name: 'return to the long title', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('1 of'); await expect(page.getByTestId('desk-full-title')).toContainText(title) } },
-        { name: 'decide and advance with focus retained', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
+        { name: 'decide and advance with focus retained', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); expect(world.calls[0]!.body.option_id).toBe(world.questions[0]!.input.options[0]!.id); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
       ],
     })
   })
@@ -108,16 +128,28 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     const work = fixtures(); work.preferences.theme = { choice: theme }
     work.nodes.find(n => n.id === 'n-1')!.body = '# Sicherheitsprüfung\n\n' + description + '\n\n' + tail
     work.nodes.find(n => n.id === 'n-2')!.body = 'Kurze Beschreibung.'
-    await mockWork(page, work); await mockJourney(page, journeyWorld('plan'))
+    await mockWork(page, work); const journey = journeyWorld('plan'), calls = await mockJourney(page, journey)
     await page.goto('/p/PHAROS?view=journey&walk=PHAROS-11')
     const walker = page.getByRole('dialog', { name: 'Release walker', exact: true })
     await expect(walker).toBeVisible()
     if (width < 901) await walker.press('i')
     const toggle = walker.locator('.description-toggle'), text = walker.locator('.description')
     await expect(toggle).toHaveText('Show full description')
+    const screens = walker.getByRole('group', { name: 'Screens' })
+    const firstScreen = screens.getByRole('button', { name: 'Before: card grid', exact: true })
+    await expect(firstScreen).toHaveAttribute('aria-pressed', 'true')
+    await expect(walker.locator('img.shot')).toHaveAttribute('alt', 'Before: card grid')
     await expect(text).not.toHaveAttribute('data-tip')
-    await expectStableControls({ controls: { reveal: toggle }, scrollAreas: { description: text }, interactions: [
+    await expectStableControls({ controls: { reveal: toggle, screens }, scrollAreas: { description: text }, interactions: [
       { name: 'show full description', run: async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-expanded', 'true'); await expect(text).toHaveCSS('mask-image', 'none'); await text.focus(); await text.press('End'); await expect.poll(() => text.evaluate(el => el.scrollTop)).toBeGreaterThan(0); await expect(text).toContainText(tail) } },
+      ...scrollKeys.map(key => ({ name: `read release description with ${key}`, run: async () => {
+        await nativeScrollKey(text, key)
+        await expect(firstScreen).toHaveAttribute('aria-pressed', 'true')
+        await expect(walker.locator('img.shot')).toHaveAttribute('alt', 'Before: card grid')
+        expect(journey.walkers['r-2']!.tickets.find(ticket => ticket.ticket_node_id === 'n-1')!.included).toBe(true)
+        expect(calls.filter(call => call.method !== 'GET' && call.path.endsWith('/plan'))).toHaveLength(0)
+        await expect(page).toHaveURL(/walk=PHAROS-11/)
+      } })),
     ] })
     await shot(page, `walker-${width}-${theme}`)
     await walker.press('ArrowRight')

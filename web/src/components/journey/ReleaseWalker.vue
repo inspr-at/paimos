@@ -118,6 +118,9 @@ function slide(event: PointerEvent) {
 
 // ---------- Keys ----------
 function keydown(event: KeyboardEvent) {
+  // Reading full context must keep native scrolling, including Shift+Space.
+  if (event.target instanceof Element && event.target.closest('.description.revealed') &&
+    ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) return
   const target = event.target as HTMLElement
   if (event.key === 'Escape') {
     event.preventDefault()
