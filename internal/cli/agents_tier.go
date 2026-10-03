@@ -26,7 +26,7 @@ func (rt *runtime) cmdAgentsTier() *Command {
 	for _, action := range []string{"show", "set", "ask", "approve", "decline"} {
 		tier.subs = append(tier.subs, rt.agentTierAction(action))
 	}
-	return &Command{Name: "agents", Short: "Agent session settings", Use: "agents <command>", subs: []*Command{tier}}
+	return tier
 }
 func (rt *runtime) agentTierAction(action string) *Command {
 	var project, session, tier, reason, request, decisionRequest string

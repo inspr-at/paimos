@@ -42,14 +42,19 @@ func scanTierRequest(row pgx.Row) (TierRequest, error) {
 }
 
 type TierState struct {
-	SessionID      string               `json:"session_id"`
-	Revision       int64                `json:"revision"`
-	Active         *string              `json:"active_tier"`
-	Pending        *Control             `json:"pending"`
-	ReadOnly       bool                 `json:"read_only"`
-	ReadOnlyReason string               `json:"read_only_reason,omitempty"`
-	Reports        []servicetier.Report `json:"reports"`
-	Requests       []TierRequest        `json:"requests"`
+	History          []TierHistory        `json:"history"`
+	HistoryTruncated bool                 `json:"history_truncated"`
+	RunCost          *TierRunCost         `json:"run_cost"`
+	Estimates        []TierEstimate       `json:"estimates"`
+	SessionID        string               `json:"session_id"`
+	Revision         int64                `json:"revision"`
+	Active           *string              `json:"active_tier"`
+	Pending          *Control             `json:"pending"`
+	LastChange       *Control             `json:"last_change"`
+	ReadOnly         bool                 `json:"read_only"`
+	ReadOnlyReason   string               `json:"read_only_reason,omitempty"`
+	Reports          []servicetier.Report `json:"reports"`
+	Requests         []TierRequest        `json:"requests"`
 }
 
 func sessionTierReport(s Session, model string) servicetier.Report {
@@ -116,6 +121,12 @@ func (m *Module) tierState(r *http.Request, tx pgx.Tx, p tenant.Principal, s Ses
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
+	last, err := scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state='completed' ORDER BY sequence DESC LIMIT 1`, s.ID))
+	if err == nil {
+		out.LastChange = &last
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
 	rows, err := tx.Query(r.Context(), `SELECT `+tierRequestColumns+` FROM harness_tier_requests WHERE session_id=$1 ORDER BY created_at DESC,id DESC LIMIT 50`, s.ID)
 	if err != nil {
 		return out, err
@@ -128,7 +139,12 @@ func (m *Module) tierState(r *http.Request, tx pgx.Tx, p tenant.Principal, s Ses
 		}
 		out.Requests = append(out.Requests, q)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
+	err = m.tierEvidence(r, tx, s, &out)
+	return out, err
 }
 func (m *Module) getTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
@@ -193,6 +209,7 @@ func (m *Module) reportTiers(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 }
 
 type tierChange struct {
+	UndoOf    string                `json:"undo_of_control_id,omitempty"`
 	RequestID string                `json:"request_id"`
 	Tier      string                `json:"tier"`
 	Revision  *int64                `json:"expected_revision"`
@@ -213,13 +230,18 @@ func (m *Module) setTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	return m.changeTier(r, tx, p, in, "")
 }
-func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in tierChange, requestID string) (any, error) {
+func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in tierChange, requestID string) (result any, err error) {
+	r, finish := deferControlEvents(r, tx)
+	defer finish(&err)
 	if !workorders.UUID(in.RequestID) || !servicetier.Valid(in.Tier) || in.Revision == nil || *in.Revision < 0 {
 		return nil, workorders.Fail(400, "request id, tier and expected revision required")
 	}
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
 		return nil, err
+	}
+	if in.UndoOf != "" && !workorders.UUID(in.UndoOf) {
+		return nil, workorders.Fail(400, "invalid undo control")
 	}
 	// Idempotent replay is bound to the actor and the entire original change.
 	raw, _ := json.Marshal(in)
@@ -234,6 +256,18 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
+	}
+	if in.UndoOf != "" {
+		var valid bool
+		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls c JOIN harness_tier_history h ON h.tenant_id=c.tenant_id AND h.control_id=c.id
+   WHERE c.session_id=$1 AND c.id=$2 AND h.action IN ('switch_requested','approved') AND h.from_tier=$3
+   AND ((c.state='pending' AND $3=service_tier) OR (c.state='completed' AND c.outcome='applied' AND c.value=service_tier))
+   AND c.sequence=(SELECT max(sequence) FROM harness_controls WHERE session_id=$1 AND kind='tier')) FROM harness_sessions WHERE id=$1`, s.ID, in.UndoOf, in.Tier).Scan(&valid); err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, workorders.Fail(409, "tier control is no longer undoable")
+		}
 	}
 	if reason := tierReadOnly(s); reason != "" {
 		return nil, workorders.Fail(409, reason)
@@ -271,6 +305,18 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 		if err = persistTierReceipt(r.Context(), tx, p, s, in, dg, "tier_cancelled_pending"); err != nil {
 			return nil, err
 		}
+		var asked *string
+		err = tx.QueryRow(r.Context(), `SELECT request_id::text FROM harness_tier_history WHERE session_id=$1 AND control_id=$2 AND action IN ('approved','switch_requested') ORDER BY id DESC LIMIT 1`, s.ID, c.ID).Scan(&asked)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		originalRequest := ""
+		if asked != nil {
+			originalRequest = *asked
+		}
+		if err = appendTierHistory(r.Context(), tx, p, s, "cancelled", c.Value, originalRequest, in.RequestID, c.ID); err != nil {
+			return nil, err
+		}
 		if err = record(r.Context(), tx, p, s, "tier_cancelled", c, map[string]any{"control_id": c.ID}); err != nil {
 			return nil, err
 		}
@@ -295,7 +341,25 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 			return nil, err
 		}
 		// Stepping to exactly what the agent asked for is approval, too.
-		if _, err = tx.Exec(r.Context(), `UPDATE harness_tier_requests SET state='approved',decided_at=clock_timestamp(),decided_by_principal_id=$3,control_id=$4 WHERE session_id=$1 AND state='pending' AND tier=$2 AND ($5='' OR id=nullif($5,'')::uuid)`, s.ID, in.Tier, p.ID, c.ID, requestID); err != nil {
+		var approved string
+		err = tx.QueryRow(r.Context(), `UPDATE harness_tier_requests SET state='approved',decided_at=clock_timestamp(),decided_by_principal_id=$3,control_id=$4 WHERE session_id=$1 AND state='pending' AND tier=$2 AND ($5='' OR id=nullif($5,'')::uuid) RETURNING id::text`, s.ID, in.Tier, p.ID, c.ID, requestID).Scan(&approved)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		action := "switch_requested"
+		if approved != "" {
+			action = "approved"
+		}
+		if in.UndoOf != "" {
+			// An Undo can also approve a fresh agent request. Preserve both facts.
+			if approved != "" {
+				if err = appendTierHistory(r.Context(), tx, p, s, "approved", in.Tier, approved, c.ID, in.UndoOf); err != nil {
+					return nil, err
+				}
+			}
+			action = "undo_requested"
+		}
+		if err = appendTierHistory(r.Context(), tx, p, s, action, in.Tier, approved, c.ID, in.UndoOf); err != nil {
 			return nil, err
 		}
 	}
@@ -365,6 +429,9 @@ func (m *Module) askTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
+	if err = appendTierHistory(r.Context(), tx, p, s, "requested", in.Tier, q.ID, "", ""); err != nil {
+		return nil, err
+	}
 	return q, record(r.Context(), tx, p, s, "tier_requested", nil, q)
 }
 func (m *Module) decideTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -406,6 +473,9 @@ func (m *Module) decideTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 		return m.changeTier(r, tx, p, in, id)
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE harness_tier_requests SET state='declined',decided_at=clock_timestamp(),decided_by_principal_id=$2 WHERE id=$1`, id, p.ID); err != nil {
+		return nil, err
+	}
+	if err = appendTierHistory(r.Context(), tx, p, s, "declined", q.Tier, q.ID, "", ""); err != nil {
 		return nil, err
 	}
 	if err = record(r.Context(), tx, p, s, "tier_declined", q, map[string]any{"request_id": id, "state": "declined"}); err != nil {

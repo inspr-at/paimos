@@ -228,6 +228,10 @@ jobs:
         run: npm run test:unit
       - working-directory: web
         run: npx playwright install --with-deps chromium
+      # AEON-478: measure allowance and briefing regressions once Chromium is installed.
+      - name: Usage dashboard and morning briefing regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1
       - name: Capture the round-6 release list for comparison
         id: release-list-before
         working-directory: web
@@ -258,8 +262,16 @@ jobs:
       - name: Browser runner safety (no browsers)
         working-directory: web
         run: npm run test:browser-safety
+      - name: Service tier controls and layout stability
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1
       - working-directory: web
         run: npm run build
+      - name: Install shells for generated account command unit checks
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Web unit checks
+        working-directory: web
+        run: npm run test:unit
       - name: Access scope and role helper tests
         working-directory: web
         run: node --experimental-strip-types --test tests/access.test.ts tests/agent-login.test.ts
@@ -330,6 +342,18 @@ jobs:
           tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
           tests/accounts-computers.spec.ts tests/agents-top.spec.ts
           tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
+      - name: Decision Desk keyboard, protected adapters and geometry (AEON-567)
+        working-directory: web
+        env:
+          AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
+        run: npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure
+      - name: Upload Decision Desk captures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aeon-567-desk-shots
+          path: ${{ runner.temp }}/aeon-desk-shots
+          if-no-files-found: ignore
       - name: Session linking, approval and security regressions
         working-directory: web
         env:
@@ -346,10 +370,6 @@ jobs:
       - name: Scope proposals and key management regressions
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
-
-      - name: Morning briefing regressions
-        working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
 
   # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
   footer-ui:
@@ -544,9 +564,9 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
-      - name: Test workspace model provider controls
+      - name: Test workspace model provider and catalog refresh controls
         working-directory: web
-        run: npm test -- tests/model-provider.spec.ts --workers=1
+        run: npm test -- tests/model-provider.spec.ts tests/model-refresh.spec.ts --workers=1
 
   status-autopilot-ui:
     runs-on: ubuntu-latest

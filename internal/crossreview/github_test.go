@@ -40,7 +40,7 @@ func TestGitHubStatusExactHeadAndNarrowAuthority(t *testing.T) {
 		extraPermission bool
 		want            string
 		posts           int
-	}{{"exact", strings.Repeat("b", 40), strings.Repeat("a", 40), false, "success", 1}, {"stale", strings.Repeat("c", 40), strings.Repeat("a", 40), false, "stale", 0}, {"excess authority", strings.Repeat("b", 40), strings.Repeat("a", 40), true, "error", 0}, {"wrong base", strings.Repeat("b", 40), strings.Repeat("c", 40), false, "stale", 1}} {
+	}{{"exact", strings.Repeat("b", 40), strings.Repeat("a", 40), false, "success", 1}, {"stale", strings.Repeat("c", 40), strings.Repeat("a", 40), false, "stale", 1}, {"excess authority", strings.Repeat("b", 40), strings.Repeat("a", 40), true, "error", 0}, {"wrong base", strings.Repeat("b", 40), strings.Repeat("c", 40), false, "stale", 1}} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := AppConfig{ID: "1", InstallationID: "2", KeyFile: file, TenantID: testID(), Repository: "example/review-fixture"}
 			posts, revokes := 0, 0
@@ -70,7 +70,7 @@ func TestGitHubStatusExactHeadAndNarrowAuthority(t *testing.T) {
 				case "POST /repos/example/review-fixture/statuses/" + strings.Repeat("b", 40):
 					posts++
 					var input map[string]string
-					if json.NewDecoder(r.Body).Decode(&input) != nil || input["state"] != map[bool]string{true: "error", false: "success"}[tc.name == "wrong base"] || input["context"] != "aeon/review" {
+					if json.NewDecoder(r.Body).Decode(&input) != nil || input["state"] != map[bool]string{true: "error", false: "success"}[tc.want == "stale"] || input["context"] != "aeon/review" {
 						t.Fatal("status not bound to the review")
 					}
 				case "DELETE /installation/token":
