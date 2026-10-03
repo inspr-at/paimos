@@ -347,6 +347,9 @@ Keyboard resets return focus to the row’s model chip; removing a kind returns
 focus to Everything else. Adding a kind retains focus during save and returns
 focus to Add a kind of work afterward.
 
+Model-cell hovers retain the planned and measured details and show the
+**Why this model?** action. These buttons do not add sequential tab stops to the list.
+
 The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
 `/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
 Use a level's returned `revision` for edits and the DELETE `revision` query
