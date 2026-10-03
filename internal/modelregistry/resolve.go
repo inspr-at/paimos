@@ -41,7 +41,8 @@ type resolveQuery struct {
 type ladderStep struct {
 	Retired bool
 	Route
-	Profile Profile
+	Profile         Profile
+	SuppressedUntil *time.Time
 }
 
 func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) (Resolution, error) {
@@ -98,10 +99,12 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 		SELECT r.priority, r.profile_id::text, r.state, r.reason, r.valid_until,
 		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at,
 		       d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider,
+		       o.suppressed_until,
 		       EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id)
-		FROM model_role_routes r
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) r
 		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
 		JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
 		WHERE r.role = $1
 		ORDER BY r.priority, r.profile_id`, role)
 	if err != nil {
@@ -116,7 +119,7 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 			&step.Profile.ID, &step.Profile.Slug, &step.Profile.Version, &step.Profile.Harness,
 			&step.Profile.Family, &step.Profile.Model, &step.Profile.Effort, &step.Profile.Tier,
 			&step.Profile.Enabled, &step.Profile.CreatedAt, &step.Profile.DisplayName, &step.Profile.ShortName, &step.Profile.ModelVersion, &step.Profile.EffortLevel, &step.Profile.Provider,
-			&step.Retired,
+			&step.SuppressedUntil, &step.Retired,
 		); err != nil {
 			return nil, err
 		}
@@ -153,6 +156,15 @@ func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, h
 	}
 	if q.Harness != "" && step.Profile.Harness != q.Harness {
 		reasons = append(reasons, "harness filter")
+	}
+	if KnownInvalid(step.Profile.Model) {
+		reasons = append(reasons, "known invalid model")
+	}
+	if step.SuppressedUntil != nil && now.Before(*step.SuppressedUntil) {
+		reasons = append(reasons, "model invalid until "+step.SuppressedUntil.UTC().Format(time.RFC3339))
+	}
+	if role.name == "review-gate-security" && step.Profile.Family == "anthropic" {
+		reasons = append(reasons, "security review policy")
 	}
 	if step.Retired {
 		reasons = append(reasons, "retired")

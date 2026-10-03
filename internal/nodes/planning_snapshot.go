@@ -9,11 +9,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/jackc/pgx/v5"
 )
 
 type estimateRateBasis struct {
 	planningCalibration
+	Speed              float64 `json:"speed,omitempty"`
 	TokensPerHourExact string  `json:"tokens_per_hour_exact"`
 	ListPerHour        *string `json:"list_per_hour,omitempty"`
 	PriceVersion       *int64  `json:"price_version,omitempty"`
@@ -26,15 +28,16 @@ type estimateRateBasis struct {
 }
 
 type planningSnapshot struct {
-	CostProject string            `json:"-"`
-	ID          string            `json:"id"`
-	StartedAt   time.Time         `json:"started_at"`
-	Source      string            `json:"source"`
-	Hours       *float64          `json:"estimate_hours"`
-	Tokens      *int64            `json:"estimated_tokens"`
-	Cost        *string           `json:"estimated_cost_usd,omitempty"`
-	Route       *planningRoute    `json:"route"`
-	RateBasis   estimateRateBasis `json:"rate_basis"`
+	ModelEstimate *usagedashboard.ModelEstimateHistory `json:"model_estimate,omitempty"`
+	CostProject   string                               `json:"-"`
+	ID            string                               `json:"id"`
+	StartedAt     time.Time                            `json:"started_at"`
+	Source        string                               `json:"source"`
+	Hours         *float64                             `json:"estimate_hours"`
+	Tokens        *int64                               `json:"estimated_tokens"`
+	Cost          *string                              `json:"estimated_cost_usd,omitempty"`
+	Route         *planningRoute                       `json:"route"`
+	RateBasis     estimateRateBasis                    `json:"rate_basis"`
 }
 
 // CapturePlanningStart serializes starts on the node, including competing
@@ -58,7 +61,7 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_estimate_snapshots WHERE ticket_node_id=$1::uuid AND closed_at IS NULL)`, id).Scan(&exists); err != nil || exists {
 		return err
 	}
-	rows, err := loadPlanRows(ctx, tx, []string{id})
+	rows, err := loadPlanRows(ctx, tx, []string{id}, nil)
 	if err != nil || len(rows) == 0 {
 		return err
 	}
@@ -72,11 +75,14 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 		return err
 	}
 	pl := &planner{routes: routes, samples: samples, billing: map[string]planBilling{}, calibrations: map[routeKey]calibration{}}
+	if err := pl.loadLearning(ctx, tx, func(p string) bool { return p == project }, project); err != nil {
+		return err
+	}
 	row := rows[0]
 	route := pl.route(row)
 	cal := pl.calibration(route)
-	snap := planningSnapshot{Source: source, Hours: row.hours, Tokens: pl.estimate(row).tokens,
-		RateBasis: estimateRateBasis{planningCalibration: planningCalibration{Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, TokensPerHourExact: strconv.FormatFloat(cal.tokensPerHour, 'f', -1, 64), CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
+	snap := planningSnapshot{ModelEstimate: pl.modelEstimate(row), Source: source, Hours: row.hours, Tokens: pl.estimate(row).tokens,
+		RateBasis: estimateRateBasis{Speed: cal.speed, planningCalibration: planningCalibration{BasisText: cal.basisText, Level: cal.level, Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, TokensPerHourExact: strconv.FormatFloat(cal.tokensPerHour, 'f', -1, 64), CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
 	if route != nil {
 		snap.Route = route.view
 		if price := route.price; price != nil {
@@ -85,7 +91,7 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 		}
 	}
 	if cal.listPerHour != nil {
-		rate := strconv.FormatFloat(*cal.listPerHour, 'f', -1, 64)
+		rate := strconv.FormatFloat(*cal.listPerHour*cal.speed, 'f', -1, 64)
 		snap.RateBasis.ListPerHour = &rate
 		if row.hours != nil {
 			// Match the live planning numeric multiplication and micro-dollar rounding.

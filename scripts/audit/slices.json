@@ -95,6 +95,7 @@
         "internal/modelprovider/**",
         "internal/openrouter/**",
         "internal/modelregistry/**",
+        "internal/modelreport/**",
         "internal/modelprefs/**",
         "internal/crossreview/**",
         "internal/reviewgate/**",

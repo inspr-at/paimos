@@ -103,6 +103,7 @@ func TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI(t *testing.T) {
 	}
 	a := NewCodexAdapter(fakeVendorPath(t, "codex_capacity"), map[string]string{"key": home})
 	a.SetExpectedEmails(map[string]string{"key": "agent@example.test"})
+	qualifyCodexFixture(t, a)
 	got := a.CaptureCapacity(t.Context(), "key")
 	if len(got) != 1 || got[0].Source != "agentd" || got[0].UsedPercent != 31 || got[0].WindowKind != "weekly" {
 		t.Fatal(got)

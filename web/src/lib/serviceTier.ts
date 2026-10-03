@@ -24,10 +24,11 @@ export interface TierRequest {
 }
 export interface TierState {
   session_id: string; revision: number; active_tier: ServiceTier | null; pending: TierControl | null
+  history?: TierHistory[]; history_truncated?: boolean; run_cost?: TierRunCost | null; estimates?: TierEstimate[]
   last_change?: TierControl | null
   read_only: boolean; read_only_reason?: string; reports: readonly TierReport[]; requests: TierRequest[]
 }
-export interface TierChange { request_id: string; tier: ServiceTier; expected_revision: number; expected_ownership: ProcessOwnership }
+export interface TierChange { undo_of_control_id?: string; request_id: string; tier: ServiceTier; expected_revision: number; expected_ownership: ProcessOwnership }
 // The cancelled daemon control and the successful Undo receipt have different
 // outcomes. Neither is a vendor rejection.
 export const tierCancelled = (control?: TierControl | null) => control?.state === 'completed' && (
@@ -68,4 +69,37 @@ export function undoTierAllowed(current: TierState, receipt: { session: string; 
   if (current.session_id !== receipt.session || current.read_only) return false
   if (current.pending) return current.revision === receipt.revision && current.pending.id === receipt.control && current.pending.state === 'pending' && current.pending.value === receipt.to && current.active_tier === receipt.from
   return current.revision === receipt.revision + 1 && current.active_tier === receipt.to
+}
+
+export interface TierHistory {
+  reason?: string; id: number; action: 'requested' | 'switch_requested' | 'approved' | 'declined' | 'changed' | 'cancelled' | 'undo_requested' | 'undone' | 'rejected'
+  from_tier: ServiceTier | null; to_tier: ServiceTier; actor_id: string; actor_name: string; asked_by_name: string | null; at: string
+}
+export interface TierRunCost {
+  model: string; run_id: string; cost_usd: string; default_cost_usd: string; provisional: boolean
+  segments: { tier: ServiceTier; price_multiplier: number }[]
+}
+export interface TierEstimate { actual?: boolean; tier: ServiceTier; n: number; basis: string; run_id: string | null; cost_usd: string | null; duration_ms: number | null }
+const dollars = (value: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value))
+// The multiplier is arithmetic text in the approved fragment, not an icon.
+export const tierRunCostLabel = (cost?: TierRunCost | null) => !cost ? 'Tier cost unavailable' : `${cost.segments.map(s => `${TIER_NAME[s.tier]} ×${s.price_multiplier}`).join(' + ')} · ${dollars(cost.default_cost_usd)} at Default`
+export const tierCostAmount = (cost: TierRunCost) => dollars(cost.cost_usd)
+// Missing evidence is an unread/failed read, never a measured zero-run sample.
+export const tierEstimate = (state: TierState | undefined, tier: ServiceTier): TierEstimate | undefined => state?.estimates?.find(e => e.tier === tier)
+export const estimateCostText = (e?: TierEstimate) => !e ? '—' : e.n > 0 && e.cost_usd !== null ? `${e.actual ? '' : '≈ '}${dollars(e.cost_usd)}` : 'no estimate yet'
+export const estimateTimeText = (e?: TierEstimate) => !e ? '—' : e.n > 0 && e.duration_ms !== null ? `${e.actual ? '' : '≈ '}${Math.round(e.duration_ms / 6000) / 10} min` : 'time: no estimate yet'
+export function tierHistoryText(h: TierHistory): string {
+  const from = h.from_tier ? TIER_NAME[h.from_tier] : 'unreported tier', to = TIER_NAME[h.to_tier]
+  const actor = ` · by ${h.actor_name}`, asked = h.asked_by_name ? `, asked by ${h.asked_by_name}` : ''
+  switch (h.action) {
+    case 'requested': return `Asked for ${to} from ${from}${actor}`
+    case 'switch_requested': return `Switch requested: ${from} to ${to}${actor}`
+    case 'approved': return `Approved ${from} to ${to}${actor}${asked} · waiting for confirmation`
+    case 'declined': return `Declined ${to} for ${h.asked_by_name || 'the agent'} · kept ${from}${actor}`
+    case 'cancelled': return `Undo: cancelled switch from ${from} to ${to}${actor} · kept ${from}`
+    case 'undo_requested': return `Undo requested: ${from} to ${to}${actor}`
+    case 'undone': return `Tier ${from} to ${to}${actor} (undo)`
+    case 'rejected': return h.reason === 'outcome_unconfirmed' ? `Tier ${from} to ${to}${actor} · outcome unconfirmed` : `Rejected switch from ${from} to ${to}${actor}`
+    case 'changed': return `Tier ${from} to ${to}${actor}${asked}`
+  }
 }

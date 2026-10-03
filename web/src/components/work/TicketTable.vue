@@ -688,7 +688,7 @@ defineExpose({
                 <span v-if="entry.tree" class="tree" :style="{ width: `${(entry.tree.depth + 1) * INDENT}px` }">
                   <span v-for="i in entry.tree.depth" :key="i" class="guide" :class="guideClass(i - 1, entry.tree.depth, entry.tree.guides, entry.tree.last)" :style="{ left: `${(i - 1) * INDENT}px` }" />
                   <button
-                    v-if="entry.tree.hasChildren" type="button" class="twisty" :style="{ left: `${entry.tree.depth * INDENT}px` }" :aria-expanded="entry.tree.expanded"
+                    v-if="entry.tree.hasChildren" type="button" class="twisty" :style="{ '--twisty-left': `${entry.tree.depth * INDENT}px` }" :aria-expanded="entry.tree.expanded"
                     :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" tabindex="-1" @click.stop="emit('toggleRow', entry.row.id)"
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
@@ -830,6 +830,11 @@ defineExpose({
   container: tickets / inline-size;
 }
 .table-card.compact { --row-h: 30px; }
+/* Touch tablets need a full 44px content line plus the row's hairline.
+   Both densities keep hit targets inside their row; fine pointers stay dense. */
+@media (min-width: 721px) and (pointer: coarse) {
+  .table-card, .table-card.compact { --row-h: 45px; }
+}
 .tickets { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13.5px; }
 .tickets:focus-visible { box-shadow: none; }
 /* Keyboard cursor: the app focus ring around the whole row. A shadow on the
@@ -894,7 +899,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .guide.line::before, .guide.elbow::before { content: ''; position: absolute; left: 8.5px; top: 0; bottom: 0; width: 1px; background: var(--line-2); }
 .guide.elbow.last::before { bottom: 50%; }
 .guide.elbow::after { content: ''; position: absolute; left: 8.5px; top: 50%; width: 9px; height: 1px; background: var(--line-2); }
-.twisty { position: absolute; top: 50%; display: grid; place-items: center; width: 18px; height: 22px; margin-top: -11px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
+.twisty { position: absolute; top: 50%; left: var(--twisty-left); display: grid; place-items: center; width: 18px; height: 22px; margin-top: -11px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
 .twisty svg { transition: transform .15s ease; }
 .twisty[aria-expanded="true"] svg { transform: rotate(90deg); }
 @media (hover: hover) { .twisty:hover { color: var(--ink); background: var(--row-selected); } }
@@ -967,6 +972,9 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 /* Row actions float over the end of the title cell instead of reserving space in every
    row; the title fades out beneath them, whatever the row tint underneath. */
 td.c-title { position: relative; overflow: hidden; }
+/* Let the arrow's invisible reach cross the cell edge on touch layouts.
+   The title link and phone title text retain their own clipping. */
+@media (max-width: 720px), (pointer: coarse) { td.c-title { overflow: visible; } }
 .row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
@@ -987,6 +995,15 @@ td.c-title { position: relative; overflow: hidden; }
 .row-actions :deep(.icon-btn) { width: 24px; height: 24px; color: var(--ink-3); }
 .row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
+@media (min-width: 721px) and (pointer: coarse) {
+  /* Keep the compact visuals, but reserve each full 44px reach plus the
+     existing 2px separation. Padding contains the outer edges as well. */
+  .row-actions { gap: 22px; padding: 0 10px; }
+  .compact .row-actions { gap: 24px; padding: 0 11px; }
+  .ticket-row:hover .title-cell,
+  .ticket-row.cursor .title-cell,
+  td.c-title:focus-within .title-cell { padding-right: 98px; }
+}
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
@@ -1109,6 +1126,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
+  /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
+  .table-card.compact .ticket-row { padding-top: 11px; }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
   .table-card.selecting .ticket-row {
@@ -1176,7 +1195,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .guide { display: none; }
   /* The chevron area sits left of the title with a generous tap target. */
   .tree-row .title-cell { position: relative; padding-left: 0; }
-  .twisty { position: static; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
+  /* Centre the shared hit area on the arrow; desktop indentation is already
+     represented by the card's padding, so it must not offset the phone arrow. */
+  .twisty { position: relative; inset: auto; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
   .twisty-spacer { display: block; flex-shrink: 0; width: 26px; }
   .tree-row .tree { display: contents; }
   .tree-row .title-link { flex-basis: calc(100% - 60px); }

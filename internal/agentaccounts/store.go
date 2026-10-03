@@ -288,6 +288,7 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
+	MeasurementOnly   bool                `json:"measurement_only,omitempty"`
 	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
 	DaemonID          string              `json:"daemon_id"`
@@ -354,7 +355,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
 	}
-	if report := in.Readiness; report != nil && uuidRE.MatchString(report.CheckID) &&
+	if report := in.Readiness; !in.MeasurementOnly && report != nil && uuidRE.MatchString(report.CheckID) &&
 		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
 		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
 		before.daemonGeneration != nil && *before.daemonGeneration != generation {
@@ -407,14 +408,29 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		}
 	}
 	if in.Readiness != nil {
+		if in.MeasurementOnly && (before.daemonGeneration == nil || *before.daemonGeneration != generation) {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
 		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
 			return Account{}, fail(409, "readiness daemon generation changed")
 		}
 		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
 			return Account{}, err
 		}
+	} else if !in.MeasurementOnly && in.Available && before.Harness == "pi" && in.OpenRouterCredits != nil {
+		legacy := before
+		legacy.OpenRouterCredits = in.OpenRouterCredits
+		if err := storeLegacyKeyFact(tenant.WithPrincipal(ctx, p), tx, legacy, now); err != nil {
+			return Account{}, err
+		}
 	}
-	if _, err := tx.Exec(ctx, `
+	if in.MeasurementOnly {
+		// This row lock is shared with ordinary health probes. A measurement,
+		// including delayed replay, has no authority to change their result.
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_daemon_generation=$2 WHERE id=$1::uuid`, accountID, generation); err != nil {
+			return Account{}, err
+		}
+	} else if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
 		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
@@ -425,7 +441,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, err
 	}
-	if after.LastProbeAt != nil {
+	if !in.MeasurementOnly && after.LastProbeAt != nil {
 		if err := learnOnline(ctx, tx, after, *after.LastProbeAt); err != nil {
 			return Account{}, err
 		}
