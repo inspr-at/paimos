@@ -95,8 +95,9 @@ const legacyAttentionCap = 5
 // AccountAttention names one enrolled account that still needs a fix while
 // its harness stays ready because another account of that harness can work.
 type AccountAttention struct {
-	AccountID string `json:"account_id"`
-	Reason    string `json:"reason"`
+	AccountID    string `json:"account_id"`
+	Reason       string `json:"reason"`
+	ReasonDetail string `json:"reason_detail,omitempty"`
 }
 
 // AttentionBlock is the validated partial block for one ready harness.
@@ -115,6 +116,7 @@ type AttentionBlock struct {
 type HarnessDetail struct {
 	State              string             `json:"state"`
 	Reason             string             `json:"reason,omitempty"`
+	ReasonDetail       string             `json:"reason_detail,omitempty"`
 	Fix                HarnessFix         `json:"fix,omitzero"`
 	Attention          []AccountAttention `json:"attention_accounts,omitempty"`
 	AttentionCount     int                `json:"attention_count,omitempty"`
@@ -126,17 +128,21 @@ type HarnessDetail struct {
 // A malformed attention list is ignored; it does not drop the rest of the detail.
 func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 	var wire struct {
-		State     string          `json:"state"`
-		Reason    string          `json:"reason"`
-		Fix       json.RawMessage `json:"fix"`
-		Attention json.RawMessage `json:"attention_accounts"`
-		Count     json.RawMessage `json:"attention_count"`
-		Truncated json.RawMessage `json:"attention_truncated"`
+		State        string          `json:"state"`
+		Reason       string          `json:"reason"`
+		ReasonDetail json.RawMessage `json:"reason_detail"`
+		Fix          json.RawMessage `json:"fix"`
+		Attention    json.RawMessage `json:"attention_accounts"`
+		Count        json.RawMessage `json:"attention_count"`
+		Truncated    json.RawMessage `json:"attention_truncated"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
 	}
 	*d = HarnessDetail{State: wire.State, Reason: wire.Reason}
+	if wire.State == "blocked" {
+		d.ReasonDetail = decodeProbeDetail(wire.Reason, wire.ReasonDetail)
+	}
 	if len(wire.Fix) > 0 && wire.Fix[0] == '{' {
 		_ = json.Unmarshal(wire.Fix, &d.Fix)
 	}
@@ -177,11 +183,15 @@ func decodeAttention(raw json.RawMessage) []AccountAttention {
 	}
 	var kept []AccountAttention
 	for _, item := range items {
-		var parsed AccountAttention
+		var parsed struct {
+			AccountID    string          `json:"account_id"`
+			Reason       string          `json:"reason"`
+			ReasonDetail json.RawMessage `json:"reason_detail"`
+		}
 		if json.Unmarshal(item, &parsed) != nil {
 			continue
 		}
-		kept = append(kept, parsed)
+		kept = append(kept, AccountAttention{AccountID: parsed.AccountID, Reason: parsed.Reason, ReasonDetail: decodeProbeDetail(parsed.Reason, parsed.ReasonDetail)})
 	}
 	if len(kept) == 0 {
 		return nil
@@ -296,11 +306,12 @@ func PartialAttention(harness string, enrolledIDs []string, state string, items 
 		if item.Reason == "" || !enrolled[item.AccountID] || seen[item.AccountID] {
 			continue
 		}
-		if _, ok := HarnessReport(harness, "blocked", item.Reason); !ok {
+		detail, ok := HarnessReport(harness, "blocked", item.Reason)
+		if !ok {
 			continue
 		}
 		seen[item.AccountID] = true
-		kept = append(kept, AccountAttention{AccountID: item.AccountID, Reason: item.Reason})
+		kept = append(kept, AccountAttention{AccountID: item.AccountID, Reason: item.Reason, ReasonDetail: detail.WithProbeDetail(harness, item.ReasonDetail).ReasonDetail})
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].AccountID < kept[j].AccountID })
 	if len(kept) == 0 || len(kept) >= len(enrolled) {

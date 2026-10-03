@@ -451,6 +451,7 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 		if agentsetup.KnownHarnessState(detail.State) {
 			statuses[harness] = detail.State
 		}
+		detail = detail.WithProbeDetail(harness, report.ReasonDetail)
 		// Never persist client-supplied commands, paths or diagnostics: the
 		// fix is derived from the harness and reason code. Attention on a
 		// non-ready report is ignored. A ready report keeps only enrolled

@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 type capacityAPI interface {
@@ -303,7 +304,11 @@ func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase s
 // before reading quota. No credential files or auth response are published.
 func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capacity.Reading {
 	return a.captureCapacity(ctx, key, func(home string) (*wireProcess, error) {
-		return launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
+		if err := harnesslaunch.Validate(a.Path, a.Nodes[key].Path); err != nil {
+			return nil, err
+		}
+		environment := harnesslaunch.Environment(capacityEnvironment("CODEX_HOME", home, a.Path), a.Nodes[key].Path)
+		return launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, environment, "jsonrpc", func(AdapterEvent) {})
 	})
 }
 

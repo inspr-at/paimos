@@ -99,11 +99,14 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 					reason = "its sign-in and availability check did not finish within 60 seconds"
 				case "probe_failed":
 					reason = "its availability check failed or could not be confirmed by Aeon"
+					if detail := SafeProbeDetail(d.Reason, d.ReasonDetail); detail != "" {
+						reason = "its sign-in check failed: " + detail
+					}
 				case "capacity_timeout":
 					reason = "capacity capture exceeded its 10-second limit"
 				}
 				action = account + " is blocked: " + reason + "."
-				if fix := RecoveryFix(a.Harness, d.Reason); fix.Command != "" {
+				if fix := d.WithProbeDetail(a.Harness, d.ReasonDetail).Fix; fix.Command != "" {
 					action += " Run `" + fix.Command + "`."
 				}
 			}

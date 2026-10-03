@@ -462,13 +462,24 @@ func (a *ClaudeAdapter) ProbeAccountStatus(ctx context.Context, key string) (Pro
 }
 
 func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStatus {
+	unavailable := func(detail string) ProbeStatus { return ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: detail} }
 	home, err := localHome(a.Homes, key)
 	if err != nil {
-		return probeUnavailable
+		detail := agentsetup.ProbeProfileMissing
+		if errors.Is(err, errAccountHomePhysical) {
+			detail = agentsetup.ProbeProfilePhysical
+		}
+		if errors.Is(err, errAccountHomePrivate) {
+			detail = agentsetup.ProbeProfilePrivate
+			if userHome, e := os.UserHomeDir(); e == nil && a.Homes[key] == filepath.Join(userHome, ".claude") {
+				detail = agentsetup.ProbeClaudeDefaultPrivate
+			}
+		}
+		return unavailable(detail)
 	}
 	raw, code, err := probeRun(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
 	if err != nil {
-		return probeUnavailable
+		return unavailable(agentsetup.ProbeCommandFailed)
 	}
 	var status struct {
 		AccountID  string `json:"accountId"`
@@ -477,14 +488,14 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		AuthMethod string `json:"authMethod"`
 	}
 	if decodeProbeJSON(raw, &status) != nil || status.LoggedIn == nil {
-		return probeUnavailable
+		return unavailable(agentsetup.ProbeOutputInvalid)
 	}
 	if !*status.LoggedIn {
 		return probeAuthFailed
 	}
 	if a.Emails != nil {
 		if a.Emails[key] == "" {
-			return probeUnavailable
+			return unavailable(agentsetup.ProbeIdentityMissing)
 		}
 		// An API-key login or a different email is explicitly another account;
 		// a login without an email says nothing about which account it is.
@@ -492,14 +503,14 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 			return probeAuthFailed
 		}
 		if strings.TrimSpace(status.Email) == "" {
-			return probeUnavailable
+			return unavailable(agentsetup.ProbeEmailMissing)
 		}
 		if !strings.EqualFold(status.Email, a.Emails[key]) {
 			return probeAuthFailed
 		}
 	}
 	if code != 0 {
-		return probeUnavailable
+		return unavailable(agentsetup.ProbeExitFailed)
 	}
 	if status.AccountID != "" {
 		a.quotaIdentities().Store(key, status.AccountID)

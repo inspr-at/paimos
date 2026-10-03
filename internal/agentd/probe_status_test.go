@@ -5,13 +5,17 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 // fakeStatus writes a vendor stand-in that prints out and exits with code.
@@ -72,7 +76,7 @@ func TestClaudeBillingProbeRespectsEmailFence(t *testing.T) {
 		{"fenced subscription", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0, ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"fenced unknown auth kind", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"new_kind"}`, 0, ProbeStatus{OK: true}},
 		{"unfenced API key", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{OK: true, BillingMode: "api"}},
-		{"unfenced failed command", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 1, ProbeStatus{Failure: ProbeUnavailable}},
+		{"unfenced failed command", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 1, ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeExitFailed}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := fakeStatus(t, tc.answer, tc.code)
@@ -116,17 +120,17 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"claude signed out", claude(`{"loggedIn":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"claude other identity", claude(`{"loggedIn":true,"email":"b@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
-		{"claude empty object", claude(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
-		{"claude malformed", claude(`not json`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"claude empty object", claude(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
+		{"claude malformed", claude(`not json`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
 		{"cursor signed in", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"42"}}`, 0), ProbeStatus{OK: true}},
 		{"cursor signed out", cursor(`{"status":"unauthenticated","isAuthenticated":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"cursor other user", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"7"}}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"cursor empty object", cursor(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
 		// AEON-299 re-review: incomplete or unknown answers are never a sign-out.
-		{"claude signed in without email", claude(`{"loggedIn":true}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
-		{"claude signed in with empty email", claude(`{"loggedIn":true,"email":"","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"claude signed in without email", claude(`{"loggedIn":true}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeEmailMissing}},
+		{"claude signed in with empty email", claude(`{"loggedIn":true,"email":"","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeEmailMissing}},
 		{"claude api key login", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
-		{"claude loggedIn null", claude(`{"loggedIn":null}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"claude loggedIn null", claude(`{"loggedIn":null}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
 		{"cursor unknown status", cursor(`{"status":"refreshing","isAuthenticated":false}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
 		{"cursor logged out word", cursor(`{"status":"logged_out","isAuthenticated":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"cursor contradictory signed in", cursor(`{"status":"unauthenticated","isAuthenticated":true,"userInfo":{"userId":"42"}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
@@ -211,18 +215,19 @@ func TestProbeStatusRejectsDuplicateKeys(t *testing.T) {
 		return a.ProbeStatus(ctx, "k")
 	}
 	unavailable := ProbeStatus{Failure: ProbeUnavailable}
+	claudeUnreadable := ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}
 	cases := []struct {
 		name string
 		got  ProbeStatus
 		want ProbeStatus
 	}{
-		{"claude loggedIn false last", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","loggedIn":false}`), unavailable},
-		{"claude loggedIn true last", claude(`{"loggedIn":false,"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), unavailable},
-		{"claude duplicate email", claude(`{"loggedIn":true,"email":"a@example.com","email":"b@example.com","authMethod":"claude.ai"}`), unavailable},
-		{"claude duplicate auth method", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","authMethod":"api_key"}`), unavailable},
-		{"claude case alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","LOGGEDIN":false}`), unavailable},
-		{"claude escaped alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","logged\u0049n":false}`), unavailable},
-		{"claude duplicate unknown key", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","x":1,"x":2}`), unavailable},
+		{"claude loggedIn false last", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","loggedIn":false}`), claudeUnreadable},
+		{"claude loggedIn true last", claude(`{"loggedIn":false,"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), claudeUnreadable},
+		{"claude duplicate email", claude(`{"loggedIn":true,"email":"a@example.com","email":"b@example.com","authMethod":"claude.ai"}`), claudeUnreadable},
+		{"claude duplicate auth method", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","authMethod":"api_key"}`), claudeUnreadable},
+		{"claude case alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","LOGGEDIN":false}`), claudeUnreadable},
+		{"claude escaped alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","logged\u0049n":false}`), claudeUnreadable},
+		{"claude duplicate unknown key", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","x":1,"x":2}`), claudeUnreadable},
 		{"claude clean answer", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"cursor duplicate identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"42","userId":"7"}}`), unavailable},
 		{"cursor duplicate identity other first", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"7","userId":"42"}}`), unavailable},
@@ -287,17 +292,18 @@ func TestProbeStatusOutputCap(t *testing.T) {
 		return a.ProbeStatus(ctx, "k")
 	}
 	vendors := []struct {
-		name    string
-		probe   func(string) ProbeStatus
-		signOut string
+		name              string
+		probe             func(string) ProbeStatus
+		signOut           string
+		unavailableDetail string
 	}{
-		{"codex", codex, `Not logged in`},
-		{"claude", claude, `{"loggedIn":false}`},
-		{"cursor", cursor, `{"status":"unauthenticated","isAuthenticated":false}`},
+		{"codex", codex, `Not logged in`, ""},
+		{"claude", claude, `{"loggedIn":false}`, agentsetup.ProbeCommandFailed},
+		{"cursor", cursor, `{"status":"unauthenticated","isAuthenticated":false}`, ""},
 	}
-	unavailable := ProbeStatus{Failure: ProbeUnavailable}
 	signedOut := ProbeStatus{Failure: ProbeAuthFailed}
 	for _, v := range vendors {
+		unavailable := ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: v.unavailableDetail}
 		answer := "printf '%s' '" + v.signOut + "'"
 		cases := []struct {
 			name string
@@ -316,5 +322,76 @@ func TestProbeStatusOutputCap(t *testing.T) {
 				t.Errorf("%s %s: got %+v, want %+v", v.name, c.name, got, c.want)
 			}
 		}
+	}
+}
+
+// Stop the fixture at routing, after eligibility is established and before any
+// model run is claimed or launched. The same real queued verification survives
+// the failing probe and reaches this boundary after the profile is repaired.
+type probeRecoveryAPI struct {
+	*fakeAPI
+	routeErr error
+}
+
+func (a *probeRecoveryAPI) Route(ctx context.Context, id, daemon string, accounts []string, units map[string]int64) (Route, error) {
+	_, _ = a.fakeAPI.Route(ctx, id, daemon, accounts, units)
+	return Route{}, a.routeErr
+}
+
+// A default profile discovered by setup may still have vendor-created 0755
+// permissions. Polling must name this local cause, without loosening the fence.
+func TestClaudeProfilePermissionReasonReachesStatusAndRecovers(t *testing.T) {
+	userHome := privateHome(t)
+	home := filepath.Join(userHome, ".claude")
+	if err := os.Mkdir(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", userHome)
+	path := fakeScript(t, `: > "$CLAUDE_CONFIG_DIR/probe-ran"
+printf '%s\n' '{"loggedIn":true,"email":"a@example.test","authMethod":"claude.ai"}'`)
+	node, sdk := claudeAdapterDependencies(t, path)
+	adapter := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"local": home}, Emails: map[string]string{"local": "a@example.test"}}
+	s, base, _ := testSupervisor(t)
+	api := &probeRecoveryAPI{fakeAPI: base, routeErr: errors.New("fixture stopped at eligible route")}
+	s.api = api
+	no, duration := false, int64(60)
+	api.run.Purpose, api.run.VerificationTask, api.run.VerificationPolicy = VerificationPurpose, VerificationTask, "read_only"
+	api.run.RequestedAccountID = "account"
+	api.run.RepositoryMutationAllowed, api.run.MaxDurationSeconds = &no, &duration
+	api.profile.Harness = Claude
+	s.accounts[0].Harness = Claude
+	s.adapters[Claude] = adapter
+	if err := s.PollOnce(t.Context()); err == nil || !strings.Contains(err.Error(), "no local account enrollment for harness") {
+		t.Fatalf("expected the unavailable enrollment to prevent routing: %v", err)
+	}
+	detail := s.Lifecycle("").HarnessDetails[Claude]
+	if detail.State != "blocked" || detail.Reason != "probe_failed" || detail.ReasonDetail != agentsetup.ProbeClaudeDefaultPrivate || detail.Fix.Command != `chmod 700 "$HOME/.claude"` {
+		t.Fatalf("lost actionable safe cause: %+v", detail)
+	}
+	if api.claims != 0 || len(api.routeAccounts) != 0 || api.run.Status != "queued" || s.accountAvailable("account") {
+		t.Fatal("routed or claimed queued verification before a successful probe")
+	}
+	if _, err := os.Stat(filepath.Join(home, "probe-ran")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sign-in command ran before the profile permission check: %v", err)
+	}
+	// The operator owns the repair; only this temporary fixture is changed.
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PollOnce(t.Context()); !errors.Is(err, api.routeErr) {
+		t.Fatalf("repaired enrollment did not reach routing: %v", err)
+	}
+	detail = s.Lifecycle("").HarnessDetails[Claude]
+	if detail.State != "ready" || detail.ReasonDetail != "" || detail.Fix.Command != "" || !s.accountAvailable("account") {
+		t.Fatalf("stale failure after repair: %+v", detail)
+	}
+	if len(api.routeAccounts) != 1 || api.routeAccounts[0] != "account" || api.claims != 0 {
+		t.Fatal("repaired verification did not reach exactly its enrolled account")
+	}
+	if _, err := os.Stat(filepath.Join(home, "probe-ran")); err != nil {
+		t.Fatalf("recovery did not run the sign-in command: %v", err)
 	}
 }

@@ -956,6 +956,17 @@ every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
 
+Usage lists configured accounts even before a reading or successful verification,
+with their current computer/account readiness and any reported repair. Cursor,
+Grok and Pi do not expose a supported limit reading; their rows say so instead
+of promising a reading after the first run. Codex's quota-neutral idle capture
+uses the enrolled Node interpreter, checks the account identity in that same
+process, and reads `account/rateLimits/read` without starting a prompt. The first
+idle capture is eligible after a successful probe; subsequent attempts are
+spaced at least five minutes apart. Revoked local accounts with a dispatch fence
+are excluded from `aeon-agentd capacity`; an enrolled but unbound account stays
+visible as blocked and cannot prevent a healthy sibling account from working.
+
 Matching login fingerprints are hints. In Settings → Accounts, open an account
 and choose **Pool with…**, then confirm the named accounts use the same vendor
 login. Only those confirmed accounts share readings, holds and parallel slots;
@@ -2138,6 +2149,18 @@ Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification
 on that same computer without interrupting claimed work.
+
+Failed Claude sign-in checks include an allowlisted `reason_detail` in
+`aeon-agentd status --json` and the person account views. No raw vendor output,
+credential paths or arbitrary error strings are published. In particular,
+Claude's default profile can be discovered while its directory has vendor-created
+`0755` permissions, but the daemon requires a private profile before it runs the
+sign-in check. This leaves verification queued with `probe_failed`. For that
+specific diagnostic the operator repair is `chmod 700 "$HOME/.claude"`; the next
+successful probe clears the reason and permits the existing verification to
+proceed. Aeon does not change the vendor profile's permissions automatically.
+Claude's quota reading still depends on supported native capture or a managed
+run; fixing sign-in does not fabricate an allowance reading.
 
 New pairing-owned macOS launchd services write diagnostics to
 `~/Library/Logs/aeon-agentd/{stdout,stderr}.log` in a private `0700` directory.

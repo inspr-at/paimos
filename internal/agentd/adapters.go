@@ -33,18 +33,24 @@ func operationContext(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithTimeout(ctx, 20*time.Second)
 }
 
+var (
+	errAccountHomeMissing  = errors.New("local account key is not enrolled")
+	errAccountHomePhysical = errors.New("local account home is not physical")
+	errAccountHomePrivate  = errors.New("local account home is not private")
+)
+
 func localHome(homes map[string]string, key string) (string, error) {
 	home := homes[key]
 	if key == "" || home == "" || !filepath.IsAbs(home) {
-		return "", errors.New("local account key is not enrolled")
+		return "", errAccountHomeMissing
 	}
 	physical, err := filepath.EvalSymlinks(home)
 	if err != nil || physical != home {
-		return "", errors.New("local account home is not physical")
+		return "", errAccountHomePhysical
 	}
 	info, err := os.Stat(home)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return "", errors.New("local account home is not private")
+		return "", errAccountHomePrivate
 	}
 	return home, nil
 }
