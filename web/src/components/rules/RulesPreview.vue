@@ -123,7 +123,10 @@ watch([projectId, role, harness, agentId], load)
     <div class="for">
       <span class="for-label">For</span>
       <HeadingIdentity :text="forLine" class="for-value" />
-      <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">{{ choosing ? 'Done' : 'Change' }}</button>
+      <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">
+        <span :aria-hidden="choosing">Change</span>
+        <span :aria-hidden="!choosing">Done</span>
+      </button>
     </div>
     <div v-if="choosing" class="choose" role="group" aria-label="Preview for">
       <label>Project<select v-model="projectId" class="field"><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select></label>
@@ -197,7 +200,10 @@ watch([projectId, role, harness, agentId], load)
 
 <style scoped>
 .for { display: flex; align-items: flex-start; gap: 6px 10px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--surface-2); }
-.for .btn { flex: none; width: 76px; justify-content: center; }
+/* Both labels size the same grid cell; only the active label is seen or read. */
+.for .btn { flex: none; display: inline-grid; justify-items: center; }
+.for .btn > span { grid-area: 1 / 1; }
+.for .btn > span[aria-hidden="true"] { visibility: hidden; }
 .for-label { color: var(--ink-3); font-size: 12.5px; font-weight: 600; }
 /* Changing the preview identity must not displace its selectors or search. */
 .for-value { flex: 1; min-width: 0; height: 2lh; line-height: 1.45; font-size: 13.5px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

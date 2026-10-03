@@ -195,6 +195,84 @@ function projectControls(page: Page, width: number) {
   }
 }
 
+// Substitute translations at the compiled-module boundary: the real component
+// still owns both labels and every state change, without adding test-only props.
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const language of ['English', 'German'] as const) {
+    test(`Rules Preview toggle fits intrinsic labels (${width} ${theme} ${language})`, async ({ page }) => {
+      const errors = watchErrors(page)
+      await scene(page, width, theme)
+      await mockWork(page, fixtures())
+      await mockRules(page)
+      const change = language === 'German' ? 'Vorschau ändern' : 'Change'
+      const done = language === 'German' ? 'Auswahl übernehmen' : 'Done'
+      if (language === 'German') {
+        await page.route('**/src/components/rules/RulesPreview.vue', async route => {
+          const response = await route.fetch()
+          const body = (await response.text())
+            .replace(/(['"])Change\1/g, JSON.stringify(change))
+            .replace(/(['"])Done\1/g, JSON.stringify(done))
+          await route.fulfill({ response, body })
+        })
+      }
+      await page.goto('/settings/agent-rules')
+      await page.getByRole('button', { name: 'Preview', exact: true }).click()
+      const preview = page.getByRole('dialog', { name: 'What agents receive' })
+      const toggle = preview.locator('.for .btn')
+      await expect(toggle).toBeFocused()
+      await expect(preview.locator('.summary')).toBeVisible()
+      await toggle.evaluate(async () => { await document.fonts.ready })
+      const labelFits = async (label: string, expanded: boolean) => {
+        // Accessibility must expose only the current label, including after
+        // toggling; text ranges prove its glyphs fit inside the padded button.
+        await expect(toggle).toHaveAccessibleName(label)
+        await expect(toggle).toHaveAttribute('aria-expanded', String(expanded))
+        expect(await toggle.evaluate(el => {
+          const box = el.getBoundingClientRect(), style = getComputedStyle(el)
+          const left = box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+          const right = box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+          const rects: DOMRect[] = []
+          while (walker.nextNode()) {
+            const node = walker.currentNode
+            if (!node.textContent?.trim() || getComputedStyle(node.parentElement!).visibility === 'hidden') continue
+            const range = document.createRange()
+            range.selectNodeContents(node)
+            rects.push(...Array.from(range.getClientRects()))
+          }
+          return rects.length > 0 && rects.every(rect => rect.width > 0 && rect.height > 0 &&
+            rect.left >= left - 1 && rect.right <= right + 1 && rect.top >= box.top && rect.bottom <= box.bottom)
+        }), 'the complete active label must fit inside the button padding').toBe(true)
+      }
+      await labelFits(change, false)
+      await screenshot(page, `rules-toggle-${language.toLowerCase()}-change`, width, theme)
+      await expectStableControls({
+        controls: {
+          toggle, identity: preview.locator('.for-value'), identityRow: preview.locator('.for'),
+          close: preview.getByRole('button', { name: 'Close what agents receive' }),
+        },
+        scrollAreas: { body: preview.locator('.body') },
+        interactions: [
+          { name: 'show identity selectors', run: async () => {
+            await toggle.click()
+            await expect(preview.getByRole('group', { name: 'Preview for' })).toBeVisible()
+            await labelFits(done, true)
+            await screenshot(page, `rules-toggle-${language.toLowerCase()}-done`, width, theme)
+          } },
+          { name: 'close identity selectors by keyboard', run: async () => {
+            await expect(toggle).toBeFocused()
+            await page.keyboard.press('Space')
+            await expect(preview.getByRole('group', { name: 'Preview for' })).toHaveCount(0)
+            await labelFits(change, false)
+          } },
+        ],
+      })
+      await noOverflow(page)
+      expect(errors).toEqual([])
+    })
+  }
+}
+
 for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`project description and Done gate headings (${width} ${theme})`, async ({ page }) => {
     const errors = watchErrors(page)
