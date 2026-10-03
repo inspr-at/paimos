@@ -19,6 +19,9 @@ import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
+import ChangeTierPopover from '../components/agents/ChangeTierPopover.vue'
+import TierToast from '../components/agents/TierToast.vue'
+import { useServiceTiers } from '../stores/serviceTiers'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
@@ -237,6 +240,7 @@ function move(step: number) {
   // With the panel open, the panel follows the cursor through sessions.
   if (sessionId.value && cursor.value.startsWith('s:')) void router.replace({ path: `/agents/${cursor.value.slice(2)}`, query: route.query })
 }
+const serviceTiers = useServiceTiers()
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -269,12 +273,20 @@ let stop: (() => void) | undefined
 const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
-function changed() {
+let tierCatchUp = false
+function changed(event?: string) {
+  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
-  debounce = setTimeout(() => { debounce = undefined; void agents.loadAll() }, 400)
+  debounce = setTimeout(() => {
+    debounce = undefined
+    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
+    void agents.loadAll()
+  }, 400)
 }
+let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  stopTierWatch = serviceTiers.watchPage()
   void agents.loadAll()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
@@ -283,6 +295,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
+  stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
 })
@@ -358,6 +371,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
+    <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.instance" />
+    <TierToast />
     <StartAgentDialog ref="startDialog" />
     <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
   </section>

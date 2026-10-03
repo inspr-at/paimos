@@ -42,6 +42,9 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	if len(fixture.Registry) != len(authz.Registry) {
+		t.Fatalf("client/server parity registry size drift: fixture=%d server=%d", len(fixture.Registry), len(authz.Registry))
+	}
 	for _, permission := range fixture.Registry {
 		actual, ok := authz.Lookup(permission.Key)
 		if !ok || actual.AgentGrantable != permission.AgentGrantable || !slices.Equal(actual.GrantableAt, permission.GrantableAt) {
@@ -183,7 +186,7 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 			for _, tc := range []struct {
 				scope  string
 				status int
-			}{{outside, http.StatusForbidden}, {"keys.read", http.StatusBadRequest}, {"retired.scope", http.StatusBadRequest}} {
+			}{{outside, http.StatusForbidden}, {"keys.read", http.StatusBadRequest}, {"model_prefs.manage", http.StatusBadRequest}, {"retired.scope", http.StatusBadRequest}} {
 				if w := keyRequest(m, owner, map[string]any{"rotate_key_id": key.ID, "rotation_scopes": []string{tc.scope}}); w.Code != tc.status {
 					t.Fatalf("outside-ceiling rotation status = %d for %s", w.Code, tc.scope)
 				}
