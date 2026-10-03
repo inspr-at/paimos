@@ -14,6 +14,8 @@ const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project
 })
 const fixture = () => ({ version: 1, groups: [group('a', [9, 8, 7]), group('b', [6, 5, 4])] })
 const files = manifest => manifest.groups.flatMap(g => g.specs.map(s => s.file))
+// The real manifest plus any specs that landed on main since it was written (what every shard job runs).
+const effective = () => reconcileManifest(loadManifest(), discoverSpecs()).manifest
 
 test('LPT balancing distributes a known fixture optimally and covers it exactly once', () => {
   const manifest = fixture(), shards = balanceShards(manifest, 3)
@@ -141,7 +143,7 @@ test('runner is hosted-only, runs groups sequentially, retains failure and stops
   const env = { CI: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: '/tmp/runner', PW_RETRIES: '0' }
   await assert.rejects(main(['1/1'], { env: {}, out: () => {} }), /hosted CI/)
   await assert.rejects(main(['1/1'], { env: { CI: '1', RUNNER_ENVIRONMENT: 'self-hosted' }, out: () => {} }), /github-hosted/)
-  const calls = [], manifest = loadManifest()
+  const calls = [], manifest = effective()
   let active = false
   const run = async (args, options) => {
     assert.equal(active, false)
@@ -196,7 +198,7 @@ test('report merger retains errors, failures, suites and timing from every group
 test('wrapper JSON output aggregates every group and cannot reuse a stale green report', async () => {
   const reportDirectory = resolve(webRoot, 'test-results', 'ci-web-unit-reports')
   const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/ci-web-unit-reports/test-aggregate.json' }
-  const expectedCommands = planCommands(loadManifest(), balanceShards(loadManifest(), 12)[0], env)
+  const expectedCommands = planCommands(effective(), balanceShards(effective(), 12)[0], env)
   assert.ok(expectedCommands.length > 1, 'fixture must span several groups')
   let invocations = 0
   const run = async (args, options) => {
@@ -229,7 +231,7 @@ test('wrapper JSON output aggregates every group and cannot reuse a stale green 
 })
 
 test('a flake retry selects exactly one test in its original group and fails closed otherwise', async () => {
-  const manifest = loadManifest(), env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PW_RETRIES: '0' }
+  const manifest = effective(), env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PW_RETRIES: '0' }
   const planned = planCommands(manifest, balanceShards(manifest, 12)[0], env, webRoot)
   const spec = planned[0].files[0]
   const test = { file: spec, line: 12, column: 3, title: 'suite › case', project: '' }
