@@ -38,7 +38,10 @@ edits update that winning row and keep other rows for unlink. If unlink makes a
 chosen theme private, the API returns the default without that theme's ID/name,
 retaining the selection generation for the next choice. Changing the winning
 identity changes that generation, even when both physical row revisions match.
-Undo issues a fresh generation. The migration preserves physical row revisions
+Undo restores an unsaved preference separately from an explicit default, so
+alias inheritance resumes. Its retained row carries a fresh generation to
+reject stale writes, including revision 0; a subsequent explicit default is
+saved and audited again. The migration preserves physical row revisions
 and existing audit snapshots; audit remains append-only and its audience follows
 current links.
 

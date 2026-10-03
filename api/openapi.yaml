@@ -9566,7 +9566,7 @@ components:
         theme: {$ref: '#/components/schemas/Theme'}
         default_theme_id: {type: string, format: uuid}
         selected_theme_id: {type: [string, 'null'], format: uuid}
-        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation, independent of theme and physical row revisions. Zero means no saved choice; saved choices have unique generations, including explicit default. Link/unlink can change the winning generation.'}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation, independent of theme and physical row revisions. Zero means no choice row yet. Saved choices and undone absence have unique generations, including explicit default. Undo restores alias inheritance without reusing a generation. Link/unlink can change the winning generation.'}
         fallback_notice:
           type: [object, 'null']
           required: [deleted_theme_id, deleted_theme_name]

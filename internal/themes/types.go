@@ -67,6 +67,9 @@ type Selection struct {
 	PrincipalID string  `json:"principal_id"`
 	ThemeID     *string `json:"theme_id"`
 	Revision    int64   `json:"revision"`
+	// Unsaved distinguishes a fresh-generation absence from an explicit default.
+	// Omitted false preserves the shape of historical saved-choice snapshots.
+	Unsaved bool `json:"unsaved,omitempty"`
 	// generation is the public CAS value. Keep physical revisions in audit
 	// snapshots so historical undo remains valid after the additive migration.
 	generation int64

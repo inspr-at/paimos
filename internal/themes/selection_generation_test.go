@@ -56,7 +56,8 @@ func TestSelectionGenerationMigrationPreservesAuditAndLegacyWrites(t *testing.T)
 		f.owner, f.member = p, p
 		return db.InTenant(tenant.WithPrincipal(t.Context(), p), d.App, p.TenantID, func(tx pgx.Tx) error {
 			choice := Selection{PrincipalID: p.ID, Revision: 7}
-			if err := saveSelection(t.Context(), tx, p.TenantID, choice); err != nil {
+			// Seed the historical schema through the previous binary's columns.
+			if _, err := tx.Exec(t.Context(), `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision) VALUES($1,$2,NULL,$3)`, p.TenantID, p.ID, choice.Revision); err != nil {
 				return err
 			}
 			var err error
@@ -302,5 +303,88 @@ func TestUndoInitialSelectionKeepsFreshCAS(t *testing.T) {
 	linkPeople(t, f, f.member, f.other)
 	if got := activeHTTP(t, mux, f.other); !same(got, aliasChoice) {
 		t.Fatalf("positive-revision absence snapshot blocked inheritance: %+v", got)
+	}
+}
+
+func TestUnsavedSelectionMigrationPreservesLegacyDefaultsAndUndo(t *testing.T) {
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	f := fixture{d: d, s: Store{d.App}}
+	var oldEvent events.Event
+	var oldGeneration int64
+	seeded := false
+	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name != "1209_theme_unsaved_selection.sql" {
+			return nil
+		}
+		seeded = true
+		var tid string
+		if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('themes','Themes') RETURNING id::text`).Scan(&tid); err != nil {
+			return err
+		}
+		for _, person := range []*tenant.Principal{&f.member, &f.other} {
+			*person = tenant.Principal{TenantID: tid, Kind: tenant.Person}
+			if err := d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Existing person') RETURNING id::text`, tid).Scan(&person.ID); err != nil {
+				return err
+			}
+			dbtest.BindRole(t, d, tid, person.ID, "member")
+		}
+		f.owner = f.other
+		return db.InTenant(tenant.WithPrincipal(t.Context(), f.other), d.App, tid, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision) VALUES($1,$2,NULL,1) RETURNING generation`, tid, f.other.ID).Scan(&oldGeneration); err != nil {
+				return err
+			}
+			var err error
+			oldEvent, err = events.Append(t.Context(), tx, f.other, events.Change{Type: "theme.selected",
+				Before: Selection{PrincipalID: f.other.ID}, After: Selection{PrincipalID: f.other.ID, Revision: 1}, Metadata: audience(&f.other.ID)})
+			return err
+		})
+	})
+	if err != nil || !seeded {
+		t.Fatalf("legacy migration fixture did not run: %v", err)
+	}
+	current, err := f.s.Active(t.Context(), f.other)
+	if err != nil || current.Revision != oldGeneration || current.SelectedThemeID != nil || current.Theme.Scope != "default" {
+		t.Fatalf("migration changed the existing explicit default: %+v %v", current, err)
+	}
+	storedEvent := lastEvent(t, f, "theme.selected")
+	if storedEvent.ID != oldEvent.ID || !same(storedEvent.Before, oldEvent.Before) || !same(storedEvent.After, oldEvent.After) {
+		t.Fatalf("migration changed historical snapshots: %+v", storedEvent)
+	}
+	alias := mustTheme(t, f.s, f.member, "Legacy alias", "personal")
+	aliasChoice, err := f.s.Select(t.Context(), f.member, SelectionInput{ThemeID: &alias.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkPeople(t, f, f.member, f.other)
+	if got, err := f.s.Active(t.Context(), f.other); err != nil || !same(got, current) {
+		t.Fatalf("migrated explicit default lost precedence: %+v %v", got, err)
+	}
+	// The original revision-0 snapshot has no Unsaved field, yet its undo
+	// must remove preference precedence after the expansion migration.
+	undo(t, f, f.other, oldEvent, 201)
+	if got, err := f.s.Active(t.Context(), f.other); err != nil || !same(got, aliasChoice) {
+		t.Fatalf("historical undo failed to restore alias inheritance: %+v %v", got, err)
+	}
+	// A previous binary increments the physical revision without setting the
+	// new marker column. This must count as an explicit saved choice again.
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE theme_selections SET theme_id=NULL,revision=revision+1 WHERE tenant_id=$1 AND principal_id=$2`, f.other.TenantID, f.other.ID); err != nil {
+		t.Fatal(err)
+	}
+	legacyDefault, err := f.s.Active(t.Context(), f.other)
+	if err != nil || legacyDefault.Theme.Scope != "default" || legacyDefault.SelectedThemeID != nil || legacyDefault.Revision == oldGeneration || legacyDefault.Revision == aliasChoice.Revision {
+		t.Fatalf("legacy write retained the undone absence: %+v %v", legacyDefault, err)
+	}
+	for _, stale := range []int64{oldGeneration, aliasChoice.Revision} {
+		if _, err := f.s.Select(t.Context(), f.other, SelectionInput{Revision: stale}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("accepted stale generation after legacy write: %v", err)
+		}
 	}
 }

@@ -108,6 +108,9 @@ func undoSelection(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if !same(current, expected) {
 		return events.Change{}, events.ErrConflict
 	}
+	// Historical initial snapshots have revision 0; newer absence snapshots
+	// carry Unsaved while retaining a positive physical revision and fresh CAS.
+	restored.Unsaved = restored.Unsaved || restored.Revision == 0
 	restored.Revision = current.Revision + 1
 	if err := saveSelection(ctx, tx, p.TenantID, restored); err != nil {
 		return events.Change{}, err

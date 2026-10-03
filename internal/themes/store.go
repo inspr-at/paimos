@@ -310,26 +310,34 @@ func (s Store) Delete(ctx context.Context, p tenant.Principal, id string, revisi
 }
 
 func selection(ctx context.Context, tx pgx.Tx, tenantID, principalID string, lock bool) (Selection, error) {
-	out := Selection{PrincipalID: principalID}
+	out := Selection{PrincipalID: principalID, Unsaved: true}
 	// Preserve physical ownership across links. A canonical saved choice (even
-	// explicit default) wins; otherwise choose the lowest alias UUID. LIMIT keeps
-	// the result bounded and every identity sees the same winning row.
-	q := `SELECT principal_id::text,theme_id::text,revision,generation FROM theme_selections
+	// explicit default) wins; otherwise choose the lowest saved alias UUID. An
+	// undone absence retains its CAS row but never takes precedence over saved
+	// choices. LIMIT keeps every identity on the same bounded winning row.
+	q := `SELECT principal_id::text,theme_id::text,revision,generation,
+		coalesce(unsaved_revision=revision,false) FROM theme_selections
 		WHERE tenant_id=$1 AND principal_id IN (SELECT id FROM principals
 			WHERE tenant_id=$1 AND kind='person' AND status='active' AND coalesce(linked_to,id)=$2::uuid)
-		ORDER BY (principal_id=$2::uuid) DESC,principal_id LIMIT 1`
+		ORDER BY coalesce(unsaved_revision=revision,false),
+		(principal_id=$2::uuid) DESC,principal_id LIMIT 1`
 	if lock {
 		q += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, q, tenantID, principalID).Scan(&out.PrincipalID, &out.ThemeID, &out.Revision, &out.generation)
+	err := tx.QueryRow(ctx, q, tenantID, principalID).Scan(&out.PrincipalID, &out.ThemeID, &out.Revision, &out.generation, &out.Unsaved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
 	return out, err
 }
 func saveSelection(ctx context.Context, tx pgx.Tx, tenantID string, s Selection) error {
-	_, err := tx.Exec(ctx, `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision) VALUES($1,$2,$3,$4)
-		ON CONFLICT(tenant_id,principal_id) DO UPDATE SET theme_id=EXCLUDED.theme_id,revision=EXCLUDED.revision`, tenantID, s.PrincipalID, s.ThemeID, s.Revision)
+	var unsavedRevision *int64
+	if s.Unsaved {
+		unsavedRevision = &s.Revision
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision,unsaved_revision) VALUES($1,$2,$3,$4,$5)
+		ON CONFLICT(tenant_id,principal_id) DO UPDATE SET theme_id=EXCLUDED.theme_id,revision=EXCLUDED.revision,
+		unsaved_revision=EXCLUDED.unsaved_revision`, tenantID, s.PrincipalID, s.ThemeID, s.Revision, unsavedRevision)
 	return err
 }
 func active(ctx context.Context, tx pgx.Tx, p tenant.Principal) (Active, error) {
@@ -417,7 +425,8 @@ func (s Store) Select(ctx context.Context, p tenant.Principal, in SelectionInput
 		}
 		after := before
 		after.ThemeID = in.ThemeID
-		// A missing row is not an explicit default. Persist that first choice
+		after.Unsaved = false
+		// A missing row or undone absence is not an explicit default. Persist it
 		// so it can take precedence over an alias's preference after linking.
 		if before.Revision > 0 && same(before, after) {
 			out, err = active(ctx, tx, p)
