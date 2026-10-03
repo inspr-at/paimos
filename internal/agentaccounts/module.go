@@ -143,7 +143,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 					if err != nil {
 						return err
 					}
-					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3`, a.ID, a.LinkRevision, now.Add(-CheckTTL)))
+					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3 AND daemon_generation IS NOT DISTINCT FROM $4`, a.ID, a.LinkRevision, now.Add(-CheckTTL), a.daemonGeneration))
 					if err != nil && !isNoRows(err) {
 						return err
 					}
@@ -295,7 +295,7 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	var completionErr *committedProbeError
+	var committed error
 	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
 		scopes, err := keyScopes(r.Context(), tx, r, p)
 		if err != nil {
@@ -316,7 +316,9 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		var reportErr error
 		out, reportErr = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
-		if errors.As(reportErr, &completionErr) {
+		var partial *probeHeartbeatCommitted
+		if errors.As(reportErr, &partial) {
+			committed = partial.error
 			return nil
 		}
 		return reportErr
@@ -325,9 +327,9 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if completionErr != nil {
+	if committed != nil {
 		w.Header().Set("X-Aeon-Write-Committed", "true")
-		writeErr(w, completionErr.rejection)
+		writeErr(w, committed)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)

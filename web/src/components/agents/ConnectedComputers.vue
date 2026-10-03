@@ -5,7 +5,7 @@ import AppIcon from '../AppIcon.vue'
 import {
   PairingError, agentUpdateAdvice, activeRunIds, applyComputerListRefresh, computerRemoval, describeComputerStatus, removeComputer, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
-  platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
+  touchIDConfirmation, platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
 import { onAccessChange } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
@@ -301,6 +301,7 @@ function assign(error: unknown, fallback: string) {
                 <span class="path" :data-tip="computer.workspace_path"><span class="path-head">{{ pathParts(computer.workspace_path).head }}</span><span class="path-tail">{{ pathParts(computer.workspace_path).tail }}</span></span>
               </template>
             </p>
+            <p class="meta">{{ touchIDConfirmation(computer) }}</p>
             <p v-if="agentUpdateAdvice(computer)" class="agent-update" role="status">{{ agentUpdateAdvice(computer) }}</p>
           </div>
         </div>
