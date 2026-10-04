@@ -47,7 +47,49 @@ transport projections of chat rows and cross-mode replies. Chat event hints
 are private, and nested legacy transactions clear verified chat context.
 Migration `1141_chat_identity.sql` preserves all existing rows without backfill.
 
+## Theme settings and agent appearance
+
+Settings › Theme has separate Colours and Agents cards sharing Save and Discard.
+The Agents card uses the nine shipped renderers, with native or chosen ring/size,
+hover, five state palettes and inactive dimming. Both light and dark previews
+show a live row and Working, Waiting, Throttled, Problem and Idle. Draft appearance
+stays in the previews until a successful save; reduced motion stills artwork.
+Personal › Agents retains heartbeat warnings and estimate display.
+
+Migration 1235 copies saved personal appearance into an owner-only theme based
+on the workspace default and selects it, unless the person already saved an
+explicit theme choice. Legacy avatar/palette names and drawn geometry retain
+existing appearance; linked aliases keep physical ownership for unlink. Original
+preference rows remain for rollback and previous binaries, and heartbeat settings
+are unchanged. Creation and selection are audited with a private audience.
+Optional `agents.dim_inactive` and `agents.inactive_opacity` preserve inactive
+appearance; omitted values mean true and 55 percent. Runtime reads the active
+theme and drops stale appearance responses after identity changes.
+
 ## Theme API
+
+Settings → Theme (AEON-642) lists the workspace default, shared workspace
+themes and personal themes. Choose, duplicate, rename in place or confirm a
+deletion on the page. New theme copies the current workspace default. Members
+duplicate workspace themes to edit their own; managers with `settings.manage`
+can edit shared themes, including the workspace default (`scope: default`).
+Fresh selection or reload resolves a prior conflict; a conflict on another
+theme does not disable the selected theme's editor. Loading more themes keeps
+unresolved conflict feedback and recovery available until fresh active state loads.
+Recovery belongs to each theme: another theme's conflict or successful deletion
+cannot unlock an unresolved selected theme, even after pagination or a failed reload.
+Pagination sits above the scrolling list and retains its space when the last
+page arrives, keeping New theme, recovery and Colours controls in place.
+Colours has separate light and dark accents, optional derived dark values,
+presets, a native picker and hex input, plus recurring marker choices. The light
+and dark previews update while editing; the rest of the page keeps its saved
+appearance. Contrast below 4.5:1 warns without blocking Save. Suggest adjusts
+only the failing mode to a readable shade of the same hue. Discard and Save
+appear in an overlay bar, preserving the page layout. Saves retain the Agents
+configuration and use the existing revision checks; conflicted drafts must be
+discarded and refreshed before saving again.
+The Agents link still opens Personal → Agents until the separate Agents card
+package lands. Applying saved theme values throughout the app is a later package.
 
 AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
 returns visible workspace themes and the person's own themes with UUID keyset

@@ -79,6 +79,12 @@
       "sha256": "601ae9ff9206769a92e77704e27f0d361f11d24be373b2e7ce0d3af31cef41c5",
       "ticket": "AEON-641",
       "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
+    },
+    {
+      "file": "1235_agent_appearance_themes.sql",
+      "sha256": "7af6fafd5c777ac98de0767d756589b5f26d2bab5c5b978027f9df07b0fe7e2c",
+      "ticket": "AEON-643",
+      "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Snapshots existing explicit choices across linked identities before backfill, preserving effective themes/defaults and selection generations. Legacy-only physical identities in explicitly selected groups, and every linked alias, retain lower-priority selections via the existing unsaved-revision marker; a canonical account without a selection row records its absence so no alias backfill wins while linked; unlink restores each alias's own appearance without displacing linked explicit choices or what the canonical account showed. Selection audit snapshots retain that marker for undo. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
     }
   ]
 }

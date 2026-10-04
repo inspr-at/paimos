@@ -801,8 +801,8 @@ const shots: Shot[] = [
   } },
   // 11. Settings: agent indicator
   { screen: 'settings', state: 'agent-indicator', setup: async page => { await mockIndicator(page) }, act: async page => {
-    await page.goto('/settings/personal#agents')
-    await expect(page.getByRole('radiogroup', { name: 'Agent indicator' })).toBeVisible()
+    await page.goto('/settings/theme#agents')
+    await expect(page.getByRole('radiogroup', { name: 'Agent avatar' })).toBeVisible()
   } },
   // 12. Projects overview with live agents
   { screen: 'projects', state: 'cards-live', setup: async page => { await mockIndicator(page) }, act: async page => { await page.goto('/'); await visible(page, '.card .live-chip') } },

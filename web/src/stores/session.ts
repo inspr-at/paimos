@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { onScopeDispose, ref } from 'vue'
 import { api, getSession, sessionEnded, type Identity } from '../lib/api'
+import { resetAgentTheme, restoreAgentTheme } from '../lib/agentTheme'
 import { restoreTheme } from '../lib/theme'
 import { accessChanged, clearPermissions, refreshPermissions, revokePermissions } from '../lib/authz'
 import { clearSignInReturn } from '../lib/signInReturn'
@@ -41,6 +42,7 @@ export const useSession = defineStore('session', () => {
   function invalidate() {
     epoch++
     identity.value = null
+    resetAgentTheme()
     requiresSignIn.value = true
     error.value = ''
     dropAttachCode()
@@ -81,13 +83,19 @@ export const useSession = defineStore('session', () => {
       else {
         clearPermissions()
         resetPositions()
-        if (session.identity) void refreshPermissions()
+        if (session.identity) {
+          resetAgentTheme(`${session.identity.tenant.id}/${session.identity.principal.id}`)
+          void refreshPermissions()
+          await restoreAgentTheme(`${session.identity.tenant.id}/${session.identity.principal.id}`)
+          if (started !== epoch || !tabs.current()) return
+        } else resetAgentTheme()
       }
       readSignInConfig(session)
       if (session.identity) void restoreTheme()
     } catch {
       if (started !== epoch || !tabs.current()) return
       identity.value = null
+      resetAgentTheme()
       clearPermissions()
       devMode.value = false
       error.value = 'We couldn’t reach your workspace. Please try again.'
