@@ -125,7 +125,7 @@ func TestAttachStatusOnlyClaudeDrainRefusal(t *testing.T) {
 	}
 }
 
-func TestAttachServerRestartLosesRegistrationBeforeEnrollmentCheck(t *testing.T) {
+func TestAttachServerRestartSignalsLostRegistrationOnlyForValidEnrollment(t *testing.T) {
 	f, key, in := leaseFixture(t)
 	// Rebuild the HTTP server/module over the same database, preserving the
 	// ordinary bearer/cookie authentication while discarding only process memory.
@@ -144,13 +144,17 @@ func TestAttachServerRestartLosesRegistrationBeforeEnrollmentCheck(t *testing.T)
 		t.Fatal("restart lost account-link signing configuration")
 	}
 	f.call("GET", "/api/agent-accounts", nil, true, "", 200)
-	// Even with a connected enrollment, the first guard is the lost poll key.
+	// Only a connected, authorized enrollment may recover lost poll authority.
 	for _, state := range []string{"connected", "draining"} {
 		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state=$2 WHERE computer_id=$1`, in.ComputerID, state); err != nil {
 			t.Fatal(err)
 		}
 		w := f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
-		refusalCause(t, w, "")
+		cause := ""
+		if state == "connected" {
+			cause = attachwatch.RefusalPollKeyUnknown
+		}
+		refusalCause(t, w, cause)
 		var body struct{ Code, Error string }
 		decodeResult(t, w, &body)
 		if body.Code != "forbidden" || body.Error != "daemon poll key rejected" {

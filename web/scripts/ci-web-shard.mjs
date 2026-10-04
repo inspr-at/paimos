@@ -8,6 +8,7 @@ import { runPlaywright } from '../../scripts/playwright-safe.mjs'
 export const webRoot = fileURLToPath(new URL('../', import.meta.url))
 export const manifestPath = resolve(webRoot, 'ci-web-shards.json')
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
+const specPath = /^(?:tests|e2e)\/[a-zA-Z0-9_/-]+\.spec\.ts$/
 
 export function parseShard(value) {
   const match = /^(\d+)\/(\d+)$/.exec(value ?? '')
@@ -39,13 +40,35 @@ export function validateManifest(manifest) {
     if (group.gate !== undefined && typeof group.gate !== 'boolean') throw new Error(`Invalid gate in ${group.id}`)
     if (typeof group.hostedOnly !== 'boolean' || !Array.isArray(group.specs) || !group.specs.length) throw new Error(`Invalid specs/policy in ${group.id}`)
     for (const spec of group.specs) {
-      if (!/^(?:tests|e2e)\/[a-zA-Z0-9_/-]+\.spec\.ts$/.test(spec.file ?? '')) throw new Error(`Invalid spec path: ${spec.file}`)
+      if (!specPath.test(spec.file ?? '')) throw new Error(`Invalid spec path: ${spec.file}`)
       if (specs.has(spec.file)) throw new Error(`Duplicate spec: ${spec.file}`)
       specs.add(spec.file)
       if (!Number.isFinite(spec.weightSeconds) || spec.weightSeconds <= 0) throw new Error(`Invalid weight: ${spec.file}`)
     }
   }
+  if (manifest.exclusions !== undefined && !Array.isArray(manifest.exclusions)) throw new Error('Expected an exclusions array')
+  const excluded = new Set()
+  for (const exclusion of manifest.exclusions ?? []) {
+    if (!specPath.test(exclusion?.file ?? '')) throw new Error(`Invalid exclusion path: ${exclusion?.file}`)
+    if (!/^[A-Z][A-Z0-9]*-[1-9][0-9]*$/.test(exclusion.ticket ?? '')) throw new Error(`Exclusion needs a ticket key: ${exclusion.file}`)
+    if (typeof exclusion.reason !== 'string' || !exclusion.reason.trim()) throw new Error(`Exclusion needs a reason: ${exclusion.file}`)
+    if (specs.has(exclusion.file)) throw new Error(`Spec both declared and excluded: ${exclusion.file}`)
+    if (excluded.has(exclusion.file)) throw new Error(`Duplicate exclusion: ${exclusion.file}`)
+    excluded.add(exclusion.file)
+  }
   return manifest
+}
+
+// Check the source manifest BEFORE reconciliation, so a new spec cannot quietly
+// become an ungated synthetic entry. Unit CI requires an owner or ticketed exclusion.
+export function checkSpecInventory(manifest, discovered) {
+  validateManifest(manifest)
+  const found = new Set(discovered)
+  const declared = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  const excluded = new Set((manifest.exclusions ?? []).map(exclusion => exclusion.file))
+  for (const file of found) if (!declared.has(file) && !excluded.has(file)) throw new Error(`Spec missing from manifest or ticketed exclusions: ${file}`)
+  for (const file of [...declared, ...excluded]) if (!found.has(file)) throw new Error(`Stale manifest spec or exclusion: ${file}`)
+  return { specs: declared.size, excluded: excluded.size }
 }
 
 export function loadManifest(path = manifestPath) {
@@ -88,15 +111,17 @@ export function discoverSpecs(root = webRoot, directories = ['tests']) {
   return files.sort(compare)
 }
 
-// Specs added or removed on main after the manifest was written must not break
-// unrelated PRs. Undeclared specs go to an ungated `unlisted` group with a default
-// weight (visible in the run warning and --check); declared specs that no longer
-// exist are dropped. --strict turns either into an error.
+// At execution time, undeclared specs fall back to an ungated `unlisted` group
+// with a default weight; declared specs/exclusions that no longer exist are
+// dropped. --strict reports drift, while source-inventory unit CI rejects it
+// before this fallback can silently admit an unaccounted-for spec.
 export function reconcileManifest(manifest, discovered, { defaultWeightSeconds = 60 } = {}) {
   const found = new Set(discovered)
   const declared = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
-  const unlisted = discovered.filter(file => !declared.has(file)).sort(compare)
-  const stale = [...declared].filter(file => !found.has(file)).sort(compare)
+  const exclusions = manifest.exclusions ?? []
+  const excluded = new Set(exclusions.map(exclusion => exclusion.file))
+  const unlisted = discovered.filter(file => !declared.has(file) && !excluded.has(file)).sort(compare)
+  const stale = [...declared, ...excluded].filter(file => !found.has(file)).sort(compare)
   if (unlisted.length && manifest.groups.some(group => group.id === 'unlisted')) throw new Error('Manifest must not declare the reserved group id: unlisted')
   const groups = manifest.groups.map(group => ({ ...group, specs: group.specs.filter(spec => found.has(spec.file)) })).filter(group => group.specs.length)
   if (unlisted.length) {
@@ -106,13 +131,14 @@ export function reconcileManifest(manifest, discovered, { defaultWeightSeconds =
     groups.push({ id: 'unlisted', gate: false, config: 'playwright.ui.config.ts', project: null, flags: ['--workers=2'], env: {}, hostedOnly: true,
       specs: unlisted.map(file => ({ file, weightSeconds: defaultWeightSeconds })) })
   }
-  return { manifest: { ...manifest, groups }, unlisted, stale }
+  return { manifest: { ...manifest, groups, ...(manifest.exclusions ? { exclusions: exclusions.filter(exclusion => found.has(exclusion.file)) } : {}) }, unlisted, stale }
 }
 
 export function checkCoverage(manifest, shards, expectedSpecs, { all = false } = {}) {
   validateManifest(manifest)
   const expected = new Set(expectedSpecs)
   const declared = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  const excluded = new Set((manifest.exclusions ?? []).map(exclusion => exclusion.file))
   const required = new Set(gatedGroups(manifest, all).flatMap(group => group.specs.map(spec => spec.file)))
   const owners = new Map(manifest.groups.flatMap(group => group.specs.map(spec => [spec.file, group.id])))
   const assigned = new Set()
@@ -126,10 +152,10 @@ export function checkCoverage(manifest, shards, expectedSpecs, { all = false } =
     }
   }
   for (const file of required) if (!assigned.has(file)) throw new Error(`Spec missing from shards: ${file}`)
-  for (const file of expected) if (!declared.has(file)) throw new Error(`Spec missing from manifest: ${file}`)
-  for (const file of declared) if (!expected.has(file)) throw new Error(`Stale manifest spec: ${file}`)
+  for (const file of expected) if (!declared.has(file) && !excluded.has(file)) throw new Error(`Spec missing from manifest: ${file}`)
+  for (const file of [...declared, ...excluded]) if (!expected.has(file)) throw new Error(`Stale manifest spec: ${file}`)
   const ungated = declared.size - required.size
-  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}) }
+  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}), ...(excluded.size ? { excluded: excluded.size } : {}) }
 }
 
 export function retryCount(env) {
