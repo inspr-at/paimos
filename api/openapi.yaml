@@ -7572,6 +7572,156 @@ paths:
         '200': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals:
+    get:
+      operationId: getPhoneApprovalSettings
+      description: Own passkeys, subscription IDs and quiet hours; never returns push endpoints or private keys.
+      security: [{session: []}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/settings:
+    put:
+      operationId: setPhoneApprovalPreferences
+      description: Person-only opt-in preferences. Escalation changes notification recipients only.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalPreferences'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys/options:
+    post:
+      operationId: beginPhonePasskey
+      description: Platform passkey enrollment with required user verification, bound to authenticated person.
+      security: [{session: []}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCeremony'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys:
+    post:
+      operationId: finishPhonePasskey
+      description: Verify and persist a fresh platform registration.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCredentialProof'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePasskey'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys/{credentialId}:
+    delete:
+      operationId: revokePhonePasskey
+      description: Revoke own passkey and invalidate outstanding challenges.
+      security: [{session: []}]
+      parameters: [{name: credentialId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Revoked}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/subscriptions:
+    post:
+      operationId: subscribePhoneApprovals
+      description: Person-scoped Web Push opt-in; allowlisted public push providers only.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePushSubscription'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneSubscription'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/subscriptions/{subscriptionId}:
+    delete:
+      operationId: revokePhoneSubscription
+      description: Revoke own subscription.
+      security: [{session: []}]
+      parameters: [{name: subscriptionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Revoked}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /phone-approvals/{kind}/{requestId}:
+    get:
+      operationId: getPhoneApproval
+      description: Review live server context. Attach is restricted to its computer owner. Gates preserve existing permission checks.
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /phone-approvals/{kind}/{requestId}/options:
+    post:
+      operationId: beginPhoneDecision
+      description: Fresh 2-minute challenge includes request ID and hash, person, tenant, decision and reason.
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneDecision'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCeremony'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /phone-approvals/{kind}/{requestId}/decision:
+    post:
+      operationId: decidePhoneApproval
+      description: Verify required WebAuthn UV, origin, RP ID, signature, counter, request hash and one-use challenge in the existing decision transaction. Push payload never authorizes a decision. Missing, unauthorized, expired and already decided store requests return 404 request unavailable; phone verification errors retain their status.
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneDecisionProof'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /approvals:
     get:
       operationId: listApprovals
@@ -16199,6 +16349,92 @@ components:
       properties:
         decision: {type: string, enum: [approved, denied]}
         reason: {type: string}
+    PhoneApprovalPreferences:
+      type: object
+      additionalProperties: false
+      required: [enabled, time_zone, quiet_start, quiet_end, escalation_minutes]
+      properties:
+        enabled: {type: boolean}
+        time_zone: {type: string, maxLength: 100}
+        quiet_start: {type: integer, minimum: 0, maximum: 1439, description: Local minute of day; equal endpoints disable quiet hours.}
+        quiet_end: {type: integer, minimum: 0, maximum: 1439}
+        escalation_minutes: {type: integer, minimum: 5, maximum: 1440}
+    PhonePasskey:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    PhoneSubscription:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    PhonePushSubscription:
+      type: object
+      additionalProperties: false
+      required: [endpoint, keys]
+      properties:
+        endpoint: {type: string, format: uri, maxLength: 2048}
+        keys:
+          type: object
+          additionalProperties: false
+          required: [auth, p256dh]
+          properties:
+            auth: {type: string, maxLength: 64}
+            p256dh: {type: string, maxLength: 128}
+    PhoneApprovalSettings:
+      type: object
+      required: [available, push_available, preferences, passkeys, subscriptions]
+      properties:
+        available: {type: boolean}
+        push_available: {type: boolean}
+        vapid_public_key: {type: string}
+        preferences: {$ref: '#/components/schemas/PhoneApprovalPreferences'}
+        passkeys: {type: array, items: {$ref: '#/components/schemas/PhonePasskey'}}
+        subscriptions: {type: array, items: {$ref: '#/components/schemas/PhoneSubscription'}}
+    PhoneCredentialProof:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, credential]
+      properties:
+        challenge_id: {type: string, format: uuid}
+        credential: {type: object, description: Serialized PublicKeyCredential registration or assertion.}
+    PhoneDecision:
+      type: object
+      additionalProperties: false
+      required: [decision, request_hash]
+      properties:
+        decision: {type: string, enum: [approved, denied]}
+        reason: {type: string, maxLength: 4000}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+    PhoneDecisionProof:
+      type: object
+      additionalProperties: false
+      required: [decision, request_hash, challenge_id, credential]
+      properties:
+        decision: {type: string, enum: [approved, denied]}
+        reason: {type: string, maxLength: 4000}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        challenge_id: {type: string, format: uuid}
+        credential: {type: object}
+    PhoneCeremony:
+      type: object
+      required: [challenge_id, publicKey]
+      properties:
+        challenge_id: {type: string, format: uuid}
+        publicKey: {type: object, description: WebAuthn JSON options; base64url byte fields decoded by client.}
+    PhoneApprovalReview:
+      type: object
+      required: [kind, request_id, request_hash, pending]
+      properties:
+        kind: {type: string, enum: [approval, attach]}
+        request_id: {type: string, format: uuid}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        pending: {type: boolean}
+        approval: {$ref: '#/components/schemas/Approval'}
+        attach: {$ref: '#/components/schemas/AttachView'}
     Approval:
       allOf:
         - {$ref: '#/components/schemas/ApprovalProposal'}

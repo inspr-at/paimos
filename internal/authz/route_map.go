@@ -24,11 +24,22 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"POST /api/projects/{projectId}/chat-roles":           "chat.bind",
-	"POST /api/projects/{projectId}/chat-threads/resolve": "chat.read",
-	"GET /api/chat-threads/{id}":                          "chat.read",
-	"POST /api/chat-threads/{id}/binding":                 "chat.bind",
-	"POST /api/chat-deliveries/binding/resolve":           "chat.receive",
+	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
+	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
+	"GET /api/chat-threads/{id}":                                    "chat.read",
+	"POST /api/chat-threads/{id}/binding":                           "chat.bind",
+	"POST /api/chat-deliveries/binding/resolve":                     "chat.receive",
+	"GET /api/me/phone-approvals":                                   "profile.read",
+	"PUT /api/me/phone-approvals/settings":                          "profile.write",
+	"POST /api/me/phone-approvals/passkeys/options":                 "profile.write",
+	"POST /api/me/phone-approvals/passkeys":                         "profile.write",
+	"DELETE /api/me/phone-approvals/passkeys/{credentialId}":        "profile.write",
+	"POST /api/me/phone-approvals/subscriptions":                    "profile.write",
+	"DELETE /api/me/phone-approvals/subscriptions/{subscriptionId}": "profile.write",
+	"GET /api/phone-approvals/{kind}/{requestId}":                   "profile.read",
+	"POST /api/phone-approvals/{kind}/{requestId}/options":          "profile.write",
+	"POST /api/phone-approvals/{kind}/{requestId}/decision":         "profile.write",
+
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",

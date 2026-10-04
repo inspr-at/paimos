@@ -15,6 +15,7 @@ import SettingsCard from './SettingsCard.vue'
 import AgentIndicatorSettings from './AgentIndicatorSettings.vue'
 import GraphMotionSettings from './GraphMotionSettings.vue'
 import SessionWatchingSettings from './SessionWatchingSettings.vue'
+import PhoneApprovalSettings from './PhoneApprovalSettings.vue'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
 
@@ -79,6 +80,10 @@ const KEYS: { keys: string[][]; label: string }[] = [
 
     <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Security" icon="shield" anchor="security">
       <SessionWatchingSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
+    </SettingsCard>
+
+    <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Phone approvals" icon="shield" anchor="phone-approvals">
+      <PhoneApprovalSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Appearance" icon="sun" anchor="appearance">

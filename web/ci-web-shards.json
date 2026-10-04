@@ -2395,6 +2395,27 @@
           "listedTests": 12
         }
       ]
+    },
+    {
+      "id": "phone-approvals",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-455 phone approval regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/phone-approvals.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        }
+      ]
     }
   ],
   "sourceRevision": "068611ab87b80319ed1f0843bbad79ca897b7dcb",
