@@ -178,7 +178,13 @@ for (const width of [1440, 1024, 390, 1920]) for (const theme of ['light', 'dark
     await agent(page, 'pharos-deployer').getByRole('button', { name: /active key/ }).click()
     await agent(page, 'pharos-deployer').getByRole('button', { name: /^Edit scopes/ }).click()
     const edit = dialog(page, 'Edit scopes for pharos-deployer')
-    const expectedColumns = width === 1920 ? 3 : width === 1440 ? 2 : 1
+    // Container breakpoints use body content width; scrollbar gutters differ by host.
+    const availableWidth = await edit.locator('.sheet-body').evaluate(element => {
+      const style = getComputedStyle(element)
+      return element.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+    })
+    expect(availableWidth).toBeGreaterThan(0)
+    const expectedColumns = availableWidth >= 900 ? 3 : availableWidth >= 600 ? 2 : 1
     await expect(edit.getByRole('checkbox', { name: /nodes\.read/ })).toBeChecked()
     await columns(edit, expectedColumns)
     const scope = edit.getByRole('checkbox', { name: /nodes\.write/ })
