@@ -372,3 +372,22 @@ ask callers identify their new membership by its original request ID.
 P3 must use each pending effect's deadline rather than the source answer's human
 grace deadline. Corrections retain the original per-asker reuse pointers. Active
 Always publication and post-dispatch corrections remain P4/P3 responsibilities.
+
+AEON-619 release-123 merge-main round retains latest main `9d81acc6` in normal
+local merge `0045620f`, after preserving the inherited pending main merge as
+`d0eebb41`. The three conflicts retain both README sections, all exact-byte
+migration exceptions and their explicit test expectations. Preservation checks
+confirm 296 main-only and 32 branch-only files byte-for-byte, 1,056 OpenAPI
+entries, both route maps and 239 unique migration numbers. Main's CI workflow
+and shard manifest are unchanged; all four portal specs already have entries.
+
+Local checks pass: 25 migration-checker tests, the migration guard against
+`v261003095616.0.0`, OpenAPI reporter-contract tests, strict 12-shard coverage
+and all 13 public-portal browser tests with zero remaining owned processes.
+The approved remote runner returned exit 3 before code transfer because
+Mailina was the console user. Affected-package Go validation remains pending
+for the coordinator on the approved remote lane or hosted CI; these local
+checks do not claim that validation. Evidence is retained in
+`tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
+`r123-*` logs. No feature change, origin push, deployment, migration renumbering,
+ticket status change or model review ran.
