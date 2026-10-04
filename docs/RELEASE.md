@@ -283,6 +283,24 @@ execution of all three specs at the reviewed candidate SHA and repeat the
 consolidated gate before accepting the coverage change. No push, deployment
 or review approval was performed by this worker.
 
+Final fix round 3 (AEON-677, review-ap27): successful read-only GitHub queries
+returned no runs for the reviewed candidate
+`4327edd93d04074228d2fb2e06fc159b135d5b7c` or the source commit above, and no PR
+or remote branch exists for `work/aeon-ci-sharding`. All 19 shard unit tests,
+11 queue unit tests and both strict inventory checks passed again; retained
+browser report, log and source hashes were verified, without rerunning browsers.
+The final-round evidence is retained in the ignored
+`web/test-results/aeon-ci-sharding-fix3/` directory; its `summary.json` SHA256 is
+`fa44a4a72ba0075e75b9a2c0d2f9fbff0ddf2ba1ab5e1950489668d24664f2d7`.
+Review-ap27's P2 finding remains unresolved and the three-round limit is reached.
+The explicit no-push instruction prevents this worker from publishing a
+candidate to obtain hosted evidence; `mbp2606` is off limits, so
+`remote-test.sh` was not invoked. No behavior fix or new regression test was
+made. The authorized coordinator must publish the candidate, retain successful
+hosted results for all three specs and affected shard durations at the reviewed
+SHA, resolve any actual failures, and repeat the consolidated gate. This local
+handoff does not establish hosted stability, the five-minute target or approval.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
