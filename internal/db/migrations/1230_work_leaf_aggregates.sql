@@ -208,3 +208,24 @@ LANGUAGE sql STABLE AS $$
       AND r.project_node_id = p_project
       AND r.release_node_id = p_release;
 $$;
+
+-- Leaf Undo changes aggregate projections even when parent status is unchanged.
+-- Admit only this public fact, retaining target visibility and every node-ref
+-- check. Unknown automation domains and hidden referenced nodes remain private.
+ALTER POLICY events_project_visibility ON events
+    USING ((SELECT aeon_visible_all())
+        OR (CASE
+                WHEN node_id IS NULL THEN
+                    (SELECT aeon_visibility_system())
+                    OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[])
+                ELSE EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id = events.tenant_id AND n.id = events.node_id)
+                    AND (split_part(type, '.', 1) IN ('node', 'nodes', 'comment', 'comments', 'attachment',
+                            'attachments', 'relation', 'relations', 'import', 'journey', 'intake', 'requirement',
+                            'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
+                            'kind', 'kinds', 'profile')
+                         OR type IN ('status_autopilot.changed', 'status_autopilot.undone', 'status_autopilot.skipped', 'status_autopilot.derived', 'status_autopilot.retained', 'status_autopilot.causal_undo')
+                         OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))
+            END
+            AND (cardinality(node_refs) = 0
+                 OR NOT EXISTS (SELECT 1 FROM unnest(node_refs) AS ref(id)
+                                WHERE ref.id NOT IN (SELECT n.id FROM nodes n)))));

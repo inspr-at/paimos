@@ -328,3 +328,7 @@ rollout, the coordinator validates the AEON-429 integration and whole chain,
 including the parent UI, under AEON-649's maintenance/verified-backup gate. See
 the root README for the API contract, explicit bounds and read-serialization
 tradeoff. This worker neither pushes nor deploys.
+
+Migration 1230 also admits `status_autopilot.undone` to project-visible events,
+under the same target and referenced-node visibility checks. This lets another
+person's leaf Undo refresh aggregates when the parent status is unchanged.
