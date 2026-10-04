@@ -43,7 +43,7 @@ func TestEstimateComplexityBucketsAndHints(t *testing.T) {
 func TestRouteClassificationConfirmsAgentAndClearsProvenance(t *testing.T) {
 	agent := tenant.Principal{ID: "11111111-1111-4111-8111-111111111111", Kind: tenant.Agent}
 	person := tenant.Principal{ID: "22222222-2222-4222-8222-222222222222", Kind: tenant.Person}
-	raw, err := canonicalRouteFields(agent, "task", []byte(`{"complexity":"M","complexity_confirmed":true}`), nil)
+	raw, err := canonicalRouteFields(agent, "work", []byte(`{"complexity":"M","complexity_confirmed":true}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestRouteClassificationConfirmsAgentAndClearsProvenance(t *testing.T) {
 	if fields["complexity_confirmed"] != false || fields["complexity_source"] != "agent" {
 		t.Fatal(fields)
 	}
-	confirmed, err := canonicalRouteFields(person, "task", []byte(`{"complexity":"M"}`), raw)
+	confirmed, err := canonicalRouteFields(person, "work", []byte(`{"complexity":"M"}`), raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +59,11 @@ func TestRouteClassificationConfirmsAgentAndClearsProvenance(t *testing.T) {
 	if fields["complexity_source"] != "person" || fields["complexity_by"] != person.ID || fields["complexity_confirmed"] != true {
 		t.Fatal(fields)
 	}
-	cleared, err := canonicalRouteFields(person, "task", []byte(`{"complexity":null}`), confirmed)
+	cleared, err := canonicalRouteFields(person, "work", []byte(`{"complexity":null}`), confirmed)
 	if err != nil || len(routeFieldMap(t, cleared)) != 0 {
 		t.Fatalf("clear left provenance: %s %v", cleared, err)
 	}
-	if _, err := canonicalRouteFields(person, "ticket", []byte(`{"complexity":"M","complexity_source":"suggested"}`), nil); err == nil {
+	if _, err := canonicalRouteFields(person, "work", []byte(`{"complexity":"M","complexity_source":"suggested"}`), nil); err == nil {
 		t.Fatal("client forged a server suggestion")
 	}
 }
@@ -71,7 +71,7 @@ func TestRouteClassificationConfirmsAgentAndClearsProvenance(t *testing.T) {
 func TestEstimatedTicketSuggestionsAndConfirmation(t *testing.T) {
 	p := newPrincipal(t, "estimate-routes")
 	agent := estimateAgent(t, p)
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	n := mustNode(t, agent, fmt.Sprintf(`{"kind_id":%q,"title":"RLS schema migration","fields":{"estimate_hours":2}}`, kind.ID))
 	fields := routeFieldMap(t, n.Fields)
 	for key, want := range map[string]string{"route_role": "build-hard", "area": "security", "complexity": "M"} {
@@ -129,9 +129,9 @@ func TestEstimateRouteDefaultsAndDerivedComplexity(t *testing.T) {
 	p := newPrincipal(t, "estimate-defaults")
 	projectKind := kindBySlug(t, p, "project")
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Product","fields":{"route_role":"build-hard","area":"frontend"}}`, projectKind.ID))
-	epicKind := kindBySlug(t, p, "epic")
+	epicKind := kindBySlug(t, p, "work")
 	epic := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Epic","parent_id":%q,"fields":{"area":"docs"}}`, epicKind.ID, project.ID))
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"General work","parent_id":%q,"fields":{"estimate_hours":1}}`, ticketKind.ID, epic.ID))
 	fields := routeFieldMap(t, n.Fields)
 	if fields["route_role"] != "build-hard" || fields["area"] != "docs" || fields["complexity"] != "M" {
@@ -160,7 +160,7 @@ func TestEstimateRouteDefaultsAndDerivedComplexity(t *testing.T) {
 		t.Fatal(fields)
 	}
 	for _, raw := range []string{`{"complexity":"XL"}`, `{"complexity":true}`, `{"complexity":"S","complexity_source":"person"}`} {
-		if _, err := canonicalRouteFields(tenant.Principal{ID: p.ID, Kind: tenant.Agent}, "ticket", []byte(raw), nil); err == nil {
+		if _, err := canonicalRouteFields(tenant.Principal{ID: p.ID, Kind: tenant.Agent}, "work", []byte(raw), nil); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}

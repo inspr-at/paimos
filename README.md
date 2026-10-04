@@ -3190,8 +3190,21 @@ of eligible leaf estimates separately from their editable planned estimate;
 cancelled and archived leaves retain their own displayed estimate and sort by it,
 but contribute nothing to ancestor totals. Descendant node and session events
 invalidate loaded parent projections in the affected project even when parent
-status and revision stay unchanged. Membership changes also refresh former leaves;
-reads still respect pinned editors and reject responses overtaken by newer hints.
+status and revision stay unchanged. Membership changes also refresh former leaves.
+When an uncached descendant moves, its source project is unknown; held work rows
+across projects are conservatively refreshed through authorized reads. Reads still
+respect pinned editors and reject responses overtaken by newer hints.
+Late usage reports also invalidate the session's currently bound readable work
+node and held parents, including after a session stops. Planning sorts resolve
+displayed work rows as well as eligible descendant leaves, preserving a closed
+leaf's route, token and cost projections across sort changes.
+Current `work` nodes keep route provenance, human checks, completion benefits,
+project moves, graph links and person-only roadmap publication. Future frozen
+release notes capture work members using the existing public-field whitelist.
+Tests use the current starter catalog; historic mixed-kind cases define their own
+tenant kinds.
+Lists without sized work skip calibration reads that cannot produce an estimate,
+while still resolving displayed routes and retaining historical usage.
 
 The unreleased 1230 migration bounds every shared scope traversal to 4096 input
 roots and 50000 distinct root/node pairs, counting overlapping roots against the

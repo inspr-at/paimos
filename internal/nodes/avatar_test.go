@@ -19,7 +19,7 @@ import (
 func TestPeopleSayWhetherTheyHaveAPicture(t *testing.T) {
 	p := newPrincipal(t, "avatar-people")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	main := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Main"}`)
 	ctx := t.Context()
 	ids := map[string]string{}
@@ -57,7 +57,7 @@ func TestPeopleSayWhetherTheyHaveAPicture(t *testing.T) {
 		mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"For `+who+`","parent_id":"`+main.ID+`","fields":{"assignee":"`+assignee+`"}}`)
 	}
 
-	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+main.ID+"&kind=ticket", "")
+	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+main.ID+"&kind=work", "")
 	list := decode[nodePage](t, status, body, http.StatusOK)
 	got := map[string]bool{}
 	for _, item := range list.Items {

@@ -10,17 +10,18 @@ import (
 
 func TestPatchRefusesDifferentKind(t *testing.T) {
 	p := newPrincipal(t, "kind-change")
+	customKind(t, p, "initiative", "epic")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
-	epicKind := kindBySlug(t, p, "epic")
+	ticketKind := kindBySlug(t, p, "work")
+	epicKind := kindBySlug(t, p, "initiative")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Kind project","state":"active"}`)
 	ticket := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Stay a ticket","fields":`+benefitFields+`}`)
 	before := len(tenantEvents(t, p.TenantID))
 
 	for _, body := range []string{
 		`{"kind_id":"` + epicKind.ID + `","title":"Changed"}`,
-		`{"type":"epic","title":"Changed"}`,
-		`{"kind":"epic","title":"Changed"}`,
+		`{"type":"initiative","title":"Changed"}`,
+		`{"kind":"initiative","title":"Changed"}`,
 	} {
 		status, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+ticket.ID, body)
 		if status != http.StatusConflict {
@@ -47,7 +48,7 @@ func TestPatchRefusesDifferentKind(t *testing.T) {
 		t.Fatalf("events %d, want %d", len(tenantEvents(t, p.TenantID)), before)
 	}
 
-	status, raw = call(t, &p, http.MethodPatch, "/api/nodes/"+ticket.ID, `{"type":"ticket","title":"Renamed"}`)
+	status, raw = call(t, &p, http.MethodPatch, "/api/nodes/"+ticket.ID, `{"type":"work","title":"Renamed"}`)
 	renamed := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if renamed.Title != "Renamed" || renamed.KindID != ticketKind.ID {
 		t.Fatalf("same kind did not apply the title: %#v", renamed)
@@ -55,7 +56,7 @@ func TestPatchRefusesDifferentKind(t *testing.T) {
 
 	events := len(tenantEvents(t, p.TenantID))
 	updated := renamed.UpdatedAt
-	status, raw = call(t, &p, http.MethodPatch, "/api/nodes/"+ticket.ID, `{"kind_id":"`+ticketKind.ID+`","kind":"ticket"}`)
+	status, raw = call(t, &p, http.MethodPatch, "/api/nodes/"+ticket.ID, `{"kind_id":"`+ticketKind.ID+`","kind":"work"}`)
 	same := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if same.Title != "Renamed" || same.KindID != ticketKind.ID || !same.UpdatedAt.Equal(updated) {
 		t.Fatalf("same kind was written: %#v", same)

@@ -39,7 +39,7 @@ func estimateFieldsOf(t *testing.T, n nodeJSON) map[string]any {
 
 func TestEstimateOnlyPatchPreservesFieldsAndRevision(t *testing.T) {
 	p := newPrincipal(t, "estimate-only")
-	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Work","fields":{"priority":"high","notes":"Keep me","tags":["ETA"]}}`, kindBySlug(t, p, "ticket").ID))
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Work","fields":{"priority":"high","notes":"Keep me","tags":["ETA"]}}`, kindBySlug(t, p, "work").ID))
 	code, body := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"estimate_hours":1.5}`)
 	updated := decode[nodeJSON](t, code, body, 200)
 	f := estimateFieldsOf(t, updated)
@@ -49,7 +49,7 @@ func TestEstimateOnlyPatchPreservesFieldsAndRevision(t *testing.T) {
 	if !updated.UpdatedAt.After(n.UpdatedAt) {
 		t.Fatal("revision did not advance")
 	}
-	code, body = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"type":"ticket","estimate_hours":2}`)
+	code, body = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"type":"work","estimate_hours":2}`)
 	if f := estimateFieldsOf(t, decode[nodeJSON](t, code, body, 200)); f["estimate_hours"] != float64(2) || f["notes"] != "Keep me" {
 		t.Fatal("same-kind patch skipped estimate", f)
 	}
@@ -85,7 +85,7 @@ func TestEstimateOnlyPatchPreservesFieldsAndRevision(t *testing.T) {
 func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 	p := newPrincipal(t, "estimates")
 	agent := estimateAgent(t, p)
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	for _, bad := range []string{`0`, `-1`, `200.1`, `"2"`, `true`, `{}`, `1e999`} {
 		code, body := call(t, &p, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Invalid","fields":{"estimate_hours":%s}}`, kind.ID, bad))
 		if code != 400 {
@@ -94,7 +94,7 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 	}
 	for _, actor := range []tenant.Principal{p, agent} {
 		n := mustNode(t, actor, fmt.Sprintf(`{"kind_id":%q,"title":"Estimate","fields":{"estimate_hours":1.50,"estimate_by":%q,"estimate_at":"fake","estimate_confirmed":true}}`, kind.ID, p.ID))
-		if n.Estimate == nil || n.Estimate.Hours == nil || *n.Estimate.Hours != 1.5 || n.Estimate.EstimatedChildren != 0 || n.Estimate.OpenChildren != 0 || n.Estimate.By == nil || n.Estimate.By.ID != actor.ID || n.Estimate.By.Name != actor.Name {
+		if n.Estimate == nil || n.Estimate.Hours == nil || *n.Estimate.Hours != 1.5 || n.Estimate.IsParent || n.Estimate.LeafCount != 1 || n.Estimate.EstimatedLeaves != 1 || n.Estimate.EstimatedChildren != 1 || n.Estimate.OpenChildren != 1 || n.Estimate.By == nil || n.Estimate.By.ID != actor.ID || n.Estimate.By.Name != actor.Name {
 			t.Fatalf("create estimate view: %+v", n.Estimate)
 		}
 		code, body := call(t, &actor, "GET", "/api/nodes/"+n.ID, "")
@@ -137,7 +137,7 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 		}
 	}
 	missing := mustNode(t, agent, fmt.Sprintf(`{"kind_id":%q,"title":"Draft"}`, kind.ID))
-	if missing.Estimate != nil || strings.Contains(strings.Join(missing.Warnings, " "), "--estimate") || !strings.Contains(strings.Join(missing.Warnings, " "), "fields.estimate_hours") {
+	if missing.Estimate == nil || missing.Estimate.Hours != nil || missing.Estimate.LeafCount != 1 || missing.Estimate.EstimatedLeaves != 0 || strings.Contains(strings.Join(missing.Warnings, " "), "--estimate") || !strings.Contains(strings.Join(missing.Warnings, " "), "fields.estimate_hours") {
 		t.Fatal("api warning", missing.Estimate, missing.Warnings)
 	}
 	mux := http.NewServeMux()
@@ -151,8 +151,8 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 	if strings.Contains(strings.Join(cliNode.Warnings, " "), "--estimate") || !strings.Contains(strings.Join(cliNode.Warnings, " "), "fields.estimate_hours") {
 		t.Fatal("api warning stays neutral", cliNode.Warnings)
 	}
-	if cliNode.Estimate != nil {
-		t.Fatal("missing hours still has an estimate view")
+	if cliNode.Estimate == nil || cliNode.Estimate.Hours != nil || cliNode.Estimate.LeafCount != 1 || cliNode.Estimate.EstimatedLeaves != 0 {
+		t.Fatal("missing hours must retain honest leaf coverage", cliNode.Estimate)
 	}
 	other := addPrincipal(t, "estimate-other")
 	code, _ := call(t, &other, "PATCH", "/api/nodes/"+missing.ID, `{"fields":{"estimate_hours":2}}`)
@@ -168,9 +168,9 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 func TestEstimateSortRollupAndRevision(t *testing.T) {
 	p := newPrincipal(t, "estimate-rollup")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
-	epicKind := kindBySlug(t, p, "epic")
-	task := kindBySlug(t, p, "task")
+	ticket := kindBySlug(t, p, "work")
+	epicKind := kindBySlug(t, p, "work")
+	task := kindBySlug(t, p, "work")
 	proj := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, project.ID))
 	epic := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Epic","parent_id":%q,"fields":{"estimate_hours":99}}`, epicKind.ID, proj.ID))
 	makeChild := func(kind, parent, fields string) nodeJSON {
@@ -181,7 +181,7 @@ func TestEstimateSortRollupAndRevision(t *testing.T) {
 	missing := makeChild(ticket.ID, epic.ID, `{}`)
 	closed := makeChild(ticket.ID, epic.ID, `{"estimate_hours":10}`)
 	deleted := makeChild(ticket.ID, epic.ID, `{"estimate_hours":20}`)
-	_ = makeChild(task.ID, a.ID, `{"estimate_hours":50}`) // no double count
+	_ = makeChild(task.ID, a.ID, `{"estimate_hours":50}`) // replaces a's 2h plan in the leaf sum
 	// Custom closed state categories and malformed legacy values both stay safe.
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=field_schema||'{"states":[{"state":"shipped","category":"done"}]}'::jsonb WHERE id=$1`, ticket.ID); err != nil {
@@ -201,7 +201,9 @@ func TestEstimateSortRollupAndRevision(t *testing.T) {
 	}
 	code, body := call(t, &p, "GET", "/api/nodes/"+epic.ID, "")
 	view := decode[nodeJSON](t, code, body, 200).Estimate
-	if view == nil || view.Hours == nil || *view.Hours != 2.5 || view.OpenChildren != 3 || view.EstimatedChildren != 2 {
+	// 50h nested leaf + 0.5h sibling + 10h done leaf; neither parent plan
+	// nor the deleted leaf contributes. The missing estimate stays in coverage.
+	if view == nil || view.Hours == nil || *view.Hours != 60.5 || view.PlannedHours == nil || *view.PlannedHours != 99 || view.OpenChildren != 4 || view.EstimatedChildren != 3 || view.LeafCount != 4 {
 		t.Fatalf("rollup: %+v %s", view, body)
 	}
 	for _, direction := range []string{"estimate", "-estimate"} {
@@ -232,7 +234,7 @@ func TestEstimateSortRollupAndRevision(t *testing.T) {
 	}
 	code, body = call(t, &p, "GET", "/api/nodes?parent_id="+proj.ID+"&sort=estimate", "")
 	page := decode[nodePage](t, code, body, 200)
-	if len(page.Items) != 1 || page.Items[0].Estimate == nil || *page.Items[0].Estimate.Hours != 2.5 {
+	if len(page.Items) != 1 || page.Items[0].Estimate == nil || *page.Items[0].Estimate.Hours != 60.5 {
 		t.Fatalf("list rollup %s", body)
 	}
 	// A stale agent revision cannot overwrite or claim a person's estimate.
@@ -261,7 +263,7 @@ func TestWorkingAgentConfirmsEstimate(t *testing.T) {
 	p := newPrincipal(t, "estimate-confirm")
 	agent := estimateAgent(t, p)
 	proj := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
-	n := mustNode(t, agent, fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Work","fields":{"estimate_hours":2}}`, kindBySlug(t, p, "ticket").ID, proj.ID))
+	n := mustNode(t, agent, fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Work","fields":{"estimate_hours":2}}`, kindBySlug(t, p, "work").ID, proj.ID))
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',decode(repeat('00',32),'hex'),decode(repeat('01',32),'hex'),'working')`, p.TenantID, proj.ID, agent.ID, n.ID)
 		return err

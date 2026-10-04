@@ -40,7 +40,7 @@ func TestCompletionRequirements(t *testing.T) {
 	for _, tc := range []struct {
 		k, b, a string
 		want    int
-	}{{"ticket", "open", "done", 4}, {"ticket", "done", "done", 0}, {"ticket", "done", "open", 0}, {"task", "open", "done", 0}, {"ticket", "", "done", 4}} {
+	}{{"work", "open", "done", 4}, {"work", "done", "done", 0}, {"work", "", "done", 4}, {"ticket", "open", "done", 4}, {"ticket", "done", "done", 0}, {"ticket", "done", "open", 0}, {"task", "open", "done", 0}, {"ticket", "", "done", 4}} {
 		if got := Transition(tc.k, tc.b, tc.a, json.RawMessage(`{}`)); len(got) != tc.want {
 			t.Fatalf("%+v: %v", tc, got)
 		}

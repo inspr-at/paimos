@@ -22,7 +22,7 @@ import (
 func TestPolishedNodeList(t *testing.T) {
 	p := newPrincipal(t, "polished")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	create := func(kind, key, title, state, parent string, fields map[string]any) nodeJSON {
 		t.Helper()
 		if fields == nil {
@@ -57,17 +57,18 @@ func TestPolishedNodeList(t *testing.T) {
 	if len(within.Items) != 3 || within.Items[0].ID != a.ID || within.Items[1].ID != c.ID || within.Items[2].ID != b.ID {
 		t.Fatalf("natural key order/within: %#v", within.Items)
 	}
-	if within.Facets["state"]["new"] != 1 || within.Facets["kind"]["ticket"] != 3 || within.Facets["priority"]["high"] != 1 || within.Facets["assignee"][p.ID] != 1 || within.Facets["assignee"]["none"] != 2 {
+	// State counts include leaves only; other facets retain all listed rows.
+	if within.Facets["state"]["new"] != 0 || within.Facets["state"]["qa"] != 1 || within.Facets["state"]["done"] != 1 || within.Facets["kind"]["work"] != 3 || within.Facets["priority"]["high"] != 1 || within.Facets["assignee"][p.ID] != 1 || within.Facets["assignee"]["none"] != 2 {
 		t.Fatalf("facets: %#v", within.Facets)
 	}
 	row := within.Items[0]
-	if row.KindSlug != "ticket" || row.KindLabel != "Ticket" || row.Priority == nil || *row.Priority != "high" || row.Assignee == nil || row.Assignee.ID != p.ID || row.Parent == nil || row.Parent.ID != root.ID || row.ChildrenCount != 1 || row.Project == nil || row.Project.ID != root.ID {
+	if row.KindSlug != "work" || row.KindLabel != "Work item" || row.Priority == nil || *row.Priority != "high" || row.Assignee == nil || row.Assignee.ID != p.ID || row.Parent == nil || row.Parent.ID != root.ID || row.ChildrenCount != 1 || row.Project == nil || row.Project.ID != root.ID {
 		t.Fatalf("projection: %#v", row)
 	}
 	if within.Items[1].Parent == nil || within.Items[1].Parent.ID != a.ID || within.Items[1].Project == nil || within.Items[1].Project.ID != root.ID {
 		t.Fatalf("deep projection: %#v", within.Items[1])
 	}
-	if got := get("/api/nodes?kind=ticket&kind=project&state=new,qa&priority=high&priority=medium&within=" + root.ID); len(got.Items) != 2 {
+	if got := get("/api/nodes?kind=work&kind=project&state=new,qa&priority=high&priority=medium&within=" + root.ID); len(got.Items) != 2 {
 		t.Fatalf("list filters: %#v", got.Items)
 	}
 	if got := get("/api/nodes?assignee=" + p.ID); len(got.Items) != 1 || got.Items[0].ID != a.ID {
@@ -127,7 +128,7 @@ func TestPolishedNodeList(t *testing.T) {
 	}
 	status, body := call(t, &p, http.MethodGet, "/api/projects", "")
 	projects := decode[projectPage](t, status, body, http.StatusOK)
-	if len(projects.Items) != 1 || projects.Items[0].ID != root.ID || projects.Items[0].Total != 3 || projects.Items[0].Open != 1 || projects.Items[0].InProgress != 1 || projects.Items[0].Done != 1 || projects.Items[0].LastActivity.IsZero() {
+	if len(projects.Items) != 1 || projects.Items[0].ID != root.ID || projects.Items[0].Total != 2 || projects.Items[0].Open != 0 || projects.Items[0].InProgress != 1 || projects.Items[0].Done != 1 || projects.Items[0].LastActivity.IsZero() {
 		t.Fatalf("projects: %#v", projects.Items)
 	}
 	status, body = call(t, &p, http.MethodGet, "/api/projects?include_archived=true", "")
@@ -149,9 +150,11 @@ func TestPolishedNodeList(t *testing.T) {
 // Every row names its nearest epic: a ticket its own, a task its ticket's.
 func TestListNearestEpic(t *testing.T) {
 	p := newPrincipal(t, "nearest-epic")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
 	project := kindBySlug(t, p, "project")
 	epicKind := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	task := kindBySlug(t, p, "task")
 	create := func(kind, key, parent string) nodeJSON {
 		t.Helper()
@@ -215,7 +218,7 @@ func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
 	p, path := testList6000Performance(t)
 	status, body := call(t, &p, http.MethodGet, path, "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
-	if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["ticket"] != 6000 {
+	if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["work"] != 6000 {
 		t.Fatal("stale-statistics fixture lost its 6000 tickets or selected page")
 	}
 	ids := make([]string, len(page.Items))
@@ -234,7 +237,7 @@ func testList6000Performance(t *testing.T) (tenant.Principal, string) {
 	t.Helper()
 	p := newPrincipal(t, "large-list")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
@@ -262,7 +265,7 @@ func testList6000Performance(t *testing.T) (tenant.Principal, string) {
 		status, body := call(t, &p, http.MethodGet, path, "")
 		elapsed := time.Since(start)
 		page := decode[nodePage](t, status, body, http.StatusOK)
-		if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["ticket"] != 6000 {
+		if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["work"] != 6000 {
 			t.Fatalf("large list result: %d, %#v", len(page.Items), page.Facets)
 		}
 		if fastest == 0 || elapsed < fastest {
@@ -277,6 +280,7 @@ func testList6000Performance(t *testing.T) (tenant.Principal, string) {
 		limit = 600 * time.Millisecond
 	}
 	if fastest >= limit {
+		logListPerformancePlans(t, p, path)
 		t.Fatalf("6000-node list exceeded %s: %s", limit, fastest)
 	}
 	start := time.Now()
@@ -330,7 +334,7 @@ func testList6000Performance(t *testing.T) (tenant.Principal, string) {
 func TestProjectSummaryRecentPeople(t *testing.T) {
 	p := newPrincipal(t, "recent-people")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	main := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Main"}`)
 	child := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Child","parent_id":"`+main.ID+`"}`)
 	grandchild := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Grandchild","parent_id":"`+child.ID+`"}`)

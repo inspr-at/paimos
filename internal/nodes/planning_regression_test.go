@@ -22,14 +22,14 @@ import (
 
 func TestPlanningSourceProjectCosts(t *testing.T) {
 	w := planningSetup(t)
-	target := w.node(t, "TARGET-1", "ticket", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
+	target := w.node(t, "TARGET-1", "work", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
 	w.session(t, target.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
 	other := w
 	other.root = mustNode(t, w.admin, `{"kind_id":"`+kindBySlug(t, w.admin, "project").ID+`","title":"Other project"}`)
 	bindProjectRole(t, w.admin.TenantID, w.viewer.ID, "viewer", w.root.ID)
 	bindProjectRole(t, w.admin.TenantID, w.viewer.ID, "guest", other.root.ID)
 	for i := range 5 {
-		n := other.node(t, fmt.Sprintf("PRIVATE-%d", i+1), "ticket", other.root.ID, "done", nil)
+		n := other.node(t, fmt.Sprintf("PRIVATE-%d", i+1), "work", other.root.ID, "done", nil)
 		other.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1_000_000, 0, 0, "api", "")
 	}
 	// Make the source's actual price unmistakable; it must not calibrate A's cost.
@@ -41,9 +41,9 @@ func TestPlanningSourceProjectCosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	private := other.node(t, "PRIVATE-6", "ticket", other.root.ID, "open", nil)
+	private := other.node(t, "PRIVATE-6", "work", other.root.ID, "open", nil)
 	other.session(t, private.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "subscription", "B confidential plan")
-	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket"
+	path := "/api/nodes?within=" + w.root.ID + "&kind=work"
 	for _, sort := range []string{"key", "tokens", "list_cost", "paid"} {
 		got := planningOf(t, w.viewer, path+"&sort="+sort)[target.Key]
 		if got == nil || got.Cost == nil || got.Cost.ListEstimated == nil || got.Cost.PaidEstimated == nil {
@@ -71,7 +71,7 @@ func TestPlanningSourceProjectCosts(t *testing.T) {
 // Bulk fixtures keep the regression realistic without hundreds of HTTP writes.
 func planningBulk(t *testing.T, w planningWorld, count, sessions int, state, prefix string, reported bool) []string {
 	t.Helper()
-	kind := kindBySlug(t, w.admin, "ticket")
+	kind := kindBySlug(t, w.admin, "work")
 	var ids []string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,state,parent_id,position,fields)
@@ -116,9 +116,9 @@ func planningBulk(t *testing.T, w planningWorld, count, sessions int, state, pre
 
 func TestPlanningCalibrationSkipsIneligibleAndOtherRoutes(t *testing.T) {
 	w := planningSetup(t)
-	target := w.node(t, "CAL-1", "ticket", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
+	target := w.node(t, "CAL-1", "work", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("FIN-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("FIN-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1_000_000, 0, 0, "api", "")
 	}
 	planningBulk(t, w, 400, 1, "done", "UNREPORTED-", false)
@@ -149,19 +149,19 @@ func TestPlanningSortUsesDisplayedNumbersAndCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("TRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("TRAIN-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 100_000_000, 0, 0, "api", "")
 	}
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("SOLTRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("SOLTRAIN-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-sol", "xhigh", "gpt-6-sol", 60, 5_000_000, 0, 0, "api", "")
 	}
-	high := w.node(t, "SORT-1", "ticket", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 1})
-	low := w.node(t, "SORT-2", "ticket", w.root.ID, "open", map[string]any{"route_role": "build", "area": "backend", "estimate_hours": 2})
-	tie := w.node(t, "SORT-3", "ticket", w.root.ID, "open", map[string]any{"route_role": "build", "area": "backend", "estimate_hours": 2})
-	spent := w.node(t, "SORT-4", "ticket", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 100})
+	high := w.node(t, "SORT-1", "work", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 1})
+	low := w.node(t, "SORT-2", "work", w.root.ID, "open", map[string]any{"route_role": "build", "area": "backend", "estimate_hours": 2})
+	tie := w.node(t, "SORT-3", "work", w.root.ID, "open", map[string]any{"route_role": "build", "area": "backend", "estimate_hours": 2})
+	spent := w.node(t, "SORT-4", "work", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 100})
 	w.session(t, spent.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 0, 0, 0, "api", "")
-	empty := w.node(t, "SORT-5", "ticket", w.root.ID, "open", nil)
+	empty := w.node(t, "SORT-5", "work", w.root.ID, "open", nil)
 	ties := []nodeJSON{low, tie}
 	slices.SortFunc(ties, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
 	for _, field := range []string{"tokens", "list_cost", "paid"} {
@@ -193,8 +193,8 @@ func TestPlanningSortUsesDisplayedNumbersAndCursor(t *testing.T) {
 
 func TestPlanningRoundedCostTie(t *testing.T) {
 	w := planningSetup(t)
-	first := w.node(t, "RND-1", "ticket", w.root.ID, "open", nil)
-	second := w.node(t, "RND-2", "ticket", w.root.ID, "open", nil)
+	first := w.node(t, "RND-1", "work", w.root.ID, "open", nil)
+	second := w.node(t, "RND-2", "work", w.root.ID, "open", nil)
 	w.session(t, first.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
 	w.session(t, second.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
 	// Digits past the six the API projects. The lower id holds the larger raw
@@ -249,8 +249,8 @@ func fixedMicros(usd string) string {
 // still returns, with the integer text, numeric order, and six-place display.
 func TestPlanningHugeUsageDoesNotBreakTheList(t *testing.T) {
 	w := planningSetup(t)
-	huge := w.node(t, "BIG-1", "ticket", w.root.ID, "open", nil)
-	mid := w.node(t, "BIG-2", "ticket", w.root.ID, "open", nil)
+	huge := w.node(t, "BIG-1", "work", w.root.ID, "open", nil)
+	mid := w.node(t, "BIG-2", "work", w.root.ID, "open", nil)
 	for range 5 {
 		w.session(t, huge.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
 	}
@@ -312,7 +312,7 @@ func TestPlanningCostMicrosAgree(t *testing.T) {
 	w := planningSetup(t)
 	// This rounding test needs a calibrated estimate, not a hidden default.
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("MICROTRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("MICROTRAIN-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 4_900_000, 100_000, 4_500_000, "api", "")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
@@ -322,7 +322,7 @@ func TestPlanningCostMicrosAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An api charge on this harness makes the paid estimate follow list price.
-	bill := w.node(t, "BILL-1", "ticket", w.root.ID, "open", nil)
+	bill := w.node(t, "BILL-1", "work", w.root.ID, "open", nil)
 	w.session(t, bill.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
 
 	mk := func(key string, hours any) nodeJSON {
@@ -331,7 +331,7 @@ func TestPlanningCostMicrosAgree(t *testing.T) {
 		if hours != nil {
 			f["estimate_hours"] = hours
 		}
-		return w.node(t, key, "ticket", w.root.ID, "open", f)
+		return w.node(t, key, "work", w.root.ID, "open", f)
 	}
 	zeroA, zeroB := mk("MIC-11", nil), mk("MIC-12", nil)
 	halfA, halfB := mk("MIC-21", nil), mk("MIC-22", nil)
@@ -442,7 +442,7 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 	// List cost so the explained sort key is the micro-dollar projection. Every
 	// row reports the same 4000 tokens, so the page check does not depend on
 	// which tied cost sorts first.
-	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket&sort=list_cost&limit=50"
+	path := "/api/nodes?within=" + w.root.ID + "&kind=work&sort=list_cost&limit=50"
 	if page := listPage(t, w.admin, path); !planningBulkPage(page) {
 		t.Fatal("bulk usage totals")
 	}
