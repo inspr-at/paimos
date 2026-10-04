@@ -55,6 +55,18 @@
       "sha256": "3c2353cc11a31d0a26c7465fe12f4e562ec5fdd0f695d62ba720520d0a75713b",
       "ticket": "AEON-649",
       "reason": "Owner-accepted AEON-648 concept Q4 explicitly retires epic/ticket/task in one atomic migration, with verified pre-migration backup as the only rollback. The starter, schema-extension and historical journey kind guards switch to work; the same-file Go hook reconciles schemas, refuses busy parents, rewrites allowed-child references, preserves node IDs/content and historical sessions/Decision Desk identities, then deletes legacy definitions and appends provenance events. This is a contract change and is incompatible with older binaries that assume retired kinds. Exact bytes are prepared for the coordinator consolidated review, not a package-worker approval or release waiver. Deployment requires release 122 published, drained merge/work queues, stopped writers, instance-specific verified backup/restore and the completed downstream work-node packages; it precedes AEON-596 ship adoption. No production backup, push or deployment is claimed by this local fixture drill."
+    },
+    {
+      "file": "1233_work_parent_releases.sql",
+      "sha256": "2f844411751cb98a95579b79f4dcd18c392f185e00a3c1b3eda69e4c8f6d86fe",
+      "ticket": "AEON-653",
+      "reason": "Additive parent placement metadata, FORCE tenant/project RLS, bounded work-edge scope and ordinary-create inheritance. The classifier conservatively flags replacement of the existing release-note capture helper to admit work leaves; all already-frozen snapshots remain immutable and unchanged. Exact bytes require coordinator consolidated review and whole-chain previous-binary/backup gates before merge or deployment; this worker grants no acceptance or release authority."
+    },
+    {
+      "file": "1234_recurrence_work_templates.sql",
+      "sha256": "c201abb265fddb5f5bf42c967a3073043f43d998dad8dcb58763db586a074929",
+      "ticket": "AEON-653",
+      "reason": "Owner-accepted AEON-648 Q14 migrates stored epic/ticket/task template kind references to work under per-tenant FORCE RLS. The classifier conservatively flags the tenant-loop DO block. Definitions retain content, schedules and identity; receipts and historical sessions are unchanged. Exact bytes require coordinator consolidated review under the AEON-649 verified-backup and downstream integration gates; no deployment approval is claimed."
     }
   ]
 }

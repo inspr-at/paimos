@@ -103,7 +103,7 @@ func TestNativeMembershipVisibilityBoundsAndUninitializedProject(t *testing.T) {
 	})
 	foreign := f.existing("ticket", otherProject, "Other ticket", "open")
 	rows := f.readMembership(deleted, id, foreign, f.feature, "00000000-0000-0000-0000-000000000099")
-	if len(rows) != 1 || rows[0].TicketID != id || rows[0].ReleaseID != nil {
+	if len(rows) != 2 || rows[0].TicketID != id || rows[0].ReleaseID != nil || rows[1].TicketID != f.feature {
 		t.Fatalf("visibility %+v", rows)
 	}
 	before := f.counts()
@@ -137,7 +137,7 @@ func TestNativeMembershipVisibilityBoundsAndUninitializedProject(t *testing.T) {
 	for i := 1; i < 100; i++ {
 		ids = append(ids, fmt.Sprintf("00000000-0000-0000-0000-%012d", i))
 	}
-	if got := f.readMembership(ids...); !reflect.DeepEqual(got, rows) {
+	if got := f.readMembership(ids...); !reflect.DeepEqual(got, rows[:1]) {
 		t.Fatalf("100 bound: %+v", got)
 	}
 	if w := f.request(f.other, http.MethodGet, f.membershipReadPath(f.project, id), ""); w.Code != 404 {

@@ -159,6 +159,12 @@ func httpError(w http.ResponseWriter, status int, message string) {
 // have finished. A failure rolls the entire transaction back; the durable key
 // and count are committed atomically, including overlap skips.
 func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string) (Occurrence, error) {
+	// Normalize historical definitions defensively as well as migrating storage.
+	switch r.Template.Type {
+	case "epic", "ticket", "task":
+		r.Template.Type = "work"
+	}
+
 	existing, err := scanOccurrence(tx.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM recurrence_occurrences WHERE recurrence_id=$1 AND occurrence_key=$2`, r.ID, key))
 	if err == nil {
 		return existing, nil

@@ -5,8 +5,8 @@ package releases
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -24,10 +24,11 @@ func undoMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 		before.ProjectID == "" || before.ProjectID != after.ProjectID || before.ReleaseID != after.ReleaseID || before.ReleaseID != *e.NodeID || len(before.Members) != len(after.Members) || len(before.Members) == 0 {
 		return events.Change{}, events.ErrConflict
 	}
-	if authz.RequireTx(ctx, tx, p, "releases.write", authz.Scope{ProjectID: before.ProjectID}) != nil {
-		return events.Change{}, events.ErrForbidden
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+	if err := lockMembership(ctx, tx, p, before.ProjectID); err != nil {
+		var f *failure
+		if errors.As(err, &f) && f.code == 403 {
+			return events.Change{}, events.ErrForbidden
+		}
 		return events.Change{}, err
 	}
 	var current *string
@@ -44,6 +45,20 @@ func undoMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 		return events.Change{}, events.ErrConflict
 	}
 	oldReleases := map[string]bool{}
+	if len(before.Parents) != len(after.Parents) {
+		return events.Change{}, events.ErrConflict
+	}
+	for i, want := range after.Parents {
+		old := before.Parents[i]
+		var actual string
+		if want.ParentID != old.ParentID || want.ReleaseID == nil {
+			return events.Change{}, events.ErrConflict
+		}
+		if err := tx.QueryRow(ctx, `SELECT p.release_node_id::text FROM work_parent_releases p JOIN nodes n ON n.id=p.parent_node_id AND n.tenant_id=p.tenant_id
+	 WHERE p.parent_node_id=$1 AND p.project_node_id=$2 AND n.project_id=$2 AND n.deleted_at IS NULL FOR UPDATE OF p`, want.ParentID, before.ProjectID).Scan(&actual); err != nil || actual != *want.ReleaseID {
+			return events.Change{}, events.ErrConflict
+		}
+	}
 	for i, want := range after.Members {
 		old := before.Members[i]
 		if want.TicketID != old.TicketID {
@@ -70,6 +85,15 @@ func undoMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 		var oldState string
 		if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE project_node_id=$1 AND release_node_id=$2 FOR UPDATE`, before.ProjectID, id).Scan(&oldState); err != nil || oldState != "planning" {
 			return events.Change{}, events.ErrConflict
+		}
+	}
+	for _, old := range before.Parents {
+		if old.ReleaseID == nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM work_parent_releases WHERE parent_node_id=$1`, old.ParentID); err != nil {
+				return events.Change{}, err
+			}
+		} else if _, err := tx.Exec(ctx, `UPDATE work_parent_releases SET release_node_id=$2 WHERE parent_node_id=$1`, old.ParentID, old.ReleaseID); err != nil {
+			return events.Change{}, err
 		}
 	}
 	for _, old := range before.Members {

@@ -84,7 +84,7 @@ func (m *module) createTicket(w http.ResponseWriter, r *http.Request) {
 func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, in ticketInput) (Walker, error) {
 	var out Walker
 	// Match R1 structural writes and the release planner's lock order.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+	if err := lockMembership(ctx, tx, p, project); err != nil {
 		return out, err
 	}
 	var person bool
@@ -188,15 +188,13 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	if err != nil {
 		return out, err
 	}
-	if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.created", After: snapshot}); err != nil {
-		return out, err
-	}
 	var assigned *string
 	if in.Included {
 		assigned = &release
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,walker_position,source,scope_revision_required)
-  VALUES($1,$2,$3,$4,$5,(SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$3),'manual',true)`, p.TenantID, id, project, in.FeatureID, assigned)
+  VALUES($1,$2,$3,$4,$5,(SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$3),'manual',true)
+ ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET feature_node_id=excluded.feature_node_id`, p.TenantID, id, project, in.FeatureID, assigned)
 	if err != nil {
 		return out, err
 	}
@@ -204,6 +202,9 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 		return out, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now() WHERE project_node_id=$1`, project); err != nil {
+		return out, err
+	}
+	if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.created", After: snapshot}); err != nil {
 		return out, err
 	}
 	out, err = load(ctx, tx, project, release)

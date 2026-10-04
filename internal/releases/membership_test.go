@@ -17,6 +17,9 @@ import (
 
 func (f *ticketFixture) existing(kind, parent, title, state string) string {
 	f.t.Helper()
+	if kind == "epic" || kind == "ticket" || kind == "task" {
+		kind = "work"
+	}
 	var id string
 	f.tx(func(tx pgx.Tx) error {
 		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,$3,$4 FROM node_kinds WHERE slug=$5 RETURNING nodes.id::text`, f.person.TenantID, parent, title, state, kind).Scan(&id)
@@ -56,7 +59,7 @@ func TestExistingTicketOptionsBulkAddAndUndo(t *testing.T) {
 	f := ticketSetup(t)
 	ids := []string{f.existing("ticket", f.project, "Alpha", "open"), f.existing("ticket", f.feature, "Beta", "open"), f.existing("ticket", f.project, "Gamma", "open")}
 	closed := f.existing("ticket", f.project, "Closed", "done")
-	task := f.existing("task", f.project, "Task", "open")
+	task := f.existing("memory", f.project, "Non-work", "open")
 	options := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+f.release+"/ticket-options?q=Alpha", "")
 	if options.Code != 200 {
 		t.Fatalf("options %d %s", options.Code, options.Body.String())

@@ -115,6 +115,15 @@ func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 func lock(ctx context.Context, tx pgx.Tx, tenantID string, try bool) (bool, error) {
 	if try {
 		var got bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, tenantID).Scan(&got); err != nil || !got {
+			return false, err
+		}
+	} else if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, tenantID); err != nil {
+		return false, err
+	}
+
+	if try {
+		var got bool
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, tenantID).Scan(&got); err != nil || !got {
 			return false, err
 		}

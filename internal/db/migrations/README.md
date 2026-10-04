@@ -324,3 +324,40 @@ rollout, the coordinator validates the AEON-429 integration and whole chain,
 including the parent UI, under AEON-649's maintenance/verified-backup gate. See
 the root README for the API contract, explicit bounds and read-serialization
 tradeoff. This worker neither pushes nor deploys.
+
+
+## AEON-653 release placement and recurring leaves
+
+Coordinator-reserved **1233–1234** belong only to AEON-653. The coordinator
+records their individual purposes in its shared ledger; workers author only in
+their own worktree. Migration 1233 adds `work_parent_releases`: tenant, parent,
+project and release UUIDs are metadata, located by `(tenant_id,parent_node_id)`.
+The DSAR inventory does not exist in this stack or its local origin/main;
+classify these four columns when integrating AEON-490's inventory.
+
+`ticket_node_ids` accepts parents and leaves. Placement expands work edges in
+the same project and deduplicates overlapping roots, with at most 100 roots,
+1000 work nodes per root and 1000 resulting leaves; excess rolls back. Parent
+intent is separate from release membership. Future leaves inherit the nearest
+placed ancestor's release only while it is planning. Otherwise they remain
+unassigned, become Backlog and carry `release_inheritance_note=parent_release_closed`.
+A fresh inherited leaf advances project/release revisions, invalidating stale
+plans and Undo. Undo restores both leaf membership and parent intent, only while
+its fenced result is current. Membership reads report actual distinct leaf
+releases, not intent, and return bounded leaf identities for honest client counts.
+Scopes stop at non-work children and nested projects; caller RLS stays active.
+
+Migration 1234 normalizes stored recurrence template references to work and
+increments definition revisions without rewriting occurrence receipts or prior
+sessions. REST keeps epic/ticket/task template aliases. Each occurrence creates
+a work leaf; the existing AEON-650 engine reopens its parent when
+`work-parent-status` is enabled through AEON-429. Parent Done is never a
+recurrence trigger. Historical sessions and Decision Desk IDs are untouched.
+
+Integration seams: the existing release-note capture helper and manifest
+backfill accept work leaves (AEON-596 P3/P6); immutable published snapshots stay
+unchanged. System recurrence queue entry explicitly checks leaf shape before
+using the legacy readiness helper (AEON-652), pending its consolidated lifecycle
+changes. Review both seams when merging siblings. Neither migration enables the
+rollout flag. Whole-chain acceptance, verified backup/rollback, push and deployment
+remain the coordinator's gates; this worker performs local checks and commits.

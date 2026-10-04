@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -28,6 +29,7 @@ type ticketOption struct {
 	ReleaseID    *string `json:"release_node_id"`
 	ReleaseTitle *string `json:"release_title"`
 	Availability string  `json:"availability"`
+	IsParent     bool    `json:"is_parent"`
 }
 type optionsResult struct {
 	Revision int64          `json:"expected_revision"`
@@ -39,8 +41,9 @@ type membershipInput struct {
 	ConfirmMove bool     `json:"confirm_move"`
 }
 type membershipResult struct {
-	Walker  Walker `json:"walker"`
-	EventID int64  `json:"event_id"`
+	Walker  Walker   `json:"walker"`
+	EventID int64    `json:"event_id"`
+	LeafIDs []string `json:"leaf_node_ids"`
 }
 type memberState struct {
 	TicketID      string  `json:"ticket_node_id"`
@@ -50,11 +53,12 @@ type memberState struct {
 	ScopeRequired bool    `json:"scope_revision_required"`
 }
 type membershipSnapshot struct {
-	ProjectID       string        `json:"project_node_id"`
-	ReleaseID       string        `json:"release_node_id"`
-	ProjectRevision int64         `json:"project_revision"`
-	ReleaseRevision int64         `json:"release_revision"`
-	Members         []memberState `json:"members"`
+	ProjectID       string            `json:"project_node_id"`
+	ReleaseID       string            `json:"release_node_id"`
+	ProjectRevision int64             `json:"project_revision"`
+	ReleaseRevision int64             `json:"release_revision"`
+	Members         []memberState     `json:"members"`
+	Parents         []parentPlacement `json:"parents,omitempty"`
 }
 
 func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +71,7 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	epic := strings.TrimSpace(r.URL.Query().Get("epic"))
 	kind := strings.TrimSpace(r.URL.Query().Get("type"))
-	if len(q) > 256 || len(status) > 64 || (epic != "" && !uuid.MatchString(epic)) || (kind != "" && kind != "ticket" && kind != "task") {
+	if len(q) > 256 || len(status) > 64 || (epic != "" && !uuid.MatchString(epic)) || (kind != "" && kind != "work" && kind != "ticket" && kind != "task") {
 		respond(w, nil, fail(400, "invalid ticket filter"))
 		return
 	}
@@ -93,17 +97,18 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 			return fail(409, "release is not planning")
 		}
 		rows, err := tx.Query(r.Context(), `SELECT n.id::text,n.key,n.title,n.state,k.slug,
+   EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work'),
    coalesce(j.feature_node_id,e.id)::text,j.release_node_id::text,rn.title,other.state
    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
    LEFT JOIN journey_tickets j ON j.tenant_id=n.tenant_id AND j.ticket_node_id=n.id
    LEFT JOIN nodes e ON e.tenant_id=n.tenant_id AND e.id=n.parent_id AND e.deleted_at IS NULL
-    AND EXISTS(SELECT 1 FROM node_kinds ek WHERE ek.tenant_id=e.tenant_id AND ek.id=e.kind_id AND ek.slug='epic')
+    AND EXISTS(SELECT 1 FROM node_kinds ek WHERE ek.tenant_id=e.tenant_id AND ek.id=e.kind_id AND ek.slug IN ('work','epic'))
    LEFT JOIN nodes rn ON rn.tenant_id=j.tenant_id AND rn.id=j.release_node_id AND rn.deleted_at IS NULL
    LEFT JOIN journey_releases other ON other.tenant_id=j.tenant_id AND other.project_node_id=j.project_node_id AND other.release_node_id=rn.id
-   WHERE n.project_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')
+   WHERE n.project_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')
     AND ($2='' OR n.key ILIKE '%'||$2||'%' OR n.title ILIKE '%'||$2||'%')
     AND ($3='' OR n.state=$3) AND ($4='' OR coalesce(j.feature_node_id,e.id)=nullif($4,'')::uuid)
-    AND ($5='' OR k.slug=$5)
+    AND ($5='' OR k.slug=$5 OR (k.slug='work' AND $5 IN ('ticket','task')))
    ORDER BY n.key,n.id LIMIT $6`, project, q, status, epic, kind, limit)
 		if err != nil {
 			return err
@@ -112,13 +117,13 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var t ticketOption
 			var releaseState *string
-			if err := rows.Scan(&t.NodeID, &t.Key, &t.Title, &t.Status, &t.Type, &t.FeatureID, &t.ReleaseID, &t.ReleaseTitle, &releaseState); err != nil {
+			if err := rows.Scan(&t.NodeID, &t.Key, &t.Title, &t.Status, &t.Type, &t.IsParent, &t.FeatureID, &t.ReleaseID, &t.ReleaseTitle, &releaseState); err != nil {
 				return err
 			}
 			switch {
-			case t.Type != "ticket":
+			case t.Type != "ticket" && t.Type != "work":
 				t.Availability = "unsupported"
-			case closedTicketState(t.Status):
+			case closedTicketState(t.Status) && !t.IsParent:
 				t.Availability = "closed"
 			case t.ReleaseID == nil:
 				t.Availability = "addable"
@@ -173,8 +178,10 @@ func (m *module) addMembership(w http.ResponseWriter, r *http.Request) {
 }
 
 func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, in membershipInput) (membershipResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	var result membershipResult
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+	if err := lockMembership(ctx, tx, p, project); err != nil {
 		return result, err
 	}
 	var person bool
@@ -200,6 +207,11 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 	if rev != in.Revision {
 		return result, fail(409, "release revision changed")
 	}
+	leaves, parents, err := expandWorkLeaves(ctx, tx, project, in.IDs)
+	if err != nil {
+		return result, err
+	}
+	in.IDs = leaves
 	before := membershipSnapshot{ProjectID: project, ReleaseID: release, ProjectRevision: projectRev, ReleaseRevision: rev, Members: make([]memberState, 0, len(in.IDs))}
 	after := before
 	after.Members = make([]memberState, 0, len(in.IDs))
@@ -210,7 +222,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		var nodeProject, kind, status string
 		var feature *string
 		err := tx.QueryRow(ctx, `SELECT n.project_id::text,k.slug,n.state,
-    CASE WHEN ek.slug='epic' THEN e.id::text ELSE NULL END
+    CASE WHEN ek.slug IN ('work','epic') THEN e.id::text ELSE NULL END
     FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
     LEFT JOIN nodes e ON e.tenant_id=n.tenant_id AND e.id=n.parent_id AND e.deleted_at IS NULL
     LEFT JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
@@ -221,10 +233,10 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		if err != nil {
 			return result, err
 		}
-		if nodeProject != project || kind != "ticket" {
+		if nodeProject != project || (kind != "ticket" && kind != "work") {
 			return result, fail(404, "ticket not found in project")
 		}
-		if closedTicketState(status) {
+		if closedTicketState(status) && len(parents) == 0 {
 			return result, fail(409, "closed tickets cannot be added")
 		}
 		old := memberState{TicketID: id}
@@ -236,7 +248,12 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		old.Exists = err == nil
 		if old.ReleaseID != nil {
 			if *old.ReleaseID == release {
-				return result, fail(409, "ticket is already included")
+				if len(parents) == 0 {
+					return result, fail(409, "ticket is already included")
+				}
+				before.Members = append(before.Members, old)
+				after.Members = append(after.Members, old)
+				continue
 			}
 			var oldState string
 			if err := tx.QueryRow(ctx, `SELECT r.state FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL WHERE r.project_node_id=$1 AND r.release_node_id=$2 FOR UPDATE OF r`, project, *old.ReleaseID).Scan(&oldState); err == pgx.ErrNoRows {
@@ -280,6 +297,9 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		}
 		before.Members = append(before.Members, old)
 	}
+	if err := placeParents(ctx, tx, p, project, release, parents, &before, &after); err != nil {
+		return result, err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE journey_releases SET revision=revision+1,access_required=EXISTS(SELECT 1 FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1 AND t.access_change AND n.deleted_at IS NULL) WHERE release_node_id=$1`, release); err != nil {
 		return result, err
 	}
@@ -297,6 +317,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 	}
 	result.Walker, err = load(ctx, tx, project, release)
 	result.EventID = event.ID
+	result.LeafIDs = leaves
 	return result, err
 }
 
