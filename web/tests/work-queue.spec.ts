@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { expectStableControls } from './helpers/stable'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
@@ -279,8 +280,17 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     await expect(page).toHaveURL(/\/p\/PHAROS\/tickets(?:\?|$)/)
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390)
-    await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()
-    await expect(page.getByRole('dialog', { name: 'Work queue', exact: true })).toBeVisible()
+    const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
+    const queue = page.getByRole('dialog', { name: 'Work queue', exact: true })
+    await expectStableControls({
+      controls: { opener },
+      scrollAreas: { page: page.locator('html') },
+      interactions: [
+        { name: 'open phone queue', run: async () => { await opener.click(); await expect(queue).toBeVisible() } },
+        { name: 'dismiss phone queue', run: async () => { await page.keyboard.press('Escape'); await expect(queue).toHaveCount(0) } },
+        { name: 'reopen phone queue', run: async () => { await opener.click(); await expect(queue).toBeVisible() } },
+      ],
+    })
     await page.screenshot({ path: join(shots, `queue-phone-${theme}.png`) })
     await page.keyboard.press('Escape'); await page.setViewportSize({ width: 1600, height: 1000 })
   }

@@ -1,0 +1,11 @@
+--- a/web/src/views/ProjectView.vue
++++ b/web/src/views/ProjectView.vue
+@@ -2021,4 +2021,6 @@
+ @media (max-width: 600px) {
+-  .header-activity { display: none; }
+-  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description"; gap: 4px 10px; }
++  /* Keep the queue reachable; only the activity timestamp folds on phones. */
++  .header-activity > span { display: none; }
++  .project-page[class*="header-"] .header-activity { display: flex; grid-area: activity; justify-self: start; }
++  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "activity activity" "stats stats" "description description"; gap: 4px 10px; }
+   .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }

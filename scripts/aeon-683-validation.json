@@ -1,6 +1,6 @@
 {
   "ticket": "AEON-683",
-  "review": "review-cg42: P2 required validation incomplete",
+  "review": "review-ap51: final fix round; account ownership reconciled, local replay evidence extended, remote/owner integration still open",
   "tested_spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
   "new_behavior_changes": false,
   "product_defect": {
@@ -11,7 +11,8 @@
     "root_cause": "Historical ProjectView.vue places the only queue opener in .activity.header-activity, then max-width:600px sets .header-activity display:none.",
     "ownership": "Header feature is absent from this main-based branch; origin/work/aeon-646-hide still contains the rule. No other worktree edited. Coordinator handoff recorded on AEON-683.",
     "proposed_diff": "In the phone header, retain .header-activity as a visible reserved grid slot and hide only its timestamp span; keep .q-stat visible and verify folded/compact/comfortable behavior, 390px overflow and control bounds. Preserve the failing phone assertion.",
-    "status": "open: owning header branch correction and acceptance required"
+    "status": "open: exact owner proposal reproduced baseline failure and passed20/20 locally; owner integration and remote acceptance required",
+    "proposed_diff_artifact": "scripts/aeon-683-phone-queue.patch"
   },
   "unit_validation": [
     {
@@ -70,9 +71,9 @@
   ],
   "preparation": "Historical web, scripts and required internal JSON fixtures exported into own ignored tmp/aeon-683-fix2/<revision>; dependencies symlinked from this worktree after verifying identical lockfile. Before uses original historical spec; after replaces ONLY that spec with 7718e84e. Product, helpers and fixtures remain on the historical revision.",
   "remote_acceptance": {
-    "status": "open",
+    "status": "open: not authorized by fix3 local-only/mbp2606-off-limits restrictions",
     "launcher_exit_code": 3,
-    "reason": "scripts/playwright-remote.mjs refuses before SSH: OPS-247 bootstrap and approved launcher pending. Fix2 brief explicitly puts mbp2606 off limits. No origin branch exists for this commit; user prohibits push. remote-test.sh is Go-only; no affected Go packages. No CI-equivalent Linux Chromium image was available locally.",
+    "reason": "Direct no-push/no-deploy instruction and fix3 local-only/mbp2606-off-limits instruction govern. remote-test.sh is Go-only and transfers a temporary Git ref; no affected Go packages. Browser remote readiness gate remains false pending OPS-247. No CI-equivalent Linux browser image exists in the local Docker image inventory.",
     "command": [
       "npm",
       "--prefix",
@@ -446,7 +447,7 @@
       "log_sha256": "a5081f7ab0674f448c1cfa2c34b3b628e3bf6a518cf8d0eb8172947e5d68edfd"
     }
   ],
-  "validation_status": "partial: review gate remains closed",
+  "validation_status": "partial: account ownership reconciled and local replay evidence extended; approved-dial row-budget conflict, owning-branch phone correction and remote acceptance remain open",
   "pending_runs": [
     {
       "product_revision": "6a27bb1b",
@@ -454,7 +455,19 @@
       "selection": "human-check filter is linked",
       "before_repeats": 1,
       "after_repeats": 20,
-      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+      "reason": "Local replay attempted in fix3; approved remote acceptance remains unauthorized/unavailable.",
+      "fix3_local_result": [
+        {
+          "exit_code": 0,
+          "report_sha256": "1cfeadcd8f7e81cd1d6f8d2454eba4c7a31e7f3daf41b16e3db499d2cde4ba1e",
+          "reference": "fix3.runs",
+          "outcomes": [
+            {
+              "passed": 20
+            }
+          ]
+        }
+      ]
     },
     {
       "product_revision": "0c7d02ca",
@@ -462,7 +475,31 @@
       "selection": "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
       "before_repeats": 1,
       "after_repeats": 20,
-      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+      "reason": "Local replay attempted in fix3; approved remote acceptance remains unauthorized/unavailable.",
+      "fix3_local_result": [
+        {
+          "exit_code": 0,
+          "report_sha256": "167e21b312320eeff4f7f69fcda93bc82b818d42abe1742abe91adaf360e5dbd",
+          "reference": "fix3.runs",
+          "outcomes": [
+            {
+              "passed": 20
+            },
+            {
+              "passed": 20
+            },
+            {
+              "passed": 20
+            },
+            {
+              "passed": 20
+            },
+            {
+              "passed": 20
+            }
+          ]
+        }
+      ]
     },
     {
       "product_revision": "0c7d02ca",
@@ -470,7 +507,19 @@
       "selection": "keyboard and drag moves",
       "before_repeats": 1,
       "after_repeats": 20,
-      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+      "reason": "Local replay attempted in fix3; approved remote acceptance remains unauthorized/unavailable.",
+      "fix3_local_result": [
+        {
+          "exit_code": 0,
+          "report_sha256": "090e8ef890488fd20b2c753a6aa43cc974a0c542d58fcdef23758164cbf51a25",
+          "reference": "fix3.runs",
+          "outcomes": [
+            {
+              "passed": 20
+            }
+          ]
+        }
+      ]
     },
     {
       "product_revision": "0c7d02ca",
@@ -478,7 +527,19 @@
       "selection": "human-check filter is linked",
       "before_repeats": 1,
       "after_repeats": 20,
-      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+      "reason": "Local replay attempted in fix3; approved remote acceptance remains unauthorized/unavailable.",
+      "fix3_local_result": [
+        {
+          "exit_code": 0,
+          "report_sha256": "855e639c365ba35bbb1e35acc96f64f9ca2faabbf2db824b4e10dc0fd51b05fc",
+          "reference": "fix3.runs",
+          "outcomes": [
+            {
+              "passed": 20
+            }
+          ]
+        }
+      ]
     },
     {
       "product_revision": "99981148",
@@ -486,7 +547,25 @@
       "selection": "Agents working dial and selectors",
       "before_repeats": 1,
       "after_repeats": 20,
-      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+      "reason": "Local replay attempted in fix3; approved remote acceptance remains unauthorized/unavailable.",
+      "fix3_local_result": [
+        {
+          "exit_code": 1,
+          "report_sha256": "80f5ca8407507b883bf50361ba251466fd5df9901f162b161fd7b66283dbcc7d",
+          "reference": "fix3.runs",
+          "outcomes": [
+            {
+              "failed": 20
+            },
+            {
+              "failed": 20
+            },
+            {
+              "failed": 20
+            }
+          ]
+        }
+      ]
     },
     {
       "product_revision": "99981148",
@@ -494,7 +573,1099 @@
       "selection": "Agents at once saves|stored ceiling arrives",
       "before_repeats": 1,
       "after_repeats": 20,
-      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+      "reason": "Local replay attempted in fix3; approved remote acceptance remains unauthorized/unavailable.",
+      "fix3_local_result": [
+        {
+          "exit_code": 0,
+          "report_sha256": "bbf86481909d49cf2516d806506fe51185a0a26c5802ce1ee09879fa257d84a3",
+          "reference": "fix3.runs",
+          "outcomes": [
+            {
+              "passed": 20
+            },
+            {
+              "passed": 20
+            }
+          ]
+        }
+      ]
     }
-  ]
+  ],
+  "fix3": {
+    "base_revision": "6f1b6864c710d7447d2fb359b3db461af7b440f5",
+    "concurrent_work_preserved": "29beb28c adds fix4 evidence only; product source unchanged. Commit and file left intact.",
+    "no_landed_product_changes": true,
+    "lane": "local macOS arm64, pinned bundled Chromium headless shell, supervised host lock, one spec at a time, workers=1, retries=0",
+    "selection": "Historical failing cases only, 20 repetitions per corrected case; not full-spec or remote acceptance.",
+    "authorization": "Fix3 explicitly says local tests only and mbp2606 off limits; direct user forbids push and deploy. No remote runner invoked and no readiness or safety gate changed.",
+    "source_verification": [
+      {
+        "revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "verified_product_helper_fixture_files": 1027,
+        "excluded": "Unexecuted *.spec.ts files; each run installs its declared spec revision.",
+        "mismatches": []
+      },
+      {
+        "revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "verified_product_helper_fixture_files": 1026,
+        "excluded": "Unexecuted *.spec.ts files; each run installs its declared spec revision.",
+        "mismatches": []
+      },
+      {
+        "revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "verified_product_helper_fixture_files": 1016,
+        "excluded": "Unexecuted *.spec.ts files; each run installs its declared spec revision.",
+        "mismatches": []
+      }
+    ],
+    "build_validation": {
+      "command": "npm --prefix web run build",
+      "exit_code": 0,
+      "log_file": "tmp/aeon-683-fix3/evidence/build.log",
+      "log_sha256": "9d9bcc58cf2b036b5cb49254bc3dd1a1f3e9208acef57b23dfb160853e340f13",
+      "note": "Existing large-chunk build warning; no product code changed."
+    },
+    "go_validation": "No affected Go package; Go-only remote-test.sh not invoked under explicit mbp2606-off-limits/no-push constraints.",
+    "unit_validation": [
+      {
+        "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/queue-filter.test.ts",
+        "passed": 2,
+        "exit_code": 0,
+        "time": "2026-10-04T09:25:55Z"
+      },
+      {
+        "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/work-queue.test.ts",
+        "passed": 5,
+        "exit_code": 0,
+        "time": "2026-10-04T09:25:58Z"
+      },
+      {
+        "command": "cd web && ./node_modules/.bin/vitest run tests/work-queue-store.unit.test.ts --maxWorkers=1",
+        "passed": 9,
+        "exit_code": 0,
+        "time": "2026-10-04T09:26:01Z"
+      },
+      {
+        "command": "cd web && ./node_modules/.bin/vitest run tests/agents-working.unit.test.ts --maxWorkers=1",
+        "passed": 7,
+        "exit_code": 0,
+        "time": "2026-10-04T09:26:05Z"
+      }
+    ],
+    "account_ownership": {
+      "owner_ticket": "AEON-647",
+      "owner_commit": "b11aa0f612205b6e4eee50cb5bce9ab33c152168",
+      "aeon_683_account_diff_removed": true,
+      "branch_product": "Current main-based branch retains its original matching account assertions.",
+      "integration": "Integrate b11aa0f6 with AEON-647 dial product; retain its exact Codex at-most-3 selector, starting-value assertion and full accessible-name assertion.",
+      "baseline_file_sha256": "b3fc6e7dfd982e3360a1da98a7089c72aa4060dff83cb8288db0eea901e4a41b",
+      "owner_file_sha256": "3ddacd53863d08d384dbf239e09175405be656cfb5a42ddc7558272ea6825a58"
+    },
+    "phone_proposal": {
+      "artifact": "scripts/aeon-683-phone-queue.patch",
+      "patch_sha256": "f0e834e0b029c6fae6a9ea26ab955b44b9e2ffe1b5c389c0bdb4cf2f1d7b58d6",
+      "owner_ticket": "AEON-646",
+      "owner_branch": "work/aeon-646-hide",
+      "owner_reference": "560d22bb",
+      "application": "Applied only in an ignored AEON-683 snapshot; test execution/result is recorded separately in runs. Owning branch and current product source untouched.",
+      "regression": "The same fix3 spec bytes are used before/after the proposed CSS change; the original phone assertion is retained with opener geometry checks through open/dismiss/reopen. Exact outcomes, including prior supervisor refusals, are recorded in runs.",
+      "remaining": "Owner must apply/review the proposal on its branch, verify its approved fold/density layouts and obtain approved remote evidence. This is a local snapshot proposal, not a landed owning-branch correction.",
+      "local_result": "Before: missing phone opener; after:20/20 PASS with only the proposed CSS changed. Both themes, phone overflow, accessibility and opener stability assertions retained."
+    },
+    "design_conflicts": [
+      {
+        "ticket": "AEON-647",
+        "decision": "Approved revision 10, including 44px phone targets, retained.",
+        "spec": "no-shift.spec.ts",
+        "assertion": "rowsHeight <= rowCount * (width <= 760 ? 127 : 61)",
+        "observed": "All 60 corrected historical cases fail unchanged row budget: desktop384px vs305px; phone694px vs635px.",
+        "product": "Historical approved dial sets min-height76px desktop and134px narrow.",
+        "resolution": "No assertion or product design loosened/skipped; coordinator must reconcile the approved design and legacy size budget. Geometry guard never reached in these runs."
+      }
+    ],
+    "baseline_caveats": [
+      "0c7d02ca queue keyboard/drag baseline passed one local replay; its20 corrected passes support a pass check, not same-revision failure closure. The6a27bb1b baseline queue failure was reproduced in fix2."
+    ],
+    "runs": [
+      {
+        "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+        "spec": "status-help.spec.ts",
+        "phase": "after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "status-help.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "human-check filter is linked",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/0c7d02ca-status-help-after-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:22:19.645750+00:00",
+        "finished_at": "2026-10-04T09:22:47.315271+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-status-help-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-status-help-after.log",
+        "log_sha256": "b668451506ed2bdde03c93f6479ab8929d9ef08f76b528e15a5b9d5da02ff440",
+        "stats": {
+          "startTime": "2026-10-04T09:22:19.972Z",
+          "duration": 27145.32,
+          "expected": 20,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "855e639c365ba35bbb1e35acc96f64f9ca2faabbf2db824b4e10dc0fd51b05fc",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "human-check filter is linked and removes tickets that do not need a check",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec": "status-help.spec.ts",
+        "phase": "before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "status-help.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "human-check filter is linked",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/0c7d02ca-status-help-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:22:11.333256+00:00",
+        "finished_at": "2026-10-04T09:22:19.562371+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-status-help-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-status-help-before.log",
+        "log_sha256": "5944398f9c89ae3bcfc44fe2edde0cde75c00cfe79e2bea5c5c8a98b3b134865",
+        "stats": {
+          "startTime": "2026-10-04T09:22:11.747Z",
+          "duration": 7619.913,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "report_sha256": "4e645e5fd354eaa91aa13cbe69971347face5b8fe5809648951fb6079848bc39",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "human-check filter is linked and removes tickets that do not need a check",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('.filter-chip').filter({ hasText: 'Needs a human check' })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" locator('.filter-chip').filter({ hasText: 'Needs a human check' }) with timeout 5000ms\n  - waiting for locator('.filter-chip').filter({ hasText: 'Needs a human check' })\n\n\n  160 |   await page.goto('/p/PHAROS?human_check=pending')\n  161 |   await expect(page.locator('.tickets tbody .ticket-row').filter({ hasText: 'Connect Hetzner Cloud' })).toHaveCount(1)\n> 162 |   await expect(page.locator('.filter-chip').filter({ hasText: 'Needs a human check' })).toBeVisible()\n      |                                                                                         ^\n  163 |   await expect(page.locator('.tickets tbody .ticket-row').filter({ hasText: 'Build the fleet dashboard' })).toHaveCount(0)\n  164 | })\n  165 |\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/0c7d02ca/web/tests/status-help.spec.ts:162:89"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+        "spec": "views-filters.spec.ts",
+        "phase": "after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "views-filters.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/0c7d02ca-views-filters-after-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:19:43.550772+00:00",
+        "finished_at": "2026-10-04T09:21:29.040248+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-views-filters-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-views-filters-after.log",
+        "log_sha256": "3633bbe5caff4a03ddb45ee61b2e7138c4c7c1387991264caf3eb61e660c587b",
+        "stats": {
+          "startTime": "2026-10-04T09:19:43.827Z",
+          "duration": 105034.966,
+          "expected": 100,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "167e21b312320eeff4f7f69fcda93bc82b818d42abe1742abe91adaf360e5dbd",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "an excluded value filters with \"not\", shows in its control and travels in the URL and the API",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          },
+          {
+            "title": "Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          },
+          {
+            "title": "a custom date range filters imported start dates by day",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          },
+          {
+            "title": "saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          },
+          {
+            "title": "in a view the column set belongs to the view; row height is the person\u2019s own",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec": "views-filters.spec.ts",
+        "phase": "before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "views-filters.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/0c7d02ca-views-filters-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:18:52.065076+00:00",
+        "finished_at": "2026-10-04T09:19:43.515149+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-views-filters-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-views-filters-before.log",
+        "log_sha256": "c7c53210e9490422997433f8b4b852b161942112658e976e09c2b3dc49c979a1",
+        "stats": {
+          "startTime": "2026-10-04T09:18:52.404Z",
+          "duration": 50935.193,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 5,
+          "flaky": 0
+        },
+        "report_sha256": "5a1dcc20439e7b214baa5a4ba8b625511645c0d006872b562e2faeb9228a7e47",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "an excluded value filters with \"not\", shows in its chip and travels in the URL and the API",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByLabel('Applied filters')\nExpected substring: \"Statusnot Done, Cancelled\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toContainText\" getByLabel('Applied filters') with timeout 5000ms\n  - waiting for getByLabel('Applied filters')\n\n\n  47 |   await page.keyboard.press('Escape')\n  48 |   const chips = page.getByLabel('Applied filters')\n> 49 |   await expect(chips).toContainText('Statusnot Done, Cancelled')\n     |                       ^\n  50 |   // Backspace on a chip removes it and keeps focus in the chips.\n  51 |   await chips.getByRole('button', { name: /^Edit Status filter/ }).focus()\n  52 |   await page.keyboard.press('Backspace')\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/0c7d02ca/web/tests/views-filters.spec.ts:49:23"
+            ]
+          },
+          {
+            "title": "Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByLabel('Applied filters')\nExpected substring: \"EpicGuarded multi-cloud provisioning\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toContainText\" getByLabel('Applied filters') with timeout 5000ms\n  - waiting for getByLabel('Applied filters')\n\n\n  84 |   await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])\n  85 |   await page.keyboard.press('Escape')\n> 86 |   await expect(page.getByLabel('Applied filters')).toContainText('EpicGuarded multi-cloud provisioning')\n     |                                                    ^\n  87 |   await page.getByRole('button', { name: /Remove Epic filter/ }).click()\n  88 |   // Cost unit: native and imported labels alike.\n  89 |   await page.getByRole('button', { name: 'Filter by more' }).click()\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/0c7d02ca/web/tests/views-filters.spec.ts:86:52"
+            ]
+          },
+          {
+            "title": "a custom date range filters imported start dates by day",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByLabel('Applied filters')\nExpected substring: \"Start1 Sep \u2013 15 Sep\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toContainText\" getByLabel('Applied filters') with timeout 5000ms\n  - waiting for getByLabel('Applied filters')\n\n\n  128 |   await expect(keys(page)).toHaveText(['PHAROS-11'])\n  129 |   expect(lastList(calls).query.get('date_field')).toBe('start')\n> 130 |   await expect(page.getByLabel('Applied filters')).toContainText('Start1 Sep \u2013 15 Sep')\n      |                                                    ^\n  131 | })\n  132 |\n  133 | test('saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved', async ({ page }) => {\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/0c7d02ca/web/tests/views-filters.spec.ts:130:52"
+            ]
+          },
+          {
+            "title": "saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved",
+            "outcomes": {
+              "timedOut": 1
+            },
+            "errors": [
+              "Error: locator.click: Test timeout of 30000ms exceeded.\nCall log:\n  - waiting for getByRole('toolbar', { name: 'Ticket list controls' }).getByRole('button', { name: /^Priority( \\d+)?$/ })\n\n\n  151 |   await expect(tab).toHaveAttribute('aria-current', 'page')\n  152 |   // A change marks the view; Save writes it, Reset goes back.\n> 153 |   await toolbar(page).getByRole('button', { name: /^Priority( \\d+)?$/ }).click()\n      |                                                                          ^\n  154 |   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('Medium', { exact: true }).click()\n  155 |   await page.keyboard.press('Escape')\n  156 |   await expect(bar(page).locator('.dirty')).toBeVisible()\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/0c7d02ca/web/tests/views-filters.spec.ts:153:74",
+              "Test timeout of 30000ms exceeded."
+            ]
+          },
+          {
+            "title": "in a view the column set belongs to the view; row height is the person\u2019s own",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: locator.click: Error: strict mode violation: getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Compact' }) resolved to 2 elements:\n    1) <button role=\"radio\" type=\"button\" data-v-60f71697=\"\" aria-checked=\"false\">\u2026</button> aka getByRole('radiogroup', { name: 'Row height' }).getByRole('radio', { name: 'Compact' })\n    2) <button role=\"radio\" type=\"button\" data-v-4ea5c09d=\"\" aria-checked=\"true\">\u2026</button> aka getByRole('radiogroup', { name: 'Project header density' }).getByRole('radio', { name: 'Compact' })\n\nCall log:\n  - waiting for getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Compact' })\n\n\n  314 |   // The person's own columns are untouched.\n  315 |   expect(data.preferences['list:p-pharos']?.visible).toBeUndefined()\n> 316 |   await display.getByRole('radio', { name: 'Compact' }).click()\n      |                                                         ^\n  317 |   await expect.poll(() => (data.preferences['list:display'] as { density?: string } | undefined)?.density).toBe('compact')\n  318 |   await page.keyboard.press('Escape')\n  319 |   await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/0c7d02ca/web/tests/views-filters.spec.ts:316:57"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+        "spec": "work-queue.spec.ts",
+        "phase": "after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "keyboard and drag moves",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/0c7d02ca-work-queue-after-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:21:32.486181+00:00",
+        "finished_at": "2026-10-04T09:22:11.214748+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-work-queue-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-work-queue-after.log",
+        "log_sha256": "27170e5cb581cbe307b044e3c07d4a5eda13874d257e430623700fcc2edcff19",
+        "stats": {
+          "startTime": "2026-10-04T09:21:32.771Z",
+          "duration": 38204.282,
+          "expected": 20,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "090e8ef890488fd20b2c753a6aa43cc974a0c542d58fcdef23758164cbf51a25",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "keyboard and drag moves persist, use workspace positions, retain focus, reset and filter membership",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+        "spec": "work-queue.spec.ts",
+        "phase": "before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "keyboard and drag moves",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/0c7d02ca-work-queue-before-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:21:29.119811+00:00",
+        "finished_at": "2026-10-04T09:21:32.412510+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-work-queue-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/0c7d02ca-work-queue-before.log",
+        "log_sha256": "a816e4c7fd011fd242857a37ba60d0de04f50a3eba6c26361f905592ffb7c0cc",
+        "stats": {
+          "startTime": "2026-10-04T09:21:29.396Z",
+          "duration": 2840.01,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "944975b5ae510e883a84860348207e84501bb0c3178ea2553fb8aed34c1ac773",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "keyboard and drag moves persist, use workspace positions, retain focus, reset and filter membership",
+            "outcomes": {
+              "passed": 1
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "proposal-after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-after-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:25:47.909354+00:00",
+        "finished_at": "2026-10-04T09:25:47.954919+00:00",
+        "product_source_sha256": "6611fab89a8f353f62983eebb52776395cdb3611263662b8351101f20bc5b9a8",
+        "proposal_patch_sha256": "f0e834e0b029c6fae6a9ea26ab955b44b9e2ffe1b5c389c0bdb4cf2f1d7b58d6",
+        "proposal_applied": true,
+        "ownership": "Proposal applied only to an ignored snapshot within AEON-683; owning branch untouched.",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-after-refused.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-after-refused.log",
+        "log_sha256": "221fd15a7f854f30d985eb2fa3d23b2d6c5fe5b4f7859a2e2d8c6d86bfbaaff7",
+        "validation_status": "not executed: supervisor refused startup; see log",
+        "results": []
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "proposal-after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-after-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:28:35.684017+00:00",
+        "finished_at": "2026-10-04T09:30:18.904059+00:00",
+        "product_source_sha256": "6611fab89a8f353f62983eebb52776395cdb3611263662b8351101f20bc5b9a8",
+        "proposal_patch_sha256": "f0e834e0b029c6fae6a9ea26ab955b44b9e2ffe1b5c389c0bdb4cf2f1d7b58d6",
+        "proposal_applied": true,
+        "ownership": "Proposal applied only to an ignored snapshot within AEON-683; owning branch untouched.",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-after.log",
+        "log_sha256": "b2b993379eb6dffd40a3c670cab06fb3807c7a1d891da045abab2ccdf990cafc",
+        "stats": {
+          "startTime": "2026-10-04T09:28:35.949Z",
+          "duration": 102820.059,
+          "expected": 20,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "ad32042431ceb697a03a6dbac651e785a072557e69ea528a95062313f11e22dd",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "approved queue surfaces in light/dark and narrow layouts, with accessible dialogs and release evidence",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "proposal-before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:25:47.854152+00:00",
+        "finished_at": "2026-10-04T09:25:47.901753+00:00",
+        "product_source_sha256": "93da0cf64499305dcebbafb47cd53ff1142f00685ac05c8a489958c85a291e9e",
+        "proposal_patch_sha256": "f0e834e0b029c6fae6a9ea26ab955b44b9e2ffe1b5c389c0bdb4cf2f1d7b58d6",
+        "proposal_applied": false,
+        "ownership": "Proposal applied only to an ignored snapshot within AEON-683; owning branch untouched.",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-refused.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-refused.log",
+        "log_sha256": "221fd15a7f854f30d985eb2fa3d23b2d6c5fe5b4f7859a2e2d8c6d86bfbaaff7",
+        "validation_status": "not executed: supervisor refused startup; see log",
+        "results": []
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "proposal-before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:26:43.100930+00:00",
+        "finished_at": "2026-10-04T09:26:43.155545+00:00",
+        "product_source_sha256": "93da0cf64499305dcebbafb47cd53ff1142f00685ac05c8a489958c85a291e9e",
+        "proposal_patch_sha256": "f0e834e0b029c6fae6a9ea26ab955b44b9e2ffe1b5c389c0bdb4cf2f1d7b58d6",
+        "proposal_applied": false,
+        "ownership": "Proposal applied only to an ignored snapshot within AEON-683; owning branch untouched.",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-refused2.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-refused2.log",
+        "log_sha256": "ad4deb9d7a1f6b825110379ab0c7a41aa4f9dbda6eed9e263f214148aa04922c",
+        "validation_status": "not executed: supervisor refused startup; see log",
+        "results": []
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "proposal-before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:28:26.564038+00:00",
+        "finished_at": "2026-10-04T09:28:35.675711+00:00",
+        "product_source_sha256": "93da0cf64499305dcebbafb47cd53ff1142f00685ac05c8a489958c85a291e9e",
+        "proposal_patch_sha256": "f0e834e0b029c6fae6a9ea26ab955b44b9e2ffe1b5c389c0bdb4cf2f1d7b58d6",
+        "proposal_applied": false,
+        "ownership": "Proposal applied only to an ignored snapshot within AEON-683; owning branch untouched.",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-phone-proposal-before.log",
+        "log_sha256": "96cdf3c95668c45225700a743c7c15fecb8b61818b2f600a2e35a11703235ed0",
+        "stats": {
+          "startTime": "2026-10-04T09:28:26.845Z",
+          "duration": 8669.279,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "report_sha256": "2396b6d27e6cc397c954656a01f79543aaddd6d424877ac398b84300be653b73",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "approved queue surfaces in light/dark and narrow layouts, with accessible dialogs and release evidence",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  getByRole('button', { name: /queued\\. Open the work queue/ })\nExpected: 1\nReceived: 0\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" getByRole('button', { name: /queued\\. Open the work queue/ }) with timeout 5000ms\n  - waiting for getByRole('button', { name: /queued\\. Open the work queue/ })\n    14 \u00d7 locator resolved to 0 elements\n       - unexpected value \"0\"\n\n\n   at helpers/stable.ts:14\n\n  12 | // movement. Fixed overlays do not inherit the page's scrolling coordinates.\n  13 | async function box(locator: Locator) {\n> 14 |   await expect(locator).toHaveCount(1)\n     |                         ^\n  15 |   await expect(locator).toBeVisible()\n  16 |   const sample = await locator.evaluate(async element => {\n  17 |     await document.fonts.ready\n    at box (/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/6a27bb1b/web/tests/helpers/stable.ts:14:25)\n    at expectStableControls (/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/6a27bb1b/web/tests/helpers/stable.ts:52:84)\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/6a27bb1b/web/tests/work-queue.spec.ts:285:11"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+        "spec": "status-help.spec.ts",
+        "phase": "after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "status-help.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "human-check filter is linked",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-status-help-after-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:18:23.179230+00:00",
+        "finished_at": "2026-10-04T09:18:52.031263+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-status-help-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-status-help-after.log",
+        "log_sha256": "d70f01f516ac7b7380ab1708ef585ad9d70b5218454450a7930ad311eb358389",
+        "stats": {
+          "startTime": "2026-10-04T09:18:23.461Z",
+          "duration": 28372.839,
+          "expected": 20,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "1cfeadcd8f7e81cd1d6f8d2454eba4c7a31e7f3daf41b16e3db499d2cde4ba1e",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "human-check filter is linked and removes tickets that do not need a check",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+        "spec": "status-help.spec.ts",
+        "phase": "before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "status-help.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "human-check filter is linked",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/6a27bb1b-status-help-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:18:15.609742+00:00",
+        "finished_at": "2026-10-04T09:18:23.149224+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-status-help-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/6a27bb1b-status-help-before.log",
+        "log_sha256": "d6648196b10e15c68d7465f523c806e45566ced64d641913cce0d16905422842",
+        "stats": {
+          "startTime": "2026-10-04T09:18:16.018Z",
+          "duration": 6948.484,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "report_sha256": "970cbc04b20c136810e66400c019e996b78b8505c882b8e19e924dc1d5ada7a0",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "human-check filter is linked and removes tickets that do not need a check",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toBeVisible() failed\n\nLocator: locator('.filter-chip').filter({ hasText: 'Needs a human check' })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" locator('.filter-chip').filter({ hasText: 'Needs a human check' }) with timeout 5000ms\n  - waiting for locator('.filter-chip').filter({ hasText: 'Needs a human check' })\n\n\n  160 |   await page.goto('/p/PHAROS?human_check=pending')\n  161 |   await expect(page.locator('.tickets tbody .ticket-row').filter({ hasText: 'Connect Hetzner Cloud' })).toHaveCount(1)\n> 162 |   await expect(page.locator('.filter-chip').filter({ hasText: 'Needs a human check' })).toBeVisible()\n      |                                                                                         ^\n  163 |   await expect(page.locator('.tickets tbody .ticket-row').filter({ hasText: 'Build the fleet dashboard' })).toHaveCount(0)\n  164 | })\n  165 |\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/6a27bb1b/web/tests/status-help.spec.ts:162:89"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "spec_revision": "b11aa0f612205b6e4eee50cb5bce9ab33c152168",
+        "spec": "accounts-computers.spec.ts",
+        "phase": "after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "accounts-computers.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "Agents at once saves|stored ceiling arrives",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/99981148-accounts-computers-after-artifacts"
+        ],
+        "exit_code": 0,
+        "started_at": "2026-10-04T09:24:44.598989+00:00",
+        "finished_at": "2026-10-04T09:25:39.026934+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/99981148-accounts-computers-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/99981148-accounts-computers-after.log",
+        "log_sha256": "347ae0ea86a8cf1d0fda2d9787e1183f3f068f57002edfa4ccb6eaf966401609",
+        "stats": {
+          "startTime": "2026-10-04T09:24:44.853Z",
+          "duration": 53921.434,
+          "expected": 40,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "report_sha256": "bbf86481909d49cf2516d806506fe51185a0a26c5802ce1ee09879fa257d84a3",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "Agents at once saves one ceiling and independent harness limits",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          },
+          {
+            "title": "stored ceiling arrives without a made-up total while the snapshot loads",
+            "outcomes": {
+              "passed": 20
+            },
+            "errors": []
+          }
+        ]
+      },
+      {
+        "product_revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "spec_revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "spec": "accounts-computers.spec.ts",
+        "phase": "before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "accounts-computers.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "Agents at once saves|stored ceiling arrives",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/99981148-accounts-computers-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:24:03.058090+00:00",
+        "finished_at": "2026-10-04T09:24:40.050791+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/99981148-accounts-computers-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/99981148-accounts-computers-before.log",
+        "log_sha256": "b7de6e6d1942953c82d37fc4cc2bef0a83480fa0517a23975c656fb20ec79905",
+        "stats": {
+          "startTime": "2026-10-04T09:24:03.320Z",
+          "duration": 36588.946,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "report_sha256": "5ea875c61d340d3beef5d8300b3fbeae8c8849b48d72bb9b05e5627b2590d026",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "Agents at once saves one ceiling and independent harness limits",
+            "outcomes": {
+              "timedOut": 1
+            },
+            "errors": [
+              "Error: locator.click: Test timeout of 30000ms exceeded.\nCall log:\n  - waiting for getByRole('region', { name: 'Agents at once' }).locator('[data-key=\"codex\"]').getByRole('button', { name: 'Codex: at most one more' })\n\n\n  223 |   const codex = working.locator('[data-key=\"codex\"]')\n  224 |   await codex.getByRole('radio', { name: 'At most', exact: true }).click()\n> 225 |   await codex.getByRole('button', { name: 'Codex: at most one more' }).click()\n      |                                                                        ^\n  226 |   await expect(codex.locator('.lim-num')).toHaveText('3')\n  227 |   await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: { codex: 3 } })\n  228 |   await expect(working).not.toContainText(/assigned|flexible|target|plan/i)\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/accounts-computers.spec.ts:225:72",
+              "Test timeout of 30000ms exceeded."
+            ]
+          },
+          {
+            "title": "stored ceiling arrives without a made-up total while the snapshot loads",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator:  getByRole('region', { name: 'Agents at once' }).locator('.f-num')\nExpected: \"Run up to 3 at once\"\nReceived: \"\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveAttribute\" getByRole('region', { name: 'Agents at once' }).locator('.f-num') with timeout 5000ms\n  - waiting for getByRole('region', { name: 'Agents at once' }).locator('.f-num')\n    14 \u00d7 locator resolved to <span data-v-4bba42f1=\"\" class=\"value-slot f-num\">\u2026</span>\n       - unexpected value \"null\"\n\n\n  263 |   release()\n  264 |   await expect(working.locator('.f-num')).toHaveText('3')\n> 265 |   await expect(working.locator('.f-num')).toHaveAttribute('aria-label', 'Run up to 3 at once')\n      |                                           ^\n  266 |   await expect(working.locator('.f-live')).toContainText('5 running \u00b7 winding down to 3')\n  267 | })\n  268 |\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/accounts-computers.spec.ts:265:43"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+        "spec": "no-shift.spec.ts",
+        "phase": "after",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "no-shift.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "Agents working dial and selectors",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/99981148-no-shift-after-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:23:06.845770+00:00",
+        "finished_at": "2026-10-04T09:23:56.020676+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/99981148-no-shift-after.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/99981148-no-shift-after.log",
+        "log_sha256": "3aa270f89283ce11fddc1d11ba73e3f098733330c4d9cf53cbf1bda7464c0649",
+        "stats": {
+          "startTime": "2026-10-04T09:23:07.154Z",
+          "duration": 48716.015,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 60,
+          "flaky": 0
+        },
+        "report_sha256": "80f5ca8407507b883bf50361ba251466fd5df9901f162b161fd7b66283dbcc7d",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "Agents working dial and selectors stay put at 1440",
+            "outcomes": {
+              "failed": 20
+            },
+            "errors": [
+              "Error: rows reserve controls and their explanation slot\n\nexpect(received).toBeLessThanOrEqual(expected)\n\nExpected: <= 305\nReceived:    384\n\n  138 |     const rowCount = await dial.locator('.rows > li').count()\n  139 |     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height\n> 140 |     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))\n      |                                                                            ^\n  141 |     await expectStableControls({\n  142 |       controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },\n  143 |       scrollAreas: { rows: dial.locator('.rows') },\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/no-shift.spec.ts:140:76"
+            ]
+          },
+          {
+            "title": "Agents working dial and selectors stay put at 1024",
+            "outcomes": {
+              "failed": 20
+            },
+            "errors": [
+              "Error: rows reserve controls and their explanation slot\n\nexpect(received).toBeLessThanOrEqual(expected)\n\nExpected: <= 305\nReceived:    384\n\n  138 |     const rowCount = await dial.locator('.rows > li').count()\n  139 |     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height\n> 140 |     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))\n      |                                                                            ^\n  141 |     await expectStableControls({\n  142 |       controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },\n  143 |       scrollAreas: { rows: dial.locator('.rows') },\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/no-shift.spec.ts:140:76"
+            ]
+          },
+          {
+            "title": "Agents working dial and selectors stay put at 390",
+            "outcomes": {
+              "failed": 20
+            },
+            "errors": [
+              "Error: rows reserve controls and their explanation slot\n\nexpect(received).toBeLessThanOrEqual(expected)\n\nExpected: <= 635\nReceived:    694\n\n  138 |     const rowCount = await dial.locator('.rows > li').count()\n  139 |     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height\n> 140 |     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))\n      |                                                                            ^\n  141 |     await expectStableControls({\n  142 |       controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },\n  143 |       scrollAreas: { rows: dial.locator('.rows') },\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/no-shift.spec.ts:140:76"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "spec_revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+        "spec": "no-shift.spec.ts",
+        "phase": "before",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "no-shift.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "Agents working dial and selectors",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/99981148-no-shift-before-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:22:47.392281+00:00",
+        "finished_at": "2026-10-04T09:23:06.768929+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/99981148-no-shift-before.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/99981148-no-shift-before.log",
+        "log_sha256": "7d1efd1959c5be4bd6a7fc0fb2a2fff11067827a372ccd89ba82dfad2cc2cdea",
+        "stats": {
+          "startTime": "2026-10-04T09:22:47.692Z",
+          "duration": 18890.474,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 3,
+          "flaky": 0
+        },
+        "report_sha256": "3abde08334873fcbb75723b5b50b411b14c73fafa7176ffa0faa336988fe33f7",
+        "validation_status": "executed locally; no remote acceptance claim",
+        "results": [
+          {
+            "title": "Agents working dial and selectors stay put at 1440",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' })\nExpected: \"background\"\nReceived: \"color, background-color, box-shadow, transform, opacity\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' }) with timeout 5000ms\n  - waiting for getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' })\n    14 \u00d7 locator resolved to <button class=\"pm\" type=\"button\" data-v-4bba42f1=\"\" data-tip=\"One agent more at once\" aria-label=\"One agent more at once\">\u2026</button>\n       - unexpected value \"color, background-color, box-shadow, transform, opacity\"\n\n\n  134 |     const row = dial.locator('[data-key=\"codex\"]')\n  135 |     await expect(row).toBeVisible()\n> 136 |     await expect(more).toHaveCSS('transition-property', 'background')\n      |                        ^\n  137 |     const rowCount = await dial.locator('.rows > li').count()\n  138 |     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height\n  139 |     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/no-shift.spec.ts:136:24"
+            ]
+          },
+          {
+            "title": "Agents working dial and selectors stay put at 1024",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' })\nExpected: \"background\"\nReceived: \"color, background-color, box-shadow, transform, opacity\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' }) with timeout 5000ms\n  - waiting for getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' })\n    14 \u00d7 locator resolved to <button class=\"pm\" type=\"button\" data-v-4bba42f1=\"\" data-tip=\"One agent more at once\" aria-label=\"One agent more at once\">\u2026</button>\n       - unexpected value \"color, background-color, box-shadow, transform, opacity\"\n\n\n  134 |     const row = dial.locator('[data-key=\"codex\"]')\n  135 |     await expect(row).toBeVisible()\n> 136 |     await expect(more).toHaveCSS('transition-property', 'background')\n      |                        ^\n  137 |     const rowCount = await dial.locator('.rows > li').count()\n  138 |     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height\n  139 |     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/no-shift.spec.ts:136:24"
+            ]
+          },
+          {
+            "title": "Agents working dial and selectors stay put at 390",
+            "outcomes": {
+              "failed": 1
+            },
+            "errors": [
+              "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' })\nExpected: \"background\"\nReceived: \"color, background-color, box-shadow, transform, opacity\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' }) with timeout 5000ms\n  - waiting for getByRole('region', { name: 'Agents at once' }).getByRole('button', { name: 'One agent more at once' })\n    14 \u00d7 locator resolved to <button class=\"pm\" type=\"button\" data-v-4bba42f1=\"\" data-tip=\"One agent more at once\" aria-label=\"One agent more at once\">\u2026</button>\n       - unexpected value \"color, background-color, box-shadow, transform, opacity\"\n\n\n  134 |     const row = dial.locator('[data-key=\"codex\"]')\n  135 |     await expect(row).toBeVisible()\n> 136 |     await expect(more).toHaveCSS('transition-property', 'background')\n      |                        ^\n  137 |     const rowCount = await dial.locator('.rows > li').count()\n  138 |     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height\n  139 |     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))\n    at /Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/99981148/web/tests/no-shift.spec.ts:136:24"
+            ]
+          }
+        ]
+      },
+      {
+        "product_revision": "29beb28c8c5c9769196e33269e0becccb2f6b8c1",
+        "spec": "accounts-computers.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "b3fc6e7dfd982e3360a1da98a7089c72aa4060dff83cb8288db0eea901e4a41b",
+        "phase": "current-branch",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "accounts-computers.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "Agents at once saves|stored ceiling arrives",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/current-accounts-computers-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:27:00.669463+00:00",
+        "finished_at": "2026-10-04T09:27:00.722495+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/current-accounts-computers-refused.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/current-accounts-computers-refused.log",
+        "log_sha256": "ad4deb9d7a1f6b825110379ab0c7a41aa4f9dbda6eed9e263f214148aa04922c",
+        "validation_status": "not executed: supervisor refused startup; see log",
+        "results": []
+      },
+      {
+        "product_revision": "29beb28c8c5c9769196e33269e0becccb2f6b8c1",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "current-branch",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=20",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/current-work-queue-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:27:05.627329+00:00",
+        "finished_at": "2026-10-04T09:27:05.680731+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/current-work-queue-refused.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/current-work-queue-refused.log",
+        "log_sha256": "ad4deb9d7a1f6b825110379ab0c7a41aa4f9dbda6eed9e263f214148aa04922c",
+        "validation_status": "not executed: supervisor refused startup; see log",
+        "results": []
+      },
+      {
+        "product_revision": "29beb28c8c5c9769196e33269e0becccb2f6b8c1",
+        "spec": "work-queue.spec.ts",
+        "spec_revision": "worktree fix3; content identified by spec_sha256",
+        "spec_sha256": "40c6b424c88e302ab2da3a150607772caeaa081503295a612430dd212fce07ae",
+        "phase": "current-branch",
+        "command": [
+          "node",
+          "scripts/playwright-safe.mjs",
+          "-c",
+          "playwright.ui.config.ts",
+          "work-queue.spec.ts",
+          "--workers=1",
+          "--retries=0",
+          "--grep",
+          "approved queue surfaces",
+          "--repeat-each=1",
+          "--reporter=line,json",
+          "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix3/evidence/current-work-queue-artifacts"
+        ],
+        "exit_code": 1,
+        "started_at": "2026-10-04T09:30:29.578050+00:00",
+        "finished_at": "2026-10-04T09:30:29.628186+00:00",
+        "artifact_directory": "tmp/aeon-683-fix3/evidence",
+        "report_file": "tmp/aeon-683-fix3/evidence/current-work-queue.json",
+        "log_file": "tmp/aeon-683-fix3/evidence/current-work-queue.log",
+        "log_sha256": "24d6614d79712faa54ecbf02b8a9712b36f89a4c6616ef549583023fcdb43055",
+        "validation_status": "not executed: supervisor refused startup; see log",
+        "results": []
+      }
+    ],
+    "git_integration": "origin/main33a5cc98 merge-tree check returned0 with no conflicts; conditional conflict merge not needed. Concurrent evidence-only commit29beb28c preserved."
+  }
 }
