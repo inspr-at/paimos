@@ -1,56 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-name: CI
+name: Nightly full
 
 on:
-  # One run per change (AEON-419): pushes to main, pull requests, and the merge queue.
-  # A bare `push:` also ran on every PR branch push, doubling CI load under the 20-job limit.
-  push:
-    branches: [main]
-  pull_request:
-  merge_group:
-    types: [checks_requested]
+  schedule:
+    - cron: '23 1 * * *'
   workflow_dispatch:
 
-# New main pushes supersede older main runs (AEON-585); PR cancellation stays per PR.
-concurrency:
-  # Keep existing PR/queue/manual groups; only main pushes share a group.
-  # Queue runs retain unique run IDs, including while pending; main cannot cancel them or PR checks.
-  group: ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 permissions:
   contents: read
 
 jobs:
-  tier-plan:
-    runs-on: ubuntu-latest
-    outputs:
-      mode: ${{ steps.tiers.outputs.mode }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - id: tiers
-        run: node scripts/test-tiers/diff.mjs
-
-  runner-route:
-    uses: ./.github/workflows/test-runner-route.yml
-    with:
-      required-idle-runners: 4
-
-  go-test:
-    needs: [runner-route, tier-plan]
+  nightly-go-test:
     strategy:
       fail-fast: false
       matrix:
         # Use the same event/ref/attempt guards as runs-on when evaluated.
         # Re-run all jobs: partial reruns may retain earlier matrix values.
-        shard: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
-    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
+        shard: [1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -108,7 +76,7 @@ jobs:
       - name: Test this shard (essential plus changed area, or full on main)
         env:
           GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
+        run: node scripts/test-tiers/cli.mjs run go --full --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
       - name: Preserve test tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -138,7 +106,7 @@ jobs:
 
   # Timing budgets were calibrated on hosted hardware. Always run this job,
   # regardless of the selected shard layout or which jobs are being rerun.
-  go-timing:
+  nightly-go-timing:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -180,7 +148,7 @@ jobs:
           retention-days: 8
           overwrite: true
 
-  go-static:
+  nightly-go-static:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -218,7 +186,6 @@ jobs:
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check
       - name: Test tier selector regressions
-        # Browser-free and dependency-free; static CI does not install web.
         run: node --test scripts/test-tiers/test-tiers.test.mjs
       - name: Validate every Go tier against native collection
         run: node scripts/test-tiers/cli.mjs check go
@@ -229,16 +196,16 @@ jobs:
 
   # Job id go is the required check. It stays red when a shard or the static
   # job fails because if: always() still runs this gate.
-  go:
+  nightly-go:
     if: always()
-    needs: [go-test, go-static, go-timing]
+    needs: [nightly-go-test, nightly-go-static, nightly-go-timing]
     runs-on: ubuntu-latest
     steps:
       - name: Require every Go shard and the static checks
         env:
-          GO_TEST: ${{ needs.go-test.result }}
-          GO_STATIC: ${{ needs.go-static.result }}
-          GO_TIMING: ${{ needs.go-timing.result }}
+          GO_TEST: ${{ needs.nightly-go-test.result }}
+          GO_STATIC: ${{ needs.nightly-go-static.result }}
+          GO_TIMING: ${{ needs.nightly-go-timing.result }}
         run: |
           set -euo pipefail
           echo "go-test=${GO_TEST} go-static=${GO_STATIC} go-timing=${GO_TIMING}"
@@ -251,8 +218,7 @@ jobs:
   # model-settings step ran specs that the shards now own (groups footer,
   # status-help, status-autopilot, model-settings); their unit tests run once in
   # web-setup via npm run test:unit.
-  web-setup:
-    needs: tier-plan
+  nightly-web-setup:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -299,7 +265,7 @@ jobs:
         working-directory: web
         run: |
           npm run ci:web:shard:test
-          node ../scripts/test-tiers/cli.mjs run web --unit --job web-unit
+          node ../scripts/test-tiers/cli.mjs run web --full --unit --job web-unit
       - name: Preserve unit tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -338,14 +304,14 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
-  web-shard:
-    needs: [web-setup, tier-plan]
+  nightly-web-shard:
+    needs: nightly-web-setup
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     env:
       PW_RETRIES: '0'
     steps:
@@ -367,7 +333,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ needs.web-setup.outputs.browser-cache-key }}
+          key: ${{ needs.nightly-web-setup.outputs.browser-cache-key }}
           fail-on-cache-miss: true
       # OS libraries are per runner; browser downloads and npm ci are shared.
       - name: Install Chromium system dependencies
@@ -381,7 +347,7 @@ jobs:
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           # The guard needs the wrapper's merged JSON report to see every group, including one that never started.
           CI_FLAKE_REQUIRE_JSON: '1'
-        run: node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
+        run: node scripts/test-tiers/cli.mjs run web --full --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
       - name: Preserve browser tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -414,8 +380,8 @@ jobs:
 
   # AEON-488 evidence, kept from the old web job: the immutable round-6 release list rendered with the
   # current screenshot fixture, next to the current one. Not part of the required `web` aggregate.
-  release-list-comparison:
-    needs: web-setup
+  nightly-release-list-comparison:
+    needs: nightly-web-setup
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -437,7 +403,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ needs.web-setup.outputs.browser-cache-key }}
+          key: ${{ needs.nightly-web-setup.outputs.browser-cache-key }}
           fail-on-cache-miss: true
       - name: Install Chromium system dependencies
         working-directory: web
@@ -470,23 +436,23 @@ jobs:
           if-no-files-found: error
 
   # Preserve the ruleset's required check identity, including failed/skipped setup.
-  web:
-    name: web
+  nightly-web:
+    name: nightly-web
     if: always()
-    needs: [web-setup, web-shard]
+    needs: [nightly-web-setup, nightly-web-shard]
     runs-on: ubuntu-latest
     steps:
       - name: Require setup and every web shard
         env:
-          WEB_SETUP: ${{ needs.web-setup.result }}
-          WEB_SHARD: ${{ needs.web-shard.result }}
+          WEB_SETUP: ${{ needs.nightly-web-setup.result }}
+          WEB_SHARD: ${{ needs.nightly-web-shard.result }}
         run: |
           set -euo pipefail
           echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
           test "${WEB_SETUP}" = success
           test "${WEB_SHARD}" = success
 
-  release-check:
+  nightly-release-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -521,7 +487,7 @@ jobs:
           go test ./scripts/ci-runner-guard -count=1
           go run ./scripts/ci-runner-guard
 
-  e2e:
+  nightly-e2e:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -589,7 +555,7 @@ jobs:
           npm run e2e --prefix web
 
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
-  migration-compat:
+  nightly-migration-compat:
     permissions:
       contents: read
       packages: read
@@ -639,9 +605,9 @@ jobs:
           python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py
           bash scripts/migration-compat.sh "$PREVIOUS_TAG" "$PREVIOUS_DIGEST"
 
-  tier-measurements:
+  nightly-tier-measurements:
     if: always()
-    needs: [go, web, release-check, e2e, migration-compat, release-list-comparison]
+    needs: [nightly-go, nightly-web, nightly-release-check, nightly-e2e, nightly-migration-compat, nightly-release-list-comparison]
     runs-on: ubuntu-latest
     permissions:
       contents: read

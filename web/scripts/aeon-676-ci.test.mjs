@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 const requiredSpecs = ['clip-tip', 'aeon-632b-clip', 'key-trim', 'model-prefs']
   .map(name => `tests/${name}.spec.ts`)
 
-test('AEON-676 regressions reach the required hosted web gate through the committed runner', () => {
+test('AEON-676 regressions retain hosted launch policy and full nightly coverage after tiering', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const job = id => {
     const match = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:|$(?![\\s\\S]))`, 'm').exec(workflow)
@@ -17,17 +17,21 @@ test('AEON-676 regressions reach the required hosted web gate through the commit
   assert.match(job('web'), /needs: \[web-setup, web-shard\]/)
   assert.match(job('web'), /test "\$\{WEB_SETUP\}" = success/)
   assert.match(job('web'), /test "\$\{WEB_SHARD\}" = success/)
-  assert.match(job('web-setup'), /npm run test:unit/)
+  assert.match(job('web-setup'), /cli\.mjs run web --unit/)
   const shard = job('web-shard')
-  assert.match(shard, /needs: web-setup/)
+  assert.match(shard, /needs: \[web-setup, tier-plan\]/)
   assert.match(shard, /runs-on: ubuntu-latest/)
-  assert.match(shard, /npm --prefix web run ci:web:shard -- \$\{\{ matrix.shard \}\}\/12/)
-  assert.match(shard, /exit "\$code"/)
+  assert.match(shard, /cli\.mjs run web --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
+  assert.doesNotMatch(shard, /ci-flake-guard\.mjs/)
   assert.doesNotMatch(shard, /continue-on-error:\s*true/)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).scripts
   assert.equal(scripts['ci:web:shard'], 'node scripts/ci-web-shard.mjs')
   assert.ok(scripts['test:unit'].startsWith('npm run ci:web:shard:test &&'))
   assert.ok(scripts['ci:web:shard:test'].includes('scripts/aeon-676-ci.test.mjs'))
+  const tiers = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url)))
+  for (const file of requiredSpecs) assert.ok(tiers.tests.some(row => row.file === file), `${file} must stay classified`)
+  const nightly = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
+  assert.match(nightly, /cli\.mjs run web --full --shard/)
   const quarantine = JSON.parse(readFileSync(new URL('../../scripts/ci-quarantine.json', import.meta.url)))
   assert.ok(!quarantine.entries.some(entry => entry.owner === 'AEON-676' ||
     requiredSpecs.some(file => entry.id.includes(file.split('/').at(-1)))), 'AEON-676 specs must block CI on failure')

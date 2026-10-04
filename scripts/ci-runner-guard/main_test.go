@@ -59,6 +59,32 @@ func TestFullUIQALabelOptInBoundary(t *testing.T) {
 	}
 }
 
+func TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/nightly-full.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []struct{ old, new string }{
+		{"  schedule:", "  pull_request:\n  schedule:"},
+		{"run go --full --shard", "run go --shard"},
+		{"run web --full --unit", "run web --unit"},
+		{"run web --full --shard", "run web --shard"},
+		{"  nightly-go-test:\n", "  nightly-go-test:\n    if: false\n"},
+		{"  nightly-migration-compat:\n", "  nightly-migration-compat:\n    continue-on-error: true\n"},
+		{"    runs-on: ubuntu-latest", "    runs-on: mbp2606"},
+		{"  nightly-go:\n", "  go:\n"},
+	} {
+		changed := strings.Replace(string(body), mutation.old, mutation.new, 1)
+		if changed == string(body) {
+			t.Fatalf("mutation did not apply: %s", mutation.old)
+		}
+		problems, err := checkWorkflow("nightly-full.yml", []byte(changed))
+		if err != nil || len(problems) == 0 {
+			t.Fatalf("unsafe nightly accepted: %v %v", problems, err)
+		}
+	}
+}
+
 func TestGatePreviewDoesNotReportRequiredStatusOnPushOrDispatch(t *testing.T) {
 	body, err := os.ReadFile("../../.github/workflows/cross-family-preview.yml")
 	if err != nil {

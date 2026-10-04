@@ -635,6 +635,26 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
+Test tiers (AEON-681): PRs and merge groups run ESSENTIAL plus the changed area's
+tests and reverse dependencies. Shared CI, module, migration or fixture changes,
+or uncertain impact, run the full suite. The exact classifications live in the
+[Go manifest](scripts/ci/go-test-tiers.json) and
+[web manifest](scripts/ci/web-test-tiers.json); add new registrations as NIGHTLY
+with `node scripts/test-tiers/cli.mjs classify go` (or `web`) and run `check`.
+New browser files also need their launch policy in `web/ci-web-shards.json`.
+Unclassified and stale entries fail CI. No tests are deleted: `delete-candidate`
+is only a tag, and every retained test runs in `nightly-full.yml` (scheduled or
+manual), including previously ungated UI specs. Main/manual CI also runs full.
+The AEON-415 migration check, static checks, isolated timing budgets and smoke
+gate remain unconditional; selected cases never retry automatically. Run
+measurements are uploaded as `test-tier-run-measurement`, with pass/skip/failure
+counts per class and complete Actions job runner minutes against the 22.50 Go /
+42.17 web baselines. The target is at most eight runner-minutes per gate for an
+unrelated PR; collection counts alone do not establish runtime savings.
+Mixed browser deletion recommendations are tagged as candidate groups until
+their exact NIGHTLY members have been reviewed; classification and execution
+remain unchanged by those tags.
+
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for
 the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
