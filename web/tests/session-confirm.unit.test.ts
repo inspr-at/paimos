@@ -39,6 +39,7 @@ function deletingTicket() {
   const workspace = setupSource('components/work/TicketWorkspace.vue', props, {
     'vue-router': { useRouter: () => ({}) }, '../../lib/api': {}, '../../lib/confirm': { confirmAction: confirmation },
     '../../lib/rowStore': { rowStore: { row: () => null, adopt: (row: unknown) => row } }, '../../lib/toast': {}, '../../lib/workQueue': {},
+    '../../lib/liveNodes': { liveNodes: { state: 'live', onState: () => () => {} } }, '../../lib/eta': { etaFromTicket: () => null },
     '../../lib/useActivity': { useActivity: () => ({}) }, '../../lib/useTicket': { useTicket: () => ({ readOnly: ref(false), gone: ref(false), remove }) },
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },

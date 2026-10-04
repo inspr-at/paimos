@@ -4,6 +4,7 @@ package events
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -60,7 +61,7 @@ func TestLateUsageReportHasAuthorizedNodeHint(t *testing.T) {
 	}
 	// Durable replay delivers the hint without a later heartbeat or node write.
 	srv := testServer(t, d, reader, foreign)
-	response, scanner := stream(t, srv, "")
+	response, scanner := stream(t, srv, strconv.FormatInt(reported.ID-1, 10))
 	got := nextEvent(t, scanner)
 	response.Body.Close()
 	if got.ID != reported.ID || got.Type != "harness.usage_reported" || !reflect.DeepEqual(got.NodeChanges, want) {

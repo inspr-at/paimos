@@ -799,7 +799,7 @@ It summarises up to 200 leaves / 64 KB of benefit data, excludes cancelled/archi
 leaves, refuses incomplete or cross-project sources, and never silently truncates.
 Provider changes, moved/reopened parents, changed leaves and edited benefits fence
 in-flight results. Leases recover after restart. Leaves keep the bilingual Done
-gate; published snapshots remain immutable. Migration `1237` stores only job and
+gate; published snapshots remain immutable. Migration `1239` stores only job and
 provenance metadata on existing nodes. `GET /api/nodes/{id}/benefit-generation`
 reports status; the person-only retry POST requires the displayed generation and
 node revision. Retry bodies have a 4 KiB limit and a five-second HTTP read deadline

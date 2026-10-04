@@ -355,7 +355,7 @@ func TestWorkMigrationPreflightPagesAllTenantsWithoutWrites(t *testing.T) {
 	other := workSeed(t, d, "other-preflight")
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
 		statements := []string{
-			`UPDATE node_kinds SET allowed_child_kinds=ARRAY['task'] WHERE slug='ticket'`,
+			`UPDATE node_kinds SET allowed_child_kinds=ARRAY['task'] WHERE tenant_id=$1 AND slug='ticket'`,
 			`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
  SELECT $1,k.id,'PAGE-'||i,'Parent',p.id FROM generate_series(1,105) i,node_kinds k,nodes p WHERE k.slug='ticket' AND p.key='PRJ-1'`,
 			`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
@@ -704,8 +704,8 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before, workSnapshot(t, d, tid, preserved)) {
-		t.Fatal("release 122 upgrade changed nodes, sessions or Decision Desk identities")
+	if after := workSnapshot(t, d, tid, preserved); !reflect.DeepEqual(before, after) {
+		t.Fatalf("release 122 upgrade changed nodes, sessions or Decision Desk identities: %s", snapshotDifferences(before, after))
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
 		var legacy, work, migrated int
@@ -723,4 +723,32 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("release 122 (%s): %d exact SQL files, upgrade and reapply under FORCE RLS", release.Commit, len(applied))
+}
+
+// Keep upgrade failures readable without dumping entire row snapshots.
+func snapshotDifferences(before, after []byte) []string {
+	var a, b map[string][]map[string]any
+	if json.Unmarshal(before, &a) != nil || json.Unmarshal(after, &b) != nil {
+		return []string{"invalid snapshot"}
+	}
+	var changed []string
+	for table, rows := range a {
+		if len(rows) != len(b[table]) {
+			changed = append(changed, table+": row count")
+			continue
+		}
+		for i, row := range rows {
+			for field, value := range row {
+				if !reflect.DeepEqual(value, b[table][i][field]) {
+					changed = append(changed, fmt.Sprintf("%s[%v].%s: %v -> %v", table, row["key"], field, value, b[table][i][field]))
+				}
+			}
+			for field := range b[table][i] {
+				if _, ok := row[field]; !ok {
+					changed = append(changed, table+": added column "+field)
+				}
+			}
+		}
+	}
+	return changed
 }

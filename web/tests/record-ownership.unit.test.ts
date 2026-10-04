@@ -202,6 +202,7 @@ it('S8-007: confirming deletion of A passes A even after selection moves to B', 
   const state = setup('components/work/TicketWorkspace.vue', props, {
     'vue-router': { useRouter: () => ({}) }, '../../lib/api': {}, '../../lib/confirm': { confirmAction: () => answer.promise },
     '../../lib/rowStore': { rowStore: { row: () => null, adopt: (row: unknown) => row } }, '../../lib/toast': {}, '../../lib/workQueue': {},
+    '../../lib/liveNodes': { liveNodes: { state: 'live', onState: () => () => {} } }, '../../lib/eta': { etaFromTicket: () => null },
     '../../lib/useActivity': { useActivity: () => ({}) }, '../../lib/useTicket': { useTicket: () => ({ readOnly: ref(false), gone: ref(false), remove }) },
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },

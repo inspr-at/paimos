@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { parse } from '@vue/compiler-sfc'
 import { baseParse, compile, type TemplateChildNode } from '@vue/compiler-dom'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
+vi.mock('../src/stores/session', () => ({ useSession: () => ({ identity: null }) }))
 import TicketBenefits from '../src/components/work/TicketBenefits.vue'
+import { rowStore } from '../src/lib/rowStore'
 import { completedTicketState } from '../src/lib/ticketBenefits'
 
 // Compile the actual workspace branches: the reusable editor alone cannot
@@ -32,7 +34,7 @@ for (const editing of [false, true]) {
       const app = Vue.createSSRApp({ components: { TicketBenefits }, setup: () => ({
         item: { kind_slug: kind, state: 'open', fields }, draft: fields,
         saving: false, editable: true, benefitNotice: '', benefitInvalidKey: '',
-        completedTicketState, changeBenefit: () => {}, startEdit: () => {},
+        completedTicketState, rowStore, changeBenefit: () => {}, startEdit: () => {},
       }), render })
       const html = await renderToString(app)
       expect(html).toContain('User benefit')

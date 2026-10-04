@@ -5,6 +5,7 @@ package events
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -154,7 +155,7 @@ func TestImportParentChangeHintInHistoryAndStream(t *testing.T) {
 	if !reflect.DeepEqual(page.Items[0].NodeChanges, want) {
 		t.Fatalf("import history hint: %+v; want %+v", page.Items[0].NodeChanges, want)
 	}
-	response, scanner := stream(t, testServer(t, d, reader, foreign), "")
+	response, scanner := stream(t, testServer(t, d, reader, foreign), strconv.FormatInt(recorded.ID-1, 10))
 	got := nextEvent(t, scanner)
 	response.Body.Close()
 	if got.ID != recorded.ID || !reflect.DeepEqual(got.NodeChanges, want) {

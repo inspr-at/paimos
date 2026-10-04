@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/fieldschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestWorkTypeAliasesUseCanonicalIDAndExposeShape(t *testing.T) {
@@ -81,11 +82,12 @@ func TestWorkTypeAliasesUseCanonicalIDAndExposeShape(t *testing.T) {
 		}
 	}
 	rt := &runtime{program: "paimos", configPath: filepath.Join(t.TempDir(), "missing"), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
-	result, _, err := rt.toolIssueCreate(context.Background(), nil, issueCreateArgs{Project: "AEON", Title: "MCP work", Type: "task"})
+	session := workAliasMCPSession(t, rt)
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "issue_create", Arguments: issueCreateArgs{Project: "AEON", Title: "MCP work", Type: "task"}})
 	if err != nil || result.IsError || !strings.Contains(strings.ReplaceAll(toolText(result), " ", ""), `"level_name":"Step"`) {
 		t.Fatalf("MCP create: %v %+v", err, result)
 	}
-	result, _, err = rt.toolIssueList(context.Background(), nil, issueListArgs{Project: "AEON", Type: "epic"})
+	result, err = session.CallTool(t.Context(), &mcp.CallToolParams{Name: "issue_list", Arguments: issueListArgs{Project: "AEON", Type: "epic"}})
 	if err != nil || result.IsError || !strings.Contains(strings.ReplaceAll(toolText(result), " ", ""), `"is_leaf":true`) {
 		t.Fatalf("MCP list: %v %+v", err, result)
 	}
@@ -108,9 +110,10 @@ func TestWorkAliasNeverRemapsNonWorkKinds(t *testing.T) {
 
 func TestWorkMCPCancelAndListBounds(t *testing.T) {
 	rt := &runtime{}
+	session := workAliasMCPSession(t, rt)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, _, err := rt.toolIssueCreate(ctx, nil, issueCreateArgs{Project: "AEON", Title: "Cancelled"}); !errors.Is(err, context.Canceled) {
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "issue_create", Arguments: issueCreateArgs{Project: "AEON", Title: "Cancelled"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled create: %v", err)
 	}
 	for _, n := range []int{-1, 10001} {
@@ -121,4 +124,21 @@ func TestWorkMCPCancelAndListBounds(t *testing.T) {
 			t.Fatalf("offset %d: %v", n, err)
 		}
 	}
+}
+
+// Exercise the registered MCP tools so aliases share the production adapter.
+func workAliasMCPSession(t *testing.T, rt *runtime) *mcp.ClientSession {
+	t.Helper()
+	left, right := mcp.NewInMemoryTransports()
+	server, err := rt.mcpServer().Connect(t.Context(), left, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close() })
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "work-alias-test", Version: "dev"}, nil).Connect(t.Context(), right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { session.Close() })
+	return session
 }
