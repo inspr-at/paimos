@@ -356,6 +356,189 @@ func TestSourceDispatchDelayUsesInjectedClock(t *testing.T) {
 	})
 }
 
+func TestSourceRequestCapRefillAndConcurrentDelay(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	newSource := func(t *testing.T, transport roundTripFunc, delay time.Duration) *HTTPSource {
+		t.Helper()
+		source, err := NewHTTPSource("http://source.test", file, &http.Client{Transport: transport})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := source.Configure(2, delay); err != nil {
+			t.Fatal(err)
+		}
+		return source
+	}
+	response := func() *http.Response {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`))}
+	}
+
+	t.Run("cap", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var active, peak, requests atomic.Int32
+			release := make(chan struct{})
+			var wg sync.WaitGroup
+			// Keep requests in flight until the cap has been observed, rather
+			// than hoping a handler sleep overlaps another request.
+			defer func() {
+				close(release)
+				wg.Wait()
+			}()
+			source := newSource(t, func(r *http.Request) (*http.Response, error) {
+				n := active.Add(1)
+				defer active.Add(-1)
+				for {
+					old := peak.Load()
+					if n <= old || peak.CompareAndSwap(old, n) {
+						break
+					}
+				}
+				requests.Add(1)
+				<-release
+				return response(), nil
+			}, 0)
+			for range 8 {
+				wg.Go(func() {
+					var rows []Record
+					if err := source.get(t.Context(), "/probe", &rows); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			synctest.Wait()
+			if active.Load() != 2 || requests.Load() != 2 {
+				t.Fatalf("blocked requests: active=%d, started=%d, want 2 each", active.Load(), requests.Load())
+			}
+			// Release one slot and prove exactly one queued request replaces it.
+			release <- struct{}{}
+			synctest.Wait()
+			if active.Load() != 2 || requests.Load() != 3 {
+				t.Fatalf("refilled cap: active=%d, started=%d, want 2 and 3", active.Load(), requests.Load())
+			}
+			for range 7 {
+				release <- struct{}{}
+			}
+			wg.Wait()
+			if peak.Load() != 2 || requests.Load() != 8 || active.Load() != 0 {
+				t.Fatalf("completed requests: peak=%d, started=%d, active=%d", peak.Load(), requests.Load(), active.Load())
+			}
+		})
+	})
+
+	t.Run("delay", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			const delay = 15 * time.Millisecond
+			var starts []time.Time
+			source := newSource(t, func(r *http.Request) (*http.Response, error) {
+				starts = append(starts, time.Now())
+				return response(), nil
+			}, delay)
+			start := time.Now()
+			for n := range 8 {
+				var rows []Record
+				if err := source.get(t.Context(), "/probe", &rows); err != nil {
+					t.Fatal(err)
+				}
+				// synctest advances only virtual time: assert the full configured
+				// delay, including an immediate first request, without tolerance.
+				if got, want := starts[n].Sub(start), time.Duration(n)*delay; got != want {
+					t.Fatalf("request %d start = %s, want %s", n, got, want)
+				}
+			}
+		})
+	})
+
+	t.Run("concurrent delay", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			const delay = 15 * time.Millisecond
+			const requests = 8
+			ctx, cancel := context.WithCancel(t.Context())
+			release := make(chan struct{})
+			starts := make(chan time.Time, requests)
+			var active, completed atomic.Int32
+			var wg sync.WaitGroup
+			defer func() {
+				cancel()
+				close(release)
+				wg.Wait()
+			}()
+			source := newSource(t, func(r *http.Request) (*http.Response, error) {
+				active.Add(1)
+				defer active.Add(-1)
+				starts <- time.Now()
+				<-release
+				return response(), nil
+			}, delay)
+			request := func() {
+				var rows []Record
+				if err := source.get(ctx, "/probe", &rows); err != nil {
+					if ctx.Err() == nil {
+						t.Error(err)
+					}
+					return
+				}
+				completed.Add(1)
+			}
+			start := time.Now()
+			assertStart := func(n int) {
+				t.Helper()
+				select {
+				case at := <-starts:
+					if got, want := at.Sub(start), time.Duration(n)*delay; got != want {
+						t.Fatalf("concurrent request %d start = %s, want %s", n, got, want)
+					}
+				default:
+					t.Fatalf("concurrent request %d did not start", n)
+				}
+				if len(starts) != 0 {
+					t.Fatalf("extra concurrent starts at %s: %d", time.Since(start), len(starts))
+				}
+			}
+			// Establish the first start, then queue seven callers while its
+			// transport is held. Only one caller can wait on the delay timer;
+			// the others durably block on the cap channel, not a sync.Mutex.
+			wg.Go(request)
+			synctest.Wait()
+			assertStart(0)
+			for range requests - 1 {
+				wg.Go(request)
+			}
+			synctest.Wait()
+			if active.Load() != 1 || len(starts) != 0 {
+				t.Fatalf("before delay: active=%d, extra starts=%d, want 1 and 0", active.Load(), len(starts))
+			}
+			for n := 1; n < requests; n++ {
+				if n > 1 {
+					// Free exactly one slot, keeping another transport in flight.
+					// The replacement must wait a full delay even under overlap.
+					release <- struct{}{}
+					synctest.Wait()
+					if active.Load() != 1 || len(starts) != 0 {
+						t.Fatalf("refill before delay %d: active=%d, extra starts=%d, want 1 and 0", n, active.Load(), len(starts))
+					}
+				}
+				// This advances virtual time only, with no wall-clock tolerance.
+				time.Sleep(delay)
+				synctest.Wait()
+				assertStart(n)
+				if active.Load() != 2 {
+					t.Fatalf("concurrent request %d: active=%d, want 2", n, active.Load())
+				}
+			}
+			for range 2 {
+				release <- struct{}{}
+			}
+			wg.Wait()
+			if completed.Load() != requests || active.Load() != 0 {
+				t.Fatalf("completed concurrent requests=%d, active=%d, want %d and 0", completed.Load(), active.Load(), requests)
+			}
+		})
+	})
+}
+
 func TestSourceSkipsDeletedProjectAndPurgedIssues(t *testing.T) {
 	routes := map[string]string{
 		"/api/projects?status=all":       `[{"id":3,"key":"PAI","name":"Paimos","status":"active"}]`,

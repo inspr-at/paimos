@@ -41,9 +41,14 @@ func writeCapability(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// Node creation already serializes the tenant tree. Take that lock first on
-// all mutations, then session/question locks, avoiding inverse lock ordering.
+// Mutations lock tenant -> tree -> session/question -> decision. Event append
+// comes last. The tenant fence also serializes permission changes.
 func treeLock(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	// Access-management writes fence on this row. Hold it before the tree and
+	// RequireTx so a concurrent revocation cannot slip between check and write.
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tenantID); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID)
 	return err
 }
@@ -116,6 +121,10 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		if err := treeLock(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
+		p, err = liveAsker(ctx, tx, p)
+		if err != nil {
+			return err
+		}
 		if err := permit(ctx, tx, p, project, "questions.ask"); err != nil {
 			return err
 		}
@@ -174,6 +183,28 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		if err := writeCapability(ctx, tx); err != nil {
 			return err
 		}
+		match, err := matchQuestion(ctx, tx, p, project, body)
+		if err != nil {
+			return err
+		}
+		if match.questionID != "" {
+			askerID, err := addAsker(ctx, tx, p, project, match.questionID, in, hash, body, match)
+			if err != nil {
+				return err
+			}
+			kind := "question.merged"
+			if match.decisionID != "" {
+				if err := reuseAnswer(ctx, tx, p, project, askerID, match); err != nil {
+					return err
+				}
+				kind = "question.reused"
+			}
+			if err := event(ctx, tx, p, match.questionID, kind, match.revision); err != nil {
+				return err
+			}
+			q, err = read(ctx, tx, p, match.questionID)
+			return err
+		}
 		id, err = createNode(ctx, tx, p, project, "question")
 		if err != nil {
 			return err
@@ -182,12 +213,7 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		if _, err = tx.Exec(ctx, `INSERT INTO desk_questions(tenant_id,project_id,node_id,input,suggested_outcome,suggestion_reason) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, project, id, body, stamp, why); err != nil {
 			return err
 		}
-		dest := in.TicketID
-		if dest == "" {
-			dest = id
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO desk_askers(tenant_id,project_id,question_id,principal_id,request_id,request_digest,session_id,source_request_id,ticket_id,comment_node_id,input)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, p.TenantID, project, id, p.ID, in.RequestID, hash, nullable(in.SessionID), nullable(in.SourceRequestID), nullable(in.TicketID), dest, body)
+		_, err = addAsker(ctx, tx, p, project, id, in, hash, body, questionMatch{})
 		if err != nil {
 			return err
 		}
@@ -216,16 +242,21 @@ func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Questi
 	if err := permit(ctx, tx, p, q.ProjectID, "questions.read"); err != nil {
 		return q, err
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,input FROM desk_askers
+	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,input,coalesce(reused_decision_id::text,''),coalesce(reused_revision,0) FROM desk_askers
  WHERE tenant_id=$1 AND question_id=$2 AND ($3 OR principal_id=$4) ORDER BY created_at,id`, p.TenantID, id, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
 	}
 	for rows.Next() {
 		var a Asker
-		if err := rows.Scan(&a.ID, &a.PrincipalID, &a.RequestID, &a.SessionID, &a.ReplyRootID, &a.CommentNodeID, &a.CreatedAt, &a.Input); err != nil {
+		var source Reuse
+		if err := rows.Scan(&a.ID, &a.PrincipalID, &a.RequestID, &a.SessionID, &a.ReplyRootID, &a.CommentNodeID, &a.CreatedAt, &a.Input, &source.DecisionID, &source.Revision); err != nil {
 			rows.Close()
 			return q, err
+		}
+		if source.DecisionID != "" {
+			source.Label = "From the record"
+			a.FromRecord = &source
 		}
 		q.Askers = append(q.Askers, a)
 	}

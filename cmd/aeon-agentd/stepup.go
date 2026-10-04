@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -18,7 +19,7 @@ import (
 func pairedStepUp(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote) (*agentd.StepUpManager, error) {
 	_, proof, err := agentsetup.ReadAttachProof(root, c)
 	if err != nil {
-		return nil, errors.New("paired Touch ID proof unavailable")
+		return nil, fmt.Errorf("paired Touch ID proof in %s: %w", root, err)
 	}
 	if remote == nil || remote.Client == nil || remote.Client.HTTP == nil {
 		return nil, errors.New("paired Touch ID transport unavailable")

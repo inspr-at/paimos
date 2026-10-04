@@ -206,6 +206,7 @@ func eventText(t *testing.T, pool *pgxpool.Pool, tenantID, eventType string) str
 func TestMessages(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
+	baseline := countSQL(t, w.db.App, w.sender.TenantID, `SELECT count(*) FROM events`)
 	srv, _ := serve(t, w.db, w.sender, w.recipient, w.other, w.outsider)
 	status, body := do(t, srv, "", http.MethodPost, "/api/inbox/messages", sendJSON(w.recipient.ID, "x", "k", nil, nil), nil)
 	if status != 401 || mustJSON[apiErr](t, body).Code != "unauthorized" {
@@ -219,7 +220,7 @@ func TestMessages(t *testing.T) {
 	if status != 404 {
 		t.Fatalf("foreign recipient %d %s", status, body)
 	}
-	if countSQL(t, w.db.App, w.sender.TenantID, `SELECT count(*) FROM events`) != 0 {
+	if countSQL(t, w.db.App, w.sender.TenantID, `SELECT count(*) FROM events`) != baseline {
 		t.Fatal("rejected send wrote an event")
 	}
 	status, body = do(t, srv, w.sender.ID, http.MethodPost, "/api/inbox/messages", sendJSON(w.recipient.ID, secretBody, "k1", nil, nil), nil)
