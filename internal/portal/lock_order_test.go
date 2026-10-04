@@ -4,6 +4,7 @@ package portal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,12 +19,13 @@ import (
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Pause the shipped pairing fence after tree acquisition, before tenant. Every
-// real writer must wait without owning tenant, so the pairing caller can finish.
+// Pause the pairing fence after tree acquisition, with tenant already held.
+// Every real writer must wait on tenant before taking its own resource locks.
 // PostgreSQL's wait graph proves overlap; deadlines only guard against hangs.
-func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
+func TestPortalWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 	for _, name := range []string{
 		"portal-settings", "product-settings", "moderation", "market",
 		"node-create", "node-update", "node-terminal", "node-delete", "node-move", "node-bulk", "node-convert",
@@ -142,8 +144,8 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 				dbtest.Await(t, cleanup, done)
 				dbtest.Await(t, cleanup, pairedDone)
 			})
-			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "advisory" {
-				t.Fatalf("writer must wait on the pairing/tree fence: lock=%q", lock)
+			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "transactionid" {
+				t.Fatalf("writer must wait on the tenant access fence: lock=%q", lock)
 			}
 			probe, err := f.d.Admin.Begin(ctx)
 			if err != nil {
@@ -151,8 +153,9 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 			}
 			_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, tid)
 			_ = probe.Rollback(ctx)
-			if err != nil {
-				t.Fatalf("tree waiter must leave tenant free: %v", err)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.Code != "55P03" {
+				t.Fatalf("tenant fence must already be held: %v", err)
 			}
 			barrier.Release()
 			if err := dbtest.Await(t, ctx, paired); err != nil {

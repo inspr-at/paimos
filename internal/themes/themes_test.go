@@ -444,8 +444,10 @@ func TestConcurrentCASAndRevocationFence(t *testing.T) {
 		f := setup(t)
 		dbtest.BindRole(t, f.d, f.other.TenantID, f.other.ID, "owner")
 		theme := mustTheme(t, f.s, f.owner, "Workspace", "workspace")
-		// Hold a real access-change lock while the writer acquires the tree.
-		pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "pg_advisory_xact_lock") })
+		// Hold a real access-change lock before the writer can acquire the tree.
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancel()
+		pool := f.d.App
 		tx, err := f.d.Admin.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -463,8 +465,6 @@ func TestConcurrentCASAndRevocationFence(t *testing.T) {
 			result <- err
 			close(done)
 		}()
-		barrier.Wait(t, ctx)
-		barrier.Release()
 		if dbtest.BlockedOrDone(t, ctx, f.d.Admin, tx.Conn().PgConn().PID(), done) == "" {
 			t.Fatal("writer did not wait for authority lock")
 		}

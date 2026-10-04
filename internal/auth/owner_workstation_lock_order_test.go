@@ -32,10 +32,9 @@ func TestWorkstationPathsSerializeWithPairingLifecycle(t *testing.T) {
 	}
 }
 
-// After either real writer acquires tree, a pairing waiter must still leave
-// tenant free. This rejects pairing -> tenant -> tree as well as the original
-// tenant -> pairing inversion, without relying on deadlock detector timing.
-func TestWorkstationPathsAcquireTreeBeforeTenant(t *testing.T) {
+// Both writers retain the tenant fence through pairing and tree acquisition.
+// The wait graph and NOWAIT probe prove the shared order in either direction.
+func TestWorkstationPathsAcquireTenantBeforeTree(t *testing.T) {
 	for _, action := range []string{"mark", "unmark", "authorize"} {
 		for _, first := range []string{"lifecycle", "workstation"} {
 			t.Run(action+"/"+first+"_first", func(t *testing.T) {
@@ -99,9 +98,8 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 	beforeReported := count("agent_pairing.reported")
 	beforeDisconnected := count("agent_pairing.disconnected")
 
-	// Pause AFTER the first request acquires the selected advisory fence,
-	// BEFORE tenant. The second request's actual pairing wait proves overlap;
-	// neither request may own tenant until both advisory fences are held.
+	// Pause after the selected advisory fence, with tenant already held.
+	// The second writer must wait on that tenant fence before advisory entry.
 	pool, barrier, ctx := dbtest.BarrierPool(t, originalPool, func(query string) bool {
 		if fence == "pairing" {
 			return strings.Contains(query, "pg_advisory_xact_lock") && strings.Contains(query, "aeon-pairing:")
@@ -180,18 +178,19 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 		second = "lifecycle"
 	}
 	secondResponse, secondDone := start(second)
-	if lock := dbtest.BlockedOrDone(t, ctx, originalPool, pid, secondDone); lock != "advisory" {
-		t.Fatalf("second request did not wait on the first request's pairing fence: lock=%q", lock)
+	if lock := dbtest.BlockedOrDone(t, ctx, originalPool, pid, secondDone); lock != "transactionid" {
+		t.Fatalf("second request did not wait on the first request's tenant fence: lock=%q", lock)
 	}
 	if err := db.InTenant(ctx, originalPool, f.owner.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.owner.TenantID)
 		return err
-	}); err != nil {
+	}); err == nil {
+		t.Fatalf("writer did not hold tenant before %s", fence)
+	} else {
 		var pe *pgconn.PgError
 		if !errors.As(err, &pe) || pe.Code != "55P03" {
 			t.Fatalf("unexpected tenant probe failure: %v", err)
 		}
-		t.Errorf("writer owns tenant before completing pairing -> tree entry (paused after %s)", fence)
 	}
 	barrier.Release()
 	dbtest.Await(t, ctx, firstDone)

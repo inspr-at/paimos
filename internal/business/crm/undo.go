@@ -658,7 +658,8 @@ func (m *module) undoBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		return change, err
 	}
 	current, err := lockBinding(ctx, tx, p.TenantID, expected.ContactNodeID, expected.PrincipalID)
-	if err != nil || !matches(current, expected) {
+	if err != nil || current.PrincipalID != expected.PrincipalID || current.ContactNodeID != expected.ContactNodeID ||
+		current.BoundByPrincipalID != expected.BoundByPrincipalID || !current.BoundAt.Equal(expected.BoundAt) {
 		return change, events.ErrConflict
 	}
 	_, err = tx.Exec(ctx, `DELETE FROM crm_contact_principals WHERE contact_node_id=$1::uuid AND principal_id=$2::uuid`, expected.ContactNodeID, expected.PrincipalID)

@@ -3,6 +3,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Probe immediately before and after the real tree acquisition. Tenant must
-// remain free at both boundaries; a tenant-first helper fails with the exact
-// NOWAIT conflict, without sleeps or a possible deadlock. Main's unchanged
+// Probe immediately before and after tree acquisition. The tenant fence must
+// already be held at both boundaries; NOWAIT proves the canonical tenant-first
+// order without sleeps or a possible deadlock. Main's unchanged
 // TestProjectFencesPreserveTenantModes separately guards each shipped row mode.
 type projectFenceProbeTx struct {
 	pgx.Tx
@@ -32,7 +33,7 @@ func (tx projectFenceProbeTx) Exec(ctx context.Context, sql string, args ...any)
 	return tag, err
 }
 
-func TestProjectFencesAcquireTreeBeforeTenant(t *testing.T) {
+func TestProjectFencesAcquireTenantBeforeTree(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		lock func(context.Context, pgx.Tx, string) error
@@ -50,8 +51,13 @@ func TestProjectFencesAcquireTreeBeforeTenant(t *testing.T) {
 					if err := db.InTenant(ctx, f.d.App, f.actor.TenantID, func(other pgx.Tx) error {
 						_, err := other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.actor.TenantID)
 						return err
-					}); err != nil {
-						t.Errorf("tenant must stay free through tree acquisition (tree held=%t): %v", treeHeld, err)
+					}); err == nil {
+						t.Errorf("tenant fence missing at tree boundary (tree held=%t)", treeHeld)
+					} else {
+						var pe *pgconn.PgError
+						if !errors.As(err, &pe) || pe.Code != "55P03" {
+							t.Errorf("unexpected tenant probe error: %v", err)
+						}
 					}
 					if err := db.InTenant(ctx, f.d.App, f.actor.TenantID, func(other pgx.Tx) error {
 						var free bool
