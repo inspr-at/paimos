@@ -105,15 +105,16 @@ func do(t *testing.T, srv *httptest.Server, method, path string, anonymous bool)
 
 func TestPositionNamesTheNewestEventOfTheTenantBeforeAListedRead(t *testing.T) {
 	d, a, b := fixture(t)
+	base := logPosition(t, d, a)
 	srv := positionServer(t, d, a, nil)
-	if n, ok := position(t, do(t, srv, "GET", "/api/runs", false)); !ok || n != 0 {
-		t.Fatalf("empty log: position %d, present %v", n, ok)
+	if n, ok := position(t, do(t, srv, "GET", "/api/runs", false)); !ok || n != base {
+		t.Fatalf("bootstrap log: position %d, present %v", n, ok)
 	}
 	appendEvents(t, d, a, 3)
 	appendEvents(t, d, b, 5) // another tenant's log never counts
 	for _, path := range []string{"/api/runs", "/api/agent-accounts", "/api/nodes", "/api/harness-sessions/live"} {
-		if n, ok := position(t, do(t, srv, "GET", path, false)); !ok || n != 3 {
-			t.Fatalf("%s: position %d, present %v; want the tenant's 3", path, n, ok)
+		if n, ok := position(t, do(t, srv, "GET", path, false)); !ok || n != base+3 {
+			t.Fatalf("%s: position %d, present %v; want the tenant counter after three appends", path, n, ok)
 		}
 	}
 }
@@ -122,6 +123,7 @@ func TestPositionNamesTheNewestEventOfTheTenantBeforeAListedRead(t *testing.T) {
 // inside is run again, so the body and the position come from the same quiet stretch.
 func TestPositionOfAReadNamesTheSnapshotAnInterruptedReadIsRunAgain(t *testing.T) {
 	d, a, _ := fixture(t)
+	base := logPosition(t, d, a)
 	appendEvents(t, d, a, 2)
 	srv := positionServer(t, d, a, func(run int) {
 		if run == 1 {
@@ -130,8 +132,8 @@ func TestPositionOfAReadNamesTheSnapshotAnInterruptedReadIsRunAgain(t *testing.T
 	})
 	resp := do(t, srv, "GET", "/api/runs", false)
 	n, ok := position(t, resp)
-	if !ok || n != 3 {
-		t.Fatalf("position %d, present %v; want 3, the newest event the second run saw", n, ok)
+	if !ok || n != base+3 {
+		t.Fatalf("position %d, present %v; want the newest event the second run saw", n, ok)
 	}
 	var body struct{ Run int }
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Run != 2 {
@@ -162,14 +164,15 @@ func TestPositionIsAbsentWhenEventsKeepCommittingDuringTheRead(t *testing.T) {
 // position is the counter before the handler, never a later event it may not see.
 func TestListPositionIsALowerBoundWithoutRepeatingUnderContinuousEvents(t *testing.T) {
 	d, a, b := fixture(t)
+	base := logPosition(t, d, a)
 	appendEvents(t, d, a, 2)
 	appendEvents(t, d, b, 20)
 	srv := positionServer(t, d, a, func(int) { appendEvents(t, d, a, 1) })
 	for run := 1; run <= 10; run++ {
 		resp := do(t, srv, "GET", "/api/nodes", false)
 		n, ok := position(t, resp)
-		if !ok || n != int64(run+1) {
-			t.Fatalf("read %d: position %d, present %v; want the before counter %d", run, n, ok, run+1)
+		if !ok || n != base+int64(run+1) {
+			t.Fatalf("read %d: position %d, present %v; want the before counter %d", run, n, ok, base+int64(run+1))
 		}
 		var body struct{ Run int }
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Run != run {
@@ -184,31 +187,33 @@ func TestListPositionIsALowerBoundWithoutRepeatingUnderContinuousEvents(t *testi
 // A refused read is not repeated, and never carries a position.
 func TestPositionIsNotReadForARefusedRead(t *testing.T) {
 	d, a, _ := fixture(t)
+	base := logPosition(t, d, a)
 	srv := positionServer(t, d, a, nil)
 	resp := do(t, srv, "GET", "/api/models", false)
 	if n, ok := position(t, resp); ok || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status %d, position %d, present %v; want a bare 403", resp.StatusCode, n, ok)
 	}
 	var count int
-	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, a.TenantID).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("the refused read ran %d times (%v); want once", count, err)
+	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, a.TenantID).Scan(&count); err != nil || int64(count) != base+1 {
+		t.Fatalf("the refused read ran %d times (%v); want once", int64(count)-base, err)
 	}
 }
 
 func TestPositionOfAnAcceptedWriteIsAtOrAboveItsOwnEvent(t *testing.T) {
 	d, a, _ := fixture(t)
+	base := logPosition(t, d, a)
 	appendEvents(t, d, a, 4)
 	srv := positionServer(t, d, a, nil)
 	resp := do(t, srv, "POST", "/api/runs/r1/cancel", false)
 	n, ok := position(t, resp)
-	if resp.StatusCode != 200 || !ok || n != 5 {
-		t.Fatalf("status %d, position %d, present %v; want 200 and the write's own event 5", resp.StatusCode, n, ok)
+	if resp.StatusCode != 200 || !ok || n != base+5 {
+		t.Fatalf("status %d, position %d, present %v; want 200 and the write's own event", resp.StatusCode, n, ok)
 	}
 	// A read started after the write answers at or above it: nothing older can look newer.
 	if read, ok := position(t, do(t, srv, "GET", "/api/runs", false)); !ok || read < n {
 		t.Fatalf("read position %d is below the write's %d", read, n)
 	}
-	if n, ok := position(t, do(t, srv, "DELETE", "/api/agent-accounts/a", false)); !ok || n != 5 {
+	if n, ok := position(t, do(t, srv, "DELETE", "/api/agent-accounts/a", false)); !ok || n != base+5 {
 		t.Fatalf("a 204 write: position %d, present %v", n, ok)
 	}
 }
@@ -236,13 +241,14 @@ func TestPositionIsAbsentWhereItWouldMislead(t *testing.T) {
 
 func TestPositionWriterKeepsStreamingWorking(t *testing.T) {
 	d, a, _ := fixture(t)
+	base := logPosition(t, d, a)
 	appendEvents(t, d, a, 1)
 	rec := httptest.NewRecorder()
 	w := &positionWriter{ResponseWriter: rec, r: httptest.NewRequest("POST", "/api/x", nil), pool: d.App, tenantID: a.TenantID}
 	if err := http.NewResponseController(w).Flush(); err != nil {
 		t.Fatalf("flush through the wrapper: %v", err)
 	}
-	if !rec.Flushed || rec.Header().Get(PositionHeader) != "1" {
+	if !rec.Flushed || rec.Header().Get(PositionHeader) != strconv.FormatInt(base+1, 10) {
 		t.Fatalf("flushed %v, position %q", rec.Flushed, rec.Header().Get(PositionHeader))
 	}
 }

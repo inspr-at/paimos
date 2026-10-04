@@ -106,7 +106,12 @@ func socketDisplayPath(home, path string) string {
 // PrepareSocketDirectory keeps the short fallback as private as paired state.
 // OpenStore rejects symlinks (including ancestors), foreign owners and modes;
 // it never repairs an existing unsafe directory.
-func PrepareSocketDirectory(socket string) error {
+func PrepareSocketDirectory(socket string) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("prepare local socket directory %s: %w", filepath.Dir(socket), resultErr)
+		}
+	}()
 	dir := filepath.Dir(socket)
 	if filepath.Base(dir) == "run" && filepath.Base(filepath.Dir(dir)) == ".aeon" {
 		parent, err := OpenStore(filepath.Dir(dir), true)
@@ -124,7 +129,12 @@ func PrepareSocketDirectory(socket string) error {
 
 // CheckSocket inspects an existing socket through a private directory handle;
 // neither the socket nor any of its ancestors may be symlinks.
-func CheckSocket(socket string) error {
+func CheckSocket(socket string) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("check local socket %s: %w", socket, resultErr)
+		}
+	}()
 	s, err := OpenStore(filepath.Dir(socket), false)
 	if err != nil {
 		return err
@@ -135,7 +145,10 @@ func CheckSocket(socket string) error {
 	if errors.Is(err, unix.ENOENT) {
 		return os.ErrNotExist
 	}
-	if err != nil || st.Mode&unix.S_IFMT != unix.S_IFSOCK || st.Mode&0777 != 0600 || int(st.Uid) != os.Getuid() || st.Nlink != 1 {
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsafePath, err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFSOCK || st.Mode&0777 != 0600 || int(st.Uid) != os.Getuid() || st.Nlink != 1 {
 		return ErrUnsafePath
 	}
 	return nil

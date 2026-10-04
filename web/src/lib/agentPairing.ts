@@ -1039,7 +1039,16 @@ const PROBE_DETAILS = new Set([
   'the sign-in answer did not identify the account',
   'the sign-in command exited unsuccessfully',
 ])
+const PAIRING_DETAILS = new Set([
+  'the local pairing state could not be read or saved',
+  'the pairing server could not confirm the lifecycle',
+  'the pairing response did not match the approved computer',
+  'the pairing response contains an unapproved account',
+  'the local dispatch fence could not be confirmed',
+  'the approved runtime configuration could not be refreshed',
+])
 function probeDetail(reason: unknown, detail: unknown, harness: string): string | undefined {
+  if (reason === 'pairing_sync_failed') return typeof detail === 'string' && PAIRING_DETAILS.has(detail) ? detail : undefined
   if (reason === 'login_required' && detail === "the approved account is signed out in the daemon's view") return detail
   if (detail === 'the default Claude profile is not private (requires mode 0700)' && harness !== 'claude') return undefined
   return reason === 'probe_failed' && typeof detail === 'string' && PROBE_DETAILS.has(detail) ? detail : undefined
@@ -1108,7 +1117,7 @@ export function describeEnrollmentDiagnostic(view: HarnessView, enrollment: { ac
   if (!item) return null
   const cause = probeDetail(item.reason, item.reason_detail, enrollment.harness)
   return {
-    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : 'sign-in check failed: '}${cause}.` : '',
+    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : item.reason === 'pairing_sync_failed' ? 'pairing sync failed: ' : 'sign-in check failed: '}${cause}.` : '',
     command: harnessFix(enrollment.harness, item.reason, cause)?.command ?? '',
   }
 }
@@ -1134,6 +1143,10 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
   const accounts = view.enrollments?.filter(item => item.harness === harness && item.state === 'connected') ?? []
   const accountName = accounts.length === 1 && accounts[0]?.label ? accounts[0].label : harnessDisplayName(harness)
   if (detail.reason === 'binding_missing') return `${harnessDisplayName(harness)} was approved but isn't set up on this computer. Add it here or remove it from this computer in ${product()}.`
+  if (detail.reason === 'pairing_sync_failed') {
+    const cause = probeDetail(detail.reason, detail.reason_detail, harness)
+    return `${accountName}: pairing sync failed${cause ? `: ${cause}` : ''}.`
+  }
   if (detail.reason === 'probe_pending') return `${accountName}: waiting for the sign-in and availability check; blocked after 60 seconds.`
   if (detail.reason === 'capacity_capture') return `${accountName}: a short capacity check is in progress; expected within 10 seconds.`
   if (['probe_timeout', 'probe_failed', 'capacity_timeout'].includes(detail.reason ?? '')) return `${accountName}: ${reasonLabel(detail.state, detail.reason).toLowerCase()}.`
@@ -1150,7 +1163,7 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
 
 function reasonLabel(status: string, reason?: string): string {
   const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
+  const reasons: Record<string, string> = { pairing_sync_failed: 'Pairing sync failed', repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
   // A code from a newer daemon is shown raw rather than dropped or guessed.
   if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
   if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
