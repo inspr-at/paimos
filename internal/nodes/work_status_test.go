@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func enableWorkStatusTest(t *testing.T, p tenant.Principal) {
@@ -623,4 +624,89 @@ func TestWorkParentStatusCausalUndoAuditRedactsHiddenCause(t *testing.T) {
 		}
 	})
 	readAudit(true)
+}
+
+// Both requests target the same ordinary bulk event. The first enters while
+// OFF, then activation commits; the second enters while ON and holds the tree.
+// A database-observed wait proves overlap before probing the event fence.
+func TestWorkParentStatusOrdinaryUndoOrdersAcrossActivation(t *testing.T) {
+	p := newPrincipal(t, "work-ordinary-activation")
+	child := workNodeTest(t, p, "", "open")
+	enableWorkStatusTest(t, p)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE features SET enabled=false WHERE tenant_id=$1`, p.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, raw := call(t, &p, "POST", "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q],"state":"done"}`, child.ID))
+	if status != 200 {
+		t.Fatalf("ordinary bulk: %d %s", status, raw)
+	}
+	var id int64
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE type='node.bulk_changed' ORDER BY id DESC LIMIT 1`).Scan(&id)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	offPool, offBarrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool { return sql == "SELECT aeon_work_status_begin()" })
+	type response struct {
+		status int
+		body   string
+	}
+	startUndo := func(pool *pgxpool.Pool) <-chan response {
+		done := make(chan response, 1)
+		mux := http.NewServeMux()
+		events.New(pool, events.WithUndoHandlers(UndoHandlers())).Mount(mux)
+		req := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", id), nil).WithContext(tenant.WithPrincipal(ctx, p))
+		go func() {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			done <- response{rec.Code, rec.Body.String()}
+		}()
+		return done
+	}
+	first := startUndo(offPool)
+	offPID := offBarrier.Wait(t, ctx)
+	enableWorkStatusTest(t, p)
+	onPool, onBarrier, _ := dbtest.BarrierPool(t, appPool, func(sql string) bool { return sql == "SELECT aeon_work_status_begin()" })
+	second := startUndo(onPool)
+	onPID := onBarrier.Wait(t, ctx)
+	offBarrier.Release()
+	for {
+		select {
+		case r := <-first:
+			t.Fatalf("OFF Undo escaped ON tree fence: %d %s", r.status, r.body)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
+		var waiting bool
+		if err := adminPool.QueryRow(ctx, `SELECT $1::int=ANY(pg_blocking_pids($2::int))`, onPID, offPID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		runtime.Gosched()
+	}
+	probe, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var free bool
+	err = probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,12))`, p.TenantID+":"+fmt.Sprint(id)).Scan(&free)
+	_ = probe.Rollback(ctx)
+	onBarrier.Release()
+	// Drain both requests before assertions, including the failing implementation.
+	a, b := dbtest.Await(t, ctx, first), dbtest.Await(t, ctx, second)
+	if err != nil || !free {
+		t.Fatalf("ordinary OFF Undo holds event while waiting for ON tree: free=%v err=%v; responses %d/%d", free, err, a.status, b.status)
+	}
+	if a.status != 409 || b.status != 201 {
+		t.Fatalf("ordinary Undo results: OFF %d %s; ON %d %s", a.status, a.body, b.status, b.body)
+	}
+	if currentWorkTest(t, p, child.ID).State != "open" {
+		t.Fatal("ordinary Undo did not restore child exactly once")
+	}
 }
