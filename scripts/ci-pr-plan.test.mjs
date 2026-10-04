@@ -9,17 +9,24 @@ import { classifyPaths, classifyPR, requireResults, validatePath } from './ci-pr
 
 function repository() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-pr-plan-')));
-  const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+  const home = mkdtempSync(join(tmpdir(), 'aeon-pr-plan-home-'));
+  // Every Git call, including workflow/CLI children and no-commit merges,
+  // uses fixture identity and cannot inherit the host's Git configuration.
+  const env = { PATH: process.env.PATH, HOME: home, XDG_CONFIG_HOME: home,
+    GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
+  const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', env });
   const file = (name, value = 'fixture\n') => {
     mkdirSync(dirname(join(root, name)), { recursive: true });
     writeFileSync(join(root, name), value);
     git(['add', name]);
   };
-  const commit = () => { git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']); return git(['rev-parse', 'HEAD']).trim(); };
+  const commit = () => { git(['commit', '-qm', 'fixture']); return git(['rev-parse', 'HEAD']).trim(); };
   git(['init', '-q']);
   file('README.md'); file('web/tests/existing.spec.ts');
   const base = commit();
-  return { root, git, file, commit, base,
+  return { root, env, git, file, commit, base,
     event: head => ({ pull_request: { base: { sha: base }, head: { sha: head } } }) };
 }
 
@@ -81,7 +88,7 @@ function executeWorkflowPlan(repo, head, { eventName = 'pull_request', base = re
   writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }));
   writeFileSync(output, '');
   const result = spawnSync('bash', ['-c', workflowPlanScript()], { cwd: repo.root, encoding: 'utf8', timeout: 20000,
-    env: { ...process.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath,
+    env: { ...repo.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath,
       GITHUB_SHA: head, PR_BASE_SHA: base, RUNNER_TEMP: join(repo.root, 'runner-temp'),
       GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
   assert.equal(result.status, 0, result.stderr);
@@ -164,7 +171,7 @@ test('real CLI falls back to full on missing history, malformed input and wrong 
     const eventPath = join(repo.root, 'event.json'), output = join(repo.root, `output-${lane}-${checkout}`);
     writeFileSync(eventPath, JSON.stringify(event)); writeFileSync(output, '');
     const result = spawnSync(process.execPath, [script], { cwd: repo.root, encoding: 'utf8',
-      env: { ...process.env, GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: eventPath,
+      env: { ...repo.env, GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: eventPath,
         GITHUB_SHA: checkout, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).lane, lane);
