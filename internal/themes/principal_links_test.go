@@ -274,7 +274,8 @@ func TestThemeWriteRechecksLinkAfterAuthorityFence(t *testing.T) {
 	f := setup(t)
 	old := mustTheme(t, f.s, f.member, "Original", "personal")
 	linkPeople(t, f, f.member, f.other)
-	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "pg_advisory_xact_lock") })
+	// Pause after caching identity, before the tenant-first authority fence.
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "aeon_enter_principal") })
 	tx, err := f.d.Admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +315,8 @@ func TestAliasThemeWriteDropsCachedCanonicalAfterUnlink(t *testing.T) {
 	f := setup(t)
 	private := mustTheme(t, f.s, f.other, "Former canonical person's private theme", "personal")
 	linkPeople(t, f, f.member, f.other)
-	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "pg_advisory_xact_lock") })
+	// Pause after caching identity, before the tenant-first authority fence.
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "aeon_enter_principal") })
 	tx, err := f.d.Admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
