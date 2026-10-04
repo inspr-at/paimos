@@ -22,7 +22,7 @@ test('source manifest accounts for every spec, including nested files, before re
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
   assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
   assert.deepEqual(manifest.exclusions, [])
-  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts']) {
+  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
     assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
   }
 })
@@ -355,10 +355,10 @@ test('runtime reconciliation leaves new specs ungated, drops removed specs and r
   assert.equal(reconcileManifest(manifest, files(manifest)).manifest.groups.length, manifest.groups.length)
   assert.throws(() => reconcileManifest({ ...manifest, groups: [...manifest.groups, { ...group, id: 'unlisted' }] }, [...discovered, 'tests/x.spec.ts']), /reserved/)
   assert.equal(parseArgs(['--check', '--strict']).strict, true)
-  // The real manifest includes all four newly gated specs and main's key-layout gate.
+  // The real manifest includes main's gates and the AEON-584 record-ownership spec.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 54)
+  assert.equal(JSON.parse(out.pop()).specs, 55)
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {
