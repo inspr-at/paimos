@@ -215,6 +215,9 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 		steps := reuseSteps(treeMap(jobs[id]))
 		s := treeMap(steps[len(steps)-1])
 		values := map[string]string{"REUSE": "merge_group", "REUSE_PROOF": "success", "SOURCE_RUN": "123", "CACHE_PRIME": "success", "CI_PLAN": "success", "CI_LANE": "full", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main"}
+		if treeMap(s["env"])["TIER_PLAN"] != nil {
+			values["TIER_PLAN"] = "success"
+		}
 		for key := range treeMap(s["env"]) {
 			if _, exists := values[key]; !exists {
 				values[key] = "skipped"
@@ -358,8 +361,8 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 			t.Fatalf("verifier lacks execution evidence for %s", id)
 		}
 	}
-	reuseStep(t, treeMap(jobs["go-test"]), "Test this shard")
-	reuseStep(t, treeMap(jobs["web-shard"]), "Run balanced UI shard with merge-queue flake control")
+	reuseStep(t, treeMap(jobs["go-test"]), "Test this shard (essential plus changed area, or full on main)")
+	reuseStep(t, treeMap(jobs["web-shard"]), "Run selected UI cases without retries")
 	// A new job or matrix row must invalidate the proof inventory.
 	jobs["new-required-job"] = map[string]any{"runs-on": "ubuntu-latest"}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
@@ -374,9 +377,9 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 
 func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	// Pin the accepted c72eb506 classification/full-execution configuration.
-	// Normalize only new proof dependencies, job-level reuse guards and the
-	// additive verifier regression command. Services, caches, test commands,
-	// classification and unconditional migrations must keep their exact bytes.
+	// Keep that historical fixture and the original AEON-681 tier fixture.
+	// Only six tier-adapted execution jobs use the additive merge-main pins;
+	// lane classification, unaffected jobs and unconditional migrations stay pinned.
 	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-main-before-reuse.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -393,8 +396,27 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	}
 	w := treeWorkflow(t, "ci.yml")
 	jobs := treeMap(w["jobs"])
-	guard := regexp.MustCompile(`^always\(\) && needs.ci-plan.result == 'success' && \((.*?)\) && needs.tree-reuse.outputs.reuse != 'merge_group'(?: && needs.(?:runner-route|web-setup).result == 'success')?$`)
+	guard := regexp.MustCompile(`^always\(\) && needs.ci-plan.result == 'success' && (?:needs.tier-plan.result == 'success' && )?\((.*?)\) && needs.tree-reuse.outputs.reuse != 'merge_group'(?: && needs.(?:runner-route|web-setup).result == 'success')?$`)
+	tierBody, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-tiers-before-reuse.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tierBaseline struct {
+		MergeMain struct {
+			Source string            `json:"source_main_sha"`
+			Hashes map[string]string `json:"sha256"`
+		} `json:"mergeMain"`
+	}
+	if err := json.Unmarshal(tierBody, &tierBaseline); err != nil {
+		t.Fatal(err)
+	}
+	if len(tierBaseline.MergeMain.Source) != 40 || len(tierBaseline.MergeMain.Hashes) != 6 {
+		t.Fatal("incomplete merge-main tier fixture")
+	}
 	for id, expected := range baseline.Hashes {
+		if tierHash, changed := tierBaseline.MergeMain.Hashes[id]; changed {
+			expected = tierHash
+		}
 		value := w["concurrency"]
 		if id != "concurrency" {
 			j := treeMap(jobs[id])

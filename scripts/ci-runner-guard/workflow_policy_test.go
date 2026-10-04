@@ -447,6 +447,10 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					if name == "CI_LANE" || name == "CI_PLAN" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" {
 						continue
 					}
+					if name == "TIER_PLAN" {
+						values[name] = "success"
+						continue
+					}
 					values[name] = "skipped"
 					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_SHARD") {
 						values[name] = "success"
@@ -501,13 +505,20 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	expression = strings.TrimPrefix(expression, "${{ fromJSON(")
 	expression = strings.TrimSuffix(expression, ") }}")
 	for _, lane := range []string{"full", "spec-only"} {
-		got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.ci-plan.outputs.lane": lane})
-		want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
-		if lane == "spec-only" {
-			want = "[1]"
-		}
-		if got != want {
-			t.Fatalf("%s matrix = %s, want %s", lane, got, want)
+		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
+			for _, mode := range []string{"full", "essential"} {
+				const premerge = `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`
+				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.ci-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode, premerge: map[bool]string{true: "yes", false: ""}[event == "pull_request" || event == "merge_group"]})
+				want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
+				if lane == "spec-only" {
+					want = "[1]"
+				} else if mode == "essential" && (event == "pull_request" || event == "merge_group") {
+					want = "[1, 2]"
+				}
+				if got != want {
+					t.Fatalf("%s/%s/%s matrix = %s, want %s", lane, event, mode, got, want)
+				}
+			}
 		}
 	}
 	// Full history is needed only for the lightweight PR classifier; retain

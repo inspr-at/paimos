@@ -1,212 +1,28 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-name: CI
+name: Nightly full
+# All three tiers, including never-gated browser cases. This separate workflow
+# reports failures for classification without becoming a PR/main required check.
+# A red nightly opens a ticket with the failing case and exact tested SHA.
+# Automated ticket creation, ownership and budget wiring belong to OPS step 2.
 
 on:
-  # One run per change (AEON-419): pushes to main, pull requests, and the merge queue.
-  # A bare `push:` also ran on every PR branch push, doubling CI load under the 20-job limit.
-  push:
-    branches: [main]
-  pull_request:
-  merge_group:
-    types: [checks_requested]
+  schedule:
+    - cron: '23 1 * * *'
   workflow_dispatch:
 
-# New main pushes supersede older main runs (AEON-585); PR cancellation stays per PR.
-concurrency:
-  # Keep existing PR/queue/manual groups; only main pushes share a group.
-  # Queue runs retain unique run IDs, including while pending; main cannot cancel them or PR checks.
-  group: ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 permissions:
   contents: read
 
 jobs:
-  # Read-only exact-SHA proof. Lookup/checkout failure leaves reuse unset.
-  tree-reuse:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      actions: read
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    timeout-minutes: 5
-    outputs:
-      reuse: ${{ steps.proof.outputs.reuse }}
-      run: ${{ steps.proof.outputs.run }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - name: Verify the exact merge-group SHA
-        id: proof
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_TREE_REUSE: ${{ vars.CI_TREE_REUSE }}
-        run: node scripts/ci-tree-reuse.mjs
-
-  # Preserve main-scoped cache writes when the tests reuse a queue result.
-  cache-prime:
-    needs: tree-reuse
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.tree-reuse.outputs.reuse == 'merge_group'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Resolve lockfile and Playwright cache keys
-        id: web-cache-keys
-        env:
-          LOCKFILE_HASH: ${{ hashFiles('web/package-lock.json') }}
-        run: |
-          set -euo pipefail
-          pw_version="$(node -p "require('./web/package-lock.json').packages['node_modules/@playwright/test'].version")"
-          echo "dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
-          echo "browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
-      - name: Cache installed web dependencies
-        id: web-dependencies
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: web/node_modules
-          key: ${{ steps.web-cache-keys.outputs.dependencies }}
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-      - name: Cache Playwright browsers
-        id: web-browsers
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.web-cache-keys.outputs.browsers }}
-      - name: Install Playwright browsers
-        working-directory: web
-        run: npx playwright install chromium
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        id: setup-go
-        with:
-          go-version: "1.26"
-          cache: true
-          cache-dependency-path: go.sum
-      - name: Locate Go build cache
-        id: go-cache-path
-        run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      - name: Warm Go module and build caches
-        run: |
-          go mod download
-          go build ./...
-      - name: Save main Go build cache for hosted shard 1
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-1-main-${{ github.sha }}
-      - name: Save main Go build cache for hosted shard 2
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-2-main-${{ github.sha }}
-      - name: Save main Go build cache for hosted shard 3
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-3-main-${{ github.sha }}
-      - name: Save main Go build cache for hosted shard 4
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-4-main-${{ github.sha }}
-      - name: Save main Go build cache for hosted shard 5
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-5-main-${{ github.sha }}
-      - name: Save main Go build cache for hosted shard 6
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-6-main-${{ github.sha }}
-      - name: Save main Go build cache for hosted shard 7
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ steps.go-cache-path.outputs.path }}
-          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-7-main-${{ github.sha }}
-
-  # AEON-427a: only PRs may omit heavy validation; classification errors run full.
-  ci-plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      lane: ${{ steps.plan.outputs.lane }}
-      specs: ${{ steps.plan.outputs.specs }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          # Only this lightweight PR job needs history for the three-dot diff.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - name: Classify local PR diff
-        id: plan
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          full_plan() {
-            printf 'lane=full\nspecs=[]\n' >> "$GITHUB_OUTPUT"
-            echo 'CI: full; trusted classification unavailable or not a PR' >> "$GITHUB_STEP_SUMMARY"
-          }
-          # Never execute the candidate's classifier. A first-time adoption
-          # without a base copy also retains full validation.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
-             [[ "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
-             git show "$PR_BASE_SHA:scripts/ci-pr-plan.mjs" > "$RUNNER_TEMP/ci-pr-plan.mjs"; then
-            node "$RUNNER_TEMP/ci-pr-plan.mjs" || full_plan
-          else
-            full_plan
-          fi
-
-  tier-plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      mode: ${{ steps.tiers.outputs.mode }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: contains(fromJSON('["pull_request","merge_group"]'), github.event_name)
-        with:
-          persist-credentials: false
-          fetch-depth: 1
-      # Hosted Ubuntu's Node runs this dependency-free planner. Fetch only the
-      # exact event base; skip checkout entirely when this event runs full.
-      - id: tiers
-        run: |
-          case "$GITHUB_EVENT_NAME" in
-            pull_request|merge_group) node scripts/test-tiers/diff.mjs ;;
-            *) echo 'mode=full' >> "$GITHUB_OUTPUT" ;;
-          esac
-
-  runner-route:
-    uses: ./.github/workflows/test-runner-route.yml
-    with:
-      required-idle-runners: 4
-
-  go-test:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
-    needs: [runner-route, ci-plan, tree-reuse, tier-plan]
+  nightly-go-test:
     strategy:
       fail-fast: false
       matrix:
         # Use the same event/ref/attempt guards as runs-on when evaluated.
         # Re-run all jobs: partial reruns may retain earlier matrix values.
-        shard: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
-    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
+        shard: [1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -232,6 +48,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         id: setup-go
         with:
@@ -258,36 +75,12 @@ jobs:
           restore-keys: |
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
-      - name: Install shells when this shard runs pairing path-proof tests
-        env:
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          TIER_SHARD: ${{ matrix.shard }}
-        run: |
-          set -euo pipefail
-          need=no
-          if [ "$AEON_GO_SHARD_COUNT" != 2 ]; then
-            need="$(go run ./scripts/ci-go-shards needs-shell -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}")"
-          fi
-          # Tier balancing can move the path-proof case from the legacy map.
-          tier_need="$(node --input-type=module -e '
-            import { plan } from "./scripts/test-tiers/cli.mjs";
-            import { changedPaths } from "./scripts/test-tiers/diff.mjs";
-            const tests = plan("go", {paths: changedPaths(process.env.GITHUB_EVENT_NAME, process.env, {fetchBase: true}), index: Number(process.env.TIER_SHARD), count: Number(process.env.AEON_GO_SHARD_COUNT), full: process.env.AEON_TEST_TIER_MODE !== "essential"}).tests;
-            console.log(tests.some(row => row.package === "internal/agentpairing" && row.name === "TestPathProofCommandsRunInShells") ? "yes" : "no");
-          ')"
-          if [ "$need" = yes ] || [ "$tier_need" = yes ]; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
-          fi
+      - name: Install shells used by pairing tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
       - name: Test this shard (essential plus changed area, or full on main)
         env:
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
-      - name: Confirm full tier execution
-        if: needs.tier-plan.outputs.mode != 'essential'
-        env:
-          TIER_REPORT: tmp/test-tiers/go-test-${{ matrix.shard }}-measurement.json
-        run: node scripts/test-tiers/check-full.mjs
+        run: node scripts/test-tiers/cli.mjs run go --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
       - name: Preserve test tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -306,11 +99,9 @@ jobs:
           esac
           printf 'Green test result: runner_class=%s commit=%s event=%s shards=%s\n' "$runner_class" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" "$AEON_GO_SHARD_COUNT" >> "$GITHUB_STEP_SUMMARY"
 
-  # Timing budgets were calibrated on hosted hardware. Full validation always
-  # runs this job, regardless of the selected Go shard layout.
-  go-timing:
-    needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+  # Timing budgets were calibrated on hosted hardware. Always run this job,
+  # regardless of the selected shard layout or which jobs are being rerun.
+  nightly-go-timing:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -341,7 +132,7 @@ jobs:
       - name: Timing budgets, alone
         env:
           GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --full --timing --job go-timing
+        run: node scripts/test-tiers/cli.mjs run go --all --timing --job go-timing
       - name: Preserve isolated timing measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -352,9 +143,7 @@ jobs:
           retention-days: 8
           overwrite: true
 
-  go-static:
-    needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+  nightly-go-static:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -392,7 +181,6 @@ jobs:
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check
       - name: Test tier selector regressions
-        # Browser-free and dependency-free; static CI does not install web.
         run: node --test scripts/test-tiers/test-tiers.test.mjs
       - name: Validate every Go tier against native collection
         run: node scripts/test-tiers/cli.mjs check go
@@ -403,60 +191,29 @@ jobs:
 
   # Job id go is the required check. It stays red when a shard or the static
   # job fails because if: always() still runs this gate.
-  go:
+  nightly-go:
     if: always()
-    needs: [ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan]
+    needs: [nightly-go-test, nightly-go-static, nightly-go-timing]
     runs-on: ubuntu-latest
     steps:
       - name: Require every Go shard and the static checks
         env:
-          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
-          REUSE_PROOF: ${{ needs.tree-reuse.result }}
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-          CACHE_PRIME: ${{ needs.cache-prime.result }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
-          CI_PLAN: ${{ needs.ci-plan.result }}
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          GO_TEST: ${{ needs.go-test.result }}
-          GO_STATIC: ${{ needs.go-static.result }}
-          GO_TIMING: ${{ needs.go-timing.result }}
+          GO_TEST: ${{ needs.nightly-go-test.result }}
+          GO_STATIC: ${{ needs.nightly-go-static.result }}
+          GO_TIMING: ${{ needs.nightly-go-timing.result }}
         run: |
           set -euo pipefail
-          test "$TIER_PLAN" = success
-          if [ "$REUSE" = merge_group ]; then
-            test "$GITHUB_EVENT_NAME" = push
-            test "$GITHUB_REF" = refs/heads/main
-            test "$CI_PLAN" = success
-            test "$CI_LANE" = full
-            test "$REUSE_PROOF" = success
-            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
-            test "$CACHE_PRIME" = success
-            test "$GO_TEST" = skipped
-            test "$GO_STATIC" = skipped
-            test "$GO_TIMING" = skipped
-            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           echo "go-test=${GO_TEST} go-static=${GO_STATIC} go-timing=${GO_TIMING}"
-          test "$CI_PLAN" = success
-          case "$CI_LANE" in
-            docs-only|spec-only) expected=skipped ;;
-            full) expected=success ;;
-            *) exit 1 ;;
-          esac
-          test "${GO_TEST}" = "$expected"
-          test "${GO_STATIC}" = "$expected"
-          test "${GO_TIMING}" = "$expected"
-          if [ "$expected" = skipped ]; then echo "$CI_LANE: Go checks skipped" >> "$GITHUB_STEP_SUMMARY"; fi
+          test "${GO_TEST}" = success
+          test "${GO_STATIC}" = success
+          test "${GO_TIMING}" = success
 
   # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
   # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
   # model-settings step ran specs that the shards now own (groups footer,
   # status-help, status-autopilot, model-settings); their unit tests run once in
   # web-setup via npm run test:unit.
-  web-setup:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group'
+  nightly-web-setup:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -465,6 +222,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
@@ -499,24 +257,10 @@ jobs:
       - working-directory: web
         run: npm run lint
       - name: Web unit checks (once)
-        env:
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
         working-directory: web
         run: |
-          if [ "$CI_LANE" = spec-only ]; then
-            # New specs need no tier entry for this lane's exact-spec run.
-            node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs
-            npm run test:unit:core
-          else
-            npm run ci:web:shard:test
-            node ../scripts/test-tiers/cli.mjs run web --unit --job web-unit
-          fi
-      - name: Confirm full tier execution
-        if: needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'
-        env:
-          TIER_REPORT: tmp/test-tiers/web-unit-measurement.json
-        run: node scripts/test-tiers/check-full.mjs
+          npm run ci:web:shard:test
+          node ../scripts/test-tiers/cli.mjs run web --all --unit --job web-unit
       - name: Preserve unit tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -555,21 +299,53 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
-  web-shard:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
-    needs: [ci-plan, web-setup, tree-reuse, tier-plan]
+  # Classification maintenance is scheduled and separate from executing tests.
+  # Manifest drift never blocks a PR or prevents the full suite from running.
+  nightly-tier-classification:
+    if: github.event_name == 'schedule'
+    needs: nightly-web-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime
+      - name: Restore web runtime
+        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Report Go cases needing classification
+        run: node scripts/test-tiers/cli.mjs check go --strict
+      - name: Report web cases needing classification
+        if: always()
+        run: node scripts/test-tiers/cli.mjs check web --strict
+
+  nightly-web-shard:
+    needs: nightly-web-setup
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     env:
       PW_RETRIES: '0'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
@@ -584,7 +360,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ needs.web-setup.outputs.browser-cache-key }}
+          key: ${{ needs.nightly-web-setup.outputs.browser-cache-key }}
           fail-on-cache-miss: true
       # OS libraries are per runner; browser downloads and npm ci are shared.
       - name: Install Chromium system dependencies
@@ -592,24 +368,11 @@ jobs:
         run: npx playwright install-deps chromium
       - name: Run selected UI cases without retries
         env:
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          CI_CHANGED_SPECS: ${{ needs.ci-plan.outputs.specs }}
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: |
-          if [ "$CI_LANE" = spec-only ]; then
-            npm --prefix web run ci:web:shard -- "${{ matrix.shard }}/1" --reporter=line,json
-          else
-            node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
-          fi
-      - name: Confirm full tier execution
-        if: needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'
-        env:
-          TIER_REPORT: tmp/test-tiers/web-shard-${{ matrix.shard }}-measurement.json
-        run: node scripts/test-tiers/check-full.mjs
+        run: node scripts/test-tiers/cli.mjs run web --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
       - name: Preserve browser tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -634,7 +397,6 @@ jobs:
             ${{ runner.temp }}/aeon-attach-shots/
             ${{ runner.temp }}/aeon-521a-shots/
             ${{ runner.temp }}/status-autopilot-shots/
-            ${{ runner.temp }}/ci-flake-evidence/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
@@ -642,15 +404,15 @@ jobs:
 
   # AEON-488 evidence, kept from the old web job: the immutable round-6 release list rendered with the
   # current screenshot fixture, next to the current one. Not part of the required `web` aggregate.
-  release-list-comparison:
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
-    needs: [ci-plan, web-setup, tree-reuse]
+  nightly-release-list-comparison:
+    needs: nightly-web-setup
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
@@ -665,7 +427,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ needs.web-setup.outputs.browser-cache-key }}
+          key: ${{ needs.nightly-web-setup.outputs.browser-cache-key }}
           fail-on-cache-miss: true
       - name: Install Chromium system dependencies
         working-directory: web
@@ -698,100 +460,23 @@ jobs:
           if-no-files-found: error
 
   # Preserve the ruleset's required check identity, including failed/skipped setup.
-  web:
-    name: web
+  nightly-web:
+    name: nightly-web
     if: always()
-    needs: [ci-plan, web-setup, web-shard, tree-reuse, cache-prime, tier-plan]
+    needs: [nightly-web-setup, nightly-web-shard]
     runs-on: ubuntu-latest
     steps:
       - name: Require setup and every web shard
         env:
-          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
-          REUSE_PROOF: ${{ needs.tree-reuse.result }}
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-          CACHE_PRIME: ${{ needs.cache-prime.result }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
-          CI_PLAN: ${{ needs.ci-plan.result }}
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          WEB_SETUP: ${{ needs.web-setup.result }}
-          WEB_SHARD: ${{ needs.web-shard.result }}
+          WEB_SETUP: ${{ needs.nightly-web-setup.result }}
+          WEB_SHARD: ${{ needs.nightly-web-shard.result }}
         run: |
           set -euo pipefail
-          test "$TIER_PLAN" = success
-          if [ "$REUSE" = merge_group ]; then
-            test "$GITHUB_EVENT_NAME" = push
-            test "$GITHUB_REF" = refs/heads/main
-            test "$CI_PLAN" = success
-            test "$CI_LANE" = full
-            test "$REUSE_PROOF" = success
-            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
-            test "$CACHE_PRIME" = success
-            test "$WEB_SETUP" = skipped
-            test "$WEB_SHARD" = skipped
-            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
-          test "$CI_PLAN" = success
-          case "$CI_LANE" in
-            docs-only)
-              test "$WEB_SETUP" = skipped
-              test "$WEB_SHARD" = skipped
-              echo 'docs-only: web checks skipped' >> "$GITHUB_STEP_SUMMARY" ;;
-            spec-only)
-              test "$WEB_SETUP" = success
-              test "$WEB_SHARD" = success
-              echo 'spec-only: changed specs passed' >> "$GITHUB_STEP_SUMMARY" ;;
-            full)
-              test "$WEB_SETUP" = success
-              test "$WEB_SHARD" = success
-              ;;
-            *) exit 1 ;;
-          esac
+          test "${WEB_SETUP}" = success
+          test "${WEB_SHARD}" = success
 
-  release-check:
-    if: always()
-    needs: [ci-plan, release-check-run, tree-reuse, cache-prime]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require full validation or the classified PR exemption
-        env:
-          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
-          REUSE_PROOF: ${{ needs.tree-reuse.result }}
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-          CACHE_PRIME: ${{ needs.cache-prime.result }}
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          CI_PLAN: ${{ needs.ci-plan.result }}
-          CHECK_RESULT: ${{ needs.release-check-run.result }}
-        run: |
-          set -euo pipefail
-          if [ "$REUSE" = merge_group ]; then
-            test "$GITHUB_EVENT_NAME" = push
-            test "$GITHUB_REF" = refs/heads/main
-            test "$CI_PLAN" = success
-            test "$CI_LANE" = full
-            test "$REUSE_PROOF" = success
-            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
-            test "$CACHE_PRIME" = success
-            test "$CHECK_RESULT" = skipped
-            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          # Judge dependencies inline; the PR checkout cannot supply gate code.
-          test "$CI_PLAN" = success
-          case "$CI_LANE" in
-            docs-only|spec-only)
-              test "$CHECK_RESULT" = skipped
-              echo "$CI_LANE: release checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
-            full)
-              test "$CHECK_RESULT" = success
-              ;;
-            *) exit 1 ;;
-          esac
-
-  release-check-run:
-    needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+  nightly-release-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -813,8 +498,6 @@ jobs:
         run: |
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
-      - name: PR classification and exact-SHA reuse regressions
-        run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs
       - name: Full UI QA workflow regressions
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -822,57 +505,17 @@ jobs:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
-      - name: Tier integration and workflow regressions
-        run: go test ./scripts/releaseworkflow -count=1
+      - name: Exact-SHA reuse provenance and workflow regressions
+        run: |
+          node --test scripts/ci-tree-reuse.test.mjs
+          go test ./scripts/releaseworkflow -count=1
       - name: Enforce test runner trust boundary
         run: |
           node --test scripts/ci-runner-route.test.mjs
           go test ./scripts/ci-runner-guard -count=1
           go run ./scripts/ci-runner-guard
 
-  e2e:
-    if: always()
-    needs: [ci-plan, e2e-run, tree-reuse, cache-prime]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require full validation or the classified PR exemption
-        env:
-          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
-          REUSE_PROOF: ${{ needs.tree-reuse.result }}
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-          CACHE_PRIME: ${{ needs.cache-prime.result }}
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          CI_PLAN: ${{ needs.ci-plan.result }}
-          CHECK_RESULT: ${{ needs.e2e-run.result }}
-        run: |
-          set -euo pipefail
-          if [ "$REUSE" = merge_group ]; then
-            test "$GITHUB_EVENT_NAME" = push
-            test "$GITHUB_REF" = refs/heads/main
-            test "$CI_PLAN" = success
-            test "$CI_LANE" = full
-            test "$REUSE_PROOF" = success
-            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
-            test "$CACHE_PRIME" = success
-            test "$CHECK_RESULT" = skipped
-            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          # Judge dependencies inline; the PR checkout cannot supply gate code.
-          test "$CI_PLAN" = success
-          case "$CI_LANE" in
-            docs-only|spec-only)
-              test "$CHECK_RESULT" = skipped
-              echo "$CI_LANE: end-to-end checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
-            full)
-              test "$CHECK_RESULT" = success
-              ;;
-            *) exit 1 ;;
-          esac
-
-  e2e-run:
-    needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+  nightly-e2e:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -939,8 +582,8 @@ jobs:
           fi
           npm run e2e --prefix web
 
-  # AEON-415: previous-release compatibility is unconditional in every lane.
-  migration-compat:
+  # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
+  nightly-migration-compat:
     permissions:
       contents: read
       packages: read
@@ -990,9 +633,9 @@ jobs:
           python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py
           bash scripts/migration-compat.sh "$PREVIOUS_TAG" "$PREVIOUS_DIGEST"
 
-  tier-measurements:
+  nightly-tier-measurements:
     if: always()
-    needs: [go, web, release-check, e2e, migration-compat, release-list-comparison, tree-reuse]
+    needs: [nightly-go, nightly-web, nightly-release-check, nightly-e2e, nightly-migration-compat, nightly-release-list-comparison]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1010,8 +653,6 @@ jobs:
           path: tmp/tier-job-evidence
       - name: Report cases and complete job runner minutes
         env:
-          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/test-tiers/measure.mjs tmp/tier-job-evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

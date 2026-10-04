@@ -20,6 +20,7 @@ export const executionSteps = {
   'migration-compat': 'Previous binary on the candidate schema',
 };
 export const requiredJobs = [
+  'tier-plan', 'tier-measurements',
   'runner-route / route', 'go', 'web', 'release-check', 'e2e', 'release-list-comparison',
   ...Object.keys(executionSteps),
   ...Array.from({ length: 7 }, (_, i) => `go-test (${i + 1})`),
@@ -78,10 +79,14 @@ export async function verifyRun(repository, runID, api, sha) {
   for (const name of requiredJobs) {
     const job = jobs.jobs.find(job => job.name === name);
     ensure(job?.conclusion === 'success', 'missing or failed suite job');
-    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard' : name.startsWith('web-shard (') ? 'Run balanced UI shard with merge-queue flake control' : undefined);
+    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
     if (stepName) {
       const steps = job.steps?.filter(step => step.name === stepName);
       ensure(steps?.length === 1 && steps[0].status === 'completed' && steps[0].conclusion === 'success', 'missing full execution evidence');
+    }
+    if(name==='web-setup'||/^(go-test|web-shard) \(/.test(name)) {
+      const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');
+      ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full tier execution evidence');
     }
     ensure(!job.steps?.some(step => step.name === 'Reuse the verified merge-group run' && step.conclusion !== 'skipped'), 'reused suite is not execution proof');
   }

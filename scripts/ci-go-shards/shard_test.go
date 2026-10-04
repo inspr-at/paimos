@@ -294,8 +294,12 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	foundCache := false
 	foundFreshTests := false
 	for _, step := range job.Steps {
-		if step.Name == "Test this shard" {
-			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, `test "$cached" -eq 0`)
+		if strings.HasPrefix(step.Name, "Test this shard") {
+			tierRunner, err := os.ReadFile(filepath.Join(root, "scripts/test-tiers/cli.mjs"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, "cli.mjs run go --shard") && strings.Contains(string(tierRunner), "'-count=1'")
 		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			foundCache = true
@@ -315,7 +319,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 				t.Fatal("cache must restore this branch before main without crossing platforms, toolchains, dependencies or shards")
 			}
 		}
-		if strings.Contains(step.Run, "ci-go-shards test-timing") {
+		if strings.Contains(step.Run, "cli.mjs run go --full --timing") {
 			t.Fatal("timing budgets run on routed hardware")
 		}
 		if strings.Contains(step.Run, "ci-go-shards test ") || strings.Contains(step.Run, "ci-go-shards needs-shell ") {
@@ -356,7 +360,7 @@ func TestWorkflowShardRerunsChangedChildScript(t *testing.T) {
 	}
 	var flags string
 	for _, step := range workflow.Jobs["go-test"].Steps {
-		if step.Name == "Test this shard" {
+		if strings.HasPrefix(step.Name, "Test this shard") {
 			flags = step.Env["GOFLAGS"]
 		}
 	}
@@ -947,7 +951,7 @@ func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 	}
 	count := 0
 	for _, step := range timing.Steps {
-		if strings.Contains(step.Run, "ci-go-shards test-timing") {
+		if strings.Contains(step.Run, "cli.mjs run go --full --timing") {
 			count++
 			if step.If != "" {
 				t.Fatal("timing budgets have a conditional skip")
