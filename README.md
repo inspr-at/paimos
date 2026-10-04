@@ -53,6 +53,50 @@ footer on phone sheets. Submit uses Command+Enter on Apple platforms and Ctrl+En
 elsewhere; Escape first leaves a field, then closes. API rows pass through the
 canonical session ledger and controls stay bound to the captured generation/run.
 
+## Theme API
+
+AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
+returns visible workspace themes and the person's own themes with UUID keyset
+pagination (`after`, `limit`, maximum 100). `GET /api/me/theme` returns the active
+record, default ID, selection revision and any deletion notice. Agents may read
+the workspace default with `profile.read`; theme writes belong to people.
+
+Create with `POST /api/themes`, duplicate with `POST /api/themes/{id}/duplicate`,
+rename or replace values with `PATCH /api/themes/{id}`, and delete with
+`DELETE /api/themes/{id}?revision=N`. Updates, copies and deletes require the
+record's revision; `PUT /api/me/theme` requires the independent selection
+generation in `revision` (initially 0) and a `theme_id` or null to follow the
+default. Return the generation unchanged; it is an opaque CAS value, not a
+counter to increment. The first explicit default is saved and audited. Stale
+revisions return 409. Personal writes require the owner and `profile.write`
+(or the portal equivalent); workspace/default writes require `settings.manage`.
+Personal records and their events remain owner-only, including for managers.
+The full schemas are in [the API contract](api/openapi.yaml).
+
+Linking people preserves theme owners and choice rows. Linked identities can
+read, edit and undo their shared personal themes; unlink restores each original
+owner's privacy. The canonical person's saved choice wins (including an explicit
+default); otherwise the alias choice with the lowest principal UUID wins. Choice
+edits update that winning row and keep other rows for unlink. If unlink makes a
+chosen theme private, the API returns the default without that theme's ID/name,
+retaining the selection generation for the next choice. Changing the winning
+identity changes that generation, even when both physical row revisions match.
+Undo restores an unsaved preference separately from an explicit default, so
+alias inheritance resumes. Its retained row carries a fresh generation to
+reject stale writes, including revision 0; a subsequent explicit default is
+saved and audited again. The migration preserves physical row revisions
+and existing audit snapshots; audit remains append-only and its audience follows
+current links.
+
+Each tenant starts with Porcelain, using the shipped light/dark accents and
+native agent artwork settings. Null accent dark means derived by the consumer;
+null agent ring/size means the chosen style's drawn default. Deletion is
+reversible through the event undo API. A selected tombstone resolves to the
+workspace default and supplies `fallback_notice` until another choice is saved.
+Undo restores availability without replacing later choices. The default itself
+cannot be deleted. This package supplies the API; Settings and applying its
+values are delivered by AEON-642–644.
+
 ## Code health audits
 
 AEON-571 defines the ongoing code-health workflow. Each run belongs to a child
@@ -2402,6 +2446,15 @@ with read-only `aeon-agentd status --json` for the affected account. Queue error
 can therefore explain a subsequent probe timeout; the timeout alone does not
 identify the underlying cause. Raw errors and private bindings are not logged.
 
+Pairing reconciliation and runtime refresh failures report `pairing_sync_failed`
+with a fixed short cause in local account/harness status and subsequent lifecycle
+reports. They log `agentd pairing diagnostic` once per distinct cause per daemon
+process, without raw errors, paths or credentials. Polling stays blocked until
+reconciliation and runtime validation succeed; recovery clears the diagnostic.
+Revoked enrollments retain their fences without requiring an old local candidate;
+live enrollments match the approved account key and harness, independently of a
+changed display label. Unapproved live accounts still block reconciliation.
+
 ### Paired daemon socket paths
 
 Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
@@ -2831,11 +2884,15 @@ the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
 ancestors are acceptable. The selected target still requires its executable
 and working directory.
 Those checks are defence in depth. A program running as the same user can open
-another terminal and request the review. On a Mac that can use Touch ID, attach
-approval asks for it by default until the person saves a choice. People without
-Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
-Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
-Mac that can show Touch ID prompts on that Mac's screen.
+another terminal and request the review. On a Mac whose browser-approved pairing
+pinned a Secure Enclave public key, attach approval requires that key's Touch ID
+signature by default until the person saves a choice, even when the daemon
+reports that Touch ID cannot run. Linux and older pairings without a pinned key
+keep approval in Aeon. To allow an upgraded Mac without a graphical login or
+usable Touch ID, explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching**. Saving Mac confirmation
+fails closed where Touch ID cannot run. SSH to a Mac that can show Touch ID
+prompts on that Mac's screen.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 
@@ -2930,7 +2987,9 @@ The daemon logs the server's refusal, disables attach and keeps serving work
 and local control. The updated helper shows version-repair guidance on the
 existing authenticated, kernel-checked socket; unauthenticated callers only get
 the generic auth refusal. After updating the server, restart agentd
-to retry attach registration; there is no in-process registration retry.
+to retry failed startup registration. Startup refusals still require this explicit
+repair. Once registered, a running daemon can recover a registration lost during
+a server restart, as described below.
 
 Owner refusal guidance distinguishes incompatible attach versions, a pairing
 that no longer authenticates, unavailable project/ticket access, draining or
@@ -2945,15 +3004,49 @@ they are not reported as connection failures. Admission and limit hints share th
 same per-computer cap and attempt window.
 Server errors preserve `code` and `error`
 and add `attach_refusal` only after checking the computer proof and principal
-(or the signed-in person owner). Fixed English/German hints name the next action;
+(or the signed-in person owner), with the narrowly scoped `poll_key_unknown`
+exception described below. Fixed English/German hints name the next action;
 unknown causes direct the owner to daemon status and the administrator's server
 logs. Arbitrary server text never becomes terminal output. Revoked HTTP
 bearers stay unauthenticated; pairing repair is offered only by the locally
 authenticated interactive helper. Poll refusals still detach and clear local
 state, and no uncertain conversation submission is retried.
 
-If attach fails after a server restart, the daemon's memory-only poll registration
-was lost: restart agentd when owned work permits, then request fresh approval.
+Recovery reads the long-lived computer lifecycle proof from the approved setup
+store for each registration attempt; the transport retains the memory-only poll
+key and pinned origin, without retaining that proof for the daemon lifetime.
+Startup obtains the host and registration proof together in one read. Store or
+Keychain stalls can leave at most one authority reader in flight per daemon;
+cancellation or the total deadline releases the transport gate, and abandoned
+results are discarded rather than used by a later registration.
+Local cleanup, disconnect or configuration changes refuse recovery before a
+registration is sent. Unknown-key diagnostics use a separate server-local budget
+of 30 attempts per minute per authenticated computer principal before computer, scope or watch
+lookups; they never consume the tenant attach request budget. The server holds
+at most 4096 live budgets across tenants. As an accepted AEON-608 limitation,
+new principals (including those in another tenant) are refused until a slot
+expires when that shared cap is full; existing budgets retain their counters.
+A capped call returns `attach_recovery_limited` with
+`Retry-After` seconds, without authorizing registration. The daemon retains
+the server refusal and performs no exchange or registration until that delay
+expires (valid server delays are bounded to one day). If the explicit
+`poll_key_unknown` refusal reaches the helper during cooldown, run attach again
+in a few seconds and give fresh approval; a daemon restart is not required.
+
+After a server restart, agentd automatically re-registers its memory-only poll key
+only on the explicit `poll_key_unknown` refusal. The server issues that signal
+only for the authenticated principal of a connected computer with valid attach
+scope; incorrect keys, revoked pairing, draining/removed enrollments, ended watches
+and foreign tenants remain refusals. Older servers without this signal still
+require an agentd restart. This replaces the blanket no-in-process-retry policy:
+a confirmed rejection before mutation is safe to replay, while a failed or
+uncertain exchange is not. Each call attempts registration at most once and
+replays once, with one exchange/recovery in flight, a 20-second total deadline,
+and exponential jitter windows of 500 ms to 8 seconds (actual delay: half to the
+full window). The same delay is retained as a cooldown after completion or failure;
+calls during cooldown return the refusal and there is no background retry loop.
+Registration still ends earlier approvals and watches. Run attach again and give
+fresh approval for an ended watch; new requests work without restarting agentd.
 Re-pairing is not required for lost registration. A local `harness claude draining`
 report alone does not block attach: the attach manager does not use the supervisor's
 launch fence. A server-side draining or removed enrollment does block a fresh

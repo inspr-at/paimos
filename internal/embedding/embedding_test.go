@@ -51,6 +51,7 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 	)
 	seedTenant(t, d, tenantA, "alpha")
 	seedTenant(t, d, tenantB, "beta")
+	baseline := countEvents(t, d.App, tenantA)
 	insertNode(t, d.App, tenantA, nodeA, "PAI-1", "English search title", "Markdown body", "open")
 	insertNode(t, d.App, tenantB, nodeB, "PAI-1", "Other tenant", "hidden", "open")
 
@@ -106,7 +107,7 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 	hashB := ContentHash("Renamed title", "Markdown body")
 	assertEmbedding(t, d.App, tenantA, nodeA, "test-model", hashB)
 	assertEvent(t, d.App, tenantA, nodeA, false, hashA, hashB)
-	if countEvents(t, d.App, tenantA) != 2 {
+	if countEvents(t, d.App, tenantA) != baseline+2 {
 		t.Fatalf("events %d", countEvents(t, d.App, tenantA))
 	}
 
@@ -120,7 +121,7 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("same content %d %v", n, err)
 	}
-	if countEvents(t, d.App, tenantA) != 2 {
+	if countEvents(t, d.App, tenantA) != baseline+2 {
 		t.Fatal("unchanged content wrote an event")
 	}
 	assertNoJob(t, d.App, tenantA, nodeA)
@@ -190,6 +191,7 @@ func TestWorkerBackoffAndDeletedNodes(t *testing.T) {
 	)
 	seedTenant(t, d, tenantID, "alpha")
 	insertNode(t, d.App, tenantID, liveID, "PAI-1", "Retry me", "body", "open")
+	baseline := countEvents(t, d.App, tenantID)
 	insertNode(t, d.App, tenantID, deadID, "PAI-2", "Delete me", "body", "open")
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1`, deadID)
@@ -248,7 +250,7 @@ func TestWorkerBackoffAndDeletedNodes(t *testing.T) {
 	if countEmbeddings(t, d.App, tenantID) != 0 {
 		t.Fatal("failed or deleted node stored a vector")
 	}
-	if countEvents(t, d.App, tenantID) != 0 {
+	if countEvents(t, d.App, tenantID) != baseline {
 		t.Fatal("failure wrote an event")
 	}
 }
