@@ -209,7 +209,7 @@ func load(ctx context.Context, tx pgx.Tx, project, release string) (Walker, erro
  WHERE (rel.source_node_id=n.id OR rel.target_node_id=n.id) AND screen.deleted_at IS NULL AND sk.slug='screen' ORDER BY screen.id::text)
  FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id
  WHERE t.project_node_id=$1 AND (t.release_node_id=$2 OR ($3='planning' AND t.release_node_id IS NULL)) AND n.deleted_at IS NULL
- AND ($3<>'planning' OR NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.id=c.kind_id AND ck.tenant_id=c.tenant_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work'))
+ AND aeon_work_is_release_leaf(n.tenant_id,n.id)
  ORDER BY t.walker_position,t.ticket_node_id`, project, release, out.State)
 	if err != nil {
 		return out, err

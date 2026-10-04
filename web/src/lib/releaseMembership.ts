@@ -361,6 +361,7 @@ export interface NativeMembership {
   is_parent?: boolean
   release_count?: number
   leaf_node_ids?: string[]
+  assigned_leaf_count?: number
   inheritance_note?: string | null
   ticket_node_id: string
   release_node_id: string | null
@@ -372,7 +373,7 @@ export type NativeReleaseView =
   | { status: 'pending' }
   | { status: 'unknown' }
   | { status: 'none'; isParent?: boolean; inheritanceNote?: string | null }
-  | { status: 'member'; title: string; releaseId: string; releaseState: string | null; isParent?: boolean; releaseCount?: number; leafNodeIds?: string[] }
+  | { status: 'member'; title: string; releaseId: string; releaseState: string | null; isParent?: boolean; releaseCount?: number; leafNodeIds?: string[]; assignedLeafCount?: number }
 
 export function membershipQuery(ids: string[]): string {
   const params = new URLSearchParams()
@@ -398,7 +399,8 @@ export function parseNativeMemberships(data: unknown): NativeMembership[] {
       release_state: nullable(ticket.release_state),
       ...(typeof ticket.is_parent === 'boolean' ? { is_parent: ticket.is_parent } : {}),
       ...(Number.isSafeInteger(ticket.release_count) && (ticket.release_count as number)>=0 ? { release_count: ticket.release_count as number } : {}),
-      ...(Array.isArray(ticket.leaf_node_ids) ? { leaf_node_ids: ticket.leaf_node_ids.filter((id): id is string => typeof id==='string') } : {}),
+      ...(Array.isArray(ticket.leaf_node_ids) && ticket.leaf_node_ids.length <= 1000 && ticket.leaf_node_ids.every(id => typeof id === 'string' && id.trim().length > 0) && new Set(ticket.leaf_node_ids).size === ticket.leaf_node_ids.length ? { leaf_node_ids: ticket.leaf_node_ids as string[] } : {}),
+      ...(Number.isSafeInteger(ticket.assigned_leaf_count) && (ticket.assigned_leaf_count as number)>=0 ? { assigned_leaf_count: ticket.assigned_leaf_count as number } : {}),
       ...(typeof ticket.inheritance_note==='string' ? { inheritance_note: ticket.inheritance_note } : {}),
     })
   }
@@ -417,7 +419,7 @@ export function nativeViews(requested: string[], rows: NativeMembership[]): Map<
       out.set(id, row ? { status: 'none', ...(row.is_parent ? { isParent: true } : {}), ...(row.inheritance_note ? { inheritanceNote: row.inheritance_note } : {}) } : { status: 'unknown' })
       continue
     }
-    out.set(id, { status: 'member', title: row.release_title ?? '', releaseId: row.release_node_id ?? '', releaseState: row.release_state, ...(row.is_parent ? { isParent: true, releaseCount: row.release_count, leafNodeIds: row.leaf_node_ids } : {}) })
+    out.set(id, { status: 'member', title: row.release_title ?? '', releaseId: row.release_node_id ?? '', releaseState: row.release_state, ...(row.is_parent ? { isParent: true, releaseCount: row.release_count, leafNodeIds: row.leaf_node_ids, assignedLeafCount: row.assigned_leaf_count } : {}) })
   }
   return out
 }
@@ -439,7 +441,11 @@ export function reconcileOpenedMembership(ticketIds: string[], views: Map<string
     const view = views.get(id)
     if (!view || view.status === 'unknown' || view.status === 'pending') return { status: 'unknown' }
     if (view.status !== 'member' || !view.releaseId || !view.title) return { status: 'changed' }
-    if (view.isParent && !view.leafNodeIds) return { status: 'unknown' }
+    if (view.isParent) {
+      if ((view.releaseCount ?? 1) > 1) return { status: 'changed' }
+      if (!view.leafNodeIds || view.assignedLeafCount === undefined || view.assignedLeafCount > view.leafNodeIds.length) return { status: 'unknown' }
+      if (!view.leafNodeIds.length || view.assignedLeafCount < view.leafNodeIds.length) return { status: 'changed' }
+    }
     for (const leaf of view.leafNodeIds ?? [id]) leaves.add(leaf)
     if (!releaseId) {
       releaseId = view.releaseId

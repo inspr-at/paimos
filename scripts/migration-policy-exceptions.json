@@ -67,6 +67,12 @@
       "sha256": "c201abb265fddb5f5bf42c967a3073043f43d998dad8dcb58763db586a074929",
       "ticket": "AEON-653",
       "reason": "Owner-accepted AEON-648 Q14 migrates stored epic/ticket/task template kind references to work under per-tenant FORCE RLS. The classifier conservatively flags the tenant-loop DO block. Definitions retain content, schedules and identity; receipts and historical sessions are unchanged. Exact bytes require coordinator consolidated review under the AEON-649 verified-backup and downstream integration gates; no deployment approval is claimed."
+    },
+    {
+      "file": "1237_work_release_leaf_lifecycle.sql",
+      "sha256": "d07eafbb382429eabd4f522e3dbb0b571f8f4e001163d0baaa1f38de3d1b12a1",
+      "ticket": "AEON-653",
+      "reason": "Reconcile planning members when live leaf shape changes and retain future placement as separate intent. Add live leaf filtering and coverage while preserving all frozen membership rows, published snapshots and historical identities. Replacement helpers and the tenant-scoped repair block are conservatively outside the expansion allowlist. Exact bytes require coordinator consolidated review, paused structural writers and the existing whole-chain backup/previous-binary gates; this local worker grants no release approval."
     }
   ]
 }

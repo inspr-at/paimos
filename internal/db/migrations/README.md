@@ -354,6 +354,15 @@ a work leaf; the existing AEON-650 engine reopens its parent when
 `work-parent-status` is enabled through AEON-429. Parent Done is never a
 recurrence trigger. Historical sessions and Decision Desk IDs are untouched.
 
+Migration 1237 (AEON-653 fix2) reconciles current planning membership on work
+creation, moves, restoration and deletion. A leaf becoming a parent keeps its
+placement as intent and leaves the live member set; released/frozen member rows
+and stored note snapshots remain unchanged. Live walkers, current-release journey
+calculations and new note captures exclude parents. Quick-create applies explicit inclusion
+even after automatic inheritance and advances each revision once. Membership
+reads additionally return `assigned_leaf_count`; clients compare it with current
+leaf identities before confirming that a replay placed the entire subtree.
+
 Integration seams: the existing release-note capture helper and manifest
 backfill accept work leaves (AEON-596 P3/P6); immutable published snapshots stay
 unchanged. System recurrence queue entry explicitly checks leaf shape before

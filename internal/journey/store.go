@@ -331,9 +331,9 @@ func loadImported(ctx context.Context, tx pgx.Tx, f *facts, releaseID **string) 
 	)
 		SELECT (SELECT r.release_node_id::text FROM journey_releases r JOIN nodes n ON n.id=r.release_node_id AND n.tenant_id=r.tenant_id WHERE r.project_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.created_at DESC,n.id DESC LIMIT 1),
 		       (SELECT count(*) FROM journey_releases r WHERE r.project_node_id=$1::uuid),
-		       (SELECT count(*) FROM typed WHERE slug='ticket') + (SELECT count(*) FROM journey_tickets WHERE project_node_id=$1::uuid),
+		       (SELECT count(*) FROM typed WHERE slug='ticket') + (SELECT count(*) FROM journey_tickets jt WHERE project_node_id=$1::uuid AND aeon_work_is_release_leaf(jt.tenant_id,jt.ticket_node_id)),
 		       (SELECT count(*) FROM typed WHERE slug='ticket' AND state<>'done') +
-		         (SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=$1::uuid AND n.deleted_at IS NULL AND n.state<>'done'),
+		         (SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=$1::uuid AND n.deleted_at IS NULL AND n.state<>'done' AND aeon_work_is_release_leaf(n.tenant_id,n.id)),
 		       coalesce((SELECT bool_and(n.state='done') FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id WHERE r.project_node_id=$1::uuid),false)`, f.ProjectID).Scan(&latest, &releaseCount, &ticketCount, &openTickets, &allDone)
 	if err != nil {
 		return err
@@ -382,7 +382,7 @@ func loadTicketStats(ctx context.Context, tx pgx.Tx, f *facts) error {
 		       coalesce(sum(estimated_hours) FILTER (
 		         WHERE release_node_id = $2::uuid AND estimated_hours IS NOT NULL), 0)::text
 		FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id
-		WHERE t.project_node_id = $1::uuid`, f.ProjectID, f.Release.ID).Scan(
+		WHERE t.project_node_id = $1::uuid AND aeon_work_is_release_leaf(n.tenant_id,n.id)`, f.ProjectID, f.Release.ID).Scan(
 		&f.IncludedTickets, &f.OpenReleaseTickets, &scopeN, &accessN, &f.MissingEstimate, &plan); err != nil {
 		return err
 	}

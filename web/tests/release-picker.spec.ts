@@ -664,6 +664,40 @@ test('a replay does not invent a count when membership no longer matches', async
   expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
 })
 
+test('parent replay with a backlog leaf does not claim full placement', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures()
+  await mockWork(page, data)
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { loseCreate: true })
+  await page.route('**/api/projects/*/release-memberships*', async route => {
+    const ids = new URL(route.request().url()).searchParams.getAll('ticket_node_id')
+    await route.fulfill({ json: { tickets: ids.map(id => ({
+      ticket_node_id: id, is_parent: id === 'n-2', release_count: 1,
+      release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning',
+      leaf_node_ids: id === 'n-2' ? ['assigned', 'backlog'] : [id], assigned_leaf_count: 1,
+    })) } })
+  })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  const add = page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' })
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  advanceCurrentRelease(world)
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not all in one release' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
+  const actions = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(actions).toHaveLength(2)
+  expect(actions[1].body).toEqual(actions[0].body)
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+})
+
 test('a delayed create on one project does not update the project opened meanwhile', async ({ page }) => {
   let releaseHold!: () => void
   const holdCreate = new Promise<void>(resolve => { releaseHold = resolve })

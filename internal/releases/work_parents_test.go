@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,191 @@ func TestWorkParentPlacementAndFutureLeaves(t *testing.T) {
 	events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
 	if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", out.EventID), ""); w.Code != 409 {
 		t.Fatalf("stale undo after new leaf: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInheritedLeafBecomingParentReconcilesLiveMembership(t *testing.T) {
+	f := ticketSetup(t)
+	former := f.existing("work", f.feature, "Former leaf", "open")
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	child := f.existing("work", former, "Current leaf", "open")
+	f.tx(func(tx pgx.Tx) error {
+		var parents int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_tickets WHERE ticket_node_id=$1`, former).Scan(&parents); err != nil {
+			return err
+		}
+		if parents != 0 {
+			t.Fatalf("former leaf remains a live member: %d", parents)
+		}
+		var intent string
+		if err := tx.QueryRow(t.Context(), `SELECT release_node_id::text FROM work_parent_releases WHERE parent_node_id=$1`, former).Scan(&intent); err != nil {
+			return err
+		}
+		if intent != f.release {
+			t.Fatalf("former leaf lost future placement: %s", intent)
+		}
+		for _, state := range []string{"planning", "building"} {
+			if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state=$2 WHERE release_node_id=$1`, f.release, state); err != nil {
+				return err
+			}
+			walker, err := load(t.Context(), tx, f.project, f.release)
+			if err != nil {
+				return err
+			}
+			if len(walker.Tickets) != 1 || walker.Tickets[0].NodeID != child {
+				t.Fatalf("%s walker counts former leaf: %+v", state, walker.Tickets)
+			}
+			var captured []byte
+			if err := tx.QueryRow(t.Context(), `SELECT aeon_release_note_snapshot($1,$2)`, f.project, f.release).Scan(&captured); err != nil {
+				return err
+			}
+			var snapshot struct {
+				Tickets []struct {
+					ID string `json:"id"`
+				} `json:"tickets"`
+			}
+			if err := json.Unmarshal(captured, &snapshot); err != nil {
+				return err
+			}
+			if len(snapshot.Tickets) != 1 || snapshot.Tickets[0].ID != child {
+				t.Fatalf("%s capture counts former leaf: %s", state, captured)
+			}
+		}
+		return nil
+	})
+}
+
+func TestPlacedLeafBecomingParentPreservesFrozenSnapshot(t *testing.T) {
+	f := ticketSetup(t)
+	// Direct leaf placement also establishes future intent when children arrive.
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	child := f.existing("work", f.feature, "Inherited child", "open")
+	if row := f.readMembership(child)[0]; row.ReleaseID == nil || *row.ReleaseID != f.release {
+		t.Fatalf("direct placement was lost on becoming a parent: %+v", row)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.release)
+		return err
+	})
+	path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+	frozen := f.request(f.person, http.MethodGet, path, "")
+	if frozen.Code != 200 || !strings.Contains(frozen.Body.String(), child) || !strings.Contains(frozen.Body.String(), `"frozen":true`) {
+		t.Fatalf("expected frozen child snapshot: %d %s", frozen.Code, frozen.Body.String())
+	}
+	fresh := f.existing("work", child, "After publication", "open")
+	if row := f.readMembership(fresh)[0]; row.ReleaseID != nil || row.InheritanceNote == nil || *row.InheritanceNote != "parent_release_closed" {
+		t.Fatalf("closed direct leaf placement not inherited as backlog: %+v", row)
+	}
+	after := f.request(f.person, http.MethodGet, path, "")
+	if after.Code != 200 || after.Body.String() != frozen.Body.String() {
+		t.Fatal("parent transition changed frozen snapshot")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_tickets WHERE release_node_id=$1 AND ticket_node_id=$2`, f.release, child).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatal("parent transition rewrote released membership evidence")
+		}
+		walker, err := load(t.Context(), tx, f.project, f.release)
+		if err == nil && len(walker.Tickets) != 0 {
+			t.Fatalf("live released walker includes a parent: %+v", walker.Tickets)
+		}
+		return err
+	})
+}
+
+func TestLeafShapeChangesReconcileMovedAndRestoredChildren(t *testing.T) {
+	f := ticketSetup(t)
+	former := f.existing("work", f.feature, "Former leaf", "open")
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	child := f.existing("work", former, "Current leaf", "open")
+	for _, change := range []struct {
+		sql    string
+		args   []any
+		parent bool
+	}{
+		{`UPDATE nodes SET parent_id=$2 WHERE id=$1`, []any{child, f.project}, false},
+		{`UPDATE nodes SET parent_id=$2 WHERE id=$1`, []any{child, former}, true},
+		{`UPDATE nodes SET deleted_at=now() WHERE id=$1`, []any{child}, false},
+		{`UPDATE nodes SET deleted_at=NULL WHERE id=$1`, []any{child}, true},
+	} {
+		f.tx(func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), change.sql, change.args...); err != nil {
+				return err
+			}
+			var member bool
+			if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM journey_tickets WHERE ticket_node_id=$1 AND release_node_id=$2)`, former, f.release).Scan(&member); err != nil {
+				return err
+			}
+			if member == change.parent {
+				t.Fatalf("parent=%v has live membership=%v after %s", change.parent, member, change.sql)
+			}
+			return nil
+		})
+	}
+}
+
+func TestParentReleaseSummaryReportsPartialCoverage(t *testing.T) {
+	f := ticketSetup(t)
+	a := f.existing("work", f.feature, "Assigned", "open")
+	b := f.existing("work", f.feature, "Backlog", "open")
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET release_node_id=NULL WHERE ticket_node_id=$1`, b)
+		return err
+	})
+	rows := f.readMembership(f.feature, a, b)
+	if rows[0].ReleaseCount != 1 || len(rows[0].LeafIDs) != 2 || rows[0].AssignedLeaves != 1 || rows[1].AssignedLeaves != 1 || rows[2].AssignedLeaves != 0 {
+		t.Fatalf("partial assignment presented as full coverage: %+v", rows)
+	}
+}
+
+func TestExistingPlanningParentRepairPreservesExplicitBacklog(t *testing.T) {
+	f := ticketSetup(t)
+	a := f.existing("work", f.feature, "Unprojected child", "open")
+	b := f.existing("work", f.feature, "Explicit backlog", "open")
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source)
+ VALUES($1,$2,$4,$5,0,'manual'),($1,$3,$4,NULL,1,'manual')`, f.person.TenantID, f.feature, b, f.project, f.release)
+		return err
+	})
+	sql, err := os.ReadFile("../db/migrations/1237_work_release_leaf_lifecycle.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(sql), "DO $$")
+	if start < 0 {
+		t.Fatal("repair block missing")
+	}
+	repair := string(sql)[start:]
+	end := strings.Index(repair, "$$;")
+	if end < 0 {
+		t.Fatal("repair block end missing")
+	}
+	repair = repair[:end+3]
+	if _, err := f.db.Admin.Exec(t.Context(), repair); err != nil {
+		t.Fatal(err)
+	}
+	rows := f.readMembership(a, b, f.feature)
+	if rows[0].ReleaseID == nil || *rows[0].ReleaseID != f.release || rows[1].ReleaseID != nil || rows[2].AssignedLeaves != 1 {
+		t.Fatalf("repair lost placement or overrode explicit backlog: %+v", rows)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var parents int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_tickets WHERE ticket_node_id=$1`, f.feature).Scan(&parents)
+		if err == nil && parents != 0 {
+			t.Fatal("repair retained live parent membership")
+		}
+		return err
+	})
+	before := f.counts()
+	if _, err := f.db.Admin.Exec(t.Context(), repair); err != nil {
+		t.Fatal(err)
+	}
+	if f.counts() != before {
+		t.Fatal("repair replay changed revisions or rows")
 	}
 }
 

@@ -363,7 +363,7 @@ test('a failed membership read is unknown, and ids are asked in batches of 100',
 
 test('parents show actual ships-in summaries and deduplicate leaf counts', () => {
   const rows = parseNativeMemberships({ tickets: [
-    { ticket_node_id: 'parent', is_parent: true, release_count: 1, release_node_id: 'r-2', release_title: 'Cobalt Comet', release_state: 'planning', leaf_node_ids: ['a', 'b'] },
+    { ticket_node_id: 'parent', is_parent: true, release_count: 1, release_node_id: 'r-2', release_title: 'Cobalt Comet', release_state: 'planning', leaf_node_ids: ['a', 'b'], assigned_leaf_count: 2 },
     { ticket_node_id: 'a', is_parent: false, release_count: 1, release_node_id: 'r-2', release_title: 'Cobalt Comet', release_state: 'planning', leaf_node_ids: ['a'] },
     { ticket_node_id: 'split', is_parent: true, release_count: 2, release_node_id: null, release_title: null, release_state: null, leaf_node_ids: ['a', 'b'] },
     { ticket_node_id: 'later', is_parent: false, release_count: 0, release_node_id: null, release_title: null, release_state: null, inheritance_note: 'parent_release_closed' },
@@ -374,4 +374,48 @@ test('parents show actual ships-in summaries and deduplicate leaf counts', () =>
   assert.match(releaseCell(views.get('later')).label, /Backlog.*frozen or released/)
   assert.deepEqual(reconcileOpenedMembership(['parent', 'a'], views), { status: 'added', releaseId: 'r-2', releaseTitle: 'Cobalt Comet', count: 2 })
   assert.equal(reconcileOpenedMembership(['split'], views).status, 'changed')
+})
+
+test('ambiguous parent create replay never confirms a backlog leaf as added', async () => {
+  let calls = 0
+  const keys: string[] = []
+  const client = openClient(async (_project, action) => {
+    keys.push(action.idempotency_key)
+    if (++calls === 1) throw new RequestFailure('network')
+    return openedJourney()
+  })
+  await assert.rejects(() => openReleaseWithTickets('p', ['parent'], client), ReleaseUnconfirmed)
+  await openReleaseWithTickets('p', ['parent'], client)
+  assert.deepEqual(keys, ['key-1', 'key-1'])
+  const views = nativeViews(['parent'], parseNativeMemberships({ tickets: [{
+    ticket_node_id: 'parent', is_parent: true, release_count: 1,
+    release_node_id: 'r-new', release_title: 'Release 3', release_state: 'planning',
+    leaf_node_ids: ['assigned', 'backlog'], assigned_leaf_count: 1,
+  }] }))
+  const outcome = reconcileOpenedMembership(['parent'], views)
+  assert.deepEqual(outcome, { status: 'changed' })
+  assert.equal('count' in outcome, false)
+  assert.match(openedMembershipMessage(outcome) ?? '', /not all in one release/)
+})
+
+test('parent replay needs valid coverage and counts overlapping full scopes once', () => {
+  const parent = { ticket_node_id: 'parent', is_parent: true, release_count: 1,
+    release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning', leaf_node_ids: ['a', 'b'] }
+  for (const coverage of [undefined, -1, 1.5, 3]) {
+    const views = nativeViews(['parent'], parseNativeMemberships({ tickets: [{ ...parent, assigned_leaf_count: coverage }] }))
+    assert.deepEqual(reconcileOpenedMembership(['parent'], views), { status: 'unknown' })
+  }
+  for (const coverage of [0, 1]) {
+    const views = nativeViews(['parent'], parseNativeMemberships({ tickets: [{ ...parent, assigned_leaf_count: coverage }] }))
+    assert.deepEqual(reconcileOpenedMembership(['parent'], views), { status: 'changed' })
+  }
+  for (const leaves of [['a', 'a'], ['a', 7], ['a', '']]) {
+    const views = nativeViews(['parent'], parseNativeMemberships({ tickets: [{ ...parent, leaf_node_ids: leaves, assigned_leaf_count: 1 }] }))
+    assert.deepEqual(reconcileOpenedMembership(['parent'], views), { status: 'unknown' })
+  }
+  const full = nativeViews(['parent', 'nested'], parseNativeMemberships({ tickets: [
+    { ...parent, assigned_leaf_count: 2 },
+    { ...parent, ticket_node_id: 'nested', leaf_node_ids: ['b'], assigned_leaf_count: 1 },
+  ] }))
+  assert.deepEqual(reconcileOpenedMembership(['parent', 'nested'], full), { status: 'added', releaseId: 'r-3', releaseTitle: 'Release 3', count: 2 })
 })

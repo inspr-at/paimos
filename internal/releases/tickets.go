@@ -95,7 +95,8 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 		return out, fail(403, "person required")
 	}
 	var current *string
-	if err := tx.QueryRow(ctx, `SELECT current_release_node_id::text FROM journey_projects WHERE project_node_id=$1 FOR UPDATE`, project).Scan(&current); err != nil {
+	var projectRevision int64
+	if err := tx.QueryRow(ctx, `SELECT current_release_node_id::text,revision FROM journey_projects WHERE project_node_id=$1 FOR UPDATE`, project).Scan(&current, &projectRevision); err != nil {
 		return out, err
 	}
 	var state string
@@ -194,14 +195,16 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,walker_position,source,scope_revision_required)
   VALUES($1,$2,$3,$4,$5,(SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$3),'manual',true)
- ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET feature_node_id=excluded.feature_node_id`, p.TenantID, id, project, in.FeatureID, assigned)
+ ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET feature_node_id=excluded.feature_node_id,release_node_id=excluded.release_node_id,scope_revision_required=excluded.scope_revision_required`, p.TenantID, id, project, in.FeatureID, assigned)
 	if err != nil {
 		return out, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE journey_releases SET revision=revision+1 WHERE release_node_id=$1`, release); err != nil {
+	// Inheritance may already have invalidated these revisions. One quick-create
+	// operation advances each fence once, including an explicit exclusion.
+	if _, err := tx.Exec(ctx, `UPDATE journey_releases SET revision=revision+1 WHERE release_node_id=$1 AND revision=$2`, release, revision); err != nil {
 		return out, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now() WHERE project_node_id=$1`, project); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now() WHERE project_node_id=$1 AND revision=$2`, project, projectRevision); err != nil {
 		return out, err
 	}
 	if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.created", After: snapshot}); err != nil {

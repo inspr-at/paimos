@@ -8035,8 +8035,8 @@ paths:
   /projects/{projectId}/release-memberships:
     get:
       operationId: readReleaseMemberships
-      summary: Read native release membership for visible project tickets
-      description: Returns up to 100 requested ticket or task nodes in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Null release values mean no live native membership (including backlog and unprojected tickets); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
+      summary: Read native release membership for visible project work
+      description: Returns up to 100 requested work nodes (parents or leaves, including legacy ticket/task aliases) in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Parents summarize actual current leaves; compare assigned_leaf_count with leaf_node_ids to verify full coverage, since a single distinct release can coexist with backlog leaves. Null release values mean no single live native membership (including backlog, unprojected work and split parent scope); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -12167,6 +12167,7 @@ components:
               release_title: {type: [string, 'null']}
               release_state: {type: [string, 'null'], enum: [planning, building, candidate, deploying, refused, access, released, superseded, null]}
               leaf_node_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, format: uuid}, description: Current leaves, deduplicated by the client across overlapping parents.}
+              assigned_leaf_count: {type: integer, minimum: 0, maximum: 1000, description: Current leaves with a live native release membership. A single distinct release does not imply full coverage; compare with leaf_node_ids before confirming placement.}
               is_parent: {type: boolean, description: Only live work children make a parent.}
               release_count: {type: integer, minimum: 0, description: Distinct releases of current leaves; parent placement intent is excluded.}
               releases:
