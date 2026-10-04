@@ -73,7 +73,7 @@ for(const width of [390,1024,1440])for(const theme of ['light','dark'])test(`mov
 test('drag gap and menu use one identical anchored write and exact Undo',async({page})=>{
  await page.setViewportSize({width:1440,height:1000});const world=await setup(page);await open(page,a);await open(page,b)
  const source=row(page,work).getByRole('button',{name:/^Drag /}),target=row(page,nextPeer)
- const header=page.getByRole('button',{name:'Expand all',exact:true})
+ const header=page.locator('.expand-toggle:visible')
  await expectStableControls({controls:{header,source,other:row(page,peer).getByRole('button',{name:'Move PHAROS-102',exact:true})},interactions:[{name:'pickup hover then cancel',run:async()=>{const h=await source.boundingBox(),box=await target.boundingBox();await page.mouse.move(h!.x+10,h!.y+10);await page.mouse.down();await page.mouse.move(h!.x+20,h!.y+20);await page.mouse.move(box!.x+30,box!.y+2);await expect(page.locator('.move-line')).toBeVisible();await page.keyboard.press('Escape');await page.mouse.up()}}]})
  expect(world.writes).toHaveLength(0)
  await drag(page,work,nextPeer,false);await expect.poll(()=>world.writes.length).toBe(1)
@@ -147,7 +147,7 @@ for(const width of [390,1024,1440])for(const theme of ['light','dark'])test(`ter
  const x=sourceBox!.x+sourceBox!.width/2,y=sourceBox!.y+sourceBox!.height/2,tx=terminalBox!.x+120,ty=terminalBox!.y+terminalBox!.height/2
  expect(await page.evaluate(({tx,ty})=>document.elementFromPoint(tx,ty)?.closest<HTMLElement>('[data-planning-block]')?.dataset.planningBlock,{tx,ty})).toBe(rid(4))
  const feedback=page.locator('.move-feedback')
- await expectStableControls({controls:{source,terminal,expand:page.getByRole('button',{name:'Expand all',exact:true})},interactions:[{name:width===390?'touch terminal target':'mouse terminal target',run:async()=>{
+ await expectStableControls({controls:{source,terminal,expand:page.locator('.expand-toggle:visible')},interactions:[{name:width===390?'touch terminal target':'mouse terminal target',run:async()=>{
   if(width===390){
    await page.clock.install();await page.clock.pauseAt(await page.evaluate(()=>Date.now()+1000))
    await page.evaluate(()=>{HTMLElement.prototype.setPointerCapture=function(){}})

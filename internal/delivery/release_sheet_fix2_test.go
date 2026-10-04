@@ -238,6 +238,7 @@ func TestSheetCapacityCountsEpicsCancelledAndTombstones(t *testing.T) {
 func TestSheetLifecycleReceiptsIncludeExactRolloverEvents(t *testing.T) {
 	f := newStoreFixture(t)
 	f.item(t, "ticket", "TK-1", "open", f.release, "V")
+	beforeFreeze := int64(f.scalar(t, `SELECT COALESCE(max(id),0) FROM events`))
 	frozen := f.freeze(t, f.release)
 	assertReceipt := func(r Release, after int64) {
 		t.Helper()
@@ -264,7 +265,7 @@ func TestSheetLifecycleReceiptsIncludeExactRolloverEvents(t *testing.T) {
 			t.Fatalf("receipts=%v committed=%v undo=%v", got, want, r.UndoEventID)
 		}
 	}
-	assertReceipt(frozen, 0)
+	assertReceipt(frozen, beforeFreeze)
 	last := f.lastEvent(t, "release.state_changed").ID
 	cut, err := f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: frozen.Revision, Action: "cut", VersionScheme: "legacy", Version: "1.0.0"})
 	if err != nil {

@@ -23,9 +23,10 @@ import (
 
 type storeFixture struct {
 	*readFixture
-	store         *Store
-	person, agent tenant.Principal
-	clock         time.Time
+	store          *Store
+	person, agent  tenant.Principal
+	clock          time.Time
+	baselineEvents int
 }
 
 func newStoreFixture(t *testing.T) *storeFixture {
@@ -37,6 +38,7 @@ func newStoreFixture(t *testing.T) *storeFixture {
 		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Release agent') RETURNING id::text`, f.tenant).Scan(&f.agent.ID)
 	})
 	dbtest.BindRole(t, f.d, f.tenant, f.agent.ID, "owner")
+	f.baselineEvents = f.scalar(t, `SELECT count(*) FROM events`)
 	f.store = NewStore(f.d.App).WithClock(func() time.Time { return f.clock })
 	return f
 }
@@ -174,7 +176,7 @@ func TestStoreBatchAndAgentUndoCannotPromote(t *testing.T) {
 	if !errors.Is(err, ErrPromotion) {
 		t.Fatalf("batch promotion: %v", err)
 	}
-	if f.placed(t, a).ReleaseID != f.release || f.placed(t, a).Revision != 1 || f.placed(t, tail).Revision != 0 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+	if f.placed(t, a).ReleaseID != f.release || f.placed(t, a).Revision != 1 || f.placed(t, tail).Revision != 0 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 		t.Fatal("batch failure left partial effects")
 	}
 	if _, err = f.store.Place(t.Context(), f.agent, f.project, []PlacementRequest{move}); err != nil {
@@ -295,7 +297,7 @@ func TestStoreFinalAdmissionAndHistoryAuthority(t *testing.T) {
 				if got.ReleaseID != f.next || got.Revision != 2 {
 					t.Fatalf("placement=%+v", got)
 				}
-			} else if got.ReleaseID != f.release || got.Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+			} else if got.ReleaseID != f.release || got.Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 				t.Fatal("refusal wrote state or audit")
 			}
 		})
@@ -517,7 +519,7 @@ func TestStoreReleaseAndPendingCaps(t *testing.T) {
 		closed = append(closed, r)
 	}
 	_, err = f.store.Place(t.Context(), f.person, f.project, []PlacementRequest{{ItemID: id, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: closed[0].ID, ExpectedReleaseRevision: 1}})
-	if !errors.Is(err, ErrPendingCapacity) || f.placed(t, id).Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+	if !errors.Is(err, ErrPendingCapacity) || f.placed(t, id).Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 		t.Fatalf("history pending cap: %v", err)
 	}
 	// Exactly 4,000 pending rows still permit removals. Undo of that removal

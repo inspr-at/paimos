@@ -83,7 +83,7 @@ func TestStoreFix6LiveHistoryFlagUndoStillNeedsManage(t *testing.T) {
 	if err := f.undo(t, p, e); !errors.Is(err, ErrHistoryCorrection) {
 		t.Fatalf("a live history flag edit must retain roles.manage authority: %v", err)
 	}
-	if !reflect.DeepEqual(f.placed(t, id), before) || f.releaseRow(t, f.release).Revision != 2 || f.scalar(t, `SELECT count(*) FROM events`) != 1 {
+	if !reflect.DeepEqual(f.placed(t, id), before) || f.releaseRow(t, f.release).Revision != 2 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents+1 {
 		t.Fatal("refused live history undo changed state or events")
 	}
 }

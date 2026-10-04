@@ -80,7 +80,11 @@ func TestFrozenPlacementAndUndoRecheckAfterFence(t *testing.T) {
 				result, err := f.store.PlaceWithRevision(ctx, f.person, f.project, []PlacementRequest{request})
 				moved <- outcome{result: result, err: err}
 			}()
-			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "advisory" {
+			wantLock := "advisory"
+			if strings.HasPrefix(action, "undo_") {
+				wantLock = "transactionid"
+			}
+			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != wantLock {
 				t.Fatalf("move bypassed freeze fence: %q", lock)
 			}
 			barrier.Release()

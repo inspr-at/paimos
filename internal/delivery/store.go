@@ -100,7 +100,7 @@ func transactionLimits(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// fence uses the canonical helper: tree, then tenant (pairing, when needed,
+// fence uses the canonical helper: tenant, then tree (pairing, when needed,
 // belongs before both). Never substitute a shared tree or reverse the order.
 // An empty permission defers RequireTx until the locked operation selects its
 // authority; placement/history and abandon must authorize before any commit.

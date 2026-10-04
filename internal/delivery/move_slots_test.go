@@ -217,7 +217,7 @@ func TestSingleAnchorRechecksAfterConcurrentChange(t *testing.T) {
 				result, err := f.store.PlaceWithRevision(ctx, f.person, f.project, []PlacementRequest{{ItemID: subject, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1, Slot: Slot{AfterID: anchor}}})
 				placed <- outcome{result, err}
 			}()
-			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "advisory" {
+			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "transactionid" {
 				t.Fatalf("placement bypassed anchor writer: %q", lock)
 			}
 			barrier.Release()

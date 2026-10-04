@@ -111,7 +111,7 @@ func TestPlanningPageSubtreeProbesOnlySelectedParents(t *testing.T) {
 		if err := json.Unmarshal(raw, &plan); err != nil {
 			return err
 		}
-		rows, probes := planningSubtreeWork(plan, false)
+		rows, probes := planningPageSubtreeWork(plan, false)
 		t.Logf("page subtree: %.0f node rows visited, %.0f probes", rows, probes)
 		if probes <= 0 || rows > float64(6*len(ids)) {
 			t.Fatalf("page subtree visited %.0f node rows in %.0f probes for %d leaves", rows, probes, len(ids))
@@ -122,11 +122,11 @@ func TestPlanningPageSubtreeProbesOnlySelectedParents(t *testing.T) {
 	}
 }
 
-func planningSubtreeWork(plan any, subtree bool) (rows, probes float64) {
+func planningPageSubtreeWork(plan any, subtree bool) (rows, probes float64) {
 	switch node := plan.(type) {
 	case []any:
 		for _, child := range node {
-			r, p := planningSubtreeWork(child, subtree)
+			r, p := planningPageSubtreeWork(child, subtree)
 			rows, probes = rows+r, probes+p
 		}
 	case map[string]any:
@@ -138,7 +138,7 @@ func planningSubtreeWork(plan any, subtree bool) (rows, probes float64) {
 			rows, probes = (n+removed)*loops, loops
 		}
 		for _, child := range []any{node["Plan"], node["Plans"]} {
-			r, p := planningSubtreeWork(child, subtree)
+			r, p := planningPageSubtreeWork(child, subtree)
 			rows, probes = rows+r, probes+p
 		}
 	}

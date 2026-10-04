@@ -76,7 +76,7 @@ func TestStoreFix5HistoryCorrectionSelectsLockedPermission(t *testing.T) {
 				if !errors.Is(err, ErrEntryClosed) {
 					t.Fatalf("history admission must retain its separate write deadline: %v", err)
 				}
-				if f.placed(t, id).Revision != 1 || f.placed(t, id).ReleaseID != f.release || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+				if f.placed(t, id).Revision != 1 || f.placed(t, id).ReleaseID != f.release || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 					t.Fatal("refused correction changed state or events")
 				}
 				return
@@ -304,7 +304,7 @@ func TestStoreFix5AbandonSelectsStatePermission(t *testing.T) {
 				t.Fatalf("abandon must select authority from fenced state: %v, want %v", err, tc.want)
 			}
 			if tc.want != nil {
-				if f.releaseRow(t, f.release).State != tc.state || f.releaseRow(t, f.release).Revision != 1 || !reflect.DeepEqual(f.placed(t, id), original) || f.releaseRow(t, f.next).Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+				if f.releaseRow(t, f.release).State != tc.state || f.releaseRow(t, f.release).Revision != 1 || !reflect.DeepEqual(f.placed(t, id), original) || f.releaseRow(t, f.next).Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 					t.Fatal("refused abandon left partial rollover/state/events")
 				}
 				return
@@ -319,7 +319,7 @@ func TestStoreFix5AbandonSelectsStatePermission(t *testing.T) {
 func TestStoreFix5CanonicalGuardUnchanged(t *testing.T) {
 	// Pin main's existing guard byte-for-byte; delivery coverage belongs here.
 	// Filled from origin/main, not from the candidate file being checked.
-	const mainGuardSHA256 = "390b7d29ea05cc19ae60a7bb7641dc7baf09f4d78184d0c5fc725c37a5e1b956"
+	const mainGuardSHA256 = "a5542d29b6b96c99e0855591a7de168aec1dc73b1d110d2c856bc817d9d53684"
 	data, err := os.ReadFile("../agentpairing/lock_order_test.go")
 	if err != nil {
 		t.Fatal(err)

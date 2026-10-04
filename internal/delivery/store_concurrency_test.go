@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func cutRelease(t *testing.T, f *storeFixture, r Release) Release {
@@ -72,8 +73,10 @@ func TestStoreTwoPublicationsExclusiveFromStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer probe.Rollback(context.Background())
-	if _, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.tenant); err != nil {
-		t.Fatalf("tree waiters acquired tenant early: %v", err)
+	_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.tenant)
+	var lockErr *pgconn.PgError
+	if !errors.As(err, &lockErr) || lockErr.Code != "55P03" {
+		t.Fatalf("publication must hold tenant before tree: %v", err)
 	}
 	if err = probe.Rollback(ctx); err != nil {
 		t.Fatal(err)
@@ -160,7 +163,7 @@ func TestStoreFinalRequireTxAfterRevocationFence(t *testing.T) {
 				t.Fatalf("precondition authority absent: %v", err)
 			}
 			pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
-				return strings.Contains(query, "FROM tenants") && strings.Contains(query, "FOR UPDATE")
+				return strings.Contains(query, "FROM tenants") && (strings.Contains(query, "FOR UPDATE") || strings.Contains(query, "FOR NO KEY UPDATE"))
 			})
 			revoke, writeDone := make(chan error, 1), make(chan error, 1)
 			go func() {
@@ -187,7 +190,7 @@ func TestStoreFinalRequireTxAfterRevocationFence(t *testing.T) {
 				writeDone <- err
 			}()
 			lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done)
-			if kind == "project" && lock != "advisory" || kind == "workspace" && lock != "transactionid" && lock != "tuple" {
+			if lock != "transactionid" && lock != "tuple" {
 				t.Fatalf("write bypassed authority fence: %q", lock)
 			}
 			barrier.Release()
@@ -197,7 +200,7 @@ func TestStoreFinalRequireTxAfterRevocationFence(t *testing.T) {
 			if err := dbtest.Await(t, ctx, writeDone); !errors.Is(err, authz.ErrForbidden) {
 				t.Fatalf("stale-authority write: %v", err)
 			}
-			if f.placed(t, id).ReleaseID != f.release || f.placed(t, id).Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+			if f.placed(t, id).ReleaseID != f.release || f.placed(t, id).Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 				t.Fatal("revoked write persisted effects")
 			}
 		})
@@ -261,7 +264,7 @@ func TestStoreCancellationAfterCASRollsBack(t *testing.T) {
 	if err := dbtest.Await(t, ctx, done); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled write reported %v", err)
 	}
-	if got := f.placed(t, id); got.ReleaseID != f.release || got.Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+	if got := f.placed(t, id); got.ReleaseID != f.release || got.Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != f.baselineEvents {
 		t.Fatalf("cancelled operation persisted %+v", got)
 	}
 }

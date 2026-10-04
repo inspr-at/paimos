@@ -200,7 +200,8 @@ const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
 const section = computed(() => projectSection(route))
 const { headerDensity } = useProjectHeader()
-const ticketsHeader = computed(() => ['tickets', 'releases', 'knowledge'].includes(section.value))
+const headerEnabled = computed(() => ['tickets', 'releases', 'knowledge'].includes(section.value))
+const ticketsHeader = computed(() => section.value === 'tickets')
 const headerFold = ref<HTMLElement>()
 let headerAnimation: Animation | null = null
 watch(headerDensity, async (value, before) => {
@@ -1772,10 +1773,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 </script>
 
 <template>
-  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[headerEnabled ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
-      <div ref="headerFold" id="project-header-fold" class="project-fold" :inert="ticketsHeader && headerDensity === 'collapsed' || undefined"><div class="project-fold-body">
+      <div ref="headerFold" id="project-header-fold" class="project-fold" :inert="headerEnabled && headerDensity === 'collapsed' || undefined"><div class="project-fold-body">
       <header class="project-head" :class="{ 'glimpse-room': !ticketsHeader && glimpseActive && !showViewBar }">
         <div class="head-flex" :class="{ 'with-glimpse': !ticketsHeader && glimpseActive }">
         <div class="head-main">
@@ -1817,7 +1818,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
         </div>
       </header>
-      <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
+      <div class="project-navigation" :class="{ 'legacy-navigation': !headerEnabled }">
         <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
         <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
@@ -1825,7 +1826,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
-        <div v-if="ticketsHeader" id="project-view-settings" class="project-view-settings" />
+        <div v-if="headerEnabled" id="project-view-settings" class="project-view-settings" />
       </div>
       </div>
       </div>
@@ -1834,7 +1835,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <ReleaseScopePicker ref="scopePicker" :project-id="project.id" :person="scopeOwner" :values="scopeValues" :count-text="scopeCountText" :pending-changes="deliveryLive.pending.value" :pending-incomplete="deliveryLive.overflow.value" @apply-changes="deliveryLive.apply()" @choose="chooseScope" @label="scopeLabel = $event" />
         <ListToolbar
           ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="releasesActive ? planningSummary.total : total" :pending-changes="deliveryLive.pending.value" :pending-incomplete="deliveryLive.overflow.value" @apply-changes="deliveryLive.apply()" :scope-label="projectScope.kind === 'all' || releasesActive ? '' : scopeLabel" :total-incomplete="releasesActive && planningSummary.incomplete" :loading="releasesActive ? planningSummary.loading : graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
-          :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader" :facet-loading="facetLoading" :facet-errors="list.facetErrors"
+          :settings-target="headerEnabled ? '#project-view-settings' : undefined" :project-header="headerEnabled" :facet-loading="facetLoading" :facet-errors="list.facetErrors"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
@@ -1905,7 +1906,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </template>
 
       <p v-if="!journeyActive && !settingsActive && !knowledgeActive && !graphActive" class="list-count" role="status" aria-live="polite"><template v-if="releasesActive">{{ planningSummary.incomplete ? '≥ ' : '' }}{{ planningSummary.total === null ? (planningSummary.loading ? 'Counting releases…' : 'Release count unavailable') : `${planningSummary.total} releases` }}</template><template v-else-if="total !== null">{{ total }} {{ total === 1 ? 'ticket' : 'tickets' }}{{ projectScope.kind === 'all' ? '' : ` in ${scopeLabel}` }}</template></p>
-      <Teleport defer to="#project-footer-live"><ListFreshness v-if="liveActive || releasesActive" :updated-at="releasesActive ? planningSummary.updatedAt ?? null : liveUpdatedAt" :untrusted="releasesActive ? planningSummary.total === null : liveDataStale" /></Teleport>
+      <Teleport defer to="#project-footer-live"><ListFreshness v-if="liveActive || releasesActive" :updated-at="releasesActive ? planningSummary.updatedAt ?? null : liveUpdatedAt" :untrusted="releasesActive ? planningSummary.total === null || !!deliveryLive.error.value : liveDataStale" /></Teleport>
       <FloatingPanel v-if="sectionAnchor" :anchor="sectionAnchor" label="Switch project section" @close="closeSection">
         <div class="section-menu" role="menu" aria-label="Project sections"><button v-for="item in PROJECT_SECTIONS.filter(item => ['releases', 'tickets', 'knowledge'].includes(item.id))" :key="item.id" type="button" role="menuitem" @click="closeSection(); setSection(item.id)"><AppIcon :name="item.icon" :size="14" />{{ item.label }}</button></div>
       </FloatingPanel>
@@ -1939,7 +1940,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :facet-errors="list.facetErrors" :total="releasesActive ? planningSummary.total : total" :total-incomplete="releasesActive && planningSummary.incomplete" :view="releasesActive ? 'releases' : graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!releasesActive && !graphActive && canSaveView"
 
-        :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="ticketsHeader"
+        :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="headerEnabled"
         @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"

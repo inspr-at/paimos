@@ -81,21 +81,31 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark']) {
   test(`expansion frame stays stable at ${width} ${theme}`, async ({ page }) => {
     const world = await setup(page, { theme }); await page.setViewportSize({ width, height: 1000 }); await page.goto('/p/PHAROS/releases')
     await expect(expand(page)).toBeVisible(); expect(world.calls.filter(c => c.source === 'overview')).toHaveLength(1); expect(world.calls.filter(c => c.source.startsWith('release:'))).toHaveLength(0)
+    await expect(frame(page).locator('.release-card')).toHaveCount(3)
+    await expect(search(page)).toHaveAttribute('placeholder', 'Search')
+    await expect(page.locator('.list-count')).toContainText('releases')
+    await expect(frame(page).locator('.group-label').last()).toContainText('shipped releases')
     const chevron = block(page, first).locator('.chevron'), row = block(page, first).locator('.release-row')
-    await expectStableControls({ controls: { header: page.locator('.project-head'), tabs: page.getByRole('tablist', { name: 'Project sections' }), search: search(page), toolbar: page.getByRole('toolbar', { name: 'Release list controls' }), expandAll: page.getByRole('button', { name: 'Expand all', exact: true }), collapseAll: page.getByRole('button', { name: 'Collapse all', exact: true }), loadMore: page.getByRole('button', { name: 'Load more released releases' }), clickedChevron: chevron, clickedRow: row, name: row.locator('.release-name'), more: row.locator('.release-more') }, scrollAreas: { page: page.locator('.project-page'), frame: frame(page) }, interactions: [
+    const initialScroll = await page.locator('#main').evaluate(el => el.scrollTop)
+    await expectStableControls({ controls: { header: page.locator('.project-head'), tabs: page.getByRole('tablist', { name: 'Project sections' }), search: search(page), toolbar: page.getByRole('toolbar', { name: 'Release list controls' }), expansionToggle: frame(page).locator('.expand-toggle:visible'), loadMore: page.getByRole('button', { name: 'Load more shipped releases' }), clickedChevron: chevron, clickedRow: row, name: row.locator('.release-name'), more: row.locator('.release-more') }, scrollAreas: { page: page.locator('.project-page'), frame: frame(page) }, interactions: [
       { name: 'expand first', run: async () => { await chevron.click(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1); expect((await block(page, first).locator('.planning-work').boundingBox())!.y).toBeGreaterThanOrEqual((await row.boundingBox())!.y + (await row.boundingBox())!.height - .5) } },
       { name: 'expand second', run: async () => { await expand(page, 'Audit sweep').click(); await expect(block(page, second).locator('.ticket-row')).toHaveCount(1) } },
       { name: 'collapse first', run: async () => { await chevron.click(); await expect(block(page, first).locator('.planning-work')).toHaveCount(0) } },
-      { name: 'expand all', run: async () => { await page.getByRole('button', { name: 'Expand all', exact: true }).click(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1) } },
+      { name: 'expand all', run: async () => { await page.getByRole('button', { name: 'Collapse all', exact: true }).click(); await page.getByRole('button', { name: 'Expand all', exact: true }).click(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1) } },
       { name: 'collapse all', run: async () => { await page.getByRole('button', { name: 'Collapse all', exact: true }).click(); await expect(frame(page).locator('.planning-work')).toHaveCount(0) } },
-      { name: 'history continuation', run: async () => { await page.getByRole('button', { name: 'Load more released releases' }).click(); await expect(frame(page).locator('.release-row')).toHaveCount(56) } },
-    ] })
+      { name: 'history continuation', run: async () => { await page.getByRole('button', { name: 'Load more shipped releases' }).click(); await expect(frame(page).locator('.release-row')).toHaveCount(56) } },
+    ].map(interaction => ({ ...interaction, run: async () => {
+      await interaction.run()
+      // Clicking a lower phone row deliberately scrolls the sticky toolbar.
+      // Return to the opening scroll position before comparing layout geometry.
+      await page.locator('#main').evaluate((el, top) => { el.scrollTop = top }, initialScroll)
+    } })) })
     await chevron.click(); await expect(block(page, first).locator('.parent-chip')).toHaveCSS('opacity', '1'); await expect(block(page, first).locator('.hidden-count')).toHaveText('1 finished, 1 cancelled or archived hidden by Hide closed')
     const releasedName = block(page, rid(56)).locator('.release-name'); await releasedName.focus(); await expect(releasedName.locator('.version')).toHaveCSS('opacity', '1'); await releasedName.hover()
     await search(page).focus(); await search(page).hover(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1)
     await page.keyboard.press('Meta+A'); await expect(search(page)).toBeFocused()
     await page.keyboard.press('Escape'); await expect(search(page)).not.toBeFocused()
-    mkdirSync('test-results/aeon-596-p6a', { recursive: true }); await page.screenshot({ path: `test-results/aeon-596-p6a/releases-${width}-${theme}.png`, fullPage: false })
+    mkdirSync('test-results/aeon-596-mm', { recursive: true }); await page.screenshot({ path: `test-results/aeon-596-mm/releases-${width}-${theme}.png`, fullPage: false })
     expect(world.errors).toEqual([])
   })
 }
@@ -145,7 +155,7 @@ test('Hide off returns completed ranked and cancelled tail Backlog; URL filters 
 
 test('child continuation retains server counts and query cursor; published versions reveal without resizing', async ({ page }) => {
   const world = await setup(page); await page.goto('/p/PHAROS/releases?closed=1')
-  await page.getByRole('button', { name: 'Load more released releases' }).click()
+  await page.getByRole('button', { name: 'Load more shipped releases' }).click()
   const name = block(page, history).locator('.release-name'); await expect(name).toBeVisible(); await block(page, history).locator('.chevron').click(); await expect(block(page, history).locator('.ticket-row')).toHaveCount(200)
   await expect(block(page, history).locator('.work-summary')).toHaveText('200 of 215 matching work loaded · more available')
   await page.getByRole('combobox', { name: 'Work to continue loading' }).selectOption(`release:${history}`); await page.getByRole('button', { name: 'Load work', exact: true }).click(); await expect(block(page, history).locator('.ticket-row')).toHaveCount(215)
@@ -157,7 +167,7 @@ test('delayed insertion cannot move the hovered or focused downstream chevron; l
   const entered = barrier(), release = barrier(); await setup(page, { hold: { source: `release:${first}`, entered, release } }); await page.goto('/p/PHAROS/releases')
   await expand(page).click(); await entered.wait
   const downstream = block(page, second).locator('.chevron'); await downstream.focus(); await downstream.hover()
-  await expectStableControls({ controls: { downstream, expandAll: page.getByRole('button', { name: 'Expand all', exact: true }) }, interactions: [{ name: 'passive load waits', run: async () => { release.release(); await expect(frame(page).locator('.planning-feedback')).toContainText('pages ready'); await expect(block(page, first).locator('.ticket-row')).toHaveCount(0) } }] })
+  await expectStableControls({ controls: { downstream, expansionToggle: frame(page).locator('.expand-toggle:visible') }, interactions: [{ name: 'passive load waits', run: async () => { release.release(); await expect(frame(page).locator('.planning-feedback')).toContainText('pages ready'); await expect(block(page, first).locator('.ticket-row')).toHaveCount(0) } }] })
   await search(page).focus(); await search(page).hover(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1)
   await block(page, first).locator('.chevron').click(); await expect(block(page, first).locator('.planning-work')).toHaveCount(0)
 })
@@ -171,7 +181,7 @@ test('count truncation and failed refresh stay visible instead of becoming empty
 for (const interaction of ['hover', 'focus'] as const) test(`late saved expansion holds structural insertion during downstream ${interaction}`, async ({ page }) => {
   const world = await setup(page)
   const entered = barrier(), reply = barrier()
-  await page.route('**/api/preferences/releases-expanded:p-pharos', async route => {
+  await page.route('**/api/preferences/releases-expanded%3Ap-pharos', async route => {
     if (route.request().method() !== 'GET') return route.fallback()
     entered.release(); await reply.wait
     await route.fulfill({ json: { value: { ids: [first] } } })
@@ -182,7 +192,7 @@ for (const interaction of ['hover', 'focus'] as const) test(`late saved expansio
   if (interaction === 'hover') { await search(page).focus(); await control.hover() }
   else { await control.focus(); await search(page).hover() }
   await expectStableControls({ controls: { downstream: control, row: block(page, second).locator('.release-row'), selector: page.getByRole('combobox', { name: 'Work to continue loading' }), apply: page.getByRole('button', { name: 'Show loaded', exact: true }) }, scrollAreas: { frame: frame(page) }, interactions: [{ name: 'saved preferences arrive', run: async () => {
-    const response = page.waitForResponse(r => r.url().includes('/preferences/releases-expanded:'))
+    const response = page.waitForResponse(r => decodeURIComponent(r.url()).includes('/preferences/releases-expanded:'))
     reply.release(); await response
     // Rendering frames are the barrier for the preference's promise and Vue update.
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))

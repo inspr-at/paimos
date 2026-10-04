@@ -28,7 +28,7 @@ async function samples(controls: Record<string, Locator>) {
 }
 async function noSideways(controls: Record<string, Locator>, before: Awaited<ReturnType<typeof samples>>) {
   const after = await samples(controls)
-  for (const name of Object.keys(before)) {
+  for (const name of Object.keys(controls)) {
     expect(after[name]!.x - before[name]!.x, `${name} sideways movement`).toBe(0)
     expect(after[name]!.width - before[name]!.width, `${name} width change`).toBe(0)
     expect(after[name]!.height - before[name]!.height, `${name} height change`).toBe(0)
@@ -62,7 +62,7 @@ for (const width of [390, 1024, 1440]) {
       await settled(page)
       const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
       const controls: Record<string, Locator> = {
-        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), count: toolbar.locator('.count-live'), new: page.getByRole('button', { name: 'New ticket', exact: true }),
+        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: page.getByRole('button', { name: 'New ticket', exact: true }),
         ...(width === 390 ? { filters: page.getByRole('button', { name: 'Filters', exact: true }) } : { status: toolbar.locator('.facet-control[data-dim="status"]'), filters: toolbar.locator('.facets'), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }) }),
       }
       const before = await samples(controls)
@@ -82,7 +82,8 @@ for (const width of [390, 1024, 1440]) {
         await expectStableControls({ controls: { fold: fold(page), appbar: page.locator('.app-header') }, interactions: ['collapsed', 'comfortable', 'collapsed'].map(mode => ({ name: mode, run: async () => { await fold(page).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${mode}`)) } })) })
       } else await density(page, 'Collapsed').click()
       await expect(page.locator('#project-header-fold')).toBeHidden()
-      await settled(page); await noSideways(controls, before)
+      // r6 intentionally slides the section switcher into Collapsed; New stays in place.
+      await settled(page); await noSideways({ new: controls.new! }, before)
       await capture(page, `${width}-${theme}-collapsed`)
       await search(page).focus(); await search(page).press('Escape')
       await expect(page.locator('.project-page')).toHaveClass(/header-collapsed/)

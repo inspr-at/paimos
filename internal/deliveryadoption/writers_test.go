@@ -19,6 +19,7 @@ import (
 // can reach an adopted release. Runtime guards are exercised separately; typed
 // writers cannot assume that an imported release will remain a generic node.
 var nodeWriters = map[string]string{
+	"agentruns/queue_undo.go":           "queueLoadTicket permits work kinds only; transient stale check, then stamped queueUpdateTicket",
 	"agentruns/queue.go":                "loadTicket permits work kinds only",
 	"business/crm/adjacent.go":          "typed contact/company/project-group loaders",
 	"business/crm/providers.go":         "typed external-system loader",
@@ -75,7 +76,11 @@ func checkNodeWriter(path, source string) (int, error) {
 		if nodeWriters[path] == "" {
 			err = fmt.Errorf("unclassified node writer %s", path)
 		}
-		if writesState.MatchString(sql) && !writesUpdated.MatchString(sql) {
+		// queueUndo temporarily restores the old state to evaluate stale work.
+		// Its successful path persists through the stamped queueUpdateTicket;
+		// every rejection rolls back. Keep this exception to the exact probe.
+		transientProbe := path == "agentruns/queue_undo.go" && sql == "UPDATE nodes SET state=$2 WHERE id=$1"
+		if writesState.MatchString(sql) && !writesUpdated.MatchString(sql) && !transientProbe {
 			err = fmt.Errorf("state mutation without updated_at bump in %s", path)
 		}
 		return true
@@ -116,10 +121,32 @@ func TestNodeWriterInventoryAndStateTimestampBumps(t *testing.T) {
 	}
 }
 func TestNodeWriterScanRejectsUnclassifiedAndUnstampedMutations(t *testing.T) {
-	for _, tc := range []struct{ path, sql string }{{"new/writer.go", "UPDATE nodes SET state='done',updated_at=now()"}, {"nodes/nodes.go", "UPDATE nodes SET state='done'"}} {
+	for _, tc := range []struct{ path, sql string }{{"new/writer.go", "UPDATE nodes SET state='done',updated_at=now()"}, {"nodes/nodes.go", "UPDATE nodes SET state='done'"}, {"agentruns/queue_undo.go", "UPDATE nodes SET state='done'"}} {
 		source := "package sample\nconst sql=" + strconv.Quote(tc.sql)
 		if _, err := checkNodeWriter(tc.path, source); err == nil {
 			t.Fatalf("writer scan accepted %s", tc.sql)
 		}
+	}
+}
+
+// Pin the temporary probe's final write so the inventory exception cannot hide
+// a removed timestamp bump or an unrelated unstamped writer.
+func TestQueueUndoProbeFinishesWithStampedWrite(t *testing.T) {
+	undo, err := os.ReadFile("../agentruns/queue_undo.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(undo)
+	probe := strings.Index(source, "UPDATE nodes SET state=$2 WHERE id=$1")
+	final := strings.Index(source, `queueUpdateTicket(ctx, tx, p, t, "queue.add_undone")`)
+	if probe < 0 || final < probe || !strings.Contains(source[final:], `return map[string]bool{"removed": true}, nil`) {
+		t.Fatal("queue Undo must finish its transient probe with queueUpdateTicket")
+	}
+	queue, err := os.ReadFile("../agentruns/queue.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(queue), "UPDATE nodes SET state=$2,fields=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes)") {
+		t.Fatal("queueUpdateTicket must stamp the persisted state")
 	}
 }
