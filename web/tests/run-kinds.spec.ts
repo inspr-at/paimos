@@ -136,6 +136,11 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
         }
       }
       expectModelGlyphFits(await modelGlyphSize(row.locator('.exec-model'), 6), `${width}px ${session.display_label}: complete ffmpeg remains visible`)
+      if (width <= 390) {
+        const stateBox = (await row.locator('.agent-state-label').boundingBox())!
+        const ticketBox = (await row.locator('.c-ticket').boundingBox())!
+        expect(stateBox.x + stateBox.width, `${width}px ${session.display_label}: state stays clear of project`).toBeLessThanOrEqual(ticketBox.x + .5)
+      }
       if (width <= 390) await expectStableControls({ controls: { row, host, pencil, remove, menu }, scrollAreas: { row }, interactions: [
         { name: 'open Host from badge', run: async () => {
           await host.click()

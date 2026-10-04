@@ -718,14 +718,17 @@ defineExpose({ toggleHistory })
   .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
-  /* Keep paired Remove/Actions beside each other on the title line, so neither
-     extends into the full-width execution/Host line below. */
-  .row:has(> .c-actions > .bin):has(> .c-actions > .more) { grid-template-columns: 30px auto minmax(0, 1fr) 88px; }
-  .row > .c-actions:has(> .bin):has(> .more) { flex-direction: row; }
+  /* Reserve every available action on the title line. A silent session can
+     offer Pause, Remove and Actions together; Host owns the line below. */
+  .row:has(> .c-actions > :is(.bin, .pause-controls:not(:empty))):has(> .c-actions > .more) { grid-template-columns: 30px auto minmax(0, 1fr) max-content; }
+  .row > .c-actions:has(> :is(.bin, .pause-controls:not(:empty))):has(> .more) { flex-direction: row; }
   /* Execution and Host share the whole line below the actions; a short host
      returns its spare width to the model/command. */
   .execution-host { display: grid; grid-column: 2 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-top: 6px; }
-  .c-exec { min-width: 0; gap: 6px; }
+  /* Keep the train's Default tier control without consuming main's command
+     text slot beside Host. Its reserved line also keeps tier feedback still. */
+  .c-exec { display: grid; grid-template-columns: 18px minmax(0, 1fr); min-width: 0; gap: 6px; }
+  .c-exec > .phone-tier { grid-column: 1 / -1; grid-row: 2; }
   .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
   .execution-host > .c-host { display: flex; justify-self: end; padding: 0; }
@@ -738,12 +741,14 @@ defineExpose({ toggleHistory })
   .exec-model { flex: 0 1 auto; min-width: 0; font-size: 12px; }
   .exec-harness ~ .exec-model::before, .exec-copy:has(.exec-harness) .exec-model::before { content: '·'; margin: 0 .4em; color: var(--ink-3); }
   .c-state { grid-column: 2; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
+  .c-state :deep(.agent-state-label) { min-width: 0; max-width: 100%; align-items: flex-start; }
+  .c-state :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   .c-ticket { grid-column: 3; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
   .row > .c-ticket { padding-block: 0; }
   .c-beat { display: none; }
   /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue joins the state line as
      its icon; the words stay in its accessible name and tooltip. */
-  .row .c-state:has(.state-listen) { display: flex; align-items: center; gap: 6px; }
+  .row .c-state:has(.state-listen) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .row .state-listen :deep(.listening-text) { display: none; }
   .c-elapsed { display: none; }
   .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; flex-direction: column; justify-content: center; gap: 0; padding: 0; }
