@@ -50,7 +50,7 @@ Rules 1–6 prevent recurring AEON-545 audit findings; rule 7 is the companion l
 
 ### Coordinator review checklist
 
-Use these seven checks in the consolidated cross-family gate; package workers do not run model reviews themselves (rule 9).
+Use these checks in the consolidated cross-family gate; package workers do not run model reviews themselves (rule 9).
 
 - [ ] Authorization is re-checked with `RequireTx` against the current target under the access-change lock in the final write transaction.
 - [ ] Locks follow tenant → tree → rows → sorted blob batch → event counter last, with no later lock acquisition and FK-compatible fences.
@@ -59,12 +59,15 @@ Use these seven checks in the consolidated cross-family gate; package workers do
 - [ ] Failed and partial writes, searches, syncs and deliveries surface errors; truncation and partial results are explicit.
 - [ ] Barriers/clocks prove the claimed interleaving/time; fixtures preserve asserted data; assertions cannot pass for a different failure.
 - [ ] Bounding-box checks keep actions and selectors still through options/series; downward growth keeps short frames short, without padded fixed heights.
+- [ ] UI follows `docs/ui-conventions.md`: shared tokens/components, designed light and dark themes, no coloured edge accents, decorative side frames/glows, gradient blobs or grey-pill soup; controls measured stable (±0.5 px).
 
 ## Style
 
 - Go: standard library first, small packages, explicit errors, context everywhere, no global state except in `main`.
 - SQL: every table has `tenant_id` (except `tenants`), RLS policy on `current_setting('aeon.tenant_id')`.
-- Web: Vue 3 `<script setup lang="ts">`, design tokens from `web/src/styles/tokens.css`, SVG icons only (never text glyphs), icons centred in their controls.
+- Web: Vue 3 `<script setup lang="ts">`, shared tokens and styles from `web/src/styles/tokens.css` and `web/src/styles/base.css`, SVG icons only (never text glyphs), icons centred in their controls. Reuse existing PAIMOS components before creating new ones; design both light and dark themes. Use hairlines, full tints, whitespace and type weight; no coloured edge accents, decorative side frames/glows, gradient blobs or grey-pill soup.
+  Implement the approved Opus design named in the brief; without one, build only the specified UI with existing components and note "needs Opus design" in the summary.
+  UI work must also satisfy docs/ui-conventions.md
 - UI stability (AEON-541): **The control stays put; content grows away from controls or moves inside a scroll area.** Selecting, hovering, typing or toggling never changes a control's size or position, or its neighbours in the same group. Feedback appears in place, never by pushing controls. Rule 7 governs the choice of layout; fixed heights are not the goal.
   1. For long content, Accept, Decide & next, Skip and Cancel live in a fixed footer; content above uses a scrolling body. Longer content means scrolling, never a moved button.
   2. One control layout and position for a whole series (1 of N). After next/previous, action buttons stay identical and focus stays on the same button. Top-anchored frames may grow downward; a series with an already scrolling body retains the same dialog size.
