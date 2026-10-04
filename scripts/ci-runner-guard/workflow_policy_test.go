@@ -5,12 +5,134 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestMainPushConcurrencyIsolation(t *testing.T) {
+	workflows := readPolicyWorkflows(t)
+	var ci map[string]any
+	if err := yaml.Unmarshal(workflows["ci.yml"], &ci); err != nil {
+		t.Fatal(err)
+	}
+	policy := mapping(ci["concurrency"])
+	group, ok := policy["group"].(string)
+	if !ok {
+		t.Fatal("CI needs an expression-based concurrency group")
+	}
+	cancel, ok := policy["cancel-in-progress"].(string)
+	if !ok {
+		t.Fatal("CI cancellation must be event-guarded")
+	}
+	for _, tc := range []struct {
+		name, event, ref, pr, run, wantGroup string
+		wantCancel                           bool
+	}{
+		{"main-older", "push", "refs/heads/main", "", "100", "ci-push-refs/heads/main", true},
+		{"main-newer", "push", "refs/heads/main", "", "101", "ci-push-refs/heads/main", true},
+		{"pr-older", "pull_request", "refs/pull/42/merge", "42", "102", "ci-pull_request-42", true},
+		{"pr-newer", "pull_request", "refs/pull/42/merge", "42", "103", "ci-pull_request-42", true},
+		{"other-pr", "pull_request", "refs/pull/43/merge", "43", "104", "ci-pull_request-43", true},
+		{"queue-older", "merge_group", "refs/heads/gh-readonly-queue/main/pr-42", "", "105", "ci-merge_group-105", false},
+		{"queue-newer", "merge_group", "refs/heads/gh-readonly-queue/main/pr-42", "", "106", "ci-merge_group-106", false},
+		{"manual-main-older", "workflow_dispatch", "refs/heads/main", "", "107", "ci-workflow_dispatch-107", false},
+		{"manual-main-newer", "workflow_dispatch", "refs/heads/main", "", "108", "ci-workflow_dispatch-108", false},
+		{"other-branch", "push", "refs/heads/work/example", "", "109", "ci-push-109", false},
+		{"tag", "push", "refs/tags/v260930120000.0.0", "", "110", "ci-push-110", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			context := map[string]string{
+				"github.event_name": tc.event, "github.ref": tc.ref,
+				"github.event.pull_request.number": tc.pr, "github.run_id": tc.run,
+			}
+			gotGroup := expandConcurrency(t, group, context)
+			gotCancel := expandConcurrency(t, cancel, context)
+			if gotGroup != tc.wantGroup || gotCancel != fmt.Sprint(tc.wantCancel) {
+				t.Fatalf("group/cancel = %s/%s, want %s/%t", gotGroup, gotCancel, tc.wantGroup, tc.wantCancel)
+			}
+		})
+	}
+
+	// Discover every workflow subscribed to main pushes, including path-filtered
+	// rehearsal runs. Their groups must cancel main runs without sharing CI's group.
+	var mainWorkflows []string
+	for name, body := range workflows {
+		var w map[string]any
+		if err := yaml.Unmarshal(body, &w); err != nil {
+			t.Fatal(err)
+		}
+		push := mapping(mapping(w["on"])["push"])
+		if !hasNeed(push["branches"], "main") {
+			continue
+		}
+		mainWorkflows = append(mainWorkflows, name)
+		concurrency := mapping(w["concurrency"])
+		if name == "ci.yml" {
+			continue // The event matrix above covers CI's guarded expressions.
+		}
+		otherGroup, ok := concurrency["group"].(string)
+		if !ok || concurrency["cancel-in-progress"] != true {
+			t.Fatalf("%s must cancel superseded main runs", name)
+		}
+		context := map[string]string{"github.ref": "refs/heads/main"}
+		if got := expandConcurrency(t, otherGroup, context); got != "release-image-check-refs/heads/main" {
+			t.Fatalf("release rehearsal must keep its independent main group: %s", got)
+		}
+	}
+	sort.Strings(mainWorkflows)
+	if strings.Join(mainWorkflows, ",") != "ci.yml,release-image-check.yml" {
+		t.Fatalf("main push workflow inventory changed; review its concurrency: %v", mainWorkflows)
+	}
+	for _, name := range []string{"go", "web", "release-check", "e2e"} {
+		job := mapping(mapping(ci["jobs"])[name])
+		if job == nil || (job["name"] != nil && job["name"] != name) {
+			t.Fatalf("required check %q must keep its identity", name)
+		}
+	}
+}
+
+// Evaluate only the reviewed concurrency expressions' small grammar: string
+// contexts/literals, ==, && and ||. Unknown atoms fail instead of guessing.
+// Read expressions from YAML so the event matrix exercises the actual policy.
+func expandConcurrency(t *testing.T, template string, context map[string]string) string {
+	t.Helper()
+	atom := func(text string) any {
+		text = strings.TrimSpace(text)
+		if strings.HasPrefix(text, "'") && strings.HasSuffix(text, "'") {
+			return strings.Trim(text, "'")
+		}
+		if value, ok := context[text]; ok {
+			return value
+		}
+		t.Fatalf("unsupported concurrency atom %q", text)
+		return nil
+	}
+	truthy := func(value any) bool { return value != nil && value != false && value != "" }
+	expressions := regexp.MustCompile(`\$\{\{\s*(.*?)\s*\}\}`)
+	return expressions.ReplaceAllStringFunc(template, func(expression string) string {
+		var result any
+		for _, disjunction := range strings.Split(expressions.FindStringSubmatch(expression)[1], "||") {
+			for _, conjunction := range strings.Split(disjunction, "&&") {
+				if left, right, equal := strings.Cut(conjunction, "=="); equal {
+					result = atom(left) == atom(right)
+				} else {
+					result = atom(conjunction)
+				}
+				if !truthy(result) {
+					break
+				}
+			}
+			if truthy(result) {
+				break
+			}
+		}
+		return fmt.Sprint(result)
+	})
+}
 
 // Mutate complete directory copies so every regression exercises the same
 // repository-wide entry point used by release-check and the command-line guard.
@@ -85,7 +207,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			delete(mapping(mapping(w["on"])["pull_request"]), "paths")
 		})
 	}
-	for _, file := range []string{"extra.yaml", "test-runner-route.yml", "release-image-check.yml", "release.yml", "homebrew-tap.yml"} {
+	for _, file := range []string{"extra.yaml", "test-runner-route.yml", "release-image-check.yml", "release.yml", "homebrew-tap.yml", "verify-live.yml"} {
 		add("copied-ci-group/"+file, file, "must not copy ci.yml", func(w map[string]any) {
 			w["concurrency"] = map[string]any{"group": ciGroup, "cancel-in-progress": true}
 		})
@@ -94,7 +216,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add(fmt.Sprintf("unknown-workflow-concurrency/%d", index), "extra.yaml", "workflow-level concurrency is not allowlisted", func(w map[string]any) { w["concurrency"] = concurrency })
 		add(fmt.Sprintf("reusable-workflow-concurrency/%d", index), "test-runner-route.yml", "reusable workflows must not define concurrency", func(w map[string]any) { w["concurrency"] = concurrency })
 	}
-	for _, file := range []string{"ci.yml", "release.yml", "homebrew-tap.yml", "release-image-check.yml"} {
+	for _, file := range []string{"ci.yml", "release.yml", "homebrew-tap.yml", "release-image-check.yml", "verify-live.yml"} {
 		add("allowlisted-file-made-reusable/"+file, file, "reusable workflows must not define concurrency", func(w map[string]any) {
 			mapping(w["on"])["workflow_call"] = nil
 		})
@@ -150,8 +272,17 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("missing-ci-concurrency", "ci.yml", "reviewed concurrency policy", func(w map[string]any) { delete(w, "concurrency") })
 	add("scalar-ci-concurrency", "ci.yml", "reviewed concurrency policy", func(w map[string]any) { w["concurrency"] = "shared" })
 	add("missing-cancel-expression", "ci.yml", "reviewed concurrency policy", func(w map[string]any) { delete(mapping(w["concurrency"]), "cancel-in-progress") })
-	add("cancel-main-and-queue", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
+	add("cancel-queue", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
 		mapping(w["concurrency"])["cancel-in-progress"] = "${{ contains(fromJSON('[\"pull_request\",\"push\",\"merge_group\"]'), github.event_name) }}"
+	})
+	add("main-does-not-cancel", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
+		mapping(w["concurrency"])["cancel-in-progress"] = "${{ github.event_name == 'pull_request' }}"
+	})
+	add("main-group-still-unique", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
+		mapping(w["concurrency"])["group"] = "ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}"
+	})
+	add("push-cancellation-without-main-guard", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
+		mapping(w["concurrency"])["cancel-in-progress"] = "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
 	})
 	add("non-pr-shared-group", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
 		mapping(w["concurrency"])["group"] = "ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}"

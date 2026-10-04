@@ -251,6 +251,7 @@ func TestCreateReleaseTicketFailures(t *testing.T) {
 
 func TestCreateReleaseTicketConcurrentRetryAndRollback(t *testing.T) {
 	f := ticketSetup(t)
+	before := f.counts()
 	body := f.body(1, "concurrent", true, "")
 	var wg sync.WaitGroup
 	results := make(chan *httptest.ResponseRecorder, 2)
@@ -271,7 +272,7 @@ func TestCreateReleaseTicketConcurrentRetryAndRollback(t *testing.T) {
 		}
 		id = out.Tickets[0].NodeID
 	}
-	if got := f.counts(); got[1] != 2 || got[2] != 1 || got[3] != 2 {
+	if got := f.counts(); got[1] != before[1]+2 || got[2] != 1 || got[3] != 2 {
 		t.Fatalf("retry counts %v", got)
 	}
 	// Fail the last event append; the preceding node/event/projections must roll back.

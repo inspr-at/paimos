@@ -57,6 +57,9 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		return fail(429, "rate_limited", "daemon registration capacity reached")
 	}
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{}) != nil {
+			return fail(403, "forbidden", "paired daemon required")
+		}
 		_, principal, _, _, proof, err := attachComputer(ctx, tx, in.ComputerID)
 		if err != nil || principal != p.ID || subtle.ConstantTimeCompare([]byte(proof), []byte(digest(in.DeviceProof))) != 1 {
 			return fail(403, "forbidden", "computer proof rejected")
@@ -238,7 +241,11 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	m.watchKeys.RLock()
 	defer m.watchKeys.RUnlock()
 	expected := m.watchKeys.keys[p.TenantID+"/"+in.ComputerID]
-	if !hashRE.MatchString(in.PollKey) || expected.hash == "" || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
+	if expected.hash == "" && hashRE.MatchString(in.PollKey) {
+		WriteError(w, m.unknownWatchKey(r.Context(), p, in))
+		return
+	}
+	if !hashRE.MatchString(in.PollKey) || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
 		WriteError(w, fail(403, "forbidden", "daemon poll key rejected"))
 		return
 	}

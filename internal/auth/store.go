@@ -452,6 +452,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 		`, principalID))
 		p.Scopes = []string(scopes)
 		p.KeyID = keyID
+		p.AuthKeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}
