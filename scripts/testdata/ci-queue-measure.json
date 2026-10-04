@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "repository": "inspr-at/paimos",
+  "workflow": "ci.yml",
+  "requested_count": 4,
+  "runs": [
+    {
+      "id": 104, "event": "merge_group", "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "head_branch": "gh-readonly-queue/main/pr-12-bbbb",
+      "created_at": "2026-10-03T13:00:00Z", "run_attempt": 1,
+      "attempts": [{"id": 104, "run_attempt": 1, "status": "in_progress", "conclusion": null, "jobs": [{"name": "web", "started_at": "2026-10-03T13:00:30Z", "completed_at": null, "conclusion": null}]}]
+    },
+    {
+      "id": 103, "event": "merge_group", "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "head_branch": "gh-readonly-queue/main/pr-11-aaaa",
+      "created_at": "2026-10-03T12:00:00Z", "run_attempt": 1,
+      "attempts": [{"id": 103, "run_attempt": 1, "status": "completed", "conclusion": "success", "updated_at": "2026-10-03T23:00:00Z", "jobs": [
+        {"name": "go", "started_at": "2026-10-03T12:01:00Z", "completed_at": "2026-10-03T12:04:00Z", "conclusion": "success"},
+        {"name": "web", "started_at": "2026-10-03T12:01:30Z", "completed_at": "2026-10-03T12:07:00Z", "conclusion": "success"},
+        {"name": "skipped", "started_at": "2026-10-03T12:00:00Z", "completed_at": "2026-10-03T12:50:00Z", "conclusion": "skipped"}
+      ]}]
+    },
+    {
+      "id": 102, "event": "merge_group", "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "head_branch": "gh-readonly-queue/main/pr-11-aaaa",
+      "created_at": "2026-10-03T11:00:00Z", "run_attempt": 2,
+      "attempts": [
+        {"id": 102, "run_attempt": 1, "status": "completed", "conclusion": "failure", "jobs": [
+          {"name": "web", "started_at": "2026-10-03T11:01:00Z", "completed_at": "2026-10-03T11:05:00Z", "conclusion": "failure"},
+          {"name": "go", "started_at": "2026-10-03T11:01:00Z", "completed_at": "2026-10-03T11:04:00Z", "conclusion": "success"}
+        ]},
+        {"id": 102, "run_attempt": 2, "status": "completed", "conclusion": "success", "run_started_at": "2026-10-03T11:00:00Z", "jobs": [
+          {"name": "web", "started_at": "2026-10-03T11:20:00Z", "completed_at": "2026-10-03T11:25:00Z", "conclusion": "success"}
+        ]}
+      ]
+    },
+    {
+      "id": 101, "event": "merge_group", "head_sha": "cccccccccccccccccccccccccccccccccccccccc", "head_branch": "gh-readonly-queue/main/pr-10-cccc",
+      "created_at": "2026-10-03T10:00:00Z", "run_attempt": 1,
+      "attempts": [{"id": 101, "run_attempt": 1, "status": "completed", "conclusion": "failure", "jobs": [
+        {"name": "go-test (2)", "started_at": "2026-10-03T10:02:00Z", "completed_at": "2026-10-03T10:05:00Z", "conclusion": "timed_out"},
+        {"name": "web", "started_at": "2026-10-03T10:02:00Z", "completed_at": "2026-10-03T10:12:00Z", "conclusion": "failure"}
+      ]}]
+    }
+  ]
+}

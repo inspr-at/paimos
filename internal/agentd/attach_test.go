@@ -285,7 +285,7 @@ func TestAttachRefusalNamesOwnerCausesAndClearsLocalState(t *testing.T) {
 		"other status":      {&client.StatusError{Status: 403, Message: attachwatch.LiveLimitMessage}, "approve or decline one"},
 		"offline":           {errors.Join(ErrAttachExchange, errors.New("private transport failure")), "Check the connection"},
 		"registration lost": {&client.StatusError{Status: 403, Message: "daemon poll key rejected"}, "restart agentd"},
-		"draining":          {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalDraining}, "aeon-agentd add-harness"},
+		"draining":          {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalDraining}, "let owned work finish"},
 		"enrollment":        {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalEnrollment}, "aeon-agentd add-harness"},
 		"version":           {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion}, "Update Aeon and paimos-agentd"},
 		"pairing":           {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalPairing}, "pair this computer again"},

@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
+import { isClipped, vClipTip } from '../directives/clipTip'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
@@ -85,6 +86,53 @@ const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
+const descriptionExpanded = ref(false)
+const descriptionClipped = ref(false)
+const descriptionBlock = ref<HTMLElement>()
+const descriptionMore = ref<HTMLButtonElement>()
+const descriptionText = ref<HTMLElement>()
+const descriptionProbe = ref<HTMLElement>()
+const descriptionNeedsPanel = ref(false)
+const descriptionFull = ref<HTMLElement>()
+const descriptionRoom = ref(0)
+// Description disclosure owns its measurement; full text may exceed the
+// viewport, so it belongs in a focusable scroll region rather than a tooltip.
+watch([descriptionText, descriptionProbe, () => project.value?.description], ([element, probe], _, onCleanup) => {
+  if (!element) return
+  const measure = () => {
+    descriptionClipped.value = isClipped(element)
+    const rect = element.getBoundingClientRect()
+    const room = Math.max(rect.top - 16, innerHeight - rect.bottom - 16)
+    descriptionNeedsPanel.value = innerWidth <= 720 || matchMedia('(pointer: coarse)').matches || (probe?.offsetHeight ?? 0) > room
+    if (!descriptionClipped.value) descriptionExpanded.value = false
+  }
+  const observer = new ResizeObserver(measure)
+  observer.observe(element)
+  if (probe) observer.observe(probe)
+  window.addEventListener('resize', measure)
+  measure()
+  onCleanup(() => { observer.disconnect(); window.removeEventListener('resize', measure) })
+}, { flush: 'post' })
+function closeDescription() {
+  descriptionExpanded.value = false
+  descriptionMore.value?.focus()
+}
+async function toggleDescription() {
+  descriptionRoom.value = Math.max(44, innerHeight - (descriptionBlock.value?.getBoundingClientRect().bottom ?? 0) - 12)
+  const openedFor = projectId.value
+  descriptionExpanded.value = !descriptionExpanded.value
+  if (descriptionExpanded.value) {
+    await nextTick()
+    if (descriptionExpanded.value && projectId.value === openedFor) descriptionFull.value?.focus({ preventScroll: true })
+  }
+}
+function dismissDescription(event: PointerEvent) {
+  if (event.target instanceof Node && !descriptionBlock.value?.contains(event.target)) descriptionExpanded.value = false
+}
+watch([projectId, () => project.value?.description], () => {
+  descriptionExpanded.value = false
+  descriptionClipped.value = false
+})
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const queue = useWorkQueue(), releases = useReleases()
 const queueAnchor = ref<HTMLElement | null>(null)
@@ -1538,6 +1586,7 @@ let clock: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   scrollRoot.value = document.getElementById('main')
   void projects.load()
+  document.addEventListener('pointerdown', dismissDescription)
   window.addEventListener('keydown', keydown)
   window.addEventListener('beforeunload', beforeUnload)
   phoneQuery.addEventListener('change', onPhone)
@@ -1557,6 +1606,7 @@ watch([stickMark, scrollRoot], ([element, root]) => {
   stick.observe(element)
 }, { flush: 'post' })
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', dismissDescription)
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('beforeunload', beforeUnload)
   clearInterval(clock)
@@ -1592,7 +1642,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
-          <p v-if="project.description" class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description }}</p>
+          <div v-if="project.description" ref="descriptionBlock" class="description-block" @keydown.esc.stop.prevent="closeDescription">
+            <button v-if="descriptionClipped && descriptionNeedsPanel" ref="descriptionMore" type="button" class="description-more" :aria-expanded="descriptionExpanded" aria-controls="project-description-full" @click="toggleDescription">{{ descriptionExpanded ? 'Less' : 'More' }}</button>
+            <p id="project-description" ref="descriptionText" v-clip-tip="descriptionNeedsPanel ? '' : project.description" class="description">{{ project.description }}</p>
+            <div class="description-measure" aria-hidden="true"><p ref="descriptionProbe" class="description-probe">{{ project.description }}</p></div>
+            <div v-if="descriptionExpanded" id="project-description-full" ref="descriptionFull" class="description-full" :style="{ maxHeight: `min(40dvh, ${descriptionRoom}px)` }" role="region" aria-label="Full project description" tabindex="0" @keydown.stop @keydown.esc.prevent="closeDescription">{{ project.description }}</div>
+          </div>
         </div>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
@@ -1764,17 +1819,24 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 /* The header follows its own width, not the window's: a docked ticket panel can
    leave the list as narrow as a phone on a wide screen (AEON-140). */
 .project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
-.head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.head-flex { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
 .head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
-.head-flex.with-glimpse .head-stats { align-self: end; }
-.head-flex.with-glimpse .head-main { align-self: center; }
+.head-flex.with-glimpse .head-stats, .head-flex.with-glimpse .head-main { align-self: start; }
 .head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
+.head-main:has(.description-full) { z-index: 6; }
 .head-stats { position: relative; z-index: 1; }
-.title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-line { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
-.title-line h1 { font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-line h1 { min-width: 0; font-size: 30px; white-space: normal; overflow-wrap: anywhere; }
+.title-line .key-badge, .state-chip { flex: none; margin-top: 4px; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.description-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.description-probe { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+.description-block { position: relative; display: flex; flex-direction: column; }
+.description-more { display: block; align-self: flex-start; min-width: 5ch; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.description-full { position: absolute; z-index: 6; top: 100%; inset-inline: 0; max-height: 40dvh; overflow: auto; overscroll-behavior: contain; padding: 12px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13.5px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) { .description { min-height: 44px; line-height: 22px; } }
 .head-stats { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
 .head-stats-skeleton { width: 280px; }
 .stat-placeholder { width: 100%; height: 19px; }
@@ -1864,7 +1926,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .toolbar-wrap { margin: 0 -12px; padding: 0 12px; }
   .title-line { gap: 10px; }
   .title-line h1 { font-size: 24px; }
-  .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .description { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .stat-line { flex-wrap: wrap; gap: 4px 14px; }
   .activity { display: none; }
   .hint { display: none; }
