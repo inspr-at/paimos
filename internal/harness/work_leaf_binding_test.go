@@ -134,7 +134,7 @@ func generationRequest(t *testing.T, ctx context.Context, f *harnessFixture, p t
 }
 
 func TestWorkLeafRecoveryFencesBeforeResourceLocks(t *testing.T) {
-	for _, admission := range []string{"revive", "resume", "restore"} {
+	for _, admission := range []string{"revive", "resume", "restore", "confirm-exit"} {
 		t.Run(admission, func(t *testing.T) {
 			f := fixtureWithKind(t, nil, "work")
 			// Rollout explicitly OFF: its status triggers must not mask missing locks.
@@ -153,6 +153,10 @@ func TestWorkLeafRecoveryFencesBeforeResourceLocks(t *testing.T) {
 				if n := sweep(t, f); n != 1 {
 					t.Fatalf("sweep=%d", n)
 				}
+			} else if admission == "confirm-exit" {
+				expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "ownership_lost"}, lease), 200)
+				endpoint = path + "/confirm-exit"
+				body = map[string]any{"reason": "process_exited"}
 			} else if admission == "restore" {
 				events.New(f.db.App, events.WithUndoHandlers(harness.UndoHandlers())).Mount(f.mux)
 				w := f.call(f.person, "POST", path+"/remove", map[string]any{"reason": "Remove lost registration"}, "")

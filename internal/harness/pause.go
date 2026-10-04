@@ -802,35 +802,8 @@ func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, nex
 		if err = adoptChildren(ctx, tx, p, old, next); err != nil {
 			return next, err
 		}
-		// Closed paused children still need a live parent for their continuation.
-		// Ordinary ended children keep their historical parent, as before.
-		rows, e := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE parent_id=$1 AND stop_reason='paused' AND archived_at IS NULL AND pause_record->>'state' IN ('paused','resume_requested') ORDER BY id FOR UPDATE`, old.ID)
-		if e != nil {
-			return next, e
-		}
-		children := []Session{}
-		for rows.Next() {
-			child, e := scanSession(rows)
-			if e != nil {
-				rows.Close()
-				return next, e
-			}
-			children = append(children, child)
-		}
-		e = rows.Err()
-		rows.Close()
-		if e != nil {
-			return next, e
-		}
-		for _, child := range children {
-			adopted, e := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,adopted_from_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, child.ID, next.ID, old.ID))
-			if e != nil {
-				return next, e
-			}
-			if e = record(ctx, tx, p, adopted, "adopted", child, adopted); e != nil {
-				return next, e
-			}
-		}
+		// adoptChildren includes paused continuations in the same bounded scope.
+		// Ordinary ended children retain their historical parent.
 	} else {
 		_, err = tx.Exec(ctx, `UPDATE harness_sessions SET handed_over_to_id=$2,revision=revision+1 WHERE id=$1`, old.ID, next.ID)
 		if err != nil {

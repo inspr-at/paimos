@@ -19,7 +19,19 @@ type controlEvent struct {
 	before    json.RawMessage
 	after     json.RawMessage
 }
-type controlEventBatch struct{ events []controlEvent }
+
+const (
+	maxAdoptedChildren = 1000
+	// Registration/resume adds one event per live or paused child, plus the
+	// predecessor's controls, deliveries and continuation/session events.
+	maxControlEvents     = maxAdoptedChildren + 64
+	maxControlEventBytes = 32 << 20
+)
+
+type controlEventBatch struct {
+	events []controlEvent
+	bytes  int
+}
 
 // Tier decisions and daemon control batches can update history after expiring,
 // claiming or completing controls. Save their snapshots now, but acquire the
@@ -45,9 +57,7 @@ func deferControlEvents(r *http.Request, tx pgx.Tx) (*http.Request, func(*error)
 }
 
 func (b *controlEventBatch) add(p tenant.Principal, s Session, kind string, before, after any) error {
-	// The session control quota is 16. Leave room for claim/completion/expiry
-	// and session events, while keeping a future accidental loop bounded.
-	if len(b.events) >= 64 {
+	if len(b.events) >= maxControlEvents {
 		return workorders.Fail(429, "control event batch limit reached")
 	}
 	old, err := json.Marshal(before)
@@ -58,6 +68,11 @@ func (b *controlEventBatch) add(p tenant.Principal, s Session, kind string, befo
 	if err != nil {
 		return err
 	}
+	size := len(old) + len(next)
+	if size > maxControlEventBytes-b.bytes {
+		return workorders.Fail(429, "control event batch byte limit reached")
+	}
 	b.events = append(b.events, controlEvent{p, s.ProjectID, kind, old, next})
+	b.bytes += size
 	return nil
 }

@@ -5727,7 +5727,7 @@ paths:
         '200': {description: Public generations, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
     post:
       operationId: registerHarnessSession
-      description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
+      description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. At most 1000 direct children may be adopted in one handover, including paused children on resume; larger scopes return 409 atomically. Audit buffering is capped at 32 MiB; excess returns 429 atomically. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
       requestBody:
         required: true
         content:
@@ -6468,6 +6468,30 @@ paths:
         '403': {description: Exact worker proof required}
         '409': {description: Missing planned pause or divergent replay}
         '410': {description: Archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/confirm-exit:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      operationId: confirmHarnessExit
+      security: *auth
+      description: Requires current harness.worker authority and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, enum: [process_exited, process_failed, force_stopped]}
+      responses:
+        '200': {description: Confirmed closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid exit reason}
+        '403': {description: Exact worker proof and current harness.worker authority required}
+        '409': {description: Generation is active or exit confirmation conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/yield:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

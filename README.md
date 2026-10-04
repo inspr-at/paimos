@@ -35,6 +35,17 @@ the background worker retry expired delivery under the original person's current
 authority, with an audit trail, while retaining the fence. Retries never escalate
 to force stop and reuse any still-active delivery.
 
+After an uncertain stop, the owned executor can report a later confirmed exit
+through `POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit`
+with its exact worker lease and current `harness.worker` authority. Only
+`process_exited`, `process_failed` and `force_stopped` are accepted. Confirmation
+releases the work fence, records `harness.stop_confirmed` once and preserves
+closure timestamps, archive receipts and historical bindings. Archived servicing
+remains revoked; the administrative recovery observation stays unchanged.
+Coordinator registration and resume adopt up to 1000 direct live/paused children
+atomically. Larger scopes return 409; buffered audit snapshots have a 32 MiB cap
+(429 on excess), and flush only after all generation and child mutations finish.
+
 The additive API is `GET/POST /api/nodes/{id}/work-lifecycle`,
 `POST /api/nodes/{id}/work-lifecycle/{action}/continue`, and
 `DELETE /api/nodes/{id}/work-lifecycle/{action}`. Requests bind a UUID, the node
