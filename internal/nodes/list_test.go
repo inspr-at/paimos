@@ -147,7 +147,7 @@ func TestPolishedNodeList(t *testing.T) {
 	}
 }
 
-// Every row names its nearest epic: a ticket its own, a task its ticket's.
+// The legacy epic field names the nearest Work or Epic ancestor.
 func TestListNearestEpic(t *testing.T) {
 	p := newPrincipal(t, "nearest-epic")
 	customKind(t, p, "epic", "epic")
@@ -171,20 +171,23 @@ func TestListNearestEpic(t *testing.T) {
 	taskInEpic := create(task.ID, "EP-4", inEpic.ID)
 	loose := create(ticket.ID, "EP-5", root.ID)
 	looseTask := create(task.ID, "EP-6", loose.ID)
+	workChild := create(ticket.ID, "EP-7", inEpic.ID)
+	workGrandchild := create(ticket.ID, "EP-8", workChild.ID)
+	legacyTaskChild := create(task.ID, "EP-9", taskInEpic.ID)
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&sort=key", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	epics := map[string]*listEpic{}
 	for _, item := range page.Items {
 		epics[item.ID] = item.Epic
 	}
-	for _, id := range []string{inEpic.ID, taskInEpic.ID} {
-		if got := epics[id]; got == nil || got.ID != epic.ID || got.Key != "EP-2" || got.Title != "EP-2" {
-			t.Fatalf("epic of %s: %#v", id, got)
+	for id, want := range map[string]nodeJSON{inEpic.ID: epic, taskInEpic.ID: inEpic, looseTask.ID: loose, workChild.ID: inEpic, workGrandchild.ID: workChild, legacyTaskChild.ID: inEpic} {
+		if got := epics[id]; got == nil || got.ID != want.ID || got.Key != want.Key || got.Title != want.Title {
+			t.Fatalf("nearest work/epic of %s: %#v, want %s", id, got, want.ID)
 		}
 	}
-	for _, id := range []string{epic.ID, loose.ID, looseTask.ID} {
+	for _, id := range []string{epic.ID, loose.ID} {
 		if got, ok := epics[id]; !ok || got != nil {
-			t.Fatalf("%s should list without an epic: %#v (listed %v)", id, got, ok)
+			t.Fatalf("%s should list without a work/epic parent: %#v (listed %v)", id, got, ok)
 		}
 	}
 	if !strings.Contains(string(body), `"epic":null`) {

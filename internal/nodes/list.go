@@ -44,8 +44,8 @@ type listProject struct {
 	Title string `json:"title"`
 }
 
-// listEpic is the nearest epic above an item: a ticket's own epic, or for a
-// task the epic of its ticket. Nil when the item sits under no epic.
+// listEpic retains its legacy name and projects the nearest Work or Epic
+// ancestor. Nil when no such ancestor exists before the project boundary.
 type listEpic struct {
 	ID    string `json:"id"`
 	Key   string `json:"key"`
@@ -129,8 +129,8 @@ type listQuery struct {
 	ReleasesNot    []string `json:"releases_not,omitempty"`
 	HumanChecks    []string `json:"human_checks,omitempty"`
 	HumanChecksNot []string `json:"human_checks_not,omitempty"`
-	// Epics match everything below an epic (its subtree, not the epic itself);
-	// "none" is work under no epic.
+	// Epics match everything below a named Work or legacy Epic ancestor;
+	// "none" excludes rows with any such ancestor in the selected scope.
 	Epics    []string `json:"epics,omitempty"`
 	EpicsNot []string `json:"epics_not,omitempty"`
 	// One date field with an inclusive start and exclusive end instant. Dates
@@ -1009,34 +1009,64 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	}
 	add(q.HumanChecks, checkMatch)
 	add(q.HumanChecksNot, not(checkMatch))
-	// Epic subtrees: members of the named epics, or of every epic when "none"
-	// is asked for. The walk only runs when an epic filter is set.
+	// Named parents retain their subtree membership. Parent absence needs only
+	// a set of descendant IDs, not one overlapping subtree per Work ancestor.
 	epicCTE := ""
 	if len(q.Epics)+len(q.EpicsNot) > 0 {
-		ids, all := []string{}, false
+		ids, absence := []string{}, false
 		for _, v := range append(append([]string{}, q.Epics...), q.EpicsNot...) {
 			if v == "none" {
-				all = true
+				absence = true
 			} else {
 				ids = append(ids, v)
 			}
 		}
-		epicCTE = `, epic_members(id, epic_id) AS (
-        SELECT c.id, e.id FROM node_kinds ek CROSS JOIN LATERAL (
-            SELECT id,tenant_id FROM nodes WHERE tenant_id=ek.tenant_id AND kind_id=ek.id AND deleted_at IS NULL OFFSET 0
-        ) e
+		if len(ids) > 0 {
+			epicCTE = `, epic_members(id, epic_id) AS (
+        SELECT c.id, e.id FROM nodes e
+        JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
         CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
-        WHERE ek.tenant_id=current_setting('aeon.tenant_id')::uuid AND ek.slug IN ('epic','work')
-          AND (` + arg(all) + `::bool OR e.id::text=ANY(` + arg(ids) + `::text[]))
+        WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.deleted_at IS NULL
+          AND ek.slug IN ('epic','work') AND e.id::text=ANY(` + arg(ids) + `::text[])
           AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
         UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
         ) c
     )`
+		}
+		if absence {
+			// UNION removes duplicate seeds and visits each descendant once, even
+			// when every ancestor is Work. Keep scope, visibility and live-row
+			// checks identical to the named-parent walk.
+			epicCTE += `, parented_work(id) AS (
+        SELECT c.id FROM nodes c
+        JOIN nodes e ON e.tenant_id=c.tenant_id AND e.id=c.parent_id
+        JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
+        WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid
+          AND c.deleted_at IS NULL AND e.deleted_at IS NULL AND ek.slug IN ('epic','work')
+          AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
+        UNION SELECT c.id FROM parented_work m CROSS JOIN LATERAL (
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
+        ) c
+    )`
+		}
 		epicMatch := func(values []string) string {
-			p := arg(values)
-			return `(n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(` + p + `::text[]))
-            OR ('none'=ANY(` + p + `::text[]) AND n.id NOT IN (SELECT id FROM epic_members)))`
+			named, none := []string{}, false
+			for _, v := range values {
+				if v == "none" {
+					none = true
+				} else {
+					named = append(named, v)
+				}
+			}
+			matches := []string{}
+			if len(named) > 0 {
+				matches = append(matches, `n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(`+arg(named)+`::text[]))`)
+			}
+			if none {
+				matches = append(matches, `n.id NOT IN (SELECT id FROM parented_work)`)
+			}
+			return "(" + strings.Join(matches, " OR ") + ")"
 		}
 		add(q.Epics, epicMatch)
 		add(q.EpicsNot, not(epicMatch))
@@ -1310,7 +1340,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
         ) SELECT a.id,a.key,a.title FROM ancestors a JOIN node_kinds ak ON ak.id=a.kind_id WHERE ak.slug='project' ORDER BY a.depth LIMIT 1
     ) project ON true
     LEFT JOIN LATERAL (
-        -- The nearest epic above the item; the walk stops at the first epic or project.
+        -- The nearest Work or legacy Epic ancestor, stopping at the project.
         WITH RECURSIVE up AS (
             SELECT par.id,par.parent_id,par.kind_id,par.key,par.title,1 AS depth WHERE par.id IS NOT NULL
             UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,up.depth+1 FROM up

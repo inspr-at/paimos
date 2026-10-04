@@ -3221,6 +3221,7 @@ Work vocabulary (AEON-655) is managed in Workspace settings, independently of ap
 | REST `kind_id` | Configured Epic/Ticket/Task UUID | Canonical Work UUID; retired UUIDs are rejected, never guessed |
 | REST list `kind=epic,ticket,task` | Requested old kinds | Each old slug also matches Work (including exclusions); use `shape=parent` / `shape=leaf` and `depth=N` for structure |
 | REST `epic` projection/filter | Nearest Epic/subtree | Nearest Work ancestor/subtree; property name retained for compatibility |
+| Outcomes and cross-family reviews | Ticket outcomes; Ticket/Task reviews | Work retains existing history, outcome recording and review requests; routes and payload field names stay compatible |
 | REST node/list/tree/Graph | Existing fields retained | Additive `is_leaf`, `depth`, `level_name`, `level_icon`; non-work nodes omit shape fields |
 | CLI `issue --type work,epic,ticket,task` | Old types remain accepted | Old type names resolve to canonical Work for creation/listing; same-kind updates are no-ops |
 | CLI JSON | Original `type` | Canonical `type=work`, plus `is_leaf`, `depth`, `level_name`, `level_icon` |

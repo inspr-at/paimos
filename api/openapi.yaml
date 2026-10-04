@@ -5557,7 +5557,7 @@ paths:
     get:
       operationId: listTicketReviews
       summary: Cross-family review results for this ticket
-      description: Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      description: Work and legacy Ticket/Task nodes retain their existing review history. Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
@@ -5567,7 +5567,7 @@ paths:
     post:
       operationId: requestTicketReview
       summary: Queue an independent managed review of a commit range
-      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      description: Accepts Work and legacy Ticket/Task nodes. Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
@@ -9690,7 +9690,7 @@ paths:
       description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id, rules_version or a paired from/to range is required. from/to selects recorded timestamps in [from, to), spanning at most 366 days. cursor continues the same filters in descending timestamp/ID order. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
       security: *auth
       parameters:
-        - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
+        - {name: ticket_node_id, in: query, schema: {type: string}, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
         - {name: session_id, in: query, schema: {type: string, format: uuid}}
         - {name: outcome_id, in: query, schema: {type: string, format: uuid}, description: Exact source outcome within the other filters.}
         - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
@@ -9706,7 +9706,7 @@ paths:
     post:
       operationId: recordOutcome
       summary: Record a review, fix round, CI result or revert
-      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
+      description: "Accepts Work and legacy Ticket nodes. Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
       security: *auth
       parameters:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
@@ -16251,7 +16251,7 @@ components:
       required: [kind, ticket, payload]
       properties:
         kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert]}
-        ticket: {type: string, description: Ticket node id or issue key}
+        ticket: {type: string, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
         session_id: {type: [string, "null"], format: uuid}
         rules_version: {type: [string, "null"], maxLength: 128, description: Optional until a rules version is recorded.}
         payload:
