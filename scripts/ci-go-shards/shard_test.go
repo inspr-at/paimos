@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -287,16 +288,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
 		t.Fatal("shard commands must use the selected count and bypass persistent Mac test results")
 	}
-	foundCheckout, foundSetup := false, false
-	for _, step := range job.Steps {
-		if strings.HasPrefix(step.Uses, "actions/checkout@") {
-			foundCheckout = step.With["persist-credentials"] == false
-		}
-		if strings.HasPrefix(step.Uses, "actions/setup-go@") {
-			foundSetup = step.With["cache"] == true && step.With["cache-dependency-path"] == "go.sum"
-		}
-	}
-	if !foundCheckout || !foundSetup {
+	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
 		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
 	}
 	foundCache := false
@@ -925,7 +917,7 @@ func TestClassifyTimedTests(t *testing.T) {
 	}
 }
 
-func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
+func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -950,18 +942,15 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	timing := workflow.Jobs["go-timing"]
-	if timing.RunsOn != "ubuntu-latest" || timing.If != "" || timing.Needs != "tree-reuse" {
-		t.Fatal("timing job must always run hosted")
-	}
-	if len(timing.Steps) == 0 || timing.Steps[0].If != "needs.tree-reuse.outputs.reuse == 'merge_group'" || !strings.Contains(timing.Steps[0].Run, "reused merge_group run") {
-		t.Fatal("timing job must positively report API-verified full-suite reuse")
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || !reflect.DeepEqual(timing.Needs, []any{"ci-plan", "tree-reuse"}) {
+		t.Fatal("timing job must run hosted for full validation")
 	}
 	count := 0
 	for _, step := range timing.Steps {
 		if strings.Contains(step.Run, "ci-go-shards test-timing") {
 			count++
-			if step.If != "needs.tree-reuse.outputs.reuse != 'merge_group'" {
-				t.Fatal("timing budgets may only skip an API-verified exact queue SHA")
+			if step.If != "" {
+				t.Fatal("timing budgets have a conditional skip")
 			}
 			if step.Env["GOFLAGS"] != "-count=1" {
 				t.Fatal("timing budgets must execute rather than replay cached results")
@@ -972,7 +961,7 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatalf("timing command runs %d times", count)
 	}
 	foundGuard := false
-	for _, step := range workflow.Jobs["release-check"].Steps {
+	for _, step := range workflow.Jobs["release-check-run"].Steps {
 		if strings.Contains(step.Run, "go test ./scripts/ci-runner-guard -count=1") {
 			foundGuard = true
 		}
@@ -988,7 +977,9 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			hasTiming = true
 		}
 	}
-	if gate.If != "always()" || !ok || !hasTiming || !strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = success`) {
+	if gate.If != "always()" || !ok || !hasTiming ||
+		!strings.Contains(gate.Steps[0].Run, `full) expected=success`) ||
+		!strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = "$expected"`) {
 		t.Fatal("required go gate does not require successful timing budgets")
 	}
 }

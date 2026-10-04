@@ -14,6 +14,10 @@ const keys = (page: Page) => rows(page).locator('.key')
 const lastList = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.query.get('within') && call.query.get('limit') === '200').at(-1)!
 const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Ticket list controls' })
 const bar = (page: Page) => page.getByRole('navigation', { name: 'Saved views' })
+// Active filter controls keep their accessible names when chips are folded
+// into the toolbar. Verify the selection rather than its former container.
+const selectedFilter = (page: Page, name: string) => toolbar(page).getByRole('button', { name: new RegExp(`^Edit ${name} filter:`) })
+const priorityFilter = (page: Page) => toolbar(page).locator('button[data-dim="priority"]')
 const MINE = '11111111-aaaa-4aaa-8aaa-000000000001'
 const SHARED = '11111111-aaaa-4aaa-8aaa-000000000002'
 const mira = '22222222-2222-4222-8222-222222222222'
@@ -27,7 +31,7 @@ function world(): Fixtures {
   return data
 }
 
-test('an excluded value filters with "not", shows in its chip and travels in the URL and the API', async ({ page }) => {
+test('an excluded value filters with "not", shows in its control and travels in the URL and the API', async ({ page }) => {
   const errors = watchErrors(page)
   const calls = await mockWork(page, world())
   await page.goto('/p/PHAROS?closed=1')
@@ -45,10 +49,11 @@ test('an excluded value filters with "not", shows in its chip and travels in the
   await menu.locator('.facet-option').filter({ hasText: 'Cancelled' }).getByRole('button', { name: 'Exclude Cancelled' }).click()
   await expect(rows(page)).toHaveCount(5)
   await page.keyboard.press('Escape')
-  const chips = page.getByLabel('Ticket filters')
-  await expect(chips).toContainText('Status · not Done, Cancelled')
-  // Backspace on a chip removes it and keeps focus in the chips.
-  await chips.getByRole('button', { name: /^Edit Status filter/ }).focus()
+  const status = selectedFilter(page, 'Status')
+  await expect(status).toHaveAccessibleName('Edit Status filter: not Done, Cancelled')
+  await expect(status).toContainText('not Done, Cancelled')
+  // Backspace on the active filter removes it.
+  await status.focus()
   await page.keyboard.press('Backspace')
   await expect(page).not.toHaveURL(/status=/)
   await expect(rows(page)).toHaveCount(7)
@@ -83,7 +88,8 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await expect.poll(() => lastList(calls).query.get('epic')).toBe('n-epic')
   await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   await page.keyboard.press('Escape')
-  await expect(page.getByLabel('Ticket filters')).toContainText('Epic · Guarded multi-cloud provisioning')
+  await expect(selectedFilter(page, 'Epic')).toHaveAccessibleName('Edit Epic filter: Guarded multi-cloud provisioning')
+  await expect(selectedFilter(page, 'Epic')).toContainText('Guarded multi-cloud provisioning')
   await page.getByRole('button', { name: /Remove Epic filter/ }).click()
   // Cost unit: native and imported labels alike.
   await page.getByRole('button', { name: 'Filter by more' }).click()
@@ -105,7 +111,8 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await expect.poll(() => lastList(calls).query.get('date_field')).toBe('updated')
   const from = lastList(calls).query.get('date_from')!, to = lastList(calls).query.get('date_to')!
   expect(Date.parse(to) - Date.parse(from)).toBe(86_400_000)
-  await expect(page.getByLabel('Ticket filters')).toContainText('Updated · today')
+  await expect(selectedFilter(page, 'date')).toHaveAccessibleName('Edit date filter: Updated today')
+  await expect(selectedFilter(page, 'date')).toContainText('today')
   // Clear all takes every filter and the date.
   await page.getByRole('button', { name: /Remove date filter/ }).click()
   await expect(page).toHaveURL('/p/PHAROS/tickets?closed=1&view=list')
@@ -127,7 +134,8 @@ test('a custom date range filters imported start dates by day', async ({ page })
   await expect(page).toHaveURL(/date=start:2026-09-01..2026-09-15/)
   await expect(keys(page)).toHaveText(['PHAROS-11'])
   expect(lastList(calls).query.get('date_field')).toBe('start')
-  await expect(page.getByLabel('Ticket filters')).toContainText('Start · 1 Sep – 15 Sep')
+  await expect(selectedFilter(page, 'date')).toHaveAccessibleName('Edit date filter: Start 1 Sep – 15 Sep')
+  await expect(selectedFilter(page, 'date')).toContainText('1 Sep – 15 Sep')
 })
 
 test('saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved', async ({ page }) => {
@@ -150,14 +158,14 @@ test('saving a view: named from its filters, shared, then the bar shows it and c
   const tab = bar(page).getByRole('link', { name: /Urgent/ })
   await expect(tab).toHaveAttribute('aria-current', 'page')
   // A change marks the view; Save writes it, Reset goes back.
-  await toolbar(page).getByRole('button', { name: /^Edit Priority filter:/ }).click()
+  await priorityFilter(page).click()
   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('Medium', { exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(bar(page).locator('.dirty')).toBeVisible()
   await bar(page).getByRole('button', { name: 'Reset' }).click()
   await expect(bar(page).locator('.dirty')).toBeHidden()
   await expect(rows(page)).toHaveCount(2)
-  await toolbar(page).getByRole('button', { name: /^Edit Priority filter:/ }).click()
+  await priorityFilter(page).click()
   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('Medium', { exact: true }).click()
   await page.keyboard.press('Escape')
   await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
@@ -313,7 +321,9 @@ test('in a view the column set belongs to the view; row height is the person’s
   await expect(bar(page).locator('.dirty')).toBeVisible()
   // The person's own columns are untouched.
   expect(data.preferences['list:p-pharos']?.visible).toBeUndefined()
-  await display.getByRole('radiogroup', { name: 'Row height', exact: true }).getByRole('radio', { name: 'Compact', exact: true }).click()
+  const compact = display.getByRole('radiogroup', { name: 'Row height', exact: true }).getByRole('radio', { name: 'Compact', exact: true })
+  await compact.click()
+  await expect(compact).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => (data.preferences['list:display'] as { density?: string } | undefined)?.density).toBe('compact')
   await page.keyboard.press('Escape')
   await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()

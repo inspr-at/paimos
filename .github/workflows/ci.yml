@@ -24,6 +24,7 @@ permissions:
 jobs:
   # Read-only exact-SHA proof. Lookup/checkout failure leaves reuse unset.
   tree-reuse:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       actions: read
@@ -135,13 +136,50 @@ jobs:
           path: ${{ steps.go-cache-path.outputs.path }}
           key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-7-main-${{ github.sha }}
 
+  # AEON-427a: only PRs may omit heavy validation; classification errors run full.
+  ci-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.plan.outputs.lane }}
+      specs: ${{ steps.plan.outputs.specs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          # Only this lightweight PR job needs history for the three-dot diff.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Classify local PR diff
+        id: plan
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          full_plan() {
+            printf 'lane=full\nspecs=[]\n' >> "$GITHUB_OUTPUT"
+            echo 'CI: full; trusted classification unavailable or not a PR' >> "$GITHUB_STEP_SUMMARY"
+          }
+          # Never execute the candidate's classifier. A first-time adoption
+          # without a base copy also retains full validation.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             [[ "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             git show "$PR_BASE_SHA:scripts/ci-pr-plan.mjs" > "$RUNNER_TEMP/ci-pr-plan.mjs"; then
+            node "$RUNNER_TEMP/ci-pr-plan.mjs" || full_plan
+          else
+            full_plan
+          fi
+
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml
     with:
       required-idle-runners: 4
 
   go-test:
-    needs: [runner-route, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
+    needs: [runner-route, ci-plan, tree-reuse]
     strategy:
       fail-fast: false
       matrix:
@@ -151,7 +189,7 @@ jobs:
     runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
     services:
       postgres:
-        image: ${{ needs.tree-reuse.outputs.reuse != 'merge_group' && 'pgvector/pgvector:pg18' || '' }}
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: aeon
           POSTGRES_PASSWORD: aeon
@@ -171,31 +209,21 @@ jobs:
       # replay test results from the self-hosted runner's persistent GOCACHE.
       GOFLAGS: ${{ strategy.job-total == 4 && '-count=1' || '' }}
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: setup-go
         with:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
       - name: Node for merge-queue flake control
-        if: (github.event_name == 'merge_group') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        if: github.event_name == 'merge_group'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
       - name: Locate Go build cache
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: go-cache-path
         run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
       # setup-go's dependency snapshot is immutable. Refresh compiled artifacts
@@ -203,7 +231,6 @@ jobs:
       # GOCACHE also holds test results; all shard tests bypass those below.
       # GitHub scopes PR writes to refs/pull/N/merge; main cannot restore them.
       - name: Persist Go build cache
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: go-cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -213,7 +240,6 @@ jobs:
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
       - name: Install shells when this shard runs pairing path-proof tests
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           set -euo pipefail
           need="$(go run ./scripts/ci-go-shards needs-shell -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}")"
@@ -221,7 +247,6 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
           fi
       - name: Test this shard
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         env:
           # Applies to every go test child, including PR and merge-group runs.
           # External scripts and database images are outside Go's test cache id.
@@ -241,7 +266,7 @@ jobs:
           printf 'Go shard %s/%s: %s successful package invocations, %s cached\n' "${{ matrix.shard }}" "$AEON_GO_SHARD_COUNT" "$packages" "$cached" >> "$GITHUB_STEP_SUMMARY"
           test "$cached" -eq 0
       - name: Preserve flake-guard summaries
-        if: (always()) && needs.tree-reuse.outputs.reuse != 'merge_group'
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-test-${{ matrix.shard }}-flake-evidence
@@ -250,7 +275,6 @@ jobs:
           retention-days: 7
           overwrite: true
       - name: Record successful test evidence
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           case "$RUNNER_ENVIRONMENT" in
             github-hosted) runner_class=hosted ;;
@@ -259,14 +283,15 @@ jobs:
           esac
           printf 'Green test result: runner_class=%s commit=%s event=%s shards=%s\n' "$runner_class" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" "$AEON_GO_SHARD_COUNT" >> "$GITHUB_STEP_SUMMARY"
 
-  # Timing budgets were calibrated on hosted hardware. Always run this job,
-  # regardless of the selected shard layout or which jobs are being rerun.
+  # Timing budgets were calibrated on hosted hardware. Full validation always
+  # runs this job, regardless of the selected Go shard layout.
   go-timing:
-    needs: tree-reuse
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: ${{ needs.tree-reuse.outputs.reuse != 'merge_group' && 'pgvector/pgvector:pg18' || '' }}
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: aeon
           POSTGRES_PASSWORD: aeon
@@ -281,48 +306,29 @@ jobs:
     env:
       AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
       - name: Timing budgets, alone
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         env:
           GOFLAGS: -count=1
         run: go run ./scripts/ci-go-shards test-timing
 
   go-static:
-    needs: tree-reuse
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
       - name: Forbid volatile CI identity reads in Go tests
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           python3 - <<'PY'
           import pathlib, re, sys
@@ -345,12 +351,9 @@ jobs:
           print('Go tests do not depend on volatile CI identity')
           PY
       - run: go vet ./...
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - name: Check prepared rules bootstrap drift
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: go run ./scripts/rules-bootstrap check
       - name: Check the shard list covers go test ./...
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           go run ./scripts/ci-go-shards check -count 7
           go run ./scripts/ci-go-shards check -count 4
@@ -359,27 +362,47 @@ jobs:
   # job fails because if: always() still runs this gate.
   go:
     if: always()
-    needs: [go-test, go-static, go-timing, tree-reuse, cache-prime]
+    needs: [ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     steps:
       - name: Require every Go shard and the static checks
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
+          REUSE_PROOF: ${{ needs.tree-reuse.result }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
+          CI_PLAN: ${{ needs.ci-plan.result }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           GO_TEST: ${{ needs.go-test.result }}
           GO_STATIC: ${{ needs.go-static.result }}
           GO_TIMING: ${{ needs.go-timing.result }}
         run: |
           set -euo pipefail
           if [ "$REUSE" = merge_group ]; then
-            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            test "$GITHUB_EVENT_NAME" = push
+            test "$GITHUB_REF" = refs/heads/main
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
             test "$CACHE_PRIME" = success
+            test "$GO_TEST" = skipped
+            test "$GO_STATIC" = skipped
+            test "$GO_TIMING" = skipped
+            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           echo "go-test=${GO_TEST} go-static=${GO_STATIC} go-timing=${GO_TIMING}"
-          test "${GO_TEST}" = success
-          test "${GO_STATIC}" = success
-          test "${GO_TIMING}" = success
+          test "$CI_PLAN" = success
+          case "$CI_LANE" in
+            docs-only|spec-only) expected=skipped ;;
+            full) expected=success ;;
+            *) exit 1 ;;
+          esac
+          test "${GO_TEST}" = "$expected"
+          test "${GO_STATIC}" = "$expected"
+          test "${GO_TIMING}" = "$expected"
+          if [ "$expected" = skipped ]; then echo "$CI_LANE: Go checks skipped" >> "$GITHUB_STEP_SUMMARY"; fi
 
   # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
   # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
@@ -387,31 +410,22 @@ jobs:
   # status-help, status-autopilot, model-settings); their unit tests run once in
   # web-setup via npm run test:unit.
   web-setup:
-    needs: tree-reuse
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
       browser-cache-key: ${{ steps.web-cache-keys.outputs.browsers }}
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Resolve lockfile and Playwright cache keys
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: web-cache-keys
         env:
           LOCKFILE_HASH: ${{ hashFiles('web/package-lock.json') }}
@@ -421,59 +435,48 @@ jobs:
           echo "dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
           echo "browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
       - name: Cache installed web dependencies
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: web-dependencies
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: web/node_modules
           key: ${{ steps.web-cache-keys.outputs.dependencies }}
       - name: Install web dependencies
-        if: (steps.web-dependencies.outputs.cache-hit != 'true') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        if: steps.web-dependencies.outputs.cache-hit != 'true'
         working-directory: web
         run: npm ci
       - name: Check Docker web inputs without Docker
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: node --test scripts/docker-web-inputs.test.mjs
       - name: Install shells used by command round-trip unit tests
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
       - working-directory: web
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
       - working-directory: web
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: npm run lint
       - name: Web unit checks (once)
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npm run test:unit
       - name: Browser runner safety (no browsers)
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npm run test:browser-safety
       - name: Build web
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npm run build
       - name: Cache Playwright browsers
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: web-browsers
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ steps.web-cache-keys.outputs.browsers }}
       - name: Install Playwright browsers
-        if: (steps.web-browsers.outputs.cache-hit != 'true') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        if: steps.web-browsers.outputs.cache-hit != 'true'
         working-directory: web
         run: npx playwright install chromium
       # Tar preserves executable bits, symlinks and hidden dependency files.
       # Build output is run-specific; never replay a dist cache for another commit.
       - name: Pack web runtime for shards
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist
       - name: Share web runtime with shards
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: web-runtime
@@ -483,42 +486,31 @@ jobs:
           if-no-files-found: error
 
   web-shard:
-    needs: [web-setup, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    needs: [ci-plan, web-setup, tree-reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON('[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
+        shard: ${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
     env:
       PW_RETRIES: '0'
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           node-version: "24"
       - name: Download shared web runtime
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: web-runtime
           path: ${{ runner.temp }}/web-runtime
       - name: Restore web runtime
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
       - name: Restore Playwright browsers
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
@@ -526,27 +518,32 @@ jobs:
           fail-on-cache-miss: true
       # OS libraries are per runner; browser downloads and npm ci are shared.
       - name: Install Chromium system dependencies
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npx playwright install-deps chromium
       - name: Run balanced UI shard with merge-queue flake control
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          CHANGED_SPECS: ${{ needs.ci-plan.outputs.specs }}
           # The guard needs the wrapper's merged JSON report to see every group, including one that never started.
           CI_FLAKE_REQUIRE_JSON: '1'
         run: |
           mkdir -p "$RUNNER_TEMP/ci-flake-evidence"
+          total=12
+          if [ "$CI_LANE" = spec-only ]; then
+            total=1
+            export CI_CHANGED_SPECS="$CHANGED_SPECS"
+          fi
           code=0
-          node scripts/ci-flake-guard.mjs --kind playwright -- npm --prefix web run ci:web:shard -- ${{ matrix.shard }}/12 --reporter=line,json || code=$?
+          node scripts/ci-flake-guard.mjs --kind playwright -- npm --prefix web run ci:web:shard -- "${{ matrix.shard }}/$total" --reporter=line,json || code=$?
           # ci-flake-report.mjs reads these summaries; keep them with the shard evidence.
           cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/ci-flake-evidence/web-shard-${{ matrix.shard }}.md" || true
           exit "$code"
       - name: Preserve shard traces and screenshot evidence
-        if: (always()) && needs.tree-reuse.outputs.reuse != 'merge_group'
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: web-shard-${{ matrix.shard }}-evidence
@@ -569,47 +566,34 @@ jobs:
   # AEON-488 evidence, kept from the old web job: the immutable round-6 release list rendered with the
   # current screenshot fixture, next to the current one. Not part of the required `web` aggregate.
   release-list-comparison:
-    needs: [web-setup, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    needs: [ci-plan, web-setup, tree-reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           node-version: "24"
       - name: Download shared web runtime
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: web-runtime
           path: ${{ runner.temp }}/web-runtime
       - name: Restore web runtime
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
       - name: Restore Playwright browsers
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ needs.web-setup.outputs.browser-cache-key }}
           fail-on-cache-miss: true
       - name: Install Chromium system dependencies
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npx playwright install-deps chromium
       - name: Capture the round-6 release list for comparison
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         id: release-list-before
         working-directory: web
         env:
@@ -624,13 +608,12 @@ jobs:
           git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue
           npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
       - name: Capture the current release list
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
         run: npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
       - name: Upload release list comparison screenshots
-        if: (always() && steps.release-list-before.outcome != 'skipped') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        if: always() && steps.release-list-before.outcome != 'skipped'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aeon-488-release-list-comparison
@@ -641,93 +624,178 @@ jobs:
   web:
     name: web
     if: always()
-    needs: [web-setup, web-shard, tree-reuse, cache-prime]
+    needs: [ci-plan, web-setup, web-shard, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     steps:
       - name: Require setup and every web shard
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
+          REUSE_PROOF: ${{ needs.tree-reuse.result }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
+          CI_PLAN: ${{ needs.ci-plan.result }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           WEB_SETUP: ${{ needs.web-setup.result }}
           WEB_SHARD: ${{ needs.web-shard.result }}
         run: |
           set -euo pipefail
           if [ "$REUSE" = merge_group ]; then
-            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            test "$GITHUB_EVENT_NAME" = push
+            test "$GITHUB_REF" = refs/heads/main
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
             test "$CACHE_PRIME" = success
+            test "$WEB_SETUP" = skipped
+            test "$WEB_SHARD" = skipped
+            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
-          test "${WEB_SETUP}" = success
-          test "${WEB_SHARD}" = success
+          test "$CI_PLAN" = success
+          case "$CI_LANE" in
+            docs-only)
+              test "$WEB_SETUP" = skipped
+              test "$WEB_SHARD" = skipped
+              echo 'docs-only: web checks skipped' >> "$GITHUB_STEP_SUMMARY" ;;
+            spec-only)
+              test "$WEB_SETUP" = success
+              test "$WEB_SHARD" = success
+              echo 'spec-only: changed specs passed' >> "$GITHUB_STEP_SUMMARY" ;;
+            full)
+              test "$WEB_SETUP" = success
+              test "$WEB_SHARD" = success
+              ;;
+            *) exit 1 ;;
+          esac
 
   release-check:
-    needs: tree-reuse
+    if: always()
+    needs: [ci-plan, release-check-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
+      - name: Require full validation or the classified PR exemption
         env:
+          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
+          REUSE_PROOF: ${{ needs.tree-reuse.result }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
+          CACHE_PRIME: ${{ needs.cache-prime.result }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          CI_PLAN: ${{ needs.ci-plan.result }}
+          CHECK_RESULT: ${{ needs.release-check-run.result }}
         run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          if [ "$REUSE" = merge_group ]; then
+            test "$GITHUB_EVENT_NAME" = push
+            test "$GITHUB_REF" = refs/heads/main
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+            test "$CACHE_PRIME" = success
+            test "$CHECK_RESULT" = skipped
+            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Judge dependencies inline; the PR checkout cannot supply gate code.
+          test "$CI_PLAN" = success
+          case "$CI_LANE" in
+            docs-only|spec-only)
+              test "$CHECK_RESULT" = skipped
+              echo "$CI_LANE: release checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
+            full)
+              test "$CHECK_RESULT" = success
+              ;;
+            *) exit 1 ;;
+          esac
+
+  release-check-run:
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - uses: actions/setup-node@v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           node-version: "24"
       - run: node scripts/verify-release.mjs
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - name: Release rehearsal and tag gate regressions
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
       - name: Require this release's own frozen product notes
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - run: node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - run: node --test scripts/cross-family-gate.test.mjs
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - run: node --test scripts/release-pin-pr.test.mjs
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - name: Offline code-health audit toolkit and slice ownership
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
+      - name: PR classification and exact-SHA reuse regressions
+        run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs
       - name: Full UI QA workflow regressions
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
-      - name: Exact-SHA reuse provenance and workflow regressions
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
-        run: |
-          node --test scripts/ci-tree-reuse.test.mjs
-          go test ./scripts/releaseworkflow -count=1
       - name: Enforce test runner trust boundary
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           node --test scripts/ci-runner-route.test.mjs
           go test ./scripts/ci-runner-guard -count=1
           go run ./scripts/ci-runner-guard
 
   e2e:
-    needs: tree-reuse
+    if: always()
+    needs: [ci-plan, e2e-run, tree-reuse, cache-prime]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require full validation or the classified PR exemption
+        env:
+          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
+          REUSE_PROOF: ${{ needs.tree-reuse.result }}
+          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
+          CACHE_PRIME: ${{ needs.cache-prime.result }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          CI_PLAN: ${{ needs.ci-plan.result }}
+          CHECK_RESULT: ${{ needs.e2e-run.result }}
+        run: |
+          set -euo pipefail
+          if [ "$REUSE" = merge_group ]; then
+            test "$GITHUB_EVENT_NAME" = push
+            test "$GITHUB_REF" = refs/heads/main
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+            test "$CACHE_PRIME" = success
+            test "$CHECK_RESULT" = skipped
+            echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Judge dependencies inline; the PR checkout cannot supply gate code.
+          test "$CI_PLAN" = success
+          case "$CI_LANE" in
+            docs-only|spec-only)
+              test "$CHECK_RESULT" = skipped
+              echo "$CI_LANE: end-to-end checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
+            full)
+              test "$CHECK_RESULT" = success
+              ;;
+            *) exit 1 ;;
+          esac
+
+  e2e-run:
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: ${{ needs.tree-reuse.outputs.reuse != 'merge_group' && 'pgvector/pgvector:pg18' || '' }}
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: aeon
           POSTGRES_PASSWORD: aeon
@@ -744,49 +812,33 @@ jobs:
       AEON_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
       BASE_URL: http://127.0.0.1:8080
     steps:
-      - name: Reuse the verified merge-group run
-        if: needs.tree-reuse.outputs.reuse == 'merge_group'
-        env:
-          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: |
-          echo "reused merge_group run $SOURCE_RUN"
-          echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
       - uses: actions/setup-go@v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
       - uses: actions/setup-node@v7
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install web dependencies
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npm ci
       - name: Build web
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npm run build
       - name: Build server
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         working-directory: web
         run: npx playwright install --with-deps --only-shell chromium
       - name: Measure Chromium shell cleanup on success, failure and interruption
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         env:
           AEON_BROWSER_LIFECYCLE: '1'
         run: node --test --test-concurrency=1 scripts/playwright-safe.test.mjs
       - name: Start server and run smoke
-        if: needs.tree-reuse.outputs.reuse != 'merge_group'
         run: |
           set -euo pipefail
           nohup ./bin/paimos serve >"$RUNNER_TEMP/aeon.log" 2>&1 &
@@ -806,7 +858,7 @@ jobs:
           fi
           npm run e2e --prefix web
 
-  # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
+  # AEON-415: previous-release compatibility is unconditional in every lane.
   migration-compat:
     permissions:
       contents: read

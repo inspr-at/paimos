@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import {
   balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
-  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, validateManifest, mergeReports, webRoot,
+  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
 } from './ci-web-shard.mjs'
 
 const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project: null,
@@ -206,6 +206,42 @@ test('runner is hosted-only, runs groups sequentially, retains failure and stops
   let interruptedCalls = 0
   assert.equal(await main(['1/1'], { env, out: () => {}, run: async () => { interruptedCalls++; return { code: 143 } } }), 143)
   assert.equal(interruptedCalls, 1)
+})
+
+test('spec-only execution runs exactly changed mapped, ungated and unlisted specs and retains failures', async () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'aeon-changed-specs-'))
+  mkdirSync(resolve(root, 'tests'))
+  const manifest = fixture()
+  manifest.groups[1].gate = false
+  manifest.groups[0].project = 'chromium'
+  manifest.groups[0].flags.push('--trace=retain-on-failure')
+  manifest.groups[0].env = { AEON_DESK_SHOTS: '${RUNNER_TEMP}/desk' }
+  const discovered = [...files(manifest), 'tests/not-in-map.spec.ts']
+  for (const file of discovered) writeFileSync(resolve(root, file), 'fixture')
+  writeFileSync(resolve(root, 'playwright.ui.config.ts'), 'fixture')
+  const selected = ['web/tests/a-0.spec.ts', 'web/tests/b-1.spec.ts', 'web/tests/not-in-map.spec.ts']
+  const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: '/tmp/runner', CI_CHANGED_SPECS: JSON.stringify(selected) }
+  const calls = []
+  const run = async (args, options) => { calls.push({ args, options }); return { code: calls.length === 1 ? 19 : 0 } }
+  assert.equal(await main(['1/1'], { manifest, env, root, run, out: () => {} }), 19)
+  assert.equal(calls.length, 3)
+  const requested = calls.flatMap(call => call.args.filter(arg => arg.startsWith('^')).map(pattern =>
+    discovered.filter(file => new RegExp(pattern).test(resolve(root, file)))))
+  assert.deepEqual(requested.flat().sort(), selected.map(file => file.slice(4)).sort())
+  assert.ok(calls[0].args.includes('chromium'))
+  assert.ok(calls[0].args.includes('--trace=retain-on-failure'))
+  assert.equal(calls[0].options.env.AEON_DESK_SHOTS, '/tmp/runner/desk')
+  assert.ok(calls.every(call => !call.args.includes('--pass-with-no-tests')))
+  await assert.rejects(main(['1/12'], { manifest, env, root, run, out: () => {} }), /require shard 1\/1/)
+  assert.equal(calls.length, 3, 'invalid selection launched work')
+})
+
+test('changed-spec selector refuses malformed, empty, traversing and missing selections', () => {
+  for (const json of ['null', '{}', '[]']) assert.throws(() => selectChangedSpecs(fixture(), json), /nonempty changed spec list/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["web/tests/../a.spec.ts"]'), /Invalid repository path/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["/web/tests/a.spec.ts"]'), /Invalid repository path/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["web/tests/a-0.spec.ts", "web/tests/missing.spec.ts"]'), /missing from checkout/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["web/tests/helper.ts"]'), /top-level UI spec/)
 })
 
 test('native failure-only selectors are passed to every group without repartitioning', async () => {

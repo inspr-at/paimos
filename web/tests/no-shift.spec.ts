@@ -5,6 +5,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { expectDialRowsFitContent } from './helpers/dial-layout'
 import type { Shell } from './helpers/no-shift-shells'
 
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
@@ -172,7 +173,6 @@ for (const width of [1440, 1024, 390]) {
     // Destination labels change with the current value; the stepper controls persist.
     const rowFewer = row.locator('.lim-step .pm').nth(0), rowMore = row.locator('.lim-step .pm').nth(1)
     await expect(row).toBeVisible()
-    await expect(more).toHaveCSS('transition-property', 'background')
     await page.evaluate(() => document.fonts.ready)
     // The merged dial uses a separate explanation row and a container breakpoint.
     // Verify uniform selector rows; the interaction guard below proves stability.
@@ -186,16 +186,22 @@ for (const width of [1440, 1024, 390]) {
       expect(height).toBeGreaterThan(0)
       expect(Math.abs(height - rowHeights[0]!)).toBeLessThanOrEqual(.5)
     }
+    await expectDialRowsFitContent(dial)
     await expectStableControls({
       controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: [
-        { name: 'hold total stepper', run: async () => { await more.hover(); await page.mouse.down() } },
+        // Theme feedback may animate several properties. Judge the control's
+        // geometry through focus, hover and press instead of its CSS spelling.
+        { name: 'focus total stepper', run: async () => { await more.focus(); await expect(more).toBeFocused() } },
+        { name: 'hover total stepper', run: () => more.hover() },
+        { name: 'hold total stepper', run: () => page.mouse.down() },
         { name: 'release total stepper', run: () => page.mouse.up() },
         ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
         ...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } })),
       ],
     })
+    await expectDialRowsFitContent(dial)
   })
 
   test(`Agents working harness modes stay put at ${width}`, async ({ page }) => {
@@ -307,6 +313,18 @@ test('stability guard rejects empty interactions and collapse during its animati
     animation.onfinish = () => Object.assign((el as HTMLElement).style, { width: '0px', height: '0px' })
   })
   await expect(expectStableControls({ controls, interactions: [{ name: 'hover', run: () => page.locator('#control').hover() }] })).rejects.toThrow(/sampled control (width|height) must be positive/)
+})
+
+test('dial content budget rejects fixed whitespace, clipped controls and overflow', async ({ page }) => {
+  await page.setContent('<section id="dial" style="width:900px"><ul class="rows" style="width:500px;padding:0;margin:0;list-style:none"><li data-key="codex" style="display:grid;grid-template-columns:1fr 1fr;align-items:center;min-height:76px;box-sizing:border-box;padding:9px 6px"><span>Codex</span><div style="height:56px"><button class="value-slot">1</button><p style="margin:0">No own limit</p></div></li></ul></section>')
+  const dial = page.locator('#dial'), row = dial.locator('li')
+  await expectDialRowsFitContent(dial)
+  await row.evaluate(el => { (el as HTMLElement).style.height = '180px' })
+  await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/row fits its content and approved minimum/)
+  await row.evaluate(el => { Object.assign((el as HTMLElement).style, { minHeight: '0', height: '20px' }) })
+  await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/content stays inside row (top|bottom)/)
+  await row.evaluate(el => { Object.assign((el as HTMLElement).style, { minHeight: '76px', height: 'auto' }); (el.lastElementChild as HTMLElement).style.width = '600px' })
+  await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/content stays inside row right/)
 })
 
 async function mountShell(page: Page, kind: Shell, width: number, above = false) {

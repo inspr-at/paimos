@@ -46,6 +46,8 @@ function pick(action: 'copyKey' | 'copyLink' | 'delete' | 'prev' | 'next') {
 }
 function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value = null; if (anchor) emit('move', anchor) }
 function pickConvert() { moreAnchor.value = null; emit('convert') }
+function pickView() { moreAnchor.value = null; if (props.mode === 'panel') emit('expand'); else emit('collapse') }
+function pickNewTab() { moreAnchor.value = null; emit('newTab') }
 const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
 const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
@@ -112,6 +114,8 @@ void props
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
         <button v-if="kind && ['epic', 'ticket', 'task'].includes(kind)" type="button" role="menuitem" class="menu-item" :disabled="!canRepeat" aria-keyshortcuts="Shift+R" :data-tip="canRepeat ? 'Repeat · Shift R' : 'Needs the Manage recurring work permission'" @click="closeMore(false); emit('repeat')"><AppIcon name="repeat" :size="14" /><span>Repeat…<small v-if="!canRepeat" style="display: block; font-size: 11.5px; color: var(--ink-3)">Needs the Manage recurring work permission</small></span></button>
         <button v-if="recurrenceLabel" type="button" role="menuitem" class="menu-item" :disabled="!canEditRecurrence" :data-tip="!canEditRecurrence ? 'Needs the Manage recurring work permission' : undefined" @click="closeMore(false); emit('editRecurrence')"><AppIcon name="edit" :size="14" /><span>Edit {{ recurrenceLabel }}…</span></button>
+        <button type="button" role="menuitem" class="menu-item" @click="pickView"><AppIcon :name="mode === 'panel' ? 'expand' : 'collapse'" :size="14" />{{ mode === 'panel' ? 'Open as full page' : 'Show beside the list' }}</button>
+        <button type="button" role="menuitem" class="menu-item" @click="pickNewTab"><AppIcon name="external" :size="14" />Open in a new tab</button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
@@ -166,10 +170,14 @@ void props
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .menu-item.danger:hover:not(:disabled) { background: var(--danger-bg); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
-/* A narrow panel with a trail keeps the last crumb (after an ellipsis) and drops the list position. */
+/* Narrow headers keep Back; breadcrumb text must not compete with the current
+   key and actions, even when the surrounding viewport is wide. */
 @container panel-bar (max-width: 640px) {
-  .has-trail .position, .crumb-item:not(:last-child) { display: none; }
-  .trail-more { display: inline; }
+  .has-trail .position, .trail { display: none; }
+}
+/* A narrow dock uses More for these actions, independently of viewport width. */
+@container panel-bar (max-width: 420px) {
+  .wide-only, .position { display: none; }
 }
 @media (max-width: 720px) {
   .panel-bar { padding: 0 6px 0 12px; }

@@ -6,6 +6,8 @@ Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI
 
 Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
 
+Ticket URLs select the record shown in the detail panel. A stale `peek` query is removed from a routed ticket URL; links followed inside that ticket reuse its panel and browser history. Desktop ticket panels leave room for the list, including at 1024 px and with a saved wider panel preference. Narrow ticket headers collapse breadcrumb text while keeping Back available. Phones retain the full-screen ticket sheet.
+
 Capped Done gate, Rules Preview and document-profile headings reveal their complete text on hover, keyboard focus or tap. Their reader stays inside the viewport and scrolls for long identities. Press Arrow Down on a clipped heading to enter the reader; Escape closes it and returns focus to the heading. Heading and action positions stay in place. Rules Preview reserves the width of both **Change** and **Done** labels so toggling the selectors keeps the button still without a fixed pixel width.
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
@@ -540,6 +542,10 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+On phones, the configurable project header keeps the queue action visible in
+Compact and Comfortable while folding the activity timestamp. Expanding a
+collapsed header restores the queue action.
+
 ## Feature flags
 
 Shipped rollout flags start **OFF**. A person with `settings.manage` can open
@@ -895,6 +901,18 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
+PRs containing only root Markdown, `docs/**` (excluding `testdata/`), or root
+LICENSE/LICENCE/COPYING/NOTICE files skip classified heavy jobs; required checks
+report success with a `docs-only` note. Migration compatibility runs in every
+lane, independently of classification. The allowlist lives in
+`scripts/ci-pr-plan.mjs`; CI executes the PR base commit's copy, and an unavailable
+base classifier retains full validation. Markdown under implementation and
+test-fixture paths requires full coverage. PRs changing only top-level
+`web/tests/*.spec.ts` run exactly those specs in one hosted job, including specs
+outside the shard map, with their group's config and flags. Spec renames or
+deletions, mixed changes and unavailable classification retain full coverage.
+Main pushes, merge groups and manual runs retain their existing full CI lanes.
+
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for
 the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
@@ -927,14 +945,16 @@ On a push to main, `scripts/ci-tree-reuse.mjs` searches for a successful `CI`
 merge-group run at that exact commit SHA and verifies its repository, workflow
 name/path/ID, latest run attempt, complete required jobs, all seven Go and twelve
 web shards, and successful execution steps. A verified match skips the heavy
-suite steps and database startup; the existing required checks and aggregates
+jobs before runner allocation and database startup; the existing required checks and aggregates
 report `reused merge_group run <id>`. One hosted `cache-prime` job still runs
 `npm ci`, installs Playwright Chromium and warms Go modules/builds, saving the
 same main-scoped dependency, browser and hosted Go shard cache keys restored
-by PR/queue jobs; its failure fails both aggregates. `migration-compat` always
+by PR/queue jobs; its failure fails the required aggregates. `migration-compat` always
 runs against the latest release, including every step (AEON-415). Direct pushes
-without verified queue evidence, PRs, queue runs, manual runs, failed/cancelled
-or partial reruns, API errors and timeouts run the full suite. Lookup uses only
+without verified queue evidence, queue runs, manual runs, failed/cancelled
+or partial reruns, API errors and timeouts retain full validation. PRs keep
+the docs-only/spec-only classification above; the proof job itself runs only
+on main pushes. Lookup uses only
 read permissions, a ten-second network deadline, bounded responses and at most
 20 candidates; a failed proof job leaves outputs unset and runs full CI. Set
 `CI_TREE_REUSE=off` to disable lookup. PR-to-queue tree reuse and its registry
@@ -942,7 +962,9 @@ publisher were removed to keep this path small; no tree comparisons or record
 writes remain. Offline fixtures run with `node --test scripts/ci-tree-reuse.test.mjs`
 and `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard ./scripts/ci-go-shards`;
 hosted savings and the cache-priming duration require coordinator measurement
-once the change reaches main.
+once the change reaches main. The verifier job list and execution steps are
+checked against the actual workflow and its full merge-queue matrices, so
+adding or changing a job cannot silently leave the reuse proof behind.
 
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
