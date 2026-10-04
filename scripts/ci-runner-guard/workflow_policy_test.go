@@ -85,7 +85,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			delete(mapping(mapping(w["on"])["pull_request"]), "paths")
 		})
 	}
-	for _, file := range []string{"extra.yaml", "test-runner-route.yml", "release-image-check.yml", "release.yml", "homebrew-tap.yml"} {
+	for _, file := range []string{"extra.yaml", "test-runner-route.yml", "release-image-check.yml", "release.yml", "homebrew-tap.yml", "verify-live.yml"} {
 		add("copied-ci-group/"+file, file, "must not copy ci.yml", func(w map[string]any) {
 			w["concurrency"] = map[string]any{"group": ciGroup, "cancel-in-progress": true}
 		})
@@ -94,7 +94,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add(fmt.Sprintf("unknown-workflow-concurrency/%d", index), "extra.yaml", "workflow-level concurrency is not allowlisted", func(w map[string]any) { w["concurrency"] = concurrency })
 		add(fmt.Sprintf("reusable-workflow-concurrency/%d", index), "test-runner-route.yml", "reusable workflows must not define concurrency", func(w map[string]any) { w["concurrency"] = concurrency })
 	}
-	for _, file := range []string{"ci.yml", "release.yml", "homebrew-tap.yml", "release-image-check.yml"} {
+	for _, file := range []string{"ci.yml", "release.yml", "homebrew-tap.yml", "release-image-check.yml", "verify-live.yml"} {
 		add("allowlisted-file-made-reusable/"+file, file, "reusable workflows must not define concurrency", func(w map[string]any) {
 			mapping(w["on"])["workflow_call"] = nil
 		})
@@ -177,6 +177,8 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("renamed-check-context/"+id, "ci.yml", "renamed to", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["name"] = "other" })
 	}
 	add("missing-go-dependency", "ci.yml", "go must gate every", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
+	add("missing-web-dependency", "ci.yml", "web must gate setup and every UI shard", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
+	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("collapsed-shards", "ci.yml", "routed shard count", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["go-test"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
