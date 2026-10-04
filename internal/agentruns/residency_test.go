@@ -157,3 +157,46 @@ func TestRunCreationStampsStarterAndRejectsDisallowedAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalWorkResidencyAdmissionAndLiveRecheck(t *testing.T) {
+	f := setup(t)
+	order := f.order(t, nil)
+	leaf := bindOrderToWorkLeaf(t, f, order.NodeID)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"residency":"eu"}'::jsonb WHERE id=$1`, leaf)
+		return err
+	})
+	account := f.queueAccount(t, 1000000)
+	var rejected struct {
+		Code string `json:"code"`
+	}
+	f.call(t, f.person, "POST", "/api/work-orders/"+order.NodeID+"/runs", map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile, "requested_account_id": account}, 409, &rejected)
+	if rejected.Code != "residency_unmet" {
+		t.Fatalf("wrong admission rejection: %+v", rejected)
+	}
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE work_order_id=$1`, order.NodeID) != 0 {
+		t.Fatal("rejected admission left a run")
+	}
+	run := f.run(t, order)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var stamp string
+		if err := tx.QueryRow(t.Context(), `SELECT residency FROM agent_runs WHERE id=$1`, run.ID).Scan(&stamp); err != nil {
+			return err
+		}
+		if stamp != "eu" {
+			t.Fatal("work residency lost during admission", stamp)
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"residency":"local"}'::jsonb WHERE id=$1`, leaf)
+		return err
+	})
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		policy, err := modelprefs.RunRequirement(t.Context(), tx, run.ID)
+		if err != nil {
+			return err
+		}
+		if policy.Residency != "local" {
+			t.Fatal("live work residency tightening ignored", policy.Residency)
+		}
+		return nil
+	})
+}

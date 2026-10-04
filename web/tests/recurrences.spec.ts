@@ -11,10 +11,18 @@ const id = '57000000-0000-4000-8000-000000000001', eventId = '57000000-0000-4000
 const dates = ['2026-10-19T07:00:00Z', '2026-10-26T08:00:00Z', '2026-11-02T08:00:00Z', '2026-11-09T08:00:00Z']
 const result = (recurrenceId = id): RecurrenceResult => ({ recurrence_id: recurrenceId, occurrence_key: 'manual:previous', number: 1, scheduled_at: dates[0], created_at: dates[0], node_id: 'n-1', source_event_id: null, outcome: 'created', reason: '', key: 'PHAROS-11', title: 'Sweep', state: 'open' })
 const definition = (event = false): Recurrence => ({ id: event ? eventId : id, project_id: 'p-pharos', parent_id: 'p-pharos', template: { name: event ? 'Release notes' : 'Weekly tool sweep', title: event ? 'Notes for {{release_name}}' : 'Sweep {{date}} #{{occurrence}}', description: 'Keep the work queue tidy.', acceptance_criteria: ['Record the outcome'], estimate_hours: 0.5, priority: 'medium', tags: [], type: 'ticket' }, trigger: event ? { kind: 'event', event: 'release.published', event_start: 'now', event_timezone: 'Europe/Vienna' } : { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '09:00', timezone: 'Europe/Vienna', start_date: '2026-10-02' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one', paused: false, revision: 1, occurrence_count: 1, next_at: event ? null : dates[0], created_at: dates[0], updated_at: dates[0], last_result: result(event ? eventId : id), open_previous: result(event ? eventId : id) })
-async function setup(page: Page, readOnly = false) {
+async function setup(page: Page, readOnly = false, canonical = false) {
   const errors = watchErrors(page), world = fixtures(), calls: { method: string; path: string; body: Record<string, unknown> }[] = []
   world.nodes[1].fields.recurrence_id = id; world.nodes[1].fields.occurrence_number = 1
   world.nodes[1].recurrence = { id, project_id: 'p-pharos', project_key: 'PRJ-17', number: 1, retired: false, trigger: definition().trigger }
+  if (canonical) {
+    for (const node of world.nodes.filter(node => ['epic', 'ticket', 'task'].includes(node.kind_slug))) {
+      node.kind_slug = 'work'
+      node.work_children_count = world.nodes.filter(child => child.parent_id === node.id && ['epic', 'ticket', 'task', 'work'].includes(child.kind_slug)).length
+      node.is_leaf = node.work_children_count === 0
+      node.depth = node.parent_id && node.parent_id !== node.project ? 2 : 1
+    }
+  }
   await mockWork(page, world, { readOnly })
   await page.route('**/api/me/permissions?*', route => {
     const grants = mockEffectivePermissions(readOnly ? 'viewer' : 'member', new URL(route.request().url()).searchParams.get('project_id') || undefined)
@@ -219,3 +227,35 @@ test('an Undo toast cannot mutate a different project and a failed pause stays h
   await expect(page.getByText('recurrence revision changed', { exact: true })).toBeVisible()
   await expect(row(page).getByRole('button', { name: 'Resume', exact: true })).toBeEnabled()
 })
+
+for (const parent of [false, true]) {
+  test(`migrated ${parent ? 'parent' : 'leaf'} Repeat menu and Shift+R keep the canonical target`, async ({ page }) => {
+    const { calls, errors } = await setup(page, false, true)
+    const key = parent ? 'PHAROS-10' : 'PHAROS-11'
+    await page.goto(`/p/PHAROS/${key}`)
+    const panel = page.getByRole('complementary', { name: 'Ticket details' })
+    await expect(panel).toBeVisible()
+    await panel.getByRole('button', { name: 'More actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: /Repeat/ }).click()
+    await expect(editor(page)).toBeVisible()
+    const expectedParent = 'n-epic'
+    await expect(editor(page).getByRole('button', { name: 'Parent', exact: true })).toContainText('PHAROS-10')
+    await expect(editor(page).getByRole('radiogroup', { name: 'Type', exact: true })).toHaveCount(0)
+    const create = editor(page).getByRole('button', { name: /^Create/ })
+    const cancel = editor(page).getByRole('button', { name: /^Cancel/ })
+    await expectStableControls({ controls: { create, cancel, parent: editor(page).getByRole('button', { name: 'Parent', exact: true }), clickedRow: editor(page).getByRole('radio', { name: 'Event', exact: true }) }, scrollAreas: { body: editor(page).locator('.editor-body') }, interactions: [{ name: 'Event trigger', run: async () => { await editor(page).getByRole('radio', { name: 'Event', exact: true }).evaluate(el => (el as HTMLElement).click()); await expect(create).toBeEnabled() } }] })
+    await editor(page).getByRole('textbox', { name: 'Name', exact: true }).press('Shift+R')
+    await expect(editor(page)).toHaveCount(1)
+    await cancel.click()
+    await panel.focus()
+    await panel.press('Shift+R')
+    await expect(editor(page)).toBeVisible()
+    await expect(editor(page).getByRole('button', { name: 'Parent', exact: true })).toContainText('PHAROS-10')
+    await editor(page).getByRole('button', { name: /^Create/ }).click()
+    await expect(editor(page)).toHaveCount(0)
+    const saved = calls.find(call => call.path === '/api/recurrences' && call.method === 'POST')!.body as unknown as RecurrenceInput
+    expect(saved.parent_id).toBe(expectedParent)
+    expect(saved.template.type).toBe('work')
+    expect(errors).toEqual([])
+  })
+}

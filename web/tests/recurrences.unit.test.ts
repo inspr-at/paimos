@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { ListItem } from '../src/lib/api'
 import { describe, expect, it } from 'vitest'
-import { copyRecurrenceInput, parseCriteria, recurrenceEstimate, renderTitle, templateProblems, triggerWords, type RecurrenceInput } from '../src/lib/recurrences'
+import { copyRecurrenceInput, parseCriteria, recurrenceEstimate, renderTitle, templateFrom, templateProblems, triggerWords, type RecurrenceInput } from '../src/lib/recurrences'
 const input = (): RecurrenceInput => ({ project_id: 'p', parent_id: 'p', template: { name: 'Sweep', title: 'Sweep {{date}} #{{occurrence}}', description: '', acceptance_criteria: [], estimate_hours: 0, type: 'ticket', priority: 'medium', tags: [] }, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '09:00', timezone: 'Europe/Vienna' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one' })
 describe('recurrence templates', () => {
   it('uses local dates across UTC midnight and DST, and codenames for releases', () => {
@@ -29,4 +30,11 @@ describe('recurrence templates', () => {
     expect(source.trigger.timezone).toBe('Europe/Vienna')
     expect(triggerWords({ ...source.trigger, rrule: 'FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1' })).toBe('Every 3 months on the last day at 09:00 · Europe/Vienna')
   })
+})
+
+it('new recurrence templates use canonical work for migrated leaves and parents', () => {
+  for (const kind_slug of ['work', 'ticket', 'task', 'epic']) {
+    expect(templateFrom({ kind_slug, title: 'Work', fields: {}, body: '', priority: 'high' } as ListItem).type).toBe('work')
+  }
+  expect(templateFrom().type).toBe('work')
 })

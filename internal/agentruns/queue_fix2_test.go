@@ -71,7 +71,7 @@ func TestTicketQueueDeleteCommitsWithGeneratedChild(t *testing.T) {
 	}
 }
 
-func TestTicketQueueDeleteWithOtherLiveChildRollsBack(t *testing.T) {
+func TestWorkParentQueueRefusedWithLiveWorkChild(t *testing.T) {
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	id := f.apiQueueTicket(t, nil)
@@ -103,6 +103,52 @@ func TestTicketQueueDeleteWithOtherLiveChildRollsBack(t *testing.T) {
 		t.Fatal("failed deletion retained removal audit")
 	}
 	f.call(t, f.person, "DELETE", "/api/nodes/"+child, nil, 204, nil)
+	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
+}
+
+func TestTicketQueueDeleteWithOtherLiveChildRollsBack(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	f.queueAccount(t, 1000000)
+	id := f.apiQueueTicket(t, nil)
+	queued := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
+	f.reserve(t, queued.Run)
+	var kinds struct{ Items []struct{ ID, Slug string } }
+	f.call(t, f.person, "GET", "/api/kinds", nil, 200, &kinds)
+	var child struct{ ID string }
+	for _, kind := range kinds.Items {
+		if kind.Slug == "guideline" {
+			f.call(t, f.person, "POST", "/api/nodes", map[string]any{"kind_id": kind.ID, "title": "Live non-work child", "parent_id": id}, 201, &child)
+			break
+		}
+	}
+	if child.ID == "" {
+		t.Fatal("guideline kind missing")
+	}
+	var rejected struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 409, &rejected)
+	if !strings.Contains(rejected.Error, "children") {
+		t.Fatalf("deletion failed for wrong reason: %+v", rejected)
+	}
+	for _, live := range []string{id, child.ID, queued.Run.OrderID} {
+		f.call(t, f.person, "GET", "/api/nodes/"+live, nil, 200, nil)
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued'`, queued.Run.ID); n != 1 {
+		t.Fatal("failed deletion changed the existing queued run")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, queued.Run.ID); n != 1 {
+		t.Fatal("failed deletion released the existing capacity hold", n)
+	}
+	if f.queuePage(t).Count != 1 {
+		t.Fatal("failed deletion removed the queue projection")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.removed'`, id); n != 0 {
+		t.Fatal("failed deletion committed queue removal audit")
+	}
+	f.call(t, f.person, "DELETE", "/api/nodes/"+child.ID, nil, 204, nil)
 	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
 }
 
