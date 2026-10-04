@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -32,7 +33,12 @@ func (s *Supervisor) capacityStateName() string {
 	return "aeon-agentd-" + s.daemonID + ".capacity.json"
 }
 
-func (s *Supervisor) loadCapacityCaptures() error {
+func (s *Supervisor) loadCapacityCaptures() (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("load capacity captures %s: %w", filepath.Join(s.state.Path(), s.capacityStateName()), resultErr)
+		}
+	}()
 	raw, err := s.state.Read(s.capacityStateName(), 1<<20)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

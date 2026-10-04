@@ -9,7 +9,49 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStatusErrorRetainsBoundedServerRetryDelay(t *testing.T) {
+	for _, tc := range []struct {
+		header string
+		want   time.Duration
+	}{
+		{"59", 59 * time.Second},
+		{"0", 0},
+		{"-1", 0},
+		{"86401", 0},
+		{strings.Repeat("9", 129), 0},
+		{"invalid", 0},
+	} {
+		t.Run(tc.header[:min(16, len(tc.header))], func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", tc.header)
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"computer recovery attempt cap reached","code":"attach_recovery_limited"}`))
+			}))
+			defer srv.Close()
+			err := New(srv.URL, "fixture").Do(t.Context(), "POST", "/api/agent-pairing/attach", nil, nil)
+			status, ok := err.(*StatusError)
+			if !ok || status.Status != 429 || status.RetryAfter != tc.want || status.Message != "computer recovery attempt cap reached" {
+				t.Fatal("response lost its bounded retry instruction or original refusal")
+			}
+		})
+	}
+}
+
+func TestRetryAfterHTTPDateUsesInjectedTime(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	for _, delay := range []time.Duration{-time.Second, 0, time.Minute, 24 * time.Hour, 25 * time.Hour} {
+		want := delay
+		if delay <= 0 || delay > 24*time.Hour {
+			want = 0
+		}
+		if got := retryAfter(now.Add(delay).Format(http.TimeFormat), now); got != want {
+			t.Fatal("HTTP date retry delay ignored time or its bound")
+		}
+	}
+}
 
 func TestMe(t *testing.T) {
 	const token = "aeon_prefix_secretvalue"
