@@ -17,12 +17,16 @@ func TestBootstrapResolverRequiresVerifiedEmail(t *testing.T) {
 	reset(t)
 	tid := insertTenant(t, "inspr", "INSPR")
 	m := newMod(t, Config{BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
+	baseline := map[string]int{}
+	for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
+		baseline[table] = scalar(t, adminPool, `SELECT count(*) FROM `+table)
+	}
 	for _, subject := range []string{"first-unverified", "second-unverified"} {
 		if _, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", subject, "admin@example.com", "Admin", false, ""); !errors.Is(err, errNotMember) {
 			t.Fatalf("unverified bootstrap: %v", err)
 		}
 		for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
-			if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != 0 {
+			if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != baseline[table] {
 				t.Fatalf("%s: %d rows after denied enrollment", table, n)
 			}
 		}
@@ -66,6 +70,10 @@ func TestBootstrapResolverRequiresVerifiedEmail(t *testing.T) {
 func TestBootstrapConcurrentFirstEnrollment(t *testing.T) {
 	reset(t)
 	tid := insertTenant(t, "inspr", "INSPR")
+	baseline := map[string]int{}
+	for _, table := range []string{"identities", "principals", "events"} {
+		baseline[table] = scalar(t, adminPool, `SELECT count(*) FROM `+table)
+	}
 	m := newMod(t, Config{BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -95,7 +103,7 @@ func TestBootstrapConcurrentFirstEnrollment(t *testing.T) {
 		t.Fatalf("enrolled %d issuer/subjects, want exactly one", successes)
 	}
 	for _, table := range []string{"identities", "principals", "events"} {
-		if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != 1 {
+		if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != baseline[table]+1 {
 			t.Errorf("%s: got %d rows, want only the first enrollment", table, n)
 		}
 	}
@@ -142,6 +150,7 @@ func TestBootstrapHonorsOperatorPinnedIdentity(t *testing.T) {
 func TestBootstrapCallbackRequiresVerifiedEmail(t *testing.T) {
 	reset(t)
 	insertTenant(t, "inspr", "INSPR")
+	bootstrapPrincipals := scalar(t, adminPool, `SELECT count(*) FROM principals`)
 	issuer := startFakeOIDC(t, "aeon-public")
 	m := newMod(t, Config{Env: envDev, OIDCIssuer: issuer.issuer, OIDCClientID: "aeon-public", SessionKey: bytes.Repeat([]byte{5}, 32), BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
 	app := startApp(t, m)
@@ -191,9 +200,9 @@ func TestBootstrapCallbackRequiresVerifiedEmail(t *testing.T) {
 			}
 			for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
 				want := count
-				if table == "principals" && count == 1 {
-					want = 2
-				} // Person plus the system audit actor.
+				if table == "principals" {
+					want += bootstrapPrincipals
+				}
 				if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != want {
 					t.Fatalf("%s: %d rows, want %d", table, n, want)
 				}

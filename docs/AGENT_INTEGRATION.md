@@ -539,6 +539,27 @@ exact membership source, snapshot capture and offline release-history behavior.
 
 ## Read-only attached watches (AEON-258)
 
+Recovery reads the long-lived computer lifecycle proof from the approved setup
+store for each registration attempt; the transport retains the memory-only poll
+key and pinned origin, without retaining that proof for the daemon lifetime.
+Startup obtains the host and registration proof together in one read. Store or
+Keychain stalls can leave at most one authority reader in flight per daemon;
+cancellation or the total deadline releases the transport gate, and abandoned
+results are discarded rather than used by a later registration.
+Local cleanup, disconnect or configuration changes refuse recovery before a
+registration is sent. Unknown-key diagnostics use a separate server-local budget
+of 30 attempts per minute per authenticated computer principal before computer, scope or watch
+lookups; they never consume the tenant attach request budget. The server holds
+at most 4096 live budgets across tenants. As an accepted AEON-608 limitation,
+new principals (including those in another tenant) are refused until a slot
+expires when that shared cap is full; existing budgets retain their counters.
+A capped call returns `attach_recovery_limited` with
+`Retry-After` seconds, without authorizing registration. The daemon retains
+the server refusal and performs no exchange or registration until that delay
+expires (valid server delays are bounded to one day). If the explicit
+`poll_key_unknown` refusal reaches the helper during cooldown, run attach again
+in a few seconds and give fresh approval; a daemon restart is not required.
+
 The paired daemon uses only `POST /api/agent-pairing/attach` for registration,
 requests, activation, polls and detachment. At startup it registers a fresh random
 poll key using the runtime bearer and computer lifecycle proof. The poll key lives
@@ -547,8 +568,20 @@ pairing.json, a setup store, a database, local replies or logs. Watch operations
 require that key plus the snapshot digest; pairing.json alone cannot authorize
 them. Registration ends every earlier pending, approved or active watch for that
 computer: a daemon restart requires new local consent and owner approval. Server
-restart loses poll authority too; restart the daemon to register again. Registration
-is serialized with exchanges and cannot transfer an earlier approval to a new key.
+restart loses poll authority too. A running daemon re-registers only after a 403
+`attach_refusal=poll_key_unknown`, returned solely to the owning connected computer
+with valid attach scope. Incorrect keys, revoked pairing, draining/removed
+enrollments, ended watches and foreign tenants do not trigger recovery. Older
+servers retain the explicit daemon-restart repair. Recovery makes one registration
+attempt and one replay per rejected call, serialized with other exchanges and
+bounded by a 20-second deadline. Jitter uses half to all of an exponential window
+from 500 ms to 8 seconds, followed by an equal cooldown even on failure. Calls
+during cooldown fail without registration; there is no background loop.
+This narrow exception to the former no-in-process-retry design is safe because
+the server rejects the operation before applying it. Network/decode failures and
+uncertain conversation submissions are never retried. Re-registration cannot
+transfer an earlier approval: previous watches end and require fresh consent;
+new requests can succeed without a daemon restart.
 The pairing fence permits exactly this additional route.
 The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
@@ -725,6 +758,140 @@ creation, Touch ID success/cancel, changed-biometry invalidation and Keychain AC
 refusal to a separate unsigned process before release. Local unsigned checks do
 not supply that hardware or ACL qualification.
 
+### Diagnosing paired daemon startup (AEON-667)
+
+Round-3 account probe trace: `pairedAdapters` takes Claude's executable and
+profile from the approved runtime account's `path` and `home`; Node and SDK
+come from the runtime's `node_path` and `claude_sdk_path`. `resolved` validates
+their physical installations before `probeResolved` invokes that exact Claude
+executable with `auth status --json`. This probe does not invoke the SDK bridge
+or wrap a native CLI in Node; an npm launcher's shebang finds the pinned Node
+directory first on PATH. The working directory is inherited from `serve`.
+PATH consists only of the pinned Node directory, the Claude executable's
+directory, `/usr/bin` and `/bin`; LANG/LC_ALL are `C`. For the default
+`$HOME/.claude` profile, HOME is the user's home and CLAUDE_CONFIG_DIR is absent.
+A separate profile gets HOME and CLAUDE_CONFIG_DIR set to that approved profile.
+USER, LOGNAME and TMPDIR now retain the parent login session's values, when
+present. Credential, provider and loader variables remain excluded.
+
+The installed native Claude artifact selects its Keychain account using USER
+with OS-user lookup as fallback. The previous environment removed USER even
+though OPS's successful minimal-shell check included it. Synthetic probes now
+prove that this context survives both probe and SDK launch; those tests fail
+against the prior implementation. This establishes the environment difference,
+not a confirmed cause on mbp2607: no real pairing, vendor login or Keychain was
+accessed by the worker. `authMethod: "claude.ai"` was already accepted. Bounded,
+duplicate-free JSON must confirm loggedIn and the approved email; a different
+email or API-key login still fails closed, now with its own value-free detail.
+An expired verification remains separate from account sign-in readiness. When
+that account's daemon probe is ready, setup reports `connected` with the
+informational action “Verification expired — run verification again”. Plain
+status includes the expired run and its pending local cleanup on the ready
+account line. Status never retries the run, refills its allowance or acknowledges
+cleanup; failed, cancelled and ownership-lost verification remains a failure.
+An interrupted poll returns its context error without publishing the interrupted
+probe, changing local account health or emitting a polling diagnostic.
+
+Plain `status` now includes ready harnesses and every approved account, including
+distinct states for siblings of one harness. It uses `OpenStoreReadOnly` for
+both snapshot and saved-option/version reads: no migration, lock creation,
+Keychain write or plaintext erasure. ACL denial, conflicting legacy state,
+symlinks, hardlinks and ownership checks remain enforced. Previously even
+`readSnapshot` entered `readVault` and acquired `keychain-migration.lock`, so a
+status client could make the serving daemon's read/save fail with `ErrBusy`.
+
+During a running daemon's lifecycle sync, network errors, HTTP 408/429/5xx and
+local lock contention are retryable. Each tick reserves a separate five-second
+budget for reconciliation and still performs account health probes after such
+a failure; it does not fetch queued work, claim work or launch a run. Fresh
+dispatch resumes only after successful reconciliation and runtime validation.
+Cold-start lifecycle preflight still fails closed. Each distinct failure phase
+and safe cause logs once per daemon lifetime as `pairing_sync_failed`, with
+`first_cause` (for example `http_503`, `store_busy`, `keychain_denied`) and
+`retryable`. Raw server bodies and error text are never logged.
+
+For OPS's next signed-candidate run: keep the existing service drained/stopped,
+run one candidate on the approved root, and call `status` during the run.
+Expect explicit `harness codex ready` / `harness cursor ready` lines when their
+probes succeed, plus an account line for every enrollment. Claude should become
+ready if the removed login environment caused the failure; otherwise its line
+distinguishes signed-out, different-identity and API-key results without showing
+identities or credentials. A retained verification failure may still head the
+output and does not negate ready account lines; an expired request alone cannot
+make its freshly probed ready account report `verification_failed`. Status reads
+must not introduce migration-lock failures. Any remaining pairing failure carries
+the new safe first cause; transient failures keep probing while dispatch remains blocked,
+and recovery clears that block on the next successful tick. Real hardened-runtime
+and Keychain behavior still requires this OPS run.
+
+`aeon-agentd serve --setup-root /physical/approved/root` logs startup failures
+with `slog`, including the logical file or operation and its path. It never logs
+file contents. Missing files retain `errors.Is(err, os.ErrNotExist)` semantics;
+ownership, symlink, mode and executable checks remain enforced.
+
+A plain macOS `go build` (even with `CGO_ENABLED=1` and the release version
+ldflag) does **not** select the Keychain backend. That backend requires
+`-tags aeon_enclave`. After a signed daemon has migrated a pairing, an ordinary
+build still reads `runtime.json`, then fails reading
+`<setup-root>/pairing.json` in `pairedPreflight → SyncFences → Engine.load →
+Store.Read → openFile`. The source file was removed by `readVault` after its
+verified Keychain import. `runtime.key` is likewise absent, but comes later.
+An empty root instead fails at `runtime.json`. `status` can exit successfully
+when the pairing snapshot is absent: it reports provisioning, which does not
+prove that the process can start the paired daemon. Diagnose the named failure
+on the affected host before assuming its pairing was migrated.
+
+Startup file inventory (paths below are relative to the approved setup root
+unless stated otherwise):
+
+| Stage | Reads and checks | Install-layout dependency |
+| --- | --- | --- |
+| Runtime | Private physical root and ancestors; `runtime.json`; in an enclave build, protected `pairing.json` before using the runtime origin | Keychain backend is selected at build time; its ACL validates the running daemon signature, not the Homebrew directory |
+| Lifecycle preflight | `setup.lock`, `pairing.json`; Keychain reads may acquire `keychain-migration.lock` and inspect/import the same legacy disk file; snapshot writes are atomic | Keychain item identity includes the exact physical setup-root path |
+| Optional existing-daemon observation / fences | `daemon/control.json`, referenced socket and `.token`; offline instance lock, journal, checkpoint and `dispatch-fence-all.json` / `dispatch-fence-<account-hash>.json` | Long socket paths use `$HOME/.aeon/run/<state-hash>.sock`; HOME/setup root must agree, independently of binary location |
+| Runtime credential / attach / Touch ID | `runtime.json`, protected `pairing.json`, `runtime.key`; attach and step-up reuse protected pairing proof | Missing/denied proof disables the optional feature; no plaintext fallback after ACL denial |
+| Account pins | Approved launcher files (bounded headers), Node pins and version probes; Claude Node/SDK entry and `package.json`; executable ancestors and repository markers; attach fallback revalidates approved vendor paths | These are saved harness installations, never paths relative to the daemon executable; invalid account pins block that account without vetoing daemon startup |
+| Supervisor | Physical workspace; `daemon/aeon-agentd-<id>.lock`, `.journal`, `.checkpoint.json`, `.checks.json`, `.capacity.json` | No daemon installation dependency; absent journal/capacity files are valid fresh state |
+| Listener | Private socket directory, lifetime `.sock.lock`, socket, `.token`, legacy `.owner.json` and recognized `.s<hex>` residue; then writes `daemon/control.json` | Socket lifetime and inode ownership checks apply to dev builds too |
+
+Gemini/OpenCode adapter construction only stores their approved homes and
+executable pins. Home/config checks occur when probing or launching those
+harnesses, not as a prerequisite to constructing the daemon. `service.json`,
+launchd/systemd unit ownership, `ServiceExecutable` and `managedExecutable`
+belong to setup/service management, not direct paired `serve`. Only service
+installation maps Homebrew `Cellar/aeon-agentd/<version>/bin/aeon-agentd` to its
+verified `opt` link, or `~/.local/lib/aeon/...` to `~/.local/bin/aeon-agentd`.
+Direct serve has no Homebrew-only or `/tmp`-binary prohibition.
+
+There is no developer flag or environment variable that allows an unsigned
+build to use a migrated real pairing. Adding `aeon_enclave` alone still fails
+the native signed-daemon check. Keep the existing pairing intact: do not copy
+its capabilities back to disk, change Keychain ACLs, substitute HOME, or weaken
+ownership checks. The real-root verification route is a candidate produced by
+the existing approved Darwin release/signing pipeline, with the required team,
+identifier and hardened runtime. Once the coordinator has arranged a drained,
+stopped installed service, OPS can verify and run that signed candidate from a
+separate physical path:
+
+```sh
+codesign -dv /physical/candidate/aeon-agentd
+codesign --verify --strict --test-requirement="=notarized" /physical/candidate/aeon-agentd
+/physical/candidate/aeon-agentd serve --setup-root "$HOME/Library/Application Support/aeon/paired"
+```
+
+Use the actual approved physical setup-root path if it differs. Preserve the
+installed artifact and service definition for the coordinator's normal restart
+after verification; do not run two daemons on that root. No signing credentials
+are available to branch/PR workers. Before a signed candidate exists, the safe
+development route is the synthetic local tests below; these do not use an
+operator pairing, Keychain, harness login or production server:
+
+```sh
+GOMAXPROCS=2 go test -p 2 ./internal/agentsetup -run 'Test(StartupFileErrors|MigratedPairing|ServiceExecutableLayout)'
+GOMAXPROCS=2 go test -p 2 ./cmd/aeon-agentd -run TestServeStartupLogsExactMissingFile
+GOMAXPROCS=2 go test -p 2 -tags aeon_enclave ./internal/agentsecurity
+```
+
 ### Signed release daemon (AEON-285)
 
 Release darwin `paimos-agentd` is signed with **Developer ID Application:
@@ -796,9 +963,11 @@ same-user code can still open an independent terminal and request the review.
 Ancestors are identified from kernel metadata only. On Linux that is
 `/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
 ancestor stays acceptable; the target still needs its executable and cwd. On a
-Mac with a browser-pinned local confirmation key, the unsaved default requires
-an enclave-signed confirmation before a session exists, regardless of the daemon's
-capability report. If Touch ID cannot run, activation fails closed. Type `WATCH`,
+Mac with a browser-pinned Secure Enclave public key, the unsaved default also
+requires that key's signature before a session exists, even if the daemon reports
+that Touch ID cannot run. If Touch ID cannot run, activation fails closed. A
+person can explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching** to opt out. Type `WATCH`,
 then open the paired instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
