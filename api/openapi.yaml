@@ -5616,7 +5616,7 @@ paths:
     post:
       operationId: requestTicketReview
       summary: Queue an independent managed review of a commit range
-      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
@@ -15227,7 +15227,7 @@ components:
         limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
         review_range:
           type: object
-          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent ticket, subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
+          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent work leaf (or legacy ticket/task), subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
           required: [repository, base_sha, head_sha]
           properties:
             repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}

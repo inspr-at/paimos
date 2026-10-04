@@ -95,7 +95,7 @@ func newFixture(t *testing.T) *fixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',10000000)`, tid, f.account); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='ticket' RETURNING id::text`, tid).Scan(&f.ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, tid).Scan(&f.ticket)
 	})
 	prefix, secret := strings.ReplaceAll(testID(), "-", ""), testID()
 	sum := sha256.Sum256([]byte(secret))
@@ -155,7 +155,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	}
 	var replay Review
 	f.call(t, f.person, "POST", path, in, 201, &replay)
-	if replay.OrderID != v.OrderID {
+	if replay.OrderID != v.OrderID || replay.RunID == nil || *replay.RunID != *v.RunID || replay.TicketID != f.ticket {
 		t.Fatal("replay started another review")
 	}
 	// Replaying a person's external request cannot bypass the agent author check.
@@ -296,11 +296,55 @@ func TestCompletedBuilderAutomaticallyRequestsIndependentReview(t *testing.T) {
 	if len(rows) != 1 || rows[0].AuthorRunID == nil || *rows[0].AuthorRunID != source || rows[0].AuthorFamily != "openai" || rows[0].RunID == nil {
 		t.Fatal("builder completion did not queue the exact independent review")
 	}
+	created := rows[0]
+	if created.TicketID != f.ticket || created.RequestID != source || created.Repository != report.ReviewRange.Repository || created.BaseSHA != report.ReviewRange.BaseSHA || created.HeadSHA != report.ReviewRange.HeadSHA || created.Status != "queued" || created.GateOpen || created.ReviewerFamily == nil || *created.ReviewerFamily != "anthropic" {
+		t.Fatalf("automatic work-leaf review lost its binding: %+v", created)
+	}
 	f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
+	// Exercise the review request's own replay path too: telemetry replay can
+	// return before calling RequestForRun a second time.
+	f.tx(t, func(tx pgx.Tx) error {
+		return f.m.RequestForRun(t.Context(), tx, f.agent, source, *report.ReviewRange)
+	})
+	var replay Review
+	f.call(t, f.agent, "POST", "/api/nodes/"+f.ticket+"/reviews", CreateInput{
+		RequestID: source, Repository: report.ReviewRange.Repository, BaseSHA: report.ReviewRange.BaseSHA,
+		HeadSHA: report.ReviewRange.HeadSHA, AuthorRunID: &source,
+	}, 201, &replay)
+	if replay.OrderID != created.OrderID || replay.RunID == nil || *replay.RunID != *created.RunID {
+		t.Fatal("manual replay replaced the automatic review")
+	}
 	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
-	if len(rows) != 1 {
+	if len(rows) != 1 || rows[0].OrderID != created.OrderID || rows[0].RunID == nil || *rows[0].RunID != *created.RunID {
 		t.Fatal("completion replay queued another review")
 	}
+}
+
+func TestReviewRejectsWorkParentWithoutCreatingOrders(t *testing.T) {
+	f := newFixture(t)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
+          SELECT $1,'REVIEW-2',kind_id,'Child work',$2 FROM nodes WHERE id=$2`, f.person.TenantID, f.ticket)
+		return err
+	})
+	var failure struct {
+		Code string `json:"code"`
+	}
+	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", f.input(), 409, &failure)
+	if failure.Code != "work_leaf_required" {
+		t.Fatalf("review rejected for the wrong reason: %s", failure.Code)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var orders, reviews, runs int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM work_orders),
+          (SELECT count(*) FROM work_order_reviews),(SELECT count(*) FROM agent_runs)`).Scan(&orders, &reviews, &runs); err != nil {
+			return err
+		}
+		if orders != 0 || reviews != 0 || runs != 0 {
+			t.Fatalf("parent review left partial writes: orders=%d reviews=%d runs=%d", orders, reviews, runs)
+		}
+		return nil
+	})
 }
 
 func TestReviewRespectsProjectVisibilityAndSealsSnapshot(t *testing.T) {

@@ -97,8 +97,8 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	if kind != "ticket" && kind != "task" {
-		return nil, workorders.Fail(400, "review requires a ticket or task")
+	if kind != "work" && kind != "ticket" && kind != "task" {
+		return nil, workorders.Fail(400, "review requires a work leaf, ticket or task")
 	}
 	scope := authz.Scope{}
 	if projectID != nil {
@@ -333,7 +333,7 @@ func (m *Module) RequestForRun(ctx context.Context, tx pgx.Tx, p tenant.Principa
       JOIN nodes parent ON parent.tenant_id=n.tenant_id AND parent.id=n.parent_id
       JOIN node_kinds k ON k.tenant_id=parent.tenant_id AND k.id=parent.kind_id
       WHERE r.id=$1 AND r.agent_principal_id=$2 AND r.status='completed' AND w.kind='build'
-      AND n.deleted_at IS NULL AND parent.deleted_at IS NULL AND k.slug IN ('ticket','task')`, runID, p.ID).Scan(&ticket, &project)
+      AND n.deleted_at IS NULL AND parent.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, runID, p.ID).Scan(&ticket, &project)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
