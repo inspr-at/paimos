@@ -8055,7 +8055,7 @@ paths:
     get:
       operationId: listReleaseTicketOptions
       summary: Find existing project tickets eligible for release planning
-      description: Returns at most 100 project tickets, including unprojected ticket nodes. Only addable and other_release are selectable; other_release means a live planning source and requires confirm_move. active_release covers nonplanning or unavailable sources and cannot move. The target must be the current planning release.
+      description: Returns at most 100 project tickets, including unprojected ticket nodes. Parent availability follows current leaf memberships, never the parent's historical membership. All leaves already in the target means included; any released or active source prevents placement; otherwise another planning source requires confirm_move. Parent release identity is returned only when all current leaves share one release. Parent summaries are bounded to 1000 leaves and fail with 409 above that limit. Only addable and other_release are selectable; active_release covers nonplanning or unavailable sources. The target must be the current planning release.
       security: [{session: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

@@ -224,6 +224,100 @@ func TestTicketOptionsHistoricalParentCanJoinNextRelease(t *testing.T) {
 	}
 }
 
+func TestTicketOptionsParentMatchesCurrentLeaves(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, availability string
+		backlog                    bool
+	}{
+		{"backlog", "", "addable", true},
+		{"included", "target", "included", false},
+		{"partly included", "target", "addable", true},
+		{"another planning release", "planning", "other_release", false},
+		{"partly in another release", "planning", "other_release", true},
+		{"released leaf", "released", "released", true},
+		{"superseded leaf", "superseded", "released", true},
+		{"active leaf", "building", "active_release", true},
+		{"deleted source", "deleted", "active_release", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := ticketSetup(t)
+			nested := f.existing("work", f.feature, "Nested parent", "open")
+			a := f.existing("work", nested, "Nested leaf", "done")
+			b := f.existing("work", f.feature, "Sibling leaf", "open")
+			source := f.release
+			f.tx(func(tx pgx.Tx) error {
+				if tc.source != "" && tc.source != "target" {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Source release' FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, f.person.TenantID, f.project).Scan(&source); err != nil {
+						return err
+					}
+					state := tc.source
+					if state == "deleted" {
+						state = "planning"
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state,released_at) VALUES($1,$2,$3,2,$4,CASE WHEN $4 IN ('released','superseded') THEN now() END)`, f.person.TenantID, source, f.project, state); err != nil {
+						return err
+					}
+				}
+				if tc.source != "" {
+					ids := []string{a}
+					if !tc.backlog {
+						ids = append(ids, b)
+					}
+					for i, id := range ids {
+						if _, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,$5,'manual')`, f.person.TenantID, id, f.project, source, i); err != nil {
+							return err
+						}
+					}
+				}
+				if tc.source == "deleted" {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, source)
+					return err
+				}
+				return nil
+			})
+			w := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+f.release+"/ticket-options", "")
+			var options optionsResult
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &options) != nil {
+				t.Fatalf("options %d %s", w.Code, w.Body.String())
+			}
+			seen := false
+			for _, option := range options.Tickets {
+				if option.NodeID != f.feature {
+					continue
+				}
+				seen = true
+				if !option.IsParent || option.Availability != tc.availability {
+					t.Fatalf("parent must reflect its current leaves: %+v", option)
+				}
+				if tc.backlog {
+					if option.ReleaseID != nil || option.ReleaseTitle != nil {
+						t.Fatalf("partial coverage must not claim a single release: %+v", option)
+					}
+				} else if option.ReleaseID == nil || *option.ReleaseID != source || option.ReleaseTitle == nil {
+					t.Fatalf("full coverage lost its release: %+v", option)
+				}
+			}
+			if !seen {
+				t.Fatal("parent absent from options")
+			}
+			w = f.addExisting([]string{f.feature}, int(options.Revision), false)
+			switch tc.availability {
+			case "other_release":
+				if w.Code != 409 || !strings.Contains(w.Body.String(), "confirm_move") {
+					t.Fatalf("expected confirmation: %d %s", w.Code, w.Body.String())
+				}
+				membershipOK(t, f.addExisting([]string{f.feature}, int(options.Revision), true))
+			case "released", "active_release":
+				if w.Code != 409 || (!strings.Contains(w.Body.String(), "cannot move") && !strings.Contains(w.Body.String(), "source release is unavailable")) {
+					t.Fatalf("expected source refusal: %d %s", w.Code, w.Body.String())
+				}
+			default:
+				membershipOK(t, w)
+			}
+		})
+	}
+}
+
 func TestPlanRemovalEmitsUndoableMembershipAndFreshScope(t *testing.T) {
 	f := ticketSetup(t)
 	id := f.existing("ticket", f.project, "Backlog ticket", "open")

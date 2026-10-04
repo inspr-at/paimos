@@ -17,6 +17,73 @@ type parentPlacement struct {
 	RetainedScopeRequired *bool   `json:"retained_scope_revision_required,omitempty"`
 }
 
+// Historical rows remain evidence when a shipped leaf becomes a parent. Picker
+// eligibility instead follows the current leaves, just like the fenced write.
+// One bounded scope query covers the entire page, including overlapping roots.
+func refreshParentTicketOptions(ctx context.Context, tx pgx.Tx, project, release string, options []ticketOption) error {
+	parents := make(map[string]*ticketOption)
+	ids := []string{}
+	for i := range options {
+		option := &options[i]
+		if option.IsParent {
+			ids = append(ids, option.NodeID)
+			parents[option.NodeID] = option
+			option.ReleaseID, option.ReleaseTitle = nil, nil
+			option.Availability = "unsupported"
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `WITH scope AS MATERIALIZED (
+ SELECT * FROM aeon_work_release_scope($2::uuid[]) WHERE project_id=$1 AND is_leaf
+), members AS (
+ SELECT s.root,j.release_node_id,r.state,rn.title
+ FROM scope s
+ LEFT JOIN journey_tickets j ON j.tenant_id=current_setting('aeon.tenant_id')::uuid AND j.project_node_id=$1 AND j.ticket_node_id=s.id
+ LEFT JOIN nodes rn ON rn.tenant_id=j.tenant_id AND rn.id=j.release_node_id AND rn.deleted_at IS NULL
+ LEFT JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.project_node_id=$1 AND r.release_node_id=rn.id
+)
+ SELECT root::text,count(*),count(*) FILTER(WHERE release_node_id=$3::uuid),
+ coalesce(bool_or(release_node_id<>$3::uuid AND state IN ('released','superseded')),false),
+ coalesce(bool_or(release_node_id<>$3::uuid AND (state IS NULL OR state NOT IN ('planning','released','superseded'))),false),
+ coalesce(bool_or(release_node_id<>$3::uuid AND state='planning'),false),
+ CASE WHEN count(release_node_id)=count(*) AND count(DISTINCT release_node_id)=1 THEN min(release_node_id::text) END,
+ CASE WHEN count(release_node_id)=count(*) AND count(DISTINCT release_node_id)=1 THEN min(title) END
+ FROM members GROUP BY root`, project, ids, release)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var count, included int
+		var released, active, moving bool
+		var releaseID, title *string
+		if err := rows.Scan(&id, &count, &included, &released, &active, &moving, &releaseID, &title); err != nil {
+			return err
+		}
+		if count > 1000 {
+			return fail(409, "release summary exceeds 1000 leaves")
+		}
+		option := parents[id]
+		option.ReleaseID, option.ReleaseTitle = releaseID, title
+		switch {
+		case released:
+			option.Availability = "released"
+		case active:
+			option.Availability = "active_release"
+		case moving:
+			option.Availability = "other_release"
+		case included == count:
+			option.Availability = "included"
+		default:
+			option.Availability = "addable"
+		}
+	}
+	return rows.Err()
+}
+
 // Match the paired tree writers: pairing -> tree -> tenant access fence ->
 // resource rows -> event counter. Recheck authorization under that fence.
 func lockMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {

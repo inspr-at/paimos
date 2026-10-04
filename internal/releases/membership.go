@@ -120,6 +120,9 @@ type membershipSnapshot struct {
 }
 
 func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r, false)
 	if !ok {
 		return
@@ -196,7 +199,12 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 			}
 			out.Tickets = append(out.Tickets, t)
 		}
-		return rows.Err()
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		return refreshParentTicketOptions(r.Context(), tx, project, release, out.Tickets)
 	})
 	respond(w, out, err)
 }
