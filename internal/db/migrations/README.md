@@ -381,7 +381,11 @@ the live member set. Returning to leaf restores feature, position, source,
 estimate and scope/access flags; Undo follows the same reconciliation path.
 Explicit membership changes synchronize retained intent, including plan
 removal to backlog and compensating Undo, so subsequent children follow the
-latest choice. Changing parent placement invalidates its retained scope approval,
+latest choice. A current parent intent row, including explicit backlog, takes
+precedence over historical membership when future children inherit placement.
+Undo restores the previous intent or removes it; without intent, inheritance
+falls back to the preserved membership and its release-open check.
+Changing parent placement invalidates its retained scope approval,
 including an ordinary move back to the original release. Membership events capture that
 flag so compensating Undo can restore the prior approval; restoration also
 requires fresh scope review when older retained metadata names another release.

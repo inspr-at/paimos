@@ -38,7 +38,9 @@ BEGIN
  WHILE cur IS NOT NULL LOOP
   depth := depth+1;
   IF depth>1000 THEN RAISE EXCEPTION 'release ancestry exceeds 1000 nodes' USING ERRCODE='54000'; END IF;
-  SELECT CASE WHEN t.ticket_node_id IS NOT NULL THEN t.release_node_id ELSE p.release_node_id END,
+  -- Current parent intent (including explicit backlog) wins over a retained
+  -- historical membership. Without intent, the membership still owns placement.
+  SELECT CASE WHEN p.parent_node_id IS NOT NULL THEN p.release_node_id ELSE t.release_node_id END,
    n.parent_id,(t.ticket_node_id IS NOT NULL OR p.parent_node_id IS NOT NULL) INTO rel,next_parent,placed
    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
    LEFT JOIN work_parent_releases p ON p.tenant_id=n.tenant_id AND p.parent_node_id=n.id AND p.project_node_id=project
