@@ -583,15 +583,24 @@ closed. `agentplan.CanStart` checks total and harness limits without changing
 running work; launchers must serialize starts and check account room separately.
 On **Agents**, the control reads “Run up to … agents at once.” The total and
 harness limits save to the same canonical plan used by coordinators. The folded
-line keeps compact − / + controls and a harness mark that cycles No limit →
-At most → Off; a muted number means no own limit, capped by the total and measured
-account room. Expanded numeric controls stop at 1; folded − from 1 selects Off.
+line starts with the agent mark and keeps the same raised round − / + controls
+as the expanded rows. Harness values follow Off → 1…30 → ∞ (no own limit):
+− from 1 selects Off, + from 30 selects no own limit, and − from ∞ sets a ceiling
+one below the harness's effective total/account limit. Buttons stay visible and
+disabled at the ends. Clicking the harness mark cycles No limit → At most → Off;
+the tooltip names the next mode. The ∞ value's tooltip includes the effective limit.
 A stored API/CLI zero stays visible and only + is enabled. Details grow below the
 dial with each harness's controls and the
 read-only Now, Accounts, Waiting and Checks. Folding is remembered separately
 for the signed-in viewer in `agents.working.display`; it never changes the plan.
-Arrow keys step a focused − / + or move between harness modes, preserving
-browser and OS modifier shortcuts. Failed saves stay visible across successful
+Click any total or harness value to type; Enter or blur applies, and Esc cancels.
+An empty harness field selects no own limit, 0 selects Off, and positive whole
+numbers clamp to 30. The total accepts whole numbers from 0 to 30; invalid or
+empty total drafts leave it unchanged. Drafts are discarded if the viewer, target
+value or plan revision changes. Editing occupies the value's original slot.
+Arrow keys step a focused stepper or move between harness modes; Home selects
+Off and End selects no own limit on a harness stepper. Browser and OS modifier
+shortcuts stay native. Failed saves stay visible across successful
 polls until another deliberate change. Repeated selections and arrows at a
 boundary do not write. The live line announces total changes once.
 Unknown account or queue readings stay explicit. The visible queue's ready work
