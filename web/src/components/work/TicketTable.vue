@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
@@ -694,7 +695,7 @@ defineExpose({
                   <span v-else class="twisty-spacer" />
                 </span>
                 <AppIcon :name="entry.row.kind_slug === 'epic' ? 'epic' : entry.row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="kindLabel(entry.row.kind_slug)" />
-                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
+                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
@@ -959,6 +960,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .kind-glyph { color: var(--ink-3); }
 .kind-glyph.epic { color: var(--gold); }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; }
+.title-text { display: block; overflow: hidden; text-overflow: ellipsis; }
 .ticket-row.epic .title-link { font-weight: 650; }
 .title-link:focus-visible { box-shadow: none; }
 .child-count { flex-shrink: 0; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; line-height: 17px; color: var(--ink-2); }
@@ -983,10 +985,10 @@ td.c-title { position: relative; overflow: hidden; }
    buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
    leaves the cue 12px clear of Copy. Phones hide the actions. */
 @media (min-width: 721px) {
+  .title-cell { padding-right: 58px; }
   .ticket-row:hover .title-cell,
   .ticket-row.cursor .title-cell,
   td.c-title:focus-within .title-cell {
-    padding-right: 58px;
     -webkit-mask-image: none !important;
     mask-image: none !important;
   }
