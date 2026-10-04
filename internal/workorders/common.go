@@ -3,6 +3,7 @@
 package workorders
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -82,7 +84,13 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 				return
 			}
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		// Finish network reads before InTenant can acquire admission, tree or
+		// tenant locks. Handlers still decode and authorize in the transaction,
+		// but their body is now bounded memory, never a stalled client socket.
+		if err := bufferBody(w, r); err != nil {
+			WriteError(w, err)
+			return
+		}
 		var result any
 		err := db.InTenant(r.Context(), pool, p.TenantID, func(tx pgx.Tx) error {
 			if workBindingMutation(r) {
@@ -120,6 +128,33 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		}
 		httpapi.WriteJSON(w, status, result)
 	}
+}
+
+func bufferBody(w http.ResponseWriter, r *http.Request) error {
+	if r.Body == nil || r.Body == http.NoBody {
+		r.Body = http.NoBody
+		return nil
+	}
+	controller := http.NewResponseController(w)
+	// net/http supports this through the production middleware's Unwrap.
+	// In-memory response recorders used by handler tests have no connection.
+	if err := controller.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		// Keep the deadline on failed reads so net/http cannot drain a stalled
+		// body indefinitely after the handler returns.
+		var timeout interface{ Timeout() bool }
+		if errors.As(err, &timeout) && timeout.Timeout() {
+			return Fail(http.StatusRequestTimeout, "request body read timed out")
+		}
+		return Fail(http.StatusBadRequest, "invalid JSON")
+	}
+	_ = r.Body.Close()
+	_ = controller.SetReadDeadline(time.Time{})
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return nil
 }
 
 // Admission/binding and generation recovery take the tree fence before any

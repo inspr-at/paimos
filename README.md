@@ -47,6 +47,10 @@ with its exact worker lease and current `harness.worker` authority. Only
 releases the work fence, records `harness.stop_confirmed` once and preserves
 closure timestamps, archive receipts and historical bindings. Archived servicing
 remains revoked; the administrative recovery observation stays unchanged.
+Work-order and harness endpoints buffer request bodies up to 1 MiB under a
+ten-second network read deadline before opening their tenant transaction.
+Stalled uploads cannot hold the work-tree or tenant fences; key scopes and
+target permissions are still checked inside the final mutation transaction.
 Coordinator registration and resume adopt up to 1000 direct live/paused children
 atomically. Larger scopes return 409; buffered audit snapshots have a 32 MiB cap
 (429 on excess), and flush only after all generation and child mutations finish.
