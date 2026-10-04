@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -87,12 +89,37 @@ func (w *expiredBodyDeadlineWriter) SetReadDeadline(deadline time.Time) error {
 }
 
 func TestEndpointBodyNetworkDeadline(t *testing.T) {
-	requested := make(chan time.Time, 2)
 	mux := http.NewServeMux()
 	// A body timeout must return before any database connection is needed.
 	mux.HandleFunc("POST /api/work-orders", Endpoint(nil, "work_orders.write", false, 201, nil))
 	handler := (&httpapi.Server{Mux: mux}).Handler()
 	p := tenant.Principal{ID: "11111111-1111-4111-8111-111111111111", TenantID: "22222222-2222-4222-8222-222222222222", Kind: tenant.Person}
+	assertEndpointBodyNetworkDeadline(t, handler, p, "POST /api/work-orders")
+}
+
+func TestEndpointPositionedBodyNetworkDeadline(t *testing.T) {
+	d := dbtest.Open(t)
+	p := tenant.Principal{ID: "11111111-1111-4111-8111-111111111111", Kind: tenant.Person}
+	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('body-deadline','Body deadline') RETURNING id::text`).Scan(&p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{"GET /api/runs", "GET /api/harness-sessions"} {
+		t.Run(pattern, func(t *testing.T) {
+			mux := http.NewServeMux()
+			// The watermark uses the real database, but the endpoint must time
+			// out before opening its own transaction or calling its handler.
+			mux.HandleFunc(pattern, Endpoint(nil, "", false, http.StatusOK, nil))
+			handler := (&httpapi.Server{
+				Mux: mux, Middleware: []func(http.Handler) http.Handler{events.PositionMiddleware(d.App)},
+			}).Handler()
+			assertEndpointBodyNetworkDeadline(t, handler, p, pattern)
+		})
+	}
+}
+
+func assertEndpointBodyNetworkDeadline(t *testing.T, handler http.Handler, p tenant.Principal, pattern string) {
+	t.Helper()
+	requested := make(chan time.Time, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The production middleware wraps this writer; its Unwrap must let the
 		// response controller reach the connection deadline implementation.
@@ -109,7 +136,7 @@ func TestEndpointBodyNetworkDeadline(t *testing.T) {
 	}
 	// Announce a body but send no bytes. Only the server's read deadline ends
 	// its read; the client deadline is merely a guard against a hung test.
-	if _, err := io.WriteString(conn, "POST /api/work-orders HTTP/1.1\r\nHost: test\r\nContent-Length: 1\r\nConnection: close\r\n\r\n"); err != nil {
+	if _, err := io.WriteString(conn, pattern+" HTTP/1.1\r\nHost: test\r\nContent-Length: 1\r\nConnection: close\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(conn), nil)

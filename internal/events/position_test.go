@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -244,6 +245,52 @@ func TestPositionWriterKeepsStreamingWorking(t *testing.T) {
 	}
 	if !rec.Flushed || rec.Header().Get(PositionHeader) != "1" {
 		t.Fatalf("flushed %v, position %q", rec.Flushed, rec.Header().Get(PositionHeader))
+	}
+}
+
+type positionDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *positionDeadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
+func TestPositionReadForwardsDeadlinesWithoutFlushing(t *testing.T) {
+	d, p, _ := fixture(t)
+	w := &positionDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	w.Header().Set("X-Initial", "kept")
+	r := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	r.Pattern = "GET /api/runs"
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+	deadline := time.Unix(123, 0)
+	handler := http.HandlerFunc(func(buffer http.ResponseWriter, _ *http.Request) {
+		if _, ok := buffer.(*bufferedResponse); !ok {
+			t.Error("listed read did not enter the production response buffer")
+			return
+		}
+		controller := http.NewResponseController(buffer)
+		for _, value := range []time.Time{deadline, {}} {
+			if err := controller.SetReadDeadline(value); err != nil {
+				t.Errorf("forward read deadline %v: %v", value, err)
+			}
+		}
+		httpapi.WriteJSON(buffer, http.StatusOK, map[string]bool{"ok": true})
+		if err := controller.Flush(); err != nil {
+			t.Errorf("flush buffered answer: %v", err)
+		}
+		if w.Flushed || w.Body.Len() != 0 {
+			t.Error("response escaped before its event position was known")
+		}
+	})
+	PositionMiddleware(d.App)(handler).ServeHTTP(w, r)
+	if len(w.deadlines) != 2 || w.deadlines[0] != deadline || !w.deadlines[1].IsZero() {
+		t.Fatalf("connection deadlines = %v; want installed then cleared", w.deadlines)
+	}
+	if w.Code != http.StatusOK || w.Header().Get(PositionHeader) != "0" || w.Header().Get("X-Initial") != "kept" || strings.TrimSpace(w.Body.String()) != `{"ok":true}` {
+		t.Fatalf("buffered response changed: status=%d headers=%v body=%s", w.Code, w.Header(), w.Body)
 	}
 }
 
