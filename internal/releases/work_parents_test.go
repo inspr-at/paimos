@@ -14,10 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestWorkParentPlacementRechecksRevokedGrantUnderFence(t *testing.T) {
@@ -29,34 +32,45 @@ func TestWorkParentPlacementRechecksRevokedGrantUnderFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer held.Rollback(ctx)
-	if _, err = held.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, f.person.TenantID); err != nil {
+	defer func() { _ = held.Rollback(context.Background()) }()
+	// Access changes follow tenant -> tree. Holding pairing first would make
+	// the test's revocation itself deadlock with a correctly fenced request.
+	if err = authz.LockProjectMutation(ctx, held, f.person.TenantID); err != nil {
 		t.Fatal(err)
 	}
+	var holderPID int
+	if err = held.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan uint32, 1)
+	cfg := f.db.App.Config()
+	cfg.ConnConfig.Tracer = membershipFenceTrace{ready: ready}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); pool.Close() })
+	mux := http.NewServeMux()
+	New(pool).Mount(mux)
 	result := make(chan *httptest.ResponseRecorder, 1)
 	raw, _ := json.Marshal(membershipInput{Revision: 1, IDs: []string{f.feature}})
 	go func() {
 		req := httptest.NewRequest(http.MethodPost, f.membershipPath(), strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(ctx, f.person))
 		w := httptest.NewRecorder()
-		f.mux.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 		result <- w
 	}()
-	for {
-		var waiting bool
-		err = held.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks mine JOIN pg_locks waiter ON waiter.locktype=mine.locktype AND waiter.database IS NOT DISTINCT FROM mine.database AND waiter.classid=mine.classid AND waiter.objid=mine.objid AND waiter.objsubid=mine.objsubid WHERE mine.pid=pg_backend_pid() AND mine.locktype='advisory' AND mine.granted AND waiter.pid<>mine.pid AND NOT waiter.granted)`).Scan(&waiting)
-		if err != nil {
-			t.Fatal(err)
+	completed := false
+	defer func() {
+		cancel()
+		_ = held.Rollback(context.Background())
+		if !completed {
+			<-result
 		}
-		if waiting {
-			break
-		}
-		select {
-		case w := <-result:
-			t.Fatalf("request bypassed lock barrier: %d %s", w.Code, w.Body.String())
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		default:
-		}
+	}()
+	workerPID := dbtest.Await(t, ctx, ready)
+	if err = dbtest.WaitForBlocked(ctx, f.db.Admin, int(workerPID), holderPID, membershipTenantFence); err != nil {
+		t.Fatal(err)
 	}
 	if _, err = held.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.person.TenantID, f.person.ID); err != nil {
 		t.Fatal(err)
@@ -66,6 +80,7 @@ func TestWorkParentPlacementRechecksRevokedGrantUnderFence(t *testing.T) {
 	}
 	select {
 	case w := <-result:
+		completed = true
 		if w.Code != 403 || !strings.Contains(w.Body.String(), "project access required") {
 			t.Fatalf("wrong rejection after revocation: %d %s", w.Code, w.Body.String())
 		}
