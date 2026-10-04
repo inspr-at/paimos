@@ -137,6 +137,7 @@ func (m *Module) measurement(w http.ResponseWriter, r *http.Request) {
 		}
 		seen := map[string]diffCommit{}
 		diffKnown := true
+		identityIncomplete := false
 		sessions := 0
 		for rows.Next() {
 			sessions++
@@ -168,8 +169,12 @@ func (m *Module) measurement(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, c := range commits {
 				c.SHA = strings.ToLower(c.SHA)
-				if len(c.SHA) < 7 || len(c.SHA) > 40 || strings.Trim(c.SHA, "0123456789abcdef") != "" {
+				// Retained abbreviations cannot establish commit identity: even
+				// a matching prefix may name a different full commit. Keep the
+				// report accepted, but certify neither its count nor its diff.
+				if len(c.SHA) != 40 || strings.Trim(c.SHA, "0123456789abcdef") != "" {
 					diffKnown = false
+					identityIncomplete = true
 					continue
 				}
 				if old, ok := seen[c.SHA]; ok {
@@ -192,6 +197,9 @@ func (m *Module) measurement(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out.Commits = len(seen)
+		if identityIncomplete {
+			out.Gaps = append(out.Gaps, "commit_identity_incomplete")
+		}
 		if len(seen) == 0 {
 			out.Gaps = append(out.Gaps, "no_commit_diff")
 			return nil

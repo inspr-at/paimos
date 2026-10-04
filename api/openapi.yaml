@@ -10115,7 +10115,7 @@ paths:
     get:
       operationId: ticketWorkMeasurement
       summary: Read bounded ticket work evidence
-      description: Requires outcome.read and harness.read in the current project. Counts are lifetime recorded completion, review and fix events (at most 10000); diff totals cover distinct commits on currently bound sessions (at most 200 sessions and 10000 commits). This live view does not certify contributor coverage or persist a completion receipt. Missing diff readings remain null. Gaps and truncation are explicit. Evidence from another project requires harness.read there too.
+      description: Requires outcome.read and harness.read in the current project. Project-only readers may read their authorized tickets; restricted source visibility leaves diff totals null. Counts are lifetime recorded completion, review and fix events (at most 10000); diff totals cover distinct commits with full 40-character hexadecimal IDs on currently bound sessions (at most 200 sessions and 10000 commits). Abbreviated or invalid IDs are excluded from the commit count and produce a commit_identity_incomplete gap with null diff totals. This live view does not certify contributor coverage or persist a completion receipt. Missing diff readings remain null. Gaps and truncation are explicit. Evidence from another project requires harness.read there too.
       security: *auth
       parameters:
         - {name: ticket_node_id, in: query, required: true, schema: {type: string, maxLength: 128}, description: Ticket id or key}
@@ -17171,7 +17171,7 @@ components:
         completions: {type: integer, minimum: 0}
         review_rounds: {type: integer, minimum: 0, description: Number of recorded review verdict events; repeated round numbers remain separate evidence.}
         fix_rounds: {type: integer, minimum: 0, description: Number of recorded fix-round events.}
-        commits: {type: integer, minimum: 0}
+        commits: {type: integer, minimum: 0, description: Distinct canonical full commit IDs; unresolved identities are excluded and reported as gaps.}
         lines_added: {type: [integer, 'null'], format: int64}
         lines_deleted: {type: [integer, 'null'], format: int64}
         file_changes: {type: [integer, 'null'], format: int64, description: Sum of files changed per distinct commit; not unique paths.}
