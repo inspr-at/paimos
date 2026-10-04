@@ -89,6 +89,31 @@ test('switching level during save cannot attach old Undo to the new record',asyn
 test('keyboard submits only with platform modifier and Esc first leaves a field',async({page})=>{
  const mock=await mockPolicyEditors(page);await page.goto('/settings/policies');const frame=await preferences(page);await frame.getByTestId('policy-edit').click();const field=page.getByLabel('normal preference mode');await field.focus();await field.press('u');expect(mock.state.writes).toHaveLength(0);const modifier=await page.evaluate(()=>/Mac|iPhone|iPad/.test(navigator.platform)?'Meta':'Control');await field.press(`${modifier}+a`);expect(mock.state.writes).toHaveLength(0);await field.press('Escape');await expect(frame.getByTestId('policy-save')).toBeFocused();await frame.getByTestId('policy-save').press('Escape');await expect(field).toBeDisabled();await frame.getByTestId('policy-edit').click();await page.getByLabel('normal preference mode').press(`${modifier}+Enter`);await expect(status(frame)).toContainText('Saved.');expect(mock.state.writes).toHaveLength(1)
 })
+for(const platform of ['MacIntel','Linux x86_64'])for(const width of [390,1440])for(const editor of ['ladder','preferences'] as const)test(`keyboard Save retains action focus through Undo and Escape ${editor} ${platform} ${width}`,async({page})=>{
+ await page.setViewportSize({width,height:width===390?844:1000})
+ await page.addInitScript(value=>Object.defineProperty(navigator,'platform',{get:()=>value}),platform)
+ const mock=await mockPolicyEditors(page)
+ await page.goto('/settings/policies')
+ const frame=editor==='preferences'?await preferences(page):page.locator('.editor-frame')
+ const edit=frame.getByTestId('policy-edit'),save=frame.getByTestId('policy-save')
+ await expect(edit).toHaveAttribute('aria-disabled','false');await edit.click()
+ const field=page.getByLabel(editor==='ladder'?'Ladder position':'normal preference mode')
+ const modifier=platform==='MacIntel'?'Meta':'Control'
+ await expect(save.locator('.keys')).toHaveAttribute('aria-label',platform==='MacIntel'?'Command+Enter':'Ctrl+Enter')
+ const before=structuredClone(editor==='ladder'?mock.state.ladders.get('review-gate')!.routes:mock.state.document.levels.person!.rows)
+ if(editor==='ladder'){await field.fill('2');await field.press('Tab')}else await field.selectOption('auto')
+ await field.focus()
+ const held=mock.holdNext()
+ try{
+  await expectStableControls({controls:{...actions(frame),status:status(frame),field,...(width===390?{phoneFrame:frame}:{})},scrollAreas:{body:frame.getByTestId('policy-editor-body')},interactions:[
+   {name:'keyboard Save transfers focus before disabling the field',run:async()=>{await field.press(`${modifier}+Enter`);await held.started;await expect(status(frame)).toContainText('Saving…');await expect(field).toBeDisabled();await expect(save).toBeFocused();expect(mock.state.writes).toHaveLength(1)}},
+   {name:'confirmed Save keeps action focus',run:async()=>{held.release();await expect(status(frame)).toContainText('Saved.');await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false');await expect(save).toBeFocused();const after=editor==='ladder'?mock.state.ladders.get('review-gate')!.routes:mock.state.document.levels.person!.rows;expect(after).not.toEqual(before)}},
+   {name:'keyboard Undo restores the captured setting',run:async()=>{await page.keyboard.press('u');await expect(status(frame)).toContainText(editor==='ladder'?'Order restored.':'Work-kind setting restored.');await expect(save).toBeFocused();await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','true');expect(mock.state.writes).toHaveLength(2);expect(editor==='ladder'?mock.state.ladders.get('review-gate')!.routes:mock.state.document.levels.person!.rows).toEqual(before)}},
+  ]})
+  await page.keyboard.press('Escape');await expect(edit).toBeFocused();await expect(frame.getByTestId('policy-cancel')).toHaveAttribute('aria-disabled','true');await expect(field).toBeDisabled();expect(mock.state.writes).toHaveLength(2)
+  if(width===390)await expect(frame).not.toHaveAttribute('aria-modal','true')
+ }finally{held.release()}
+})
 test('Project writes bind the chosen visible project and offer no project locks',async({page})=>{
  const mock=await mockPolicyEditors(page);await page.goto('/settings/policies');await preferences(page)
  await page.getByRole('group',{name:'Preference level'}).getByRole('button',{name:'Project',exact:true}).click();await page.getByLabel('Preference project').selectOption('p-pharos');await page.getByLabel('Preference work kind').selectOption('kind-build');const frame=page.locator('.editor-frame');await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','false');await frame.getByTestId('policy-edit').click();await expect(frame.locator('input[type=checkbox]')).toBeDisabled();await page.getByLabel('normal preference mode').selectOption('pinned');await frame.getByTestId('policy-save').click();await expect(status(frame)).toContainText('Saved.');expect(mock.state.writes[0]!.path).toBe('/api/model-preferences/levels/project/rows/kind-build?project_id=p-pharos');await frame.getByTestId('policy-undo').click();await expect(status(frame)).toContainText('Work-kind setting restored.');expect(mock.state.writes[1]!.method).toBe('DELETE');expect(mock.state.writes[1]!.path).toBe(mock.state.writes[0]!.path+'&revision=2');expect(mock.state.writes[1]!.body).toBeNull();expect(mock.state.writes[1]!.headers['if-prefs-person']).toBe('first-canonical-person');expect(mock.state.document.levels.project!.rows).toEqual([])
