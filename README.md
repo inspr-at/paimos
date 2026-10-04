@@ -2368,6 +2368,7 @@ but unbound harnesses name the required `add-harness` command. Account checks
 report a 60-second bound from daemon start for each initial account, or from
 that account being added or unblocked by repin; refreshing unchanged accounts
 does not extend the wait. Capacity capture reports a 10-second bound.
+
 **Verify again (AEON-685).** An expired one-time verification is informational
 when that enrollment has a fresh successful probe; it does not revoke separately
 approved ongoing use. A sibling's readiness never qualifies it. The account row's

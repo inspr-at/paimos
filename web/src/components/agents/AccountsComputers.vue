@@ -83,8 +83,12 @@ async function verifyAgain(line: AccountLine, card: ComputerCard) {
   try {
     const response = await api(`/agent-pairing/computers/${computer}/enrollments/${account}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: revision, expected_verification_run_id: priorRun }) })
     if (!response.ok) throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
-    if (identityKey.value !== owner || !cards.value.some(card => card.computer?.computer_id === computer && card.accounts.some(line => line.id === account))) return
-    toast(`Verification queued for ${line.vendor} on ${card.name}.`)
+    const created = await response.json() as { account_id?: string; run_id?: string }
+    if (created.account_id !== account || typeof created.run_id !== 'string') throw new Error('Verification response could not be confirmed. Refresh the account list.')
+    const current = cards.value.find(card => card.computer?.computer_id === computer)?.computer
+    const currentEnrollment = current?.enrollments.find(e => e.account_id === account)
+    if (identityKey.value !== owner || current?.revision !== revision || !currentEnrollment?.can_verify || ![priorRun, created.run_id].includes(currentEnrollment.verification_run_id)) return
+    toast(`Verification requested for ${line.vendor} on ${card.name}.`)
     const result = await capacity.refreshCapacity()
     if (identityKey.value === owner && !result.ok) toast('Verification was queued, but the account list could not refresh.', { tone: 'error' })
   } catch (error) {
@@ -454,8 +458,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
             </div>
             <div role="cell" class="acct-ready">
               <div class="readiness-actions">
-              <button v-if="canVerify(line, card)" type="button" class="verify-again" :disabled="verifyBusy(line, card)" :aria-busy="verifying === line.id" :data-requested="route.query.verify_account === line.id || undefined" @click="verifyAgain(line, card)">Verify again</button>
-              <span class="pill" :class="line.readiness.tone" :data-tip="line.readiness.tip"><span class="dot" aria-hidden="true" />{{ line.readiness.text }}</span>
+                <button v-if="canVerify(line, card)" type="button" class="verify-again" :disabled="verifyBusy(line, card)" :aria-busy="verifying === line.id" :data-requested="route.query.verify_account === line.id || undefined" @click="verifyAgain(line, card)">Verify again</button>
+                <span class="pill" :class="line.readiness.tone" :data-tip="line.readiness.tip"><span class="dot" aria-hidden="true" />{{ line.readiness.text }}</span>
               </div>
               <button v-if="line.readiness.command" type="button" class="fix" :data-tip="`Copies ${line.readiness.command} to run on ${card.name}`" @click="copy(line.readiness.command, card.name)"><AppIcon name="copy" :size="13" />{{ line.readiness.command }}</button>
               <p v-if="line.readiness.hint" class="r-hint">{{ line.readiness.hint }}</p>
@@ -579,6 +583,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 <style scoped>
 .readiness-actions { align-self: flex-start; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .verify-again { font: inherit; font-size: 12px; padding: .35em .6em; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+@media (pointer: coarse) { .verify-again { min-height: 44px; } }
 .verify-again:disabled { cursor: default; opacity: .6; }
 .verify-again[data-requested] { outline: 1px solid var(--ink-3); outline-offset: 2px; }
 .computer-confirmation { margin: 0; padding: 0 16px 12px; color: var(--ink-2); font-size: 12px; }

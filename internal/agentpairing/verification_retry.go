@@ -84,8 +84,18 @@ func (m *Module) verifyAgain(w http.ResponseWriter, r *http.Request, p tenant.Pr
 			if err := tx.QueryRow(ctx, `SELECT status FROM agent_runs WHERE id=$1 AND purpose='pairing_verification' FOR UPDATE`, *run).Scan(&status); err != nil {
 				return err
 			}
-			if claimed && status != "completed" && status != "failed" && status != "cancelled" || !claimed && status != "queued" && status != "completed" && status != "failed" && status != "cancelled" {
+			terminal := status == "completed" || status == "failed" || !claimed && status == "cancelled"
+			if !terminal && (claimed || status != "queued") {
 				return fail(409, "verification_active", "reconcile the existing verification before trying again")
+			}
+			if claimed {
+				var held bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations WHERE run_id=$1 AND state='active')`, *run).Scan(&held); err != nil {
+					return err
+				}
+				if held {
+					return fail(409, "verification_active", "settle the existing verification before trying again")
+				}
 			}
 			if !claimed && status == "queued" {
 				if err := cancelQueuedRun(ctx, tx, *run); err != nil {

@@ -2,12 +2,23 @@
 package agentpairing_test
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 )
+
+func retryErrorCode(t *testing.T, w *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	var out struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Code != want {
+		t.Fatalf("retry failure must be %s, got %s", want, out.Code)
+	}
+}
 
 func retryPath(v agentpairing.View, account string) string {
 	return "/api/agent-pairing/computers/" + *v.ComputerID + "/enrollments/" + account + "/verify"
@@ -48,7 +59,7 @@ func TestVerifyAgainKeepsEnrollmentAndSiblingAndCreatesOneBoundRun(t *testing.T)
 		t.Fatal("retry changed pairing, key, generation, approval or cleanup")
 	}
 	// A lost response or parallel click cannot create a second run.
-	f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 409)
+	retryErrorCode(t, f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 409), "conflict")
 	var newView agentpairing.View
 	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &newView)
 	if *newView.Enrollments[1].VerificationRunID != *sibling.VerificationRunID || newView.Enrollments[1].VerificationState != "queued" || *newView.Enrollments[0].VerificationRunID != out.RunID || newView.Enrollments[0].VerificationState != "queued" {
@@ -74,7 +85,7 @@ func TestVerifyAgainKeepsEnrollmentAndSiblingAndCreatesOneBoundRun(t *testing.T)
 	f.claim(v, e, key, ids, 200)
 	// Claimed work cannot be replaced, even if its approval later expires.
 	expireVerification(t, f, e)
-	f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 409)
+	retryErrorCode(t, f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 409), "verification_active")
 }
 
 func TestVerifyAgainExpiredReadyProjectionAndOwnerBoundary(t *testing.T) {
@@ -109,13 +120,11 @@ func TestVerifyAgainExpiredReadyProjectionAndOwnerBoundary(t *testing.T) {
 	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Other owner','{}') RETURNING id::text`, f.tenantID).Scan(&other); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, e.AccountID, other); err != nil {
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2, linked_at=clock_timestamp() WHERE id=$1`, e.AccountID, other); err != nil {
 		t.Fatal(err)
 	}
 	w = f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 403)
-	if w.Body.String() == "" {
-		t.Fatal("missing ownership failure")
-	}
+	retryErrorCode(t, w, "forbidden")
 	var runs int
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE requested_account_id=$1`, e.AccountID).Scan(&runs); err != nil {
 		t.Fatal(err)
@@ -123,8 +132,43 @@ func TestVerifyAgainExpiredReadyProjectionAndOwnerBoundary(t *testing.T) {
 	if runs != 1 {
 		t.Fatal("denied retry wrote a run")
 	}
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, e.AccountID, f.person); err != nil {
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2, linked_at=clock_timestamp() WHERE id=$1`, e.AccountID, f.person); err != nil {
 		t.Fatal(err)
 	}
 	f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 200)
+}
+
+func TestVerifyAgainConnectOnlyPreservesOrdinaryAllowanceAndTenantBoundary(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/windows", map[string]any{"starts_at": time.Now(), "ends_at": time.Now().Add(time.Hour), "unit": "requests", "allowance": 2, "pace_model": "unrestricted"}, true, "", 201)
+	ordinary := func() string {
+		t.Helper()
+		var data string
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(w) ORDER BY id)::text FROM account_allowance_windows w WHERE account_id=$1 AND NOT pairing_verification`, e.AccountID).Scan(&data); err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	before := ordinary()
+	f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 200)
+	retryErrorCode(t, f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 409), "conflict")
+	if ordinary() != before {
+		t.Fatal("verification changed ordinary allowance")
+	}
+	foreign := newFixtureInTenant(t, f.db, "foreign-retry")
+	other := foreign.propose("claude")
+	foreign.approve(other, "connect_only")
+	otherView := foreign.redeem(other)
+	retryErrorCode(t, f.call("POST", retryPath(otherView, otherView.Enrollments[0].AccountID), retryBody(otherView, otherView.Enrollments[0]), true, "", 404), "not_found")
+	var runs int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE requested_account_id=$1`, otherView.Enrollments[0].AccountID).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 {
+		t.Fatal("cross-tenant retry created a run")
+	}
 }

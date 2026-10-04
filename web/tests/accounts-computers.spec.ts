@@ -292,7 +292,6 @@ test('Touch ID pairing readiness and upgrade guidance keep the computer control 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
-
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`AEON-685: owner verification stays put at ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1100 })

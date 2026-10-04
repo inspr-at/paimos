@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"time"
 
@@ -35,7 +36,8 @@ func requestVerificationApproval(args []string, out io.Writer, opener func(conte
 	if err := f.Parse(args); err != nil {
 		return err
 	}
-	if account == "" || len(f.Args()) != 0 {
+	validAccount, _ := regexp.MatchString(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`, account)
+	if !validAccount || len(f.Args()) != 0 {
 		return errors.New("usage: aeon-agentd verify --account ID [--state-root PATH] [--no-browser]")
 	}
 	if root == "" {

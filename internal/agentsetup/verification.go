@@ -13,7 +13,7 @@ func (e *Engine) VerificationApprovalURL(account string) (string, error) {
 	if !uuidPattern.MatchString(account) {
 		return "", errors.New("verify requires an enrolled account UUID")
 	}
-	s, err := e.load()
+	s, err := e.loadSnapshot(true)
 	if err != nil {
 		return "", err
 	}
