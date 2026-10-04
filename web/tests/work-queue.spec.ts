@@ -332,6 +332,38 @@ test('stale progress queues as Open with Undo and keeps list controls still', as
   ] })
 })
 
+test('an ordinary title edit keeps stale work queueable without reloading', async ({ page }) => {
+  const { calls, state, data } = await world(page, { stale: true })
+  const ticket = row(page, 'PHAROS-12')
+  const detailRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/nodes/n-2' && response.request().method() === 'GET')
+  await ticket.locator('.title-text').click()
+  await detailRead
+  const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(drawer.locator('.inline-title .title-text')).toBeVisible()
+  const reads = () => calls.filter(call => call.method === 'GET' && call.path === '/api/nodes/n-2').length
+  const before = reads()
+  await drawer.locator('.inline-title .title-text').click()
+  const title = drawer.getByRole('textbox', { name: 'Title', exact: true })
+  await title.fill('Edited idle work')
+  await title.blur()
+  await expect(drawer.locator('.inline-title .title-text')).toHaveText('Edited idle work')
+  await expect(drawer.locator('.q-btn')).toHaveAttribute('aria-disabled', 'false')
+  expect(calls.some(call => call.method === 'PATCH' && call.path === '/api/nodes/n-2')).toBe(true)
+  expect(reads()).toBe(before)
+  await drawer.getByRole('button', { name: 'Close ticket details' }).click()
+  const queue = ticket.locator('.q-btn')
+  await ticket.hover()
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'queue immediately after edit', run: async () => {
+      await queue.click()
+      await expect(queue).toHaveAttribute('aria-pressed', 'true')
+      await expect(ticket.locator('.c-status')).toContainText('Open')
+    } },
+  ] })
+  expect(state.ids).toContain('n-2')
+  expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('Edited idle work')
+})
+
 test('assigned In progress explains who is working using the display status', async ({ page }) => {
   const { state } = await world(page, { assigned: true })
   const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
