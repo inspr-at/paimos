@@ -3105,8 +3105,10 @@ normal authorization remains in each writer's final transaction. Derived parent
 updates preserve `updated_at`, so they do not invalidate an unrelated title/body
 edit. Live views consume `status_autopilot.derived` at that unchanged revision.
 At that revision, the row store rejects node responses sent before a newer
-accepted read or derived hint, keeping late snapshots from reverting status;
-list snapshots retain their server-position ordering.
+accepted read or derived hint. Late list responses preserve status from newer
+node reads while still supplying list-only projections. List snapshots retain
+their server-position ordering; cross-source status uses request order when
+positions cannot be compared.
 
 Rollout remains OFF until AEON-429's `features` table and service merge. Its
 catalog must register `work-parent-status` (label: “Parents follow their work”),

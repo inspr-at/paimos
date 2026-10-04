@@ -68,6 +68,9 @@ interface Entry {
   // List projections change independently of updated_at. Order their snapshots
   // by the server event position (AEON-449), then request order for older servers.
   projectionRead?: { position?: number; sent: number; landed: number }
+  // Status is carried by node and list reads, unlike list-only projections.
+  // Across sources without comparable positions, use their request order.
+  stateRead?: { position?: number; sent: number }
   projectionChangedAt?: number
   projectionFloor?: number
   // Keep the most recently delivered hint separately from the monotonic floor:
@@ -238,10 +241,18 @@ export class RowStore {
       if (order > 0 || full || !entry.full || unversioned) {
         const incoming = make()
         const staleCount = full && sent < entry.countChangedAt && !!entry.latest
-        const copy = staleCount ? frozen({ ...incoming, children_count: entry.latest!.children_count }) : incoming
+        const stateRead = entry.stateRead
+        const staleState = order === 0 && !!stateRead && sent < stateRead.sent
+          && (position === undefined || stateRead.position === undefined)
+        const copy = staleCount || staleState ? frozen({
+          ...incoming,
+          ...(staleCount ? { children_count: entry.latest!.children_count } : {}),
+          ...(staleState ? { state: entry.latest!.state } : {}),
+        }) : incoming
         const previous = entry.latest
         if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
         entry.latest = copy
+        if (!staleState) entry.stateRead = { position, sent }
         if (full) entry.projectionRead = { position, sent, landed: ++this.clock }
         entry.full = full || (order === 0 && entry.full)
         // A list page replaces the count, so earlier local child deltas no
@@ -254,6 +265,9 @@ export class RowStore {
         // read could only guess): the display object showing it takes them now.
         if (order === 0 && entry.row && entry.shown === previous && entry.pins === 0) this.assign(entry, copy)
       }
+      // A node response can confirm a full copy without replacing its fields.
+      // Its confirmation must still fence status from older list requests.
+      if (!full) entry.stateRead = { sent }
     }
     if (!entry.row && entry.latest && this.showable(entry)) {
       entry.row = reactive(clone(entry.latest)) as ListItem

@@ -478,6 +478,84 @@ describe('RowStore: any delivery order ends at the server\'s state', () => {
 })
 
 describe('derived parent status', () => {
+  it('a node confirmation fences status even after a full cache was already confirmed', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { state: 'done' }), rows.mark(), { show: true })!
+    rows.adopt(item('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+    const older = rows.mark()
+    rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+    rows.adopt(item('n1', 1, { state: 'open' }), older, { show: true })
+    expect(row.state).toBe('done')
+    expect(rows.latest('n1')?.state).toBe('done')
+  })
+
+  it('multiple older list responses cannot consume the newer node status fence', () => {
+    const rows = new RowStore()
+    const row = rows.adoptNode(node('n1', 1, { state: 'open' }), rows.mark(), { show: true })!
+    const first = rows.mark(), second = rows.mark()
+    rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+    rows.adopt(stampAt(item('n1', 1, { state: 'open' }), { position: 41 }), first, { show: true })
+    rows.adopt(stampAt(item('n1', 1, { state: 'blocked' }), { position: 42 }), second, { show: true })
+    expect(row.state).toBe('done')
+    expect(rows.latest('n1')?.state).toBe('done')
+  })
+
+  it('positioned list status keeps server ordering after a newer list replaces the node fence', () => {
+    const rows = new RowStore()
+    const row = rows.adoptNode(node('n1', 1, { state: 'open' }), rows.mark(), { show: true })!
+    rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+    const first = rows.mark(), second = rows.mark()
+    rows.adopt(stampAt(item('n1', 1, { state: 'blocked', lead_worker: null }), { position: 42 }), second, { show: true })
+    rows.adopt(stampAt(item('n1', 1, { state: 'delivered', lead_worker: { name: 'Later worker', key: 's:later' } }), { position: 43 }), first, { show: true })
+    expect(row.state).toBe('delivered')
+    expect(row.lead_worker?.name).toBe('Later worker')
+    // A later-started read with a lower position still loses.
+    rows.adopt(stampAt(item('n1', 1, { state: 'blocked', lead_worker: null }), { position: 42 }), second, { show: true })
+    expect(row.state).toBe('delivered')
+    expect(row.lead_worker?.name).toBe('Later worker')
+    // A read started after delivery can confirm a database rewind.
+    rows.adopt(stampAt(item('n1', 1, { state: 'open', lead_worker: null }), { position: 1 }), rows.mark(), { show: true })
+    expect(row.state).toBe('open')
+    expect(row.lead_worker).toBeNull()
+  })
+
+  for (const populatedBy of ['node', 'list'] as const) {
+    for (const positioned of [false, true]) {
+      for (const hint of [false, true]) {
+        it(`keeps fresh node status when an older ${positioned ? 'positioned' : 'unpositioned'} list lands in a ${populatedBy} cache${hint ? ' after a derived hint' : ''}`, () => {
+          const rows = new RowStore()
+          const list = (state: string, position: number, lead_worker: ListItem['lead_worker'] = null) => {
+            const copy = item('n1', 1, { state, lead_worker })
+            return positioned ? stampAt(copy, { position }) : copy
+          }
+          const initial = rows.mark()
+          const row = populatedBy === 'node'
+            ? rows.adoptNode(node('n1', 1, { state: 'open' }), initial, { show: true })!
+            : rows.adopt(list('open', 40), initial, { show: true })!
+          if (hint) rows.note({ id: 'n1', type: 'status_autopilot.derived', eventId: 41, change: 'updated', fields: ['state'], revision: at(1) })
+          // Both reads follow the hint, and the list covers its position. Its
+          // rejection cannot rely on a missing hint or a lower list position.
+          const older = rows.mark(), fresh = rows.mark()
+          rows.adoptNode(node('n1', 1, { state: 'done' }), fresh, { show: true })
+          expect(rows.latest('n1')?.state).toBe('done')
+          expect(row.state).toBe('done')
+          expect(rows.adopt(list('open', 41, { name: 'Listed worker', key: 's:listed' }), older, { show: true })).toBe(row)
+          expect(rows.latest('n1')?.state).toBe('done')
+          expect(rows.shown('n1')?.state).toBe('done')
+          expect(row.state).toBe('done')
+          // Node reads do not carry list projections: the list may fill those
+          // without also replacing the independently ordered derived state.
+          expect(row.lead_worker?.name).toBe('Listed worker')
+          expect(rows.revision('n1')).toBe(at(1))
+          expect(rows.waiting('n1')).toBe(false)
+          expect(rows.current('n1')).toBe(true)
+          rows.adopt(list('blocked', 42), rows.mark(), { show: true })
+          expect(row.state).toBe('blocked')
+        })
+      }
+    }
+  }
+
   for (const populatedBy of ['node', 'list'] as const) {
     for (const refreshedBy of ['node', 'list'] as const) {
       for (const hint of [false, true]) {
