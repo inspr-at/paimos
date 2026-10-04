@@ -1,0 +1,500 @@
+{
+  "ticket": "AEON-683",
+  "review": "review-cg42: P2 required validation incomplete",
+  "tested_spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+  "new_behavior_changes": false,
+  "product_defect": {
+    "revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+    "spec": "work-queue.spec.ts",
+    "test": "approved queue surfaces in light/dark and narrow layouts, with accessible dialogs and release evidence",
+    "observed": "All 20 repetitions with the 7718e84e spec time out at the phone queue opener after settled drawer navigation. Keyboard/drag passes all 20.",
+    "root_cause": "Historical ProjectView.vue places the only queue opener in .activity.header-activity, then max-width:600px sets .header-activity display:none.",
+    "ownership": "Header feature is absent from this main-based branch; origin/work/aeon-646-hide still contains the rule. No other worktree edited. Coordinator handoff recorded on AEON-683.",
+    "proposed_diff": "In the phone header, retain .header-activity as a visible reserved grid slot and hide only its timestamp span; keep .q-stat visible and verify folded/compact/comfortable behavior, 390px overflow and control bounds. Preserve the failing phone assertion.",
+    "status": "open: owning header branch correction and acceptance required"
+  },
+  "unit_validation": [
+    {
+      "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/queue-filter.test.ts",
+      "passed": 2
+    },
+    {
+      "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/work-queue.test.ts",
+      "passed": 5
+    },
+    {
+      "command": "cd web && ./node_modules/.bin/vitest run tests/work-queue-store.unit.test.ts --maxWorkers=1",
+      "passed": 9
+    },
+    {
+      "command": "cd web && ./node_modules/.bin/vitest run tests/agents-working.unit.test.ts --maxWorkers=1",
+      "passed": 7
+    }
+  ],
+  "lane": "local macOS arm64; supervised pinned Playwright Chromium headless shell; one spec at a time, workers=1, retries=0",
+  "selection": "Only the historical failing cases in each spec, 20 repetitions per corrected case. This is not a full-spec or remote acceptance claim.",
+  "source_verification": [
+    {
+      "revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "verified_files": 658,
+      "product_and_helper_bytes_match": true,
+      "archive_sha256": "e027a49a3f17a9410052b0b8c1df82ba6051b54aea7813ecec7f1ab84f0d0eed"
+    },
+    {
+      "revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+      "verified_files": 653,
+      "product_and_helper_bytes_match": true,
+      "archive_sha256": "4e0334efd268a75c7d088b9c0a7958f1c4ffcbefe8ecc17aab99725c5a761856"
+    },
+    {
+      "revision": "9998114828af54102a3ef8ee2caab18f8801cb19",
+      "verified_files": 650,
+      "product_and_helper_bytes_match": true,
+      "archive_sha256": "1f5c18bdebc4257be0be74024547ea7722ae1fbf56748a0081a9e0d000ba1069"
+    }
+  ],
+  "dependency_lock_unchanged": true,
+  "historical_runs": [
+    {
+      "id": 37176376717,
+      "revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c"
+    },
+    {
+      "id": 37176579457,
+      "revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42"
+    },
+    {
+      "id": 37175737664,
+      "revision": "9998114828af54102a3ef8ee2caab18f8801cb19"
+    }
+  ],
+  "preparation": "Historical web, scripts and required internal JSON fixtures exported into own ignored tmp/aeon-683-fix2/<revision>; dependencies symlinked from this worktree after verifying identical lockfile. Before uses original historical spec; after replaces ONLY that spec with 7718e84e. Product, helpers and fixtures remain on the historical revision.",
+  "remote_acceptance": {
+    "status": "open",
+    "launcher_exit_code": 3,
+    "reason": "scripts/playwright-remote.mjs refuses before SSH: OPS-247 bootstrap and approved launcher pending. Fix2 brief explicitly puts mbp2606 off limits. No origin branch exists for this commit; user prohibits push. remote-test.sh is Go-only; no affected Go packages. No CI-equivalent Linux Chromium image was available locally.",
+    "command": [
+      "npm",
+      "--prefix",
+      "web",
+      "run",
+      "test:remote",
+      "--",
+      "views-filters.spec.ts",
+      "--repeat-each=20",
+      "--workers=1",
+      "--retries=0"
+    ]
+  },
+  "runs": [
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+      "spec": "status-help.spec.ts",
+      "phase": "after",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "status-help.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "human-check filter is linked",
+        "--repeat-each=20",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-status-help-after-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:10:35.761960+00:00",
+      "finished_at": "2026-10-04T09:10:35.865509+00:00",
+      "validation_status": "not executed: safe runner refused live host lock",
+      "log_sha256": "238cba100ffc49a9dadf0d4791344b1b11d4a6c08cd7033874a7e0be133ddba1",
+      "results": []
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+      "spec": "status-help.spec.ts",
+      "phase": "after",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "status-help.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "human-check filter is linked",
+        "--repeat-each=20",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-status-help-after-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:12:33.229437+00:00",
+      "finished_at": "2026-10-04T09:12:33.330878+00:00",
+      "validation_status": "not executed: safe runner refused live host lock",
+      "log_sha256": "4e531901a4335b9ff2ae450179195839ed173990e57006cb4e9c58dcfc81d167",
+      "results": []
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec": "status-help.spec.ts",
+      "phase": "before",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "status-help.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "human-check filter is linked",
+        "--repeat-each=1",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-status-help-before-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:10:35.577750+00:00",
+      "finished_at": "2026-10-04T09:10:35.695619+00:00",
+      "validation_status": "not executed: safe runner refused live host lock",
+      "log_sha256": "238cba100ffc49a9dadf0d4791344b1b11d4a6c08cd7033874a7e0be133ddba1",
+      "results": []
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec": "status-help.spec.ts",
+      "phase": "before",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "status-help.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "human-check filter is linked",
+        "--repeat-each=1",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-status-help-before-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:12:33.042032+00:00",
+      "finished_at": "2026-10-04T09:12:33.163162+00:00",
+      "validation_status": "not executed: safe runner refused live host lock",
+      "log_sha256": "4e531901a4335b9ff2ae450179195839ed173990e57006cb4e9c58dcfc81d167",
+      "results": []
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+      "spec": "views-filters.spec.ts",
+      "phase": "after",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "views-filters.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+        "--repeat-each=20",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-views-filters-after-artifacts"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-10-04T08:55:10.728586+00:00",
+      "finished_at": "2026-10-04T08:57:39.781307+00:00",
+      "results": [
+        {
+          "title": "an excluded value filters with \"not\", shows in its control and travels in the URL and the API",
+          "outcomes": {
+            "passed": 20
+          },
+          "errors": []
+        },
+        {
+          "title": "Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date",
+          "outcomes": {
+            "passed": 20
+          },
+          "errors": []
+        },
+        {
+          "title": "a custom date range filters imported start dates by day",
+          "outcomes": {
+            "passed": 20
+          },
+          "errors": []
+        },
+        {
+          "title": "saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved",
+          "outcomes": {
+            "passed": 20
+          },
+          "errors": []
+        },
+        {
+          "title": "in a view the column set belongs to the view; row height is the person\u2019s own",
+          "outcomes": {
+            "passed": 20
+          },
+          "errors": []
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-04T08:55:11.344Z",
+        "duration": 148091.95899999997,
+        "expected": 100,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "report_sha256": "80fbff2cb8e70962a4a91d0a39cbb8cb2a6d02604baa649b664df468d1989c79",
+      "log_sha256": "a6ac7c693dab38bad0152f12e1bcade8e5b3b5ea7838c2f59ebfdf61428af9d8"
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec": "views-filters.spec.ts",
+      "phase": "before",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "views-filters.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+        "--repeat-each=1",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-views-filters-before-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T08:54:10.548656+00:00",
+      "finished_at": "2026-10-04T08:55:07.211003+00:00",
+      "results": [
+        {
+          "title": "an excluded value filters with \"not\", shows in its chip and travels in the URL and the API",
+          "outcomes": {
+            "failed": 1
+          },
+          "errors": [
+            "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByLabel('Applied filters')\nExpected substring: \"Statusnot Done, Cancelled\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toContainText\" getByLabel('Applied filter"
+          ]
+        },
+        {
+          "title": "Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date",
+          "outcomes": {
+            "failed": 1
+          },
+          "errors": [
+            "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByLabel('Applied filters')\nExpected substring: \"EpicGuarded multi-cloud provisioning\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toContainText\" getByLabel('App"
+          ]
+        },
+        {
+          "title": "a custom date range filters imported start dates by day",
+          "outcomes": {
+            "failed": 1
+          },
+          "errors": [
+            "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByLabel('Applied filters')\nExpected substring: \"Start1 Sep \u2013 15 Sep\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toContainText\" getByLabel('Applied filters') wi"
+          ]
+        },
+        {
+          "title": "saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved",
+          "outcomes": {
+            "timedOut": 1
+          },
+          "errors": [
+            "Test timeout of 30000ms exceeded."
+          ]
+        },
+        {
+          "title": "in a view the column set belongs to the view; row height is the person\u2019s own",
+          "outcomes": {
+            "failed": 1
+          },
+          "errors": [
+            "Error: locator.click: Error: strict mode violation: getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Compact' }) resolved to 2 elements:\n    1) <button role=\"radio\" type=\"button\" data-v-60f71697=\"\" aria-checked=\"false\">\u2026</"
+          ]
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-04T08:54:11.090Z",
+        "duration": 55674.433,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 5,
+        "flaky": 0
+      },
+      "report_sha256": "bc88fc27ac21cd98b2d5dc368c86fbc733db71630b0c67891bd0961b78f5bd04",
+      "log_sha256": "96c37041738f23d1a1ac92327ab36c0f816dd5e75c5bfab734ba67da57e90f8b"
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+      "spec": "work-queue.spec.ts",
+      "phase": "after",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "work-queue.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "keyboard and drag moves|approved queue surfaces",
+        "--repeat-each=20",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-work-queue-after-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T08:58:46.028358+00:00",
+      "finished_at": "2026-10-04T09:09:37.217818+00:00",
+      "results": [
+        {
+          "title": "keyboard and drag moves persist, use workspace positions, retain focus, reset and filter membership",
+          "outcomes": {
+            "passed": 20
+          },
+          "errors": []
+        },
+        {
+          "title": "approved queue surfaces in light/dark and narrow layouts, with accessible dialogs and release evidence",
+          "outcomes": {
+            "timedOut": 20
+          },
+          "errors": [
+            "Test timeout of 30000ms exceeded."
+          ]
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-04T08:58:46.419Z",
+        "duration": 650581.045,
+        "expected": 20,
+        "skipped": 0,
+        "unexpected": 20,
+        "flaky": 0
+      },
+      "report_sha256": "d45d7685fe8585cd4a1665463100e11b039a0d9d3adc4ac6003193821d6d1ef2",
+      "log_sha256": "e410d0db824e6db0092a552df2930ac5ad00ecaba35d2e8cc523f33ef1df37cd"
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec": "work-queue.spec.ts",
+      "phase": "before",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "work-queue.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "keyboard and drag moves|approved queue surfaces",
+        "--repeat-each=1",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix2/evidence/6a27bb1b-work-queue-before-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T08:57:42.284634+00:00",
+      "finished_at": "2026-10-04T08:58:45.985035+00:00",
+      "results": [
+        {
+          "title": "keyboard and drag moves persist, use workspace positions, retain focus, reset and filter membership",
+          "outcomes": {
+            "timedOut": 1
+          },
+          "errors": [
+            "Test timeout of 30000ms exceeded."
+          ]
+        },
+        {
+          "title": "approved queue surfaces in light/dark and narrow layouts, with accessible dialogs and release evidence",
+          "outcomes": {
+            "timedOut": 1
+          },
+          "errors": [
+            "Test timeout of 30000ms exceeded."
+          ]
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-04T08:57:42.836Z",
+        "duration": 62906.192,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "report_sha256": "f1a0bcf3035821cbef57ec4ca939ef58e115388337d81a7cf4cda7967b5a95e2",
+      "log_sha256": "a5081f7ab0674f448c1cfa2c34b3b628e3bf6a518cf8d0eb8172947e5d68edfd"
+    }
+  ],
+  "validation_status": "partial: review gate remains closed",
+  "pending_runs": [
+    {
+      "product_revision": "6a27bb1b",
+      "spec": "status-help.spec.ts",
+      "selection": "human-check filter is linked",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "0c7d02ca",
+      "spec": "views-filters.spec.ts",
+      "selection": "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "0c7d02ca",
+      "spec": "work-queue.spec.ts",
+      "selection": "keyboard and drag moves",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "0c7d02ca",
+      "spec": "status-help.spec.ts",
+      "selection": "human-check filter is linked",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "99981148",
+      "spec": "no-shift.spec.ts",
+      "selection": "Agents working dial and selectors",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "99981148",
+      "spec": "accounts-computers.spec.ts",
+      "selection": "Agents at once saves|stored ceiling arrives",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    }
+  ]
+}
