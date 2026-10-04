@@ -27,6 +27,9 @@ func TestVerifyCommandOpensOnlyOwnerApprovalAndPreservesFixtureState(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	account := "ab000000-0000-4000-8000-000000000685"
 	proof := strings.Repeat("a", 64)
 	state := map[string]any{"schema": "aeon.agent-setup.private.v1", "origin": "https://fixture.example.test",
