@@ -726,7 +726,7 @@ defineExpose({ toggleHistory })
   .exec-copy { flex: 1; display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
   .exec-account { display: contents; }
   .exec-acct { display: none; }
-  .exec-harness { order: -1; flex: none; font-size: 12px; color: var(--ink-2); }
+  .exec-harness { order: -1; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
   .exec-model { flex: 0 1 auto; min-width: 0; font-size: 12px; }
   .exec-harness ~ .exec-model::before, .exec-copy:has(.exec-harness) .exec-model::before { content: '·'; margin: 0 .4em; color: var(--ink-3); }
   .c-state { grid-column: 2; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }

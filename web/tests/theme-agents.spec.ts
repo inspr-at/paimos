@@ -8,6 +8,10 @@ import { expectStableControls } from './helpers/stable'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 
+// Each case measures many controls after every option and captures both previews.
+// Reserve time for those real interactions on shared CI runners.
+test.setTimeout(90_000)
+
 const shots = resolve('test-results/aeon-643')
 const initial = (): ThemeRecord => ({
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '',

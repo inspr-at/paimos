@@ -64,7 +64,8 @@ test('shared sheet variants and Start agent follow window resizing within their 
 
   await mockStartAgent(page)
   await page.goto('/agents')
-  await page.locator('button.start-agent').click()
+  await page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }).click()
+  await page.getByRole('menuitem', { name: /^Start agent/ }).click()
   const start = dialog(page, 'Start agent')
   await expect(start).toBeVisible()
   await resize(start, 1040, false)

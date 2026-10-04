@@ -84,7 +84,7 @@ watch(() => [props.viewer, props.value, props.revision], () => { if (editing.val
 <style scoped>
 .f-pm { --pm-size: 22px; --value-width: 24px; --value-height: 26px; --value-size: 14px; display: inline-flex; align-items: center; flex: none; gap: 3px; padding: 0; }
 .f-pm-total { --pm-size: 26px; --value-width: 30px; --value-height: 30px; --value-size: 19px; color: var(--teal-ink); }
-.pm { display: grid; place-items: center; flex: none; width: var(--pm-size); height: var(--pm-size); padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised); box-shadow: var(--shadow-btn); color: var(--teal-ink); cursor: pointer; }
+.pm { display: grid; place-items: center; flex: none; width: var(--pm-size); height: var(--pm-size); padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised); box-shadow: var(--shadow-btn); color: var(--teal-ink); cursor: pointer; transition: background .15s ease; }
 .pm:disabled { opacity: .3; cursor: default; }
 .value-slot { display: block; flex: none; width: var(--value-width); height: var(--value-height); color: var(--ink); font: 650 var(--value-size)/1 var(--font); font-variant-numeric: tabular-nums; }
 .f-num { color: var(--teal-ink); font-weight: 700; }
@@ -101,4 +101,5 @@ watch(() => [props.viewer, props.value, props.revision], () => { if (editing.val
   .value:hover { background: var(--surface-2); box-shadow: inset 0 -1px 0 var(--line-2); }
 }
 @media (pointer: coarse) { .f-pm { --pm-size: 44px; --value-width: 44px; --value-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .pm { transition: none; } }
 </style>

@@ -81,6 +81,8 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await stable(sw, positions[0]!); await stable(scope, positions[1]!); await stable(minutes, positions[2]!)
     await scope.click(); await expect(picker.getByRole('checkbox').first()).toHaveAttribute('aria-disabled', 'true'); await picker.press('Escape')
     await sw.uncheck(); await expect(page.locator('.wind-confirm')).toHaveCount(0)
+    // Withdrawal refreshes the session list; wait for its control eligibility.
+    await expect(page.getByRole('button', { name: 'Pause worker-1', exact: true })).toBeVisible()
     await page.locator('.bulk-tools').getByRole('button', { name: 'Pause all…', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Pause all', exact: true }); await expect(dialog).toBeVisible()
     const action = dialog.locator('.pause-actions'), actionBounds = await bounds(action), note = dialog.getByRole('textbox', { name: /Note for/ }), noteBounds = await bounds(note)

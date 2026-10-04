@@ -98,6 +98,9 @@ const pairingAccess = computed(() => pairingPermissions({
   principalKind: session.identity?.principal.kind,
 }))
 const showConnect = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
+const canAttach = computed(() => session.identity?.principal.kind === 'person' && pairingAccess.value.canLookup)
+const showNew = computed(() => canStart.value || canAttach.value || showConnect.value)
+watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null })
 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
@@ -356,7 +359,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
           <div class="head-side">
             <p class="freshness" :class="{ on: live && !stale, stale }" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" /><span>{{ stale ? 'Update delayed' : live ? 'Live' : 'Connecting…' }}</span></p>
-            <button type="button" class="btn primary add-agent" aria-label="New: start an agent, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
+            <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start an agent, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
             <button type="button" class="icon-btn flat" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
           </div>
         </div>
@@ -367,7 +370,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <div role="menu" class="header-menu" @keydown="menuKeys">
           <template v-if="headerMenu.type === 'add'">
             <button v-if="canStart" type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent…<small>Pick a ticket and a harness.</small></span></button>
-            <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
+            <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
             <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
           </template>
           <template v-else>

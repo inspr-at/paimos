@@ -169,19 +169,31 @@ for (const width of [1440, 1024, 390]) {
     const more = dial.getByRole('button', { name: 'One agent more at once' })
     const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
+    // Destination labels change with the current value; the stepper controls persist.
+    const rowFewer = row.locator('.lim-step .pm').nth(0), rowMore = row.locator('.lim-step .pm').nth(1)
     await expect(row).toBeVisible()
     await expect(more).toHaveCSS('transition-property', 'background')
-    const rowCount = await dial.locator('.rows > li').count()
-    const rowsHeight = (await dial.locator('.rows').boundingBox())!.height
-    expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))
+    await page.evaluate(() => document.fonts.ready)
+    // The merged dial uses a separate explanation row and a container breakpoint.
+    // Verify uniform selector rows; the interaction guard below proves stability.
+    const rowHeights = await dial.locator('.rows > li').evaluateAll(items => items.map(item => {
+      const style = getComputedStyle(item)
+      // The first row has no separator; compare the actual content slots.
+      return item.getBoundingClientRect().height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
+    }))
+    expect(rowHeights.length).toBeGreaterThan(0)
+    for (const height of rowHeights) {
+      expect(height).toBeGreaterThan(0)
+      expect(Math.abs(height - rowHeights[0]!)).toBeLessThanOrEqual(.5)
+    }
     await expectStableControls({
-      controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore: row.getByRole('button', { name: 'Codex: at most one more' }), rowFewer: row.getByRole('button', { name: 'Codex: at most one fewer' }) },
+      controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: [
         { name: 'hold total stepper', run: async () => { await more.hover(); await page.mouse.down() } },
         { name: 'release total stepper', run: () => page.mouse.up() },
         ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
-        ...['more', 'fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: `Codex: at most one ${direction}` }).click() })),
+        ...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } })),
       ],
     })
   })

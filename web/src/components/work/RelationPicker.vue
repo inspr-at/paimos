@@ -158,30 +158,34 @@ let lastChoice = 'relates'
       <label class="search">
         <AppIcon name="search" :size="14" class="lead" />
         <input
-          ref="input" v-model="term" class="field" type="text" role="combobox" aria-controls="relation-options" aria-autocomplete="list" :aria-expanded="true"
+          ref="input" v-model="term" class="field" type="text" role="combobox" aria-controls="relation-results" aria-autocomplete="list" :aria-expanded="true"
           :aria-activedescendant="results.length ? `relation-option-${active}` : undefined" :aria-label="`Find the ticket ${subject} ${choice.label.toLowerCase()}`"
           placeholder="Find a ticket by key or title" autocomplete="off" spellcheck="false" data-autofocus @keydown="keydown"
         />
         <span v-if="loading || busy" class="spinner" aria-hidden="true" />
       </label>
       <p v-if="refusal" class="refusal" role="alert"><AppIcon name="alert" :size="14" /><span>{{ refusal }}</span></p>
-      <div id="relation-options" class="options" role="listbox" :aria-label="query ? 'Tickets found' : 'Recent tickets'" :class="{ stale: loading && !!results.length }">
+      <div id="relation-options" class="options" :class="{ stale: loading && !!results.length }">
         <p v-if="!query && results.length" class="group-label eyebrow" aria-hidden="true">Recent</p>
-        <div v-for="(result, index) in results" :key="result.id" class="option-row" role="presentation">
-          <div
-            :id="`relation-option-${index}`" role="option" class="option"
-            :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
-            :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="choose(result)"
-            @pointermove="active = index" @click="choose(result)"
-          >
-            <StatusIcon :state="result.state" :size="12" />
-            <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-            <span v-clip-tip="result.title" class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-            <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
-            <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
-            <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+        <div id="relation-results" class="option-list" role="listbox" :aria-label="query ? 'Tickets found' : 'Recent tickets'">
+          <div v-for="(result, index) in results" :key="result.id" class="option-row" role="presentation">
+            <div
+              :id="`relation-option-${index}`" role="option" class="option"
+              :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
+              :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="choose(result)"
+              @pointermove="active = index" @click="choose(result)"
+            >
+              <StatusIcon :state="result.state" :size="12" />
+              <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+              <span v-clip-tip="result.title" class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+              <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
+              <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
+              <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+            </div>
           </div>
-          <ReadName :text="`${result.key} · ${result.title}`" />
+        </div>
+        <div v-if="results.length" class="option-reads" role="group" aria-label="Read full ticket names">
+          <div v-for="result in results" :key="result.id" class="read-row"><ReadName :text="`${result.key} · ${result.title}`" /></div>
         </div>
         <p v-if="failed" class="note error" role="alert">{{ failed }}</p>
         <p v-else-if="query && !loading && !results.length && searched === query" class="note">Nothing matches “{{ query }}”. Try a key like {{ projectKey }}-12 or words from a title.</p>
@@ -213,8 +217,11 @@ let lastChoice = 'relates'
 .refusal { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); font-size: 12.5px; line-height: 1.45; }
 .refusal svg { flex-shrink: 0; margin-top: 2px; }
 .refusal span { color: var(--ink); }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; transition: opacity .12s ease; }
-.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px; transition: opacity .12s ease; }
+.option-list, .option-reads { display: grid; gap: 1px; align-content: start; }
+.option-list { grid-column: 1; }.option-reads { grid-column: 2; }
+.option-row, .read-row { display: grid; min-height: 36px; }
+.options > .group-label, .options > .note { grid-column: 1 / -1; }
 .options.stale { opacity: .6; }
 .group-label { padding: 4px 8px 2px; }
 .option { display: flex; align-items: center; min-width: 0; gap: 9px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
@@ -235,12 +242,12 @@ let lastChoice = 'relates'
 @media (max-width: 600px), (pointer: coarse) {
   .type { height: 40px; padding: 0 6px; font-size: 13px; }
   .search .field { height: 44px; font-size: 16px; }
-  .option { min-height: 44px; }
+  .option, .option-row, .read-row { min-height: 44px; }
   .foot { display: none; }
 }
 
 @media (max-width: 720px) {
-  .option { height: 52px; min-height: 52px; }
+  .option, .option-row, .read-row { height: 52px; min-height: 52px; }
   .title { line-height: 18px; }
   .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
 }

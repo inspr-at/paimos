@@ -2027,7 +2027,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 @media (max-width: 600px) {
   .header-activity { display: none; }
-  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description"; gap: 4px 10px; }
+  .header-activity:has(.q-stat) { display: flex; grid-area: activity; justify-self: start; }
+  .header-activity:has(.q-stat) > span { display: none; }
+  .header-activity .q-stat { min-height: 44px; margin: 0; }
+  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; gap: 4px 10px; }
   .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
   .project-page[class*="header-"] .title-line h1 { font-size: 24px; }
   .project-page.header-comfortable .title-line h1 { font-size: 28px; }

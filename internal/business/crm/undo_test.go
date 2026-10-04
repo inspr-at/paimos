@@ -4,6 +4,7 @@ package crm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -370,5 +371,52 @@ func TestCustomerUndoReceiptSurvivesInterveningMutation(t *testing.T) {
 	}
 	if c.Name != "Second" {
 		t.Fatalf("Undo reverted the later change: %s", c.Name)
+	}
+}
+
+// JSON timestamps preserve instants, not time.Time's internal location pointer.
+func TestCRMUndoBindingSnapshotTimestamp(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		name := "same instant in another zone"
+		if changed {
+			name = "different instant conflicts"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setup(t)
+			withUndo(t, &f)
+			expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/contacts/"+f.contact+"/principals", map[string]any{"principal_id": f.customer}), 201)
+			event := eventOf(t, f, EventContactBound)
+			expected, err := snapshotAs[Binding](event.After)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected.BoundAt = expected.BoundAt.In(time.FixedZone("snapshot", 2*60*60))
+			if changed {
+				expected.BoundAt = expected.BoundAt.Add(time.Microsecond)
+			}
+			event.After, err = json.Marshal(expected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := tenant.WithPrincipal(t.Context(), f.admin)
+			err = db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+				_, err := UndoHandlers()[EventContactBound](ctx, tx, f.admin, event)
+				return err
+			})
+			if changed {
+				if !errors.Is(err, events.ErrConflict) {
+					t.Fatalf("changed timestamp: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("same timestamp instant: %v", err)
+			}
+			want := 0
+			if changed {
+				want = 1
+			}
+			if got := count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`); got != want {
+				t.Fatalf("binding count=%d want %d", got, want)
+			}
+		})
 	}
 }

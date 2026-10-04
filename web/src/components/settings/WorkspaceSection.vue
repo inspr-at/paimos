@@ -107,7 +107,8 @@ const saveLost = () => lost.save()
 </template>
 
 <style scoped>
-.section { display: grid; gap: 14px; }
+/* Long project options must not define the width of every settings card. */
+.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .interval { display: block; margin-bottom: 8px; font-size: 13px; color: var(--ink-2); }
 .minutes { width: 88px; height: 36px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); font: 500 14px/1 var(--mono); }
 .timing-controls { display: flex; align-items: center; gap: 10px; }
