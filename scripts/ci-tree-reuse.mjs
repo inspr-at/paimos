@@ -82,6 +82,10 @@ export async function verifyRun(repository, runID, api, sha) {
       const steps = job.steps?.filter(step => step.name === stepName);
       ensure(steps?.length === 1 && steps[0].status === 'completed' && steps[0].conclusion === 'success', 'missing full execution evidence');
     }
+    if(name==='web-setup'||/^(go-test|web-shard) \(/.test(name)) {
+      const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');
+      ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full tier execution evidence');
+    }
     ensure(!job.steps?.some(step => step.name === 'Reuse the verified merge-group run' && step.conclusion !== 'skipped'), 'reused suite is not execution proof');
   }
   return { run: runID, attempt: run.run_attempt, sha };

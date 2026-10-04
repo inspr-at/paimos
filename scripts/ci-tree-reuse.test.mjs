@@ -14,7 +14,7 @@ function fixture(attempt = 1) {
   const workflow = { id: 20, name: 'CI', path: workflowPath };
   const jobs = { total_count: requiredJobs.length + 1, jobs: requiredJobs.map(name => {
     const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
-    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : [] };
+    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...((name==='web-setup'||/^(go-test|web-shard) \(/.test(name))?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   const listed = { total_count: 1, workflow_runs: [{ id: 123, head_sha: sha, event: 'merge_group' }] };
@@ -214,4 +214,11 @@ test('transport forwards cancellation with an injected signal, no timing thresho
 test('a two-shard essential queue run falls back to fresh full main validation', async () => {
   const f=fixture();f.jobs.jobs=f.jobs.jobs.filter(j=>!(/^(go-test|web-shard) \(/.test(j.name))||/\([12]\)$/.test(j.name));f.jobs.total_count=f.jobs.jobs.length;
   assert.equal((await check(f)).reuse,'none');
+});
+
+test('full fan-out alone cannot prove full execution when the independent selector narrowed',async()=>{
+  const f=fixture();job(f,'go-test (1)').steps=job(f,'go-test (1)').steps.filter(step=>step.name!=='Confirm full tier execution');
+  assert.equal((await check(f)).reuse,'none');
+  const web=fixture();job(web,'web-setup').steps.find(step=>step.name==='Confirm full tier execution').conclusion='skipped';
+  assert.equal((await check(web)).reuse,'none');
 });

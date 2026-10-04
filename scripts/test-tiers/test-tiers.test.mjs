@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { validate, select, shard, key, exactPattern, webGraph } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes } from './measure.mjs'
+import { checkFull } from './check-full.mjs'
 import { schedulingMode } from './diff.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
@@ -178,4 +179,11 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[web-setup, web-shard, tree-reuse, cache-prime\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
+})
+
+test('full-execution proof binds actual complete outcomes to this run, attempt and SHA',()=>{
+  const report={...reportCases(cases,cases.map(row=>({key:key(row),status:'passed',started:true})),1,'go-test-1'),full:true,exitCode:0,runId:'123',attempt:'2',sha:'a'}
+  const env={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'}
+  assert.equal(checkFull(report,env),true)
+  for(const change of [{full:false},{exitCode:1},{attempt:'1'},{sha:'b'},{classes:{...report.classes,NIGHTLY:{...report.classes.NIGHTLY,notRun:1}}}])assert.throws(()=>checkFull({...report,...change},env),/Full execution/)
 })

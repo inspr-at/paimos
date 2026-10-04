@@ -635,30 +635,22 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
-Test tiers (AEON-681): PRs and merge groups run ESSENTIAL plus the changed area's
-tests and reverse dependencies (Go expansion is limited to 300 extra cases;
-otherwise all tests of the changed packages still run). Shared CI, module, migration or fixture changes,
-or uncertain impact, run the full suite. The exact classifications live in the
-[Go manifest](scripts/ci/go-test-tiers.json) and
-[web manifest](scripts/ci/web-test-tiers.json); add new registrations as NIGHTLY
-with `node scripts/test-tiers/cli.mjs classify go` (or `web`) and run `check`.
-New browser files also need their launch policy in `web/ci-web-shards.json`.
-Unclassified and stale entries fail CI. No tests are deleted: `delete-candidate`
-is only a tag, and every retained test runs in `nightly-full.yml` (scheduled or
-manual), including previously ungated UI specs. Main/manual CI also runs full,
-except API-verified reuse of a full queue run (see below). A reduced queue run
-never qualifies as full-suite reuse evidence.
-The AEON-415 migration check, static checks, isolated timing budgets and smoke
-gate remain outside tier selection; migration compatibility always runs fresh.
-Selected cases never retry automatically. Run
-measurements are uploaded as `test-tier-run-measurement`, with pass/skip/failure
-counts per class and complete Actions job runner minutes against the 22.50 Go /
-42.17 web baselines. The target is at most eight runner-minutes per gate for an
-unrelated PR; collection counts alone do not establish runtime savings.
-Mixed browser deletion recommendations are tagged as candidate groups until
-their exact NIGHTLY members have been reviewed; classification and execution
-remain unchanged by those tags. A reused main report records its source run and
-current job overhead without claiming fresh test passes.
+Test tiers (AEON-681): PRs and merge groups run ESSENTIAL plus changed-area
+cases; Go reverse dependencies add at most 300 extra cases. Shared inputs or
+uncertain impact select full. Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
+and [web manifest](scripts/ci/web-test-tiers.json). Use
+`node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
+then `check`; unknown and stale entries fail CI. New browser specs also need a
+launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
+remain NIGHTLY, including candidate groups whose exact members need review.
+Scheduled/manual `nightly-full.yml` runs every case; main/manual CI runs full
+unless exact-SHA full-suite reuse is verified below. Migration compatibility
+always runs fresh; timing, static, smoke and stability gates stay outside impact
+filtering. Selected cases never retry. `test-tier-run-measurement` reports cases
+per class and complete job costs against the 22.50 Go / 42.17 web runner-minute
+baselines; reused reports carry provenance without claiming fresh passes.
+The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
+establish coverage only.
 
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for

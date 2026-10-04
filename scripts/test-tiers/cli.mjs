@@ -143,7 +143,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
 export async function main(args) {
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full] [--unit] [--shard i/N] [--paths JSON]')
-  const options={unit:false,full:false,job:`${kind}-tiers`}
+  const options={unit:false,full:process.env.AEON_TEST_TIER_MODE!==undefined&&process.env.AEON_TEST_TIER_MODE!=='essential',job:`${kind}-tiers`}
   for(let i=0;i<flags.length;i++) {
     const flag=flags[i]
     if(flag==='--full'||flag==='--unit') options[flag.slice(2)]=true

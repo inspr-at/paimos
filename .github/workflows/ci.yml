@@ -233,8 +233,14 @@ jobs:
       - name: Test this shard (essential plus changed area, or full on main)
         if: needs.tree-reuse.outputs.reuse != 'merge_group'
         env:
+          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           GOFLAGS: -count=1
         run: node scripts/test-tiers/cli.mjs run go --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
+      - name: Confirm full tier execution
+        if: (needs.tier-plan.outputs.mode != 'essential') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        env:
+          TIER_REPORT: tmp/test-tiers/go-test-${{ matrix.shard }}-measurement.json
+        run: node scripts/test-tiers/check-full.mjs
       - name: Preserve test tier measurements
         if: (always()) && needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -466,10 +472,17 @@ jobs:
         run: npm run lint
       - name: Web unit checks (once)
         if: needs.tree-reuse.outputs.reuse != 'merge_group'
+        env:
+          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
         working-directory: web
         run: |
           npm run ci:web:shard:test
           node ../scripts/test-tiers/cli.mjs run web --unit --job web-unit
+      - name: Confirm full tier execution
+        if: (needs.tier-plan.outputs.mode != 'essential') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        env:
+          TIER_REPORT: tmp/test-tiers/web-unit-measurement.json
+        run: node scripts/test-tiers/check-full.mjs
       - name: Preserve unit tier measurements
         if: (always()) && needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -564,11 +577,17 @@ jobs:
       - name: Run selected UI cases without retries
         if: needs.tree-reuse.outputs.reuse != 'merge_group'
         env:
+          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
         run: node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
+      - name: Confirm full tier execution
+        if: (needs.tier-plan.outputs.mode != 'essential') && needs.tree-reuse.outputs.reuse != 'merge_group'
+        env:
+          TIER_REPORT: tmp/test-tiers/web-shard-${{ matrix.shard }}-measurement.json
+        run: node scripts/test-tiers/check-full.mjs
       - name: Preserve browser tier measurements
         if: (always()) && needs.tree-reuse.outputs.reuse != 'merge_group'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
