@@ -21,6 +21,7 @@ import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
 import PlanningCell from './PlanningCell.vue'
 import QueueAction from './QueueAction.vue'
+import QueueStaleHint from './QueueStaleHint.vue'
 import QueueIndicator from './QueueIndicator.vue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useWorkQueue } from '../../stores/workQueue'
@@ -722,7 +723,7 @@ defineExpose({
                 <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
                   <StatusIcon :state="entry.row.state" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
-                </button></div>
+                </button><QueueStaleHint :row="entry.row" /></div>
               </td>
               <td v-else-if="column.id === 'priority'" class="c-prio" :data-column-label="column.label" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
                 <div class="cell" :data-tip="entry.row.priority && entry.row.priority !== 'none' ? priorityLabel(entry.row.priority) : 'No priority'">

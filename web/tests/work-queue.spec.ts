@@ -13,7 +13,7 @@ const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.getByRole('button', { name: `Copy ${key}`, exact: true }) })
-async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number; relationBlocker?: boolean; failRead?: boolean; noStart?: boolean } = {}) {
+async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number; relationBlocker?: boolean; failRead?: boolean; noStart?: boolean; stale?: boolean; staleMissing?: boolean; longTitle?: boolean; assigned?: boolean; live?: boolean } = {}) {
   mkdirSync(shots, { recursive: true })
   const data = fixtures()
   for (const node of data.nodes) if (node.kind_slug !== 'epic') node.fields = { ...node.fields, estimate_hours: 3, acceptance_criteria: '- [ ] Verified with evidence' }
@@ -24,6 +24,13 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
   if (options.relationBlocker) n4.fields.blocker = ''
   const n6 = data.nodes.find(n => n.id === 'n-6')!; n6.state = 'delivered'
   data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'estimate', 'suggested'] }
+  const staleNode = data.nodes.find(n => n.id === 'n-2')!
+  if (options.stale || options.assigned || options.live) {
+    staleNode.state = 'in_progress'; staleNode.fields.assignee = options.assigned ? me.id : null
+    staleNode.queue_stale = !!options.stale
+    if (options.staleMissing) staleNode.fields.acceptance_criteria = ''
+    if (options.longTitle) staleNode.title = 'Liegengebliebene Arbeit für den nächsten freien Agenten einreihen und die Wiederaufnahme zuverlässig überprüfen'
+  }
   const calls = await mockWork(page, data, { readOnly: options.viewer })
   const state = { ids: options.missing || options.relationBlocker ? ['n-3'] : ['n-4', 'n-3'], targeted: new Map<string, string>(), manual: false, failRead: !!options.failRead, failWrite: false, queueCalls: [] as { method: string; path: string; body: Record<string, unknown> | null }[] }
   const gapsFor = (node: typeof n4) => readyGaps({ fields: node.fields, state: node.state }).filter(gap => !(options.relationBlocker && node.id === 'n-4' && gap === 'blocker'))
@@ -35,6 +42,7 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
       expected_start_at: node.state === 'blocked' || options.noStart ? null : '2026-10-01T20:00:00Z', waiting: !!targeted || node.state === 'blocked', wait_reason: targeted ? 'Waiting for agent capacity' : node.state === 'blocked' ? 'Blocked by PHAROS-11; waits until unblocked' : '',
     } }
   })
+  const undoTokens = new Map<string, { run_id: string; revision: string }>()
   const snapshot = () => ({ items: entries(), count: state.ids.length, manual_order: state.manual, capacity: { queued_hours: 6, parallel_runs: 1, work_hours: 6, warning: true } })
   await page.route('**/api/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
@@ -66,13 +74,23 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
       if (gaps.length) return json({ error: 'Not ready', code: 'queue_not_ready', readiness: { queueable: true, ready: false, missing: gaps, suggested_estimate_hours: 3 } }, 422)
       if (!state.ids.includes(node.id)) state.ids.push(node.id)
       if (body!.agent_principal_id) state.targeted.set(node.id, String(body!.agent_principal_id))
-      if (['new', 'backlog'].includes(node.state)) { node.state = 'open'; node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString() }
-      return json(entries().find(item => item.node_id === node.id))
+      const wasStale = node.queue_stale === true && node.state === 'in_progress'
+      if (['new', 'backlog'].includes(node.state) || wasStale) { node.state = 'open'; node.queue_stale = false; node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString() }
+      const entry = entries().find(item => item.node_id === node.id)!
+      if (wasStale) { const token = { run_id: entry.queued.run_id, revision: node.updated_at }; undoTokens.set(node.id, token); return json({ ...entry, undo: token }) }
+      return json(entry)
     }
     if (path === '/api/queue/reset') { state.manual = false; state.ids.sort((a, b) => a === 'n-4' ? -1 : b === 'n-4' ? 1 : a.localeCompare(b)); return json(snapshot()) }
-    const match = /^\/api\/queue\/([^/]+)(?:\/(readiness|estimate|move))?$/.exec(path)
+    const match = /^\/api\/queue\/([^/]+)(?:\/(readiness|estimate|move|undo))?$/.exec(path)
     if (!match) return json({ error: 'Unknown queue endpoint' }, 404)
     const [, id, action] = match, node = data.nodes.find(n => n.id === id)!
+    if (action === 'undo') {
+      const token = undoTokens.get(id!)
+      if (!token || body?.run_id !== token.run_id || body?.revision !== node.updated_at) return json({ error: 'Ticket changed since queueing' }, 409)
+      state.ids = state.ids.filter(value => value !== id); undoTokens.delete(id!)
+      node.state = 'in_progress'; node.queue_stale = true; node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString()
+      return json({ removed: true })
+    }
     if (method === 'DELETE') { state.ids = state.ids.filter(value => value !== id); state.targeted.delete(id); return json({ removed: true }) }
     if (action === 'move') {
       const from = state.ids.indexOf(id), to = Number(body!.position) - 1 - (options.offset ?? 0)
@@ -80,7 +98,7 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
     }
     if (action === 'estimate') { node.fields.estimate_hours = body!.estimate_hours; node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString() }
     const missing = gapsFor(node)
-    return json({ queueable: true, ready: !missing.length, missing, suggested_estimate_hours: 3, security_review_required: false })
+    return json({ stale: node.queue_stale === true, queueable: node.state !== 'in_progress' || node.queue_stale === true, ready: !missing.length && (node.state !== 'in_progress' || node.queue_stale === true), missing, suggested_estimate_hours: 3, security_review_required: false })
   })
   await page.clock.setSystemTime(new Date(now))
   await page.setViewportSize({ width: 1600, height: 1000 })
@@ -385,4 +403,209 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     }
     await approved.close()
   }
+})
+
+
+test('stale progress queues as Open with Undo and keeps list controls still', async ({ page }) => {
+  const { state, data } = await world(page, { stale: true })
+  const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
+  await ticket.hover()
+  await expect(queue).toHaveAttribute('aria-disabled', 'false')
+  await expect(queue).toHaveAttribute('data-tip', 'In progress, but nobody is working on it. Queue it for the next free agent · q')
+  await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'queue stale work', run: async () => {
+      await queue.click()
+      await expect(ticket.locator('.c-status')).toContainText('Open')
+      await expect(queue).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.getByText('PHAROS-12 queued', { exact: true })).toBeVisible()
+      expect(state.ids).toContain('n-2'); expect(data.nodes.find(n => n.id === 'n-2')!.state).toBe('open')
+    } },
+    { name: 'Undo queue addition', run: async () => {
+      await page.getByRole('button', { name: 'Undo', exact: true }).click()
+      await expect(ticket.locator('.c-status')).toContainText('In progress')
+      await expect(queue).toHaveAttribute('aria-pressed', 'false')
+      await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
+      expect(state.ids).not.toContain('n-2'); expect(data.nodes.find(n => n.id === 'n-2')!.state).toBe('in_progress')
+      await ticket.hover()
+    } },
+  ] })
+})
+
+test('an ordinary title edit keeps stale work queueable without reloading', async ({ page }) => {
+  const { calls, state, data } = await world(page, { stale: true })
+  const ticket = row(page, 'PHAROS-12')
+  const detailRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/nodes/n-2' && response.request().method() === 'GET')
+  await ticket.locator('.title-text').click()
+  await detailRead
+  const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(drawer.locator('.inline-title .title-text')).toBeVisible()
+  const reads = () => calls.filter(call => call.method === 'GET' && call.path === '/api/nodes/n-2').length
+  const before = reads()
+  await drawer.locator('.inline-title .title-text').click()
+  const title = drawer.getByRole('textbox', { name: 'Title', exact: true })
+  await title.fill('Edited idle work')
+  await title.blur()
+  await expect(drawer.locator('.inline-title .title-text')).toHaveText('Edited idle work')
+  await expect(drawer.locator('.q-btn')).toHaveAttribute('aria-disabled', 'false')
+  expect(calls.some(call => call.method === 'PATCH' && call.path === '/api/nodes/n-2')).toBe(true)
+  expect(reads()).toBe(before)
+  await drawer.getByRole('button', { name: 'Close ticket details' }).click()
+  const queue = ticket.locator('.q-btn')
+  await ticket.hover()
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'queue immediately after edit', run: async () => {
+      await queue.click()
+      await expect(queue).toHaveAttribute('aria-pressed', 'true')
+      await expect(ticket.locator('.c-status')).toContainText('Open')
+    } },
+  ] })
+  expect(state.ids).toContain('n-2')
+  expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('Edited idle work')
+})
+
+test('assigned In progress explains who is working using the display status', async ({ page }) => {
+  const { state } = await world(page, { assigned: true })
+  const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
+  await ticket.hover()
+  await expect(queue).toHaveAttribute('aria-disabled', 'true')
+  await expect(queue).toHaveAttribute('data-tip', "Already in progress (Markus Barta), can't be queued.")
+  await expect(ticket.locator('.stale-hint.shown')).toHaveCount(0)
+  await queue.focus(); await page.keyboard.press('Enter')
+  expect(state.queueCalls.filter(call => call.method === 'POST')).toHaveLength(0)
+  await ticket.locator('.title-text').click()
+  const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(drawer.locator('.q-btn')).toHaveAttribute('data-tip', "Already in progress (Markus Barta), can't be queued.")
+})
+
+test('live-work In progress stays disabled even when worker details are hidden', async ({ page }) => {
+  const { state } = await world(page, { live: true })
+  const queue = row(page, 'PHAROS-12').locator('.q-btn')
+  await expect(queue).toHaveAttribute('aria-disabled', 'true')
+  await expect(queue).toHaveAttribute('data-tip', "Already in progress (assigned or active work), can't be queued.")
+  await row(page, 'PHAROS-12').hover(); await queue.focus(); await page.keyboard.press('Enter')
+  expect(state.queueCalls.filter(call => call.method === 'POST')).toHaveLength(0)
+})
+
+
+test('stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths', async ({ page }) => {
+  await world(page, { stale: true, longTitle: true })
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    const ticket = row(page, 'PHAROS-12')
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+      for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
+      await ticket.hover()
+      await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
+      await page.screenshot({ path: join(shots, `aeon-682-list-${width}-${theme}.png`) })
+      await ticket.locator('.title-text').click()
+      const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+      await expect(drawer.locator('.stale-hint.shown')).toHaveCount(1)
+      const action = drawer.locator('.q-btn')
+      await expectStableControls({ controls: { queue: action, close: drawer.getByRole('button', { name: 'Close ticket details' }) }, interactions: [
+        { name: 'queue stale ticket in its detail view', run: async () => { await action.click(); await expect(action).toHaveAttribute('aria-pressed', 'true') } },
+        { name: 'Undo in detail view', run: async () => { await page.getByRole('button', { name: 'Undo', exact: true }).click(); await expect(action).toHaveAttribute('aria-pressed', 'false') } },
+      ] })
+      for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
+      await page.screenshot({ path: join(shots, `aeon-682-ticket-${width}-${theme}.png`) })
+      await drawer.getByRole('button', { name: 'Close ticket details' }).click()
+    }
+  }
+})
+
+
+test('stale progress queued through readiness fixes also offers Undo', async ({ page }) => {
+  const { data, state } = await world(page, { stale: true, staleMissing: true })
+  const ticket = row(page, 'PHAROS-12')
+  await ticket.hover(); await ticket.locator('.q-btn').click()
+  const panel = page.getByRole('dialog', { name: 'PHAROS-12: what is missing to queue it' })
+  await panel.getByRole('button', { name: 'Draft criteria' }).click()
+  await panel.getByRole('textbox', { name: 'Draft acceptance criteria' }).fill('- [ ] Recovery verified')
+  await panel.getByRole('button', { name: 'Save criteria' }).click()
+  await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeEnabled()
+  await panel.getByRole('button', { name: 'Queue', exact: true }).click()
+  await expect(ticket.locator('.c-status')).toContainText('Open')
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(ticket.locator('.c-status')).toContainText('In progress')
+  expect(state.ids).not.toContain('n-2')
+  expect(data.nodes.find(n => n.id === 'n-2')!.fields.acceptance_criteria).toBe('- [ ] Recovery verified')
+})
+
+test('successful Undo refreshes membership and reports a failed ticket read honestly', async ({ page }) => {
+  const { state, data } = await world(page, { stale: true })
+  const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
+  await ticket.hover(); await queue.click()
+  await expect(queue).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
+  let failedReads = 0
+  await page.route('**/api/nodes/n-2', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    failedReads++
+    return route.fulfill({ status: 503, json: { error: 'Ticket refresh unavailable' } })
+  })
+  const queueReads = () => state.queueCalls.filter(call => call.method === 'GET' && call.path === '/api/queue').length
+  const before = queueReads()
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'Undo with failed ticket refresh', run: async () => {
+      await page.getByRole('button', { name: 'Undo', exact: true }).click()
+      await expect(page.getByText('Undone, but the ticket could not be refreshed: Ticket refresh unavailable. Reload before another change.', { exact: true })).toBeVisible()
+      await expect(queue).toHaveAttribute('aria-pressed', 'false')
+      await ticket.hover()
+    } },
+  ] })
+  expect(failedReads).toBe(1)
+  expect(queueReads()).toBe(before + 1)
+  expect(state.queueCalls.filter(call => call.method === 'POST' && call.path === '/api/queue/n-2/undo')).toHaveLength(1)
+  expect(state.ids).not.toContain('n-2')
+  expect(data.nodes.find(n => n.id === 'n-2')!.state).toBe('in_progress')
+  await expect(page.getByText('PHAROS-12 returned to In progress', { exact: true })).toHaveCount(0)
+})
+
+test('unassigning In progress work enables Queue directly from the mutation response', async ({ page }) => {
+  const { calls, state, data } = await world(page, { assigned: true })
+  const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
+  await expect(queue).toHaveAttribute('aria-disabled', 'true')
+  await expect(queue).toHaveAttribute('data-tip', "Already in progress (Markus Barta), can't be queued.")
+  const node = data.nodes.find(n => n.id === 'n-2')!
+  let unassignments = 0
+  // List assignment uses the bulk mutation, even for one row. The matching Go
+  // regression verifies this response projection against the real handler.
+  await page.route('**/api/nodes/bulk', route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const patch = route.request().postDataJSON() as { ids: string[]; assignee: null; if_unmodified_since: Record<string, string> }
+    expect(patch.ids).toEqual(['n-2'])
+    expect(patch.assignee).toBeNull()
+    expect(patch.if_unmodified_since).toEqual({ 'n-2': node.updated_at })
+    unassignments++
+    node.fields = { ...node.fields, assignee: patch.assignee }
+    node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString()
+    node.queue_stale = true
+    return route.fulfill({ json: { event_id: 6000, items: [{ ...node, kind_id: 'k-ticket', position: '0', deleted_at: null }], unchanged: [], skipped: [] } })
+  })
+  const reads = () => calls.filter(call => call.method === 'GET' && call.path === '/api/nodes/n-2').length
+  const before = reads()
+  await ticket.getByRole('button', { name: /Change assignee/ }).click()
+  const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-12', exact: true })
+  await menu.getByRole('menuitemradio', { name: 'Unassigned', exact: true }).click()
+  // The approved compact list uses a dash; its accessible label carries the
+  // assignment state. Assert both exactly, including removal of the person.
+  await expect(ticket.locator('.c-assignee .empty')).toHaveText('—')
+  await expect(ticket.locator('.c-assignee .empty')).toHaveAttribute('aria-label', 'Unassigned')
+  await expect(ticket.getByRole('button', { name: /Change assignee/ })).toHaveAccessibleName('Assignee: Unassigned. Change assignee of PHAROS-12')
+  await expect(queue).toHaveAttribute('aria-disabled', 'false')
+  await expect(queue).toHaveAttribute('data-tip', 'In progress, but nobody is working on it. Queue it for the next free agent · q')
+  await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
+  expect(unassignments).toBe(1)
+  expect(reads()).toBe(before)
+  await ticket.hover()
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'queue immediately after unassignment', run: async () => {
+      await queue.click()
+      await expect(queue).toHaveAttribute('aria-pressed', 'true')
+      await expect(ticket.locator('.c-status')).toContainText('Open')
+    } },
+  ] })
+  expect(state.ids).toContain('n-2')
+  expect(node.fields.assignee).toBeNull()
 })

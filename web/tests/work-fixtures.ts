@@ -19,6 +19,7 @@ const forward = (previous: string, at: number) => new Date(Math.max(at, Date.par
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
+  queue_stale?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
   recurrence?: import('../src/lib/api').NodeRecurrence
@@ -167,7 +168,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
-    id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
+    queue_stale: node.queue_stale, id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
     kind_slug: node.kind_slug, kind_label: node.kind_slug[0].toUpperCase() + node.kind_slug.slice(1),
     priority: typeof node.fields.priority === 'string' ? node.fields.priority : null, assignee,

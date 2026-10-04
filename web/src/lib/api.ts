@@ -126,6 +126,7 @@ export interface Kind {
 }
 export interface WorkNode {
   recurrence?: NodeRecurrence
+  queue_stale?: boolean
   human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string

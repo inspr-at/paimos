@@ -3698,6 +3698,11 @@
     {"package":"internal/themes","name":"TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUnlink","kind":"go","tier":"NIGHTLY"},
     {"package":"internal/themes","name":"TestAppearanceMigrationPreservesInheritedExplicitChoices","kind":"go","tier":"NIGHTLY"},
     {"package":"internal/themes","name":"TestAppearanceMigrationPreservesPhysicalOwnersGeometryAndBehaviour","kind":"go","tier":"NIGHTLY"},
-    {"package":"internal/themes","name":"TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink","kind":"go","tier":"NIGHTLY"}
+    {"package":"internal/themes","name":"TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink","kind":"go","tier":"NIGHTLY"},
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueAfterNodeMutation","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueEligibility","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueRecoveryAndUndo","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueSessionEligibility","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueUndoFences","tier":"GATED-FULL"}
   ]
 }

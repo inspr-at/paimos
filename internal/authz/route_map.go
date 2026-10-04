@@ -139,6 +139,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-pairing/account-links/{accountId}/unlink":                "profile.write",
 	"GET /api/queue/{nodeId}/readiness":                                       "nodes.read",
 	"POST /api/queue/{nodeId}/estimate":                                       "nodes.read",
+	"POST /api/queue/{nodeId}/undo":                                           "nodes.read", // Handler rechecks queue write permission and receipt ownership in the mutation transaction.
 	"GET /api/queue":                                                          "nodes.read",
 	"POST /api/queue":                                                         "nodes.read",
 	"DELETE /api/queue/{nodeId}":                                              "nodes.read",

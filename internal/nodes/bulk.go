@@ -472,6 +472,25 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			return err
 		}
 		result.EventID = &e.ID
+		// Bulk answers feed the same row store as PATCH answers. Load both
+		// queue projections once for the bounded batch (at most maxBulkNodes),
+		// after every mutation. These reads acquire no locks after the counter.
+		ids := make([]string, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].ID
+		}
+		queued, err := workqueue.Load(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		stale, err := workqueue.Stale(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		for i := range result.Items {
+			result.Items[i].Queued = queued[result.Items[i].ID]
+			result.Items[i].QueueStale = stale[result.Items[i].ID]
+		}
 		return nil
 	})
 	return result, err
