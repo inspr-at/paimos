@@ -63,10 +63,16 @@ BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0));
  PERFORM 1 FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE;
  SELECT count(*) INTO total FROM (SELECT n.id FROM nodes n JOIN node_kinds k USING(tenant_id)
-   WHERE k.id=n.kind_id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid AND k.slug='work' LIMIT 50001) s;
- IF total>50000 THEN RAISE EXCEPTION 'work status scope exceeds 50000 nodes' USING ERRCODE='54000'; END IF;
+   WHERE k.id=n.kind_id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid AND k.slug='work'
+     AND n.deleted_at IS NULL LIMIT 50001) s;
+ -- Legacy/external activation above capacity must not lock out reads or the
+ -- flag service's disable path. Work mutations still fail closed in the guard.
+ IF total>50000 THEN
+  PERFORM set_config('aeon.visible_projects',coalesce(prior_visible,''),true),set_config('aeon.system',coalesce(prior_system,''),true);
+  RETURN false;
+ END IF;
  PERFORM n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND k.slug='work'
+  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND k.slug='work' AND n.deleted_at IS NULL
   ORDER BY n.id FOR NO KEY UPDATE OF n;
  -- Activation provisions System while the flag is still off. Never create a
  -- principal (principal-link lock 532) after a writer's event-counter lock.
@@ -93,7 +99,7 @@ $$;
 
 CREATE FUNCTION aeon_work_status_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE slug text; prior_visible text := current_setting('aeon.visible_projects',true);
- prior_system text := current_setting('aeon.system',true); a jsonb; b jsonb;
+ prior_system text := current_setting('aeon.system',true); a jsonb; b jsonb; total integer;
 BEGIN
  IF current_setting('aeon.work_status_deriving',true)='on' THEN RETURN NEW; END IF;
  SELECT k.slug INTO slug FROM node_kinds k WHERE k.tenant_id=NEW.tenant_id AND k.id=NEW.kind_id;
@@ -105,6 +111,9 @@ BEGIN
   RETURN NEW;
  END IF;
  IF current_setting('aeon.work_status_entered',true) IS DISTINCT FROM NEW.tenant_id::text THEN
+  SELECT count(*) INTO total FROM (SELECT n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+   WHERE n.tenant_id=NEW.tenant_id AND k.slug='work' AND n.deleted_at IS NULL LIMIT 50001) s;
+  IF total>50000 THEN RAISE EXCEPTION 'work status scope exceeds 50000 nodes' USING ERRCODE='54000'; END IF;
   RAISE EXCEPTION 'work status transaction protocol required' USING ERRCODE='55000';
  END IF;
  IF TG_OP='UPDATE' AND NEW.state IS DISTINCT FROM OLD.state AND aeon_work_status_enabled(NEW.project_id) AND EXISTS (
@@ -167,12 +176,18 @@ CREATE FUNCTION aeon_work_status_flush() RETURNS void LANGUAGE plpgsql AS $$
 DECLARE prior_visible text := current_setting('aeon.visible_projects',true);
  prior_system text := current_setting('aeon.system',true); target_tenant uuid := current_setting('aeon.tenant_id')::uuid;
  r record; cats text[]; target_state text; reason text; before_snap jsonb; after_snap jsonb; actor uuid;
- cause_id bigint; cause_ids jsonb; change_count integer; max_depth integer;
+ cause_id bigint; cause_ids jsonb; change_count integer; max_depth integer; total integer;
 BEGIN
  IF current_setting('aeon.work_status_entered',true) IS DISTINCT FROM target_tenant::text THEN RETURN; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_temp.aeon_work_changes WHERE tenant_id=target_tenant)
   AND NOT EXISTS(SELECT 1 FROM pg_temp.aeon_work_settings WHERE tenant_id=target_tenant) THEN RETURN; END IF;
  PERFORM set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true),set_config('aeon.work_status_deriving','on',true);
+ -- Entry counts the old tree. Validate the final live tree too, under the
+ -- same fences, so creation, restoration and kind conversion cannot cross
+ -- capacity and commit a tenant that the next transaction cannot handle.
+ SELECT count(*) INTO total FROM (SELECT n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+  WHERE n.tenant_id=target_tenant AND k.slug='work' AND n.deleted_at IS NULL LIMIT 50001) s;
+ IF total>50000 THEN RAISE EXCEPTION 'work status scope exceeds 50000 nodes' USING ERRCODE='54000'; END IF;
  -- Walk each work edge once; projects and other kinds end work ancestry.
  -- Explicit limits reject the transaction rather than produce a partial status.
  IF to_regclass('pg_temp.aeon_work_order') IS NULL THEN

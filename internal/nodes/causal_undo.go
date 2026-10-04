@@ -33,6 +33,9 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if e.Type != evNodeCreated && (json.Unmarshal(e.Before, &before) != nil || before.ID != after.ID) {
 		return events.Change{}, events.ErrConflict
 	}
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return events.Change{}, err
+	}
 	current, err := scanNode(tx.QueryRow(ctx, `SELECT `+nodeReturning+` FROM nodes WHERE id=$1::uuid FOR NO KEY UPDATE`, after.ID))
 	if err != nil {
 		return events.Change{}, events.ErrConflict

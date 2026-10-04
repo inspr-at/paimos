@@ -5,10 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/activity"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -361,4 +367,260 @@ func TestWorkParentStatusReusesAutopilotActivity(t *testing.T) {
 	if !found {
 		t.Fatal("derived status missing from autopilot Activity")
 	}
+}
+
+// probeConfirmationBody pauses the body at an explicit barrier, before any
+// confirmation bytes are available. Timeouts guard hangs, not interleavings.
+type probeConfirmationBody struct {
+	reader  io.Reader
+	entered chan struct{}
+	release chan struct{}
+	ctx     context.Context
+}
+
+func (b *probeConfirmationBody) Read(p []byte) (int, error) {
+	if b.entered != nil {
+		close(b.entered)
+		b.entered = nil
+		select {
+		case <-b.release:
+		case <-b.ctx.Done():
+			return 0, b.ctx.Err()
+		}
+	}
+	return b.reader.Read(p)
+}
+func (b *probeConfirmationBody) Close() error { return nil }
+
+func TestWorkParentStatusConfirmationReadsBeforeTenantLocks(t *testing.T) {
+	p := newPrincipal(t, "work-body-fence")
+	parent := workNodeTest(t, p, "", "open")
+	child := workNodeTest(t, p, parent.ID, "open")
+	enableWorkStatusTest(t, p)
+	patchWorkTest(t, p, child.ID, "in_progress")
+	id, cause := lastDerivedTest(t, p, parent.ID)
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), 15*time.Second)
+	defer cancel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	mux := http.NewServeMux()
+	events.New(appPool, events.WithCausalUndoHandlers(CausalUndoHandlers())).Mount(mux)
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", id), nil).WithContext(ctx)
+	req.Body = &probeConfirmationBody{reader: strings.NewReader(fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause)), entered: entered, release: release, ctx: ctx}
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { defer close(done); mux.ServeHTTP(rec, req) }()
+	select {
+	case <-entered:
+	case <-done:
+		t.Fatalf("body never read: %d %s", rec.Code, rec.Body.String())
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	// Acquire the same tree fence through an independent connection while the
+	// request is stalled. A successful probe proves no tenant-wide lock is held.
+	probe, err := adminPool.Begin(ctx)
+	if err != nil {
+		close(release)
+		<-done
+		t.Fatal(err)
+	}
+	var available bool
+	err = probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, p.TenantID).Scan(&available)
+	if err == nil && available {
+		_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, p.TenantID)
+	}
+	_ = probe.Rollback(ctx)
+	close(release)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err != nil || !available {
+		t.Fatalf("confirmation body holds tenant-wide locks: available=%v err=%v", available, err)
+	}
+	if rec.Code != 201 {
+		t.Fatalf("confirmed Undo: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkParentStatusDisabledUndoFencesRevocation(t *testing.T) {
+	p := newPrincipal(t, "work-disabled-revoke")
+	parent := workNodeTest(t, p, "", "open")
+	child := workNodeTest(t, p, parent.ID, "open")
+	enableWorkStatusTest(t, p)
+	patchWorkTest(t, p, child.ID, "in_progress")
+	id, cause := lastDerivedTest(t, p, parent.ID)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE features SET enabled=false WHERE tenant_id=$1`, p.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 15*time.Second)
+	defer cancel()
+	revoke, err := appPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke.Rollback(context.Background())
+	if _, err := revoke.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := authz.LockProjectMutation(ctx, revoke, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	var blocker uint32
+	if err := revoke.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blocker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revoke.Exec(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'disabled_reader','Disabled reader');`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revoke.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,permission FROM roles,unnest(ARRAY['nodes.read','events.read','events.undo','events.undo_other']) permission WHERE tenant_id=$1 AND key='disabled_reader'`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revoke.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='disabled_reader') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	type response struct {
+		status int
+		body   []byte
+	}
+	done := make(chan response, 1)
+	go func() {
+		status, body := causalCallTest(t, p, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+		done <- response{status, body}
+	}()
+	// Commit revocation only once PostgreSQL proves Undo waits on its fence.
+	for {
+		select {
+		case r := <-done:
+			t.Fatalf("Undo escaped uncommitted revocation fence: %d %s", r.status, r.body)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
+		var waiting bool
+		if err := adminPool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE NOT granted AND $1::int=ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		runtime.Gosched()
+	}
+	// The per-event fence must still be free while Undo waits on the tree.
+	// This is the same order whether transaction entry saw the flag ON or OFF.
+	probe, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventAvailable bool
+	err = probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,12))`, p.TenantID+":"+fmt.Sprint(id)).Scan(&eventAvailable)
+	_ = probe.Rollback(ctx)
+	if err := revoke.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if err != nil || !eventAvailable {
+			t.Fatalf("Undo locked the event before its tree fence: available=%v err=%v", eventAvailable, err)
+		}
+		if r.status != 403 || !strings.Contains(string(r.body), "forbidden") {
+			t.Fatalf("revoked Undo: %d %s", r.status, r.body)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if currentWorkTest(t, p, child.ID).State != "in_progress" {
+		t.Fatal("revoked Undo changed child")
+	}
+}
+
+func TestWorkParentStatusCausalUndoAuditRedactsHiddenCause(t *testing.T) {
+	p := newPrincipal(t, "work-undo-audit")
+	project := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Project"}`)
+	parent := workNodeTest(t, p, project.ID, "open")
+	child := workNodeTest(t, p, parent.ID, "open")
+	enableWorkStatusTest(t, p)
+	patchWorkTest(t, p, child.ID, "in_progress")
+	id, cause := lastDerivedTest(t, p, parent.ID)
+	status, raw := causalCallTest(t, p, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+	if status != 201 {
+		t.Fatalf("Undo: %d %s", status, raw)
+	}
+	var auditID int64
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE type='status_autopilot.causal_undo' AND undo_of=$1`, id).Scan(&auditID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readAudit := func(hidden bool) {
+		t.Helper()
+		status, raw := callAs(t, events.New(appPool), &p, "GET", fmt.Sprintf("/api/events?node_id=%s", parent.ID), "")
+		if status != 200 {
+			t.Fatalf("history: %d %s", status, raw)
+		}
+		var page struct {
+			Items []events.Event `json:"items"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range page.Items {
+			if e.ID == auditID {
+				var snapshot map[string]json.RawMessage
+				if err := json.Unmarshal(e.After, &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				if _, exists := snapshot["cause_event_id"]; exists {
+					t.Fatalf("cause ID in public audit snapshot: %s", e.After)
+				}
+				if e.Derivation == nil {
+					t.Fatal("causal audit lacks safe context")
+				}
+				if hidden {
+					if e.Derivation.CauseEventID != nil {
+						t.Fatal("hidden cause exposed")
+					}
+				} else if e.Derivation.CauseEventID == nil || *e.Derivation.CauseEventID != cause {
+					t.Fatal("visible cause lost")
+				}
+				return
+			}
+		}
+		t.Fatal("visible parent causal audit missing")
+	}
+	readAudit(false)
+	// Model a historical audit snapshot as well: redaction must not depend on
+	// rewriting append-only events that existed before this fix.
+	if _, err := adminPool.Exec(t.Context(), `ALTER TABLE events DISABLE TRIGGER USER`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := adminPool.Exec(t.Context(), `UPDATE events SET after=after||jsonb_build_object('cause_event_id',$1::bigint),metadata=NULL WHERE tenant_id=$2 AND id=$3`, cause, p.TenantID, auditID)
+	_, enableErr := adminPool.Exec(t.Context(), `ALTER TABLE events ENABLE TRIGGER USER`)
+	if err != nil || enableErr != nil {
+		t.Fatalf("legacy fixture: %v %v", err, enableErr)
+	}
+	readAudit(false)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, p.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $2,$1,id,'project',$3 FROM roles WHERE tenant_id=$2 AND key='admin'`, p.ID, p.TenantID, project.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appPool.Exec(t.Context(), `CREATE POLICY work_test_undo_hidden ON nodes AS RESTRICTIVE USING(id<>'`+child.ID+`'::uuid OR aeon_visibility_system())`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, err := appPool.Exec(context.Background(), `DROP POLICY IF EXISTS work_test_undo_hidden ON nodes`)
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	readAudit(true)
 }

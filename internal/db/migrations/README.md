@@ -309,6 +309,15 @@ bulk, move, delete, restore, Undo and category updates. Changed children schedul
 both ancestor chains; final derivation reads locked canonical rows and emits at
 most one transition per parent. Retention has a separate audit event.
 
+Capacity counts live work rows and checks the final tree before commit; crossing
+creates, restores or kind conversions roll back. Tombstones do not consume the
+live-row limit. If an already enabled tenant exceeds it, entry leaves derivation
+inactive and restores caller visibility, allowing reads and feature disablement
+while the work-write guard fails closed. Causal Undo independently fences access
+changes when the flag is disabled, and reads confirmation before transaction
+entry. Its cause reference stays in private metadata and is exposed only through
+the visibility-checked event envelope; legacy snapshots are redacted on read.
+
 The migration does not backfill statuses or enable flags. Initial reconciliation
 is caused by child changes or state-category configuration changes. Before any
 rollout, the coordinator validates the AEON-429 integration and whole chain,

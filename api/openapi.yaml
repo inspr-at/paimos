@@ -4843,7 +4843,7 @@ paths:
               required: [confirmed_cause_event_id]
               properties:
                 confirmed_cause_event_id: {type: integer, minimum: 1, description: Must match the cause_event_id returned by undo-preview. Required only for derived parent events.}
-      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
+      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Confirmation is limited to 1 KiB and read with a 10-second deadline before mutation locks; its cause and permissions are rechecked inside the final transaction even after the derivation feature is disabled. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '201':
@@ -17248,7 +17248,7 @@ components:
           format: int64
         derivation:
           type: object
-          description: Safe Status autopilot derivation context; cause_event_id is omitted unless the cause event is visible. Automatic parent writes preserve the parent edit revision.
+          description: Safe Status autopilot derivation and causal-Undo context; cause_event_id is omitted unless the cause event is visible and never exposed in a causal-Undo snapshot. Automatic parent writes preserve the parent edit revision.
           required: [rule_version, reason, affected_nodes]
           properties:
             rule_version: {type: integer, minimum: 1}

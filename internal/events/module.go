@@ -369,16 +369,47 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "invalid event ID")
 		return
 	}
+	// Network reads must finish before InTenant takes any mutation fences.
+	// Empty bodies remain valid for ordinary Undo; derived Undo requires a
+	// matching confirmation, rechecked against the locked current cause below.
+	var confirm struct {
+		Cause int64 `json:"confirmed_cause_event_id"`
+	}
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(10 * time.Second))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	decoder.DisallowUnknownFields()
+	decodeErr := decoder.Decode(&confirm)
+	if decodeErr != nil && decodeErr != io.EOF {
+		failure(w, ErrConflict)
+		return
+	}
+	if decodeErr == nil {
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			failure(w, ErrConflict)
+			return
+		}
+	}
+	_ = controller.SetReadDeadline(time.Time{})
 	var result Event
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		// Serialize attempts on this original event without modifying history or
-		// taking the event counter before a resource lock (writers take it last).
-		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 12))`, p.TenantID+":"+strconv.FormatInt(id, 10)); err != nil {
-			return err
-		}
 		e, err := scanEvent(tx.QueryRow(r.Context(), `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
     FROM events WHERE tenant_id=$1 AND id=$2`, p.TenantID, id))
 		if err != nil {
+			return err
+		}
+		// Event snapshots are immutable. Identify causal Undo first, then take
+		// its tree/access fence before the per-event lock in both flag states.
+		// Otherwise activation could invert their order against flagged Undo.
+		if e.Type == derivedStatusEvent {
+			if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+		}
+		// Serialize attempts on this original event without modifying history or
+		// taking the event counter before a resource lock (writers take it last).
+		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 12))`, p.TenantID+":"+strconv.FormatInt(id, 10)); err != nil {
 			return err
 		}
 		if e.Type != derivedStatusEvent && e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
@@ -391,16 +422,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			var confirm struct {
-				Cause int64 `json:"confirmed_cause_event_id"`
-			}
-			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&confirm); err != nil || confirm.Cause != preview.CauseEventID {
-				return ErrConflict
-			}
-			var trailing any
-			if err := decoder.Decode(&trailing); err != io.EOF {
+			if confirm.Cause != preview.CauseEventID {
 				return ErrConflict
 			}
 			causeID = cause.ID
@@ -435,7 +457,11 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if causeID != 0 {
-			if _, err := Append(r.Context(), tx, p, Change{NodeID: e.NodeID, Type: "status_autopilot.causal_undo", After: map[string]any{"id": *e.NodeID, "cause_event_id": causeID}, UndoOf: &id}); err != nil {
+			metadata, err := json.Marshal(map[string]any{"cause_event_id": causeID, "rule_version": 1, "reason": "Reverted the triggering work change."})
+			if err != nil {
+				return err
+			}
+			if _, err := Append(r.Context(), tx, p, Change{NodeID: e.NodeID, Type: "status_autopilot.causal_undo", After: map[string]any{"id": *e.NodeID}, Metadata: metadata, UndoOf: &id}); err != nil {
 				return err
 			}
 		}

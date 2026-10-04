@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -356,4 +357,121 @@ func TestWorkStatusRejectsOversizedChangesAtomically(t *testing.T) {
 	if changed != 0 {
 		t.Fatalf("partial oversized write %d", changed)
 	}
+}
+
+// Use the production SQL functions unchanged except for their literal capacity
+// in this isolated database. A three-row boundary exercises the same guards
+// without inserting 50,000 rows on the shared workstation.
+func (f *statusFixture) smallLimit() {
+	f.t.Helper()
+	for _, name := range []string{"aeon_work_status_begin", "aeon_work_status_flush"} {
+		var definition string
+		if err := f.d.App.QueryRow(f.t.Context(), `SELECT pg_get_functiondef(($1||'()')::regprocedure)`, name).Scan(&definition); err != nil {
+			f.t.Fatal(err)
+		}
+		definition = strings.ReplaceAll(strings.ReplaceAll(definition, "LIMIT 50001", "LIMIT 4"), "total>50000", "total>3")
+		if _, err := f.d.App.Exec(f.t.Context(), definition); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+}
+func TestWorkStatusNodeLimitCrossingRollsBack(t *testing.T) {
+	f := newStatusFixture(t)
+	f.smallLimit()
+	for i := 1; i <= 3; i++ {
+		f.node(fmt.Sprintf("WK-%d", i), "PRJ-1", "open")
+	}
+	f.enable()
+	err := f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,'WK-4','Crossing',p.id FROM node_kinds k,nodes p WHERE k.slug='work' AND p.key='PRJ-1'`, f.tid)
+		return err
+	})
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "54000" || pg.Message != "work status scope exceeds 50000 nodes" {
+		t.Fatalf("limit-crossing mutation did not fail atomically: %v", err)
+	}
+	var count int
+	if err := f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE k.slug='work'`).Scan(&count)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("partial crossing write: %d", count)
+	}
+	f.check("WK-1", "open")
+	f.exec(`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,'MEM-1','Memory',p.id FROM node_kinds k,nodes p WHERE k.slug='memory' AND p.key='PRJ-1'`, f.tid)
+	err = db.InTransaction(dbtest.Seed(t.Context()), f.d.App, func(ctx context.Context) error {
+		// The early write must roll back too when a later kind conversion
+		// exceeds capacity at the grouped transaction's final boundary.
+		if err := db.InTenant(ctx, f.d.App, f.tid, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE nodes SET title='Must roll back' WHERE key='WK-1'`)
+			return err
+		}); err != nil {
+			return err
+		}
+		return db.InTenant(ctx, f.d.App, f.tid, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE slug='work') WHERE key='MEM-1'`)
+			return err
+		})
+	})
+	if !errors.As(err, &pg) || pg.Code != "54000" || pg.Message != "work status scope exceeds 50000 nodes" {
+		t.Fatalf("grouped kind conversion did not fail atomically: %v", err)
+	}
+	if err := f.tx(func(tx pgx.Tx) error {
+		var title, kind string
+		if err := tx.QueryRow(t.Context(), `SELECT title FROM nodes WHERE key='WK-1'`).Scan(&title); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE n.key='MEM-1'`).Scan(&kind); err != nil {
+			return err
+		}
+		if title != "WK-1" || kind != "memory" {
+			return fmt.Errorf("partial grouped write: title=%s kind=%s", title, kind)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestWorkStatusNodeLimitRecoveryAndTombstones(t *testing.T) {
+	t.Run("over-limit read and disable", func(t *testing.T) {
+		f := newStatusFixture(t)
+		f.smallLimit()
+		for i := 1; i <= 4; i++ {
+			f.node(fmt.Sprintf("WK-%d", i), "PRJ-1", "open")
+		}
+		f.enable() // An old/external activation may already exceed capacity.
+		f.check("WK-1", "open")
+		f.exec(`UPDATE features SET enabled=false WHERE tenant_id=$1`, f.tid)
+		f.change("WK-1", "done")
+		f.check("WK-1", "done")
+	})
+	t.Run("tombstones do not consume capacity; restore does", func(t *testing.T) {
+		f := newStatusFixture(t)
+		f.smallLimit()
+		for i := 1; i <= 4; i++ {
+			f.node(fmt.Sprintf("WK-%d", i), "PRJ-1", "open")
+		}
+		f.exec(`UPDATE nodes SET deleted_at=clock_timestamp() WHERE key='WK-4'`)
+		f.enable()
+		f.check("WK-1", "open")
+		err := f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=NULL WHERE key='WK-4'`)
+			return err
+		})
+		var pg *pgconn.PgError
+		if !errors.As(err, &pg) || pg.Code != "54000" || pg.Message != "work status scope exceeds 50000 nodes" {
+			t.Fatalf("restore crossing limit: %v", err)
+		}
+		var deleted bool
+		if err := f.tx(func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT deleted_at IS NOT NULL FROM nodes WHERE key='WK-4'`).Scan(&deleted)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !deleted {
+			t.Fatal("restore partially committed")
+		}
+	})
 }

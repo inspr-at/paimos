@@ -3111,9 +3111,10 @@ using its existing tenant/project inheritance, explicit project OFF and default
 OFF behavior. Before enabling it, provision the existing System actor in a
 separate committed transaction while the flag is OFF (`systemactor.Ensure` /
 `aeon_authz_system_actor`); activation without that actor fails closed.
-Activation plumbing must validate the row/depth bounds before saving ON; invalid activation can block ordinary
-flagged transactions, including the current flag service’s reads/writes. This
-checkout does not substitute a second flag API. The coordinator owns catalog
+Activation plumbing must validate the row/depth bounds before saving ON. A tenant
+already above the live-row limit can still read and disable the flag; flagged
+work mutations fail closed until recovery. This checkout does not substitute a
+second flag API. The coordinator owns catalog
 registration, activation plumbing and the AEON-429 integration check. Existing
 parents reconcile when their children or state-category configuration change;
 activation itself does not rewrite historical states. Package AEON-655 owns the
@@ -3139,18 +3140,23 @@ surface. The existing single-click Undo stays unavailable for them. Fetch
 `GET /api/events/{id}/undo-preview`; confirm its visible `change_type`, message
 and affected children, then POST `/api/events/{id}/undo` with
 `{"confirmed_cause_event_id":123}` using the returned cause ID. The write
-re-checks permissions and original child revisions, reverses the cause once,
-and derives parents again. Later child edits, hidden/ambiguous causes, active
+decodes its bounded confirmation before taking any transaction locks, then
+re-checks permissions and original child revisions under access-change fences
+even if the flag was disabled, and reverses the cause once. Parents are derived
+again while the feature is enabled. Later child edits, hidden/ambiguous causes, active
 work and unsupported reverse operations refuse the action atomically.
 
 The initial implementation deliberately serializes flagged tenant transactions
 and prelocks their work rows to avoid taking ancestor locks after the event
-counter. Reads also enter that protocol. Limits fail the entire transaction:
-50,000 work rows including tombstones, 1,000 changed nodes, depth 1,000, 10,000
+counter. Reads also enter that protocol within capacity. Limits fail the entire
+work mutation transaction: 50,000 live work rows (tombstones are excluded, and
+restoration counts toward the limit), 1,000 changed nodes, depth 1,000, 10,000
 cause events, and 10-second entry/derivation deadlines. Causal previews accept
 at most 200 children and 4 MiB of combined cause snapshots; confirmation bodies
-are limited to 1 KiB. Direct work writes outside `db.InTenant` fail closed when
-the flag is enabled. These bounds and tenant-wide read serialization require
+are limited to 1 KiB with a 10-second HTTP read deadline. The live-row limit is
+checked again against the final tree before commit, so crossing creates,
+restores and kind conversions roll back atomically. Direct work writes outside
+`db.InTenant` fail closed when the flag is enabled. These bounds and tenant-wide read serialization require
 load validation before enabling large tenants; the local deep/wide regression
 covers 64 ancestor levels and 300 leaves, not a production load claim.
 

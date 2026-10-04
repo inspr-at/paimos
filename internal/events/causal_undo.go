@@ -38,6 +38,11 @@ func (m *module) causalChange(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if parent.Type != derivedStatusEvent || parent.NodeID == nil || parent.UndoOf != nil {
 		return Event{}, nil, out, ErrConflict
 	}
+	// Historical derivations remain undoable while the feature is disabled.
+	// Fence access changes before reading grants, independently of its flag.
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return Event{}, nil, out, err
+	}
 	var id *int64
 	if err := tx.QueryRow(ctx, `SELECT (metadata->>'cause_event_id')::bigint FROM events WHERE tenant_id=$1 AND id=$2`, p.TenantID, parent.ID).Scan(&id); err != nil {
 		return Event{}, nil, out, err
@@ -201,16 +206,31 @@ func attachDerivation(ctx context.Context, tx pgx.Tx, tenantID string, items []E
 	ids := []int64{}
 	byID := map[int64]int{}
 	for i, e := range items {
-		if e.Type == derivedStatusEvent || e.Type == "status_autopilot.retained" {
+		if e.Type == derivedStatusEvent || e.Type == "status_autopilot.retained" || e.Type == "status_autopilot.causal_undo" {
 			ids = append(ids, e.ID)
 			byID[e.ID] = i
+			// Old append-only causal audits stored this private reference in
+			// their snapshot. Strip it at read time, without rewriting history.
+			if e.Type == "status_autopilot.causal_undo" {
+				var after map[string]json.RawMessage
+				if err := json.Unmarshal(e.After, &after); err != nil {
+					return err
+				}
+				delete(after, "cause_event_id")
+				raw, err := json.Marshal(after)
+				if err != nil {
+					return err
+				}
+				items[i].After = raw
+			}
 		}
 	}
 	if len(ids) == 0 {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `SELECT e.id,coalesce((e.metadata->>'rule_version')::integer,1),coalesce(e.metadata->>'reason',''),
- (SELECT c.id FROM events c WHERE c.tenant_id=e.tenant_id AND c.id=(e.metadata->>'cause_event_id')::bigint)
+ (SELECT c.id FROM events c WHERE c.tenant_id=e.tenant_id AND c.id=coalesce(e.metadata->>'cause_event_id',
+ CASE WHEN e.type='status_autopilot.causal_undo' THEN e.after->>'cause_event_id' END)::bigint)
  FROM events e WHERE e.tenant_id=$1 AND e.id=ANY($2::bigint[])`, tenantID, ids)
 	if err != nil {
 		return err
