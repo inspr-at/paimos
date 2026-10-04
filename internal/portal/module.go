@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -55,6 +57,13 @@ func New(pool *pgxpool.Pool, secureCookies bool, macKey []byte) *Module {
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/portal/products/{productId}/pace", m.readPace)
+	mux.HandleFunc("PUT /api/portal/products/{productId}/pace", m.writePace)
+	mux.HandleFunc("GET /api/portal/products/{productId}/market", m.readMarket)
+	mux.HandleFunc("GET /api/portal/products/{productId}/settings", m.readProductSettings)
+	mux.HandleFunc("PUT /api/portal/products/{productId}/settings", m.writeProductSettings)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/participation", m.readParticipation)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/participation", m.readParticipation)
 	mux.HandleFunc("GET /api/portal/settings", m.readSettings)
 	mux.HandleFunc("PATCH /api/portal/settings", m.updateSettings)
 	mux.HandleFunc("POST /api/portal/wishes/{wishId}/publish", m.publishWish)
@@ -75,6 +84,19 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/portal/pace", m.readPace)
 	mux.HandleFunc("PUT /api/portal/pace", m.writePace)
 	mux.HandleFunc("PUT /api/portal/wishes/{wishId}/fulfillment", m.writeFulfillment)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/catalog", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/wishes", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/comparison", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/pace", m.read)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/catalog.json", m.catalogFile)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/llms.txt", m.llms)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/releases", m.releases)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/roadmap", m.roadmap)
+	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/products/{productSlug}/roadmap.json", m.roadmap)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/products/{productSlug}/wishes", m.submitWish)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/products/{productSlug}/wishes/{wishKey}/votes", m.vote)
+	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/products/{productSlug}/corrections", m.submitCorrection)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}", m.read)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/catalog.json", m.catalogFile)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}/llms.txt", m.llms)
@@ -89,6 +111,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 // MountPublic serves the same public files at the site root. The patterns are
 // exact, so the Vue page at /portal/{tenantSlug} stays on the SPA.
 func (m *Module) MountPublic(mux *http.ServeMux) {
+	mux.HandleFunc("GET /portal/{tenantSlug}/products/{productSlug}/llms.txt", m.llms)
+	mux.HandleFunc("GET /portal/{tenantSlug}/products/{productSlug}/catalog.json", m.catalogFile)
+	mux.HandleFunc("GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json", m.roadmap)
 	mux.HandleFunc("GET /portal/{tenantSlug}/llms.txt", m.llms)
 	mux.HandleFunc("GET /portal/{tenantSlug}/catalog.json", m.catalogFile)
 	mux.HandleFunc("GET /portal/{tenantSlug}/roadmap.json", m.roadmap)
@@ -154,6 +179,61 @@ func decodeJSON(r *http.Request, dest any) error {
 	return nil
 }
 
+const portalBodyTimeout = 10 * time.Second
+
+// Decode before opening a transaction. A byte cap alone does not stop a slow
+// sender; the socket deadline interrupts reads even when Body.Close would wait.
+func decodePortalInput(w http.ResponseWriter, r *http.Request, decode func() error) bool {
+	controller := http.NewResponseController(w)
+	err := controller.SetReadDeadline(time.Now().Add(portalBodyTimeout))
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
+	if err == nil {
+		defer controller.SetReadDeadline(time.Time{})
+	}
+	// Non-socket handlers (including isolated tests) still have a time bound.
+	var timer *time.Timer
+	if errors.Is(err, http.ErrNotSupported) && r.Body != nil {
+		timer = time.AfterFunc(portalBodyTimeout, func() { _ = r.Body.Close() })
+		defer timer.Stop()
+	}
+	if err := decode(); err != nil {
+		var se statusError
+		if errors.As(err, &se) {
+			fail(w, se.status, se.msg)
+		} else {
+			fail(w, http.StatusBadRequest, "invalid input")
+		}
+		return false
+	}
+	return true
+}
+
+func (m *Module) decodeAdminInput(w http.ResponseWriter, r *http.Request, decode func() error) bool {
+	publicHeaders(w)
+	if _, ok := m.person(w, r); !ok {
+		return false
+	}
+	if m.pool == nil {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
+	// Preserve permission-denial precedence without holding a transaction open
+	// across body reads. manage/moderate still recheck under the write fence.
+	err := authz.Require(authz.BindPool(r.Context(), m.pool), "settings.manage", authz.Scope{})
+	if errors.Is(err, authz.ErrForbidden) {
+		fail(w, http.StatusForbidden, "permission denied")
+		return false
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
+	return decodePortalInput(w, r, decode)
+}
+
 func (m *Module) readSettings(w http.ResponseWriter, r *http.Request) {
 	publicHeaders(w)
 	p, ok := m.person(w, r)
@@ -195,12 +275,19 @@ func (m *Module) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in settingsWrite
-	if err := decodeJSON(r, &in); err != nil || in.Enabled == nil {
-		fail(w, http.StatusBadRequest, "invalid settings")
+	if !decodePortalInput(w, r, func() error {
+		if err := decodeJSON(r, &in); err != nil || in.Enabled == nil {
+			return statusError{http.StatusBadRequest, "invalid settings"}
+		}
+		return nil
+	}) {
 		return
 	}
 	var settings portalSettings
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}

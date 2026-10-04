@@ -70,6 +70,12 @@
       "reason": "Additive recurrence retirement state, tenant-scoped tombstone backfill, and project event visibility. Complete snapshots stay unchanged; only validated workspace tags at template.tags are omitted from definition reference walks, with other references and event domains preserved. ALTER POLICY, trigger replacement and the one-time reference backfill follow the existing 0823 migration pattern and are conservatively outside the classifier allowlist. This owned, unpublished migration and exact-byte exception are exposed in draft PR #188 for coordinator review; regressions cover hidden deletion events, workspace-tag history, and project/reference/workspace boundaries. Previous-binary compatibility is measured in CI; no merge or release authority is granted."
     },
     {
+      "file": "1138_portal_products.sql",
+      "sha256": "39a0436761b6467a48d7e5fe91985d64a546dd1f6fa6c966c67df752d9aaedb0",
+      "ticket": "AEON-619",
+      "reason": "Additive product registry, product project-link table and nullable legacy product bindings. The classifier flags the FORCE-RLS tenant-loop backfill and legacy mirror DELETE despite retaining every legacy table, column, ballot and response shape. Backfill captures the old default once and retains participation as legacy for existing published products; new products are disabled. Exact-byte exception is for coordinator review before merge/release and does not waive previous-binary probes. Fix round 2 registers pre-existing nested/deleted products as unpublished and disabled, and idempotently registers newly eligible roots on move/restore/kind changes; existing settings/default choices remain intact."
+    },
+    {
       "file": "1141_chat_identity.sql",
       "sha256": "4a748622f79da3c967954178375c03b802fcce72092fb84a7d1474cd19a336e8",
       "ticket": "AEON-618",

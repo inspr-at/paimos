@@ -366,7 +366,7 @@ for (const width of [1600, 390]) {
 
     await page.getByRole('button', { name: 'Add a feature' }).click()
     await page.getByLabel('Title').fill('Deadline radar')
-    await page.getByLabel('Status').selectOption('live')
+    await page.getByRole('combobox', { name: /^Status\b/ }).selectOption('live')
     await page.getByLabel('Legal basis').fill('§ 20 WEG')
     await page.getByRole('button', { name: 'Add feature' }).click()
     const radar = page.getByRole('listitem').filter({ hasText: 'Deadline radar' })

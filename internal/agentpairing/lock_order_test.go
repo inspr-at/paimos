@@ -13,7 +13,7 @@ import (
 )
 
 // TestTenantTreePairingLockOrder inventories every direct advisory/tenant lock
-// and lock-helper call in these five packages. The shipped order is pairing ->
+// and lock-helper call in these seven packages. The shipped order is pairing ->
 // tree -> tenant -> resource rows; access-only writers omit pairing/tree. Keep
 // the exact primitive sequences here: checking only callers missed the previous
 // inversions inside shared helpers. New call sites must join this inventory.
@@ -60,9 +60,22 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/occurrence.go:runNow":                  "recurrence.lock",
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",
 		"operatoractor/actor.go:EnsureWithProduction":       "tree tenant:UPDATE",
+
+		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
+		"nodes/module.go:lockTree":                    "project.Write",
+		"nodes/nodes.go:updateNode":                   "pairing.Lock",
+		"nodes/nodes.go:deleteNode":                   "pairing.Lock",
+		"nodes/portal_publish.go:armPortalModeration": "project.Write",
+		"portal/market.go:manage":                     "pairing.Mutation",
+		"portal/moderate.go:moderate":                 "pairing.Mutation",
+		"portal/module.go:updateSettings":             "pairing.Mutation",
+		"portal/products.go:publicWriteProduct":       "pairing.Mutation",
+		// The existing scanner labels direct seed-0 advisories "tree";
+		// this key is portal-public-service:<tenant>, after the mutation fence.
+		"portal/public.go:serviceActor": "tree",
 	}
 	got := map[string]string{}
-	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor"} {
+	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor", "nodes", "portal"} {
 		files, err := filepath.Glob(filepath.Join("..", pkg, "*.go"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("inventory %s: files=%d err=%v", pkg, len(files), err)
@@ -98,7 +111,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		}
 	}
 	if reflect.DeepEqual(got, want) {
-		t.Logf("verified %d lock sites across five packages", len(got))
+		t.Logf("verified %d lock sites across seven packages", len(got))
 	}
 }
 
