@@ -45,7 +45,7 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
-	// Now supplies the capacity scheduler clock; deadlines still use contexts.
+	// Now supplies the capacity and pairing-recovery clocks; deadlines still use contexts.
 	Now func() time.Time
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
@@ -175,6 +175,7 @@ type Supervisor struct {
 	signInUnverified       map[string]bool
 	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
 	probeReasonDetails     map[string]string // Allowlisted explanations, protected by mu.
+	pairingFailure         string            // Allowlisted cause; guarded by mu, independent of harness holds.
 	harnessHoldReasons     map[string]string
 	dependencyReasons      map[string]string
 	harnessHolds           map[string]string
@@ -208,12 +209,18 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		return nil, errors.New("invalid daemon configuration")
 	}
 	physical, err := filepath.EvalSymlinks(c.Workspace)
-	if err != nil || !filepath.IsAbs(c.Workspace) || physical != c.Workspace {
-		return nil, errors.New("workspace must be an existing physical absolute path")
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace %s: %w", c.Workspace, err)
+	}
+	if !filepath.IsAbs(c.Workspace) || physical != c.Workspace {
+		return nil, fmt.Errorf("workspace %s must be an existing physical absolute path", c.Workspace)
 	}
 	info, err := os.Stat(physical)
-	if err != nil || !info.IsDir() {
-		return nil, errors.New("workspace is not a directory")
+	if err != nil {
+		return nil, fmt.Errorf("stat workspace %s: %w", physical, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("workspace %s is not a directory", physical)
 	}
 	tenantID, principalID, err := c.API.Identity(ctx)
 	if err != nil {
@@ -443,19 +450,58 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
+	return s.pollOnce(ctx, true)
+}
+
+// ProbeOnce refreshes account health without queue reads, claims or launches.
+// It is safe during a retryable lifecycle outage; durable fences still apply.
+func (s *Supervisor) ProbeOnce(ctx context.Context) error {
+	return s.pollOnce(ctx, false)
+}
+
+func pollContextError(ctx context.Context, causes ...error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, err := range causes {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr error) {
 	diagnostic := ""
-	defer func() { s.reportPollDiagnostic(diagnostic) }()
-	// Recover no-launch claims before a fresh probe changes account generation.
-	recoveryErr := s.recoverUnlaunched(ctx)
-	s.settlePending(ctx)
-	if !s.dispatchAllowed("") {
+	defer func() {
+		if pollContextError(ctx, resultErr) == nil {
+			s.reportPollDiagnostic(diagnostic)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var recoveryErr error
+	var runs []Run
+	if dispatch {
+		// Recover no-launch claims before a fresh probe changes generation.
+		recoveryErr = s.recoverUnlaunched(ctx)
+		s.settlePending(ctx)
+	}
+	if err := pollContextError(ctx, recoveryErr); err != nil {
+		return err
+	}
+	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
 		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
-	runs, err := s.api.Queued(ctx)
-	if err != nil {
-		diagnostic = "queue_unavailable"
-		return err
+	if dispatch {
+		var err error
+		runs, err = s.api.Queued(ctx)
+		if err != nil {
+			diagnostic = "queue_unavailable"
+			return err
+		}
 	}
 	failures := []error{recoveryErr}
 	s.mu.Lock()
@@ -470,6 +516,9 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	for _, account := range accounts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if s.hasUnresolvedOldClaim(account.ID) {
 			s.freezeOnError(account.ID)
 			continue
@@ -481,6 +530,9 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		if account.DependencyBlocked {
 			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
+				if cancelled := pollContextError(ctx, err); cancelled != nil {
+					return cancelled
+				}
 				failures = append(failures, errors.New("account probe unavailable"))
 			}
 			continue
@@ -527,6 +579,11 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 				status = probeAccount(ctx, probe, account.Key)
 			}
 		}
+		// Cancellation is not evidence about sign-in, dependencies or health.
+		// Discard the interrupted result before publishing or consuming the wait.
+		if err := pollContextError(ctx, dependencyErr, probeErr); err != nil {
+			return err
+		}
 		if pi, ok := probe.(*PiAdapter); ok && hold == "" {
 			pi.probeMu.Lock()
 			cached := pi.probes[account.Key]
@@ -556,6 +613,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		if cancelled := pollContextError(ctx, err); cancelled != nil {
+			s.mu.Unlock()
+			return cancelled
+		}
 		// A concurrent repin/hold release starts a new probe lifecycle. The old
 		// adapter's in-flight result cannot consume that wait or establish local readiness.
 		if !s.probePendingSince[account.ID].Equal(pendingSince) {
@@ -648,6 +709,9 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 	}
 	for _, run := range runs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if run.AgentPrincipalID != s.principalID {
 			failures = append(failures, ErrScope)
 			continue

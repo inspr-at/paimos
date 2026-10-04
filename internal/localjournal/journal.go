@@ -65,18 +65,21 @@ func Open[T any](config Config[T]) (*Journal[T], error) {
 		return nil, fmt.Errorf("create local journal state: %w", err)
 	}
 	info, err := os.Lstat(config.Directory)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
-		return nil, errors.New("local journal state directory has unsafe mode or type")
+	if err != nil {
+		return nil, fmt.Errorf("stat local journal directory %s: %w", config.Directory, err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return nil, fmt.Errorf("local journal directory %s has unsafe mode or type", config.Directory)
 	}
 	j := &Journal[T]{dir: config.Directory, journalPath: filepath.Join(config.Directory, config.Prefix+".journal"),
 		checkpointPath: filepath.Join(config.Directory, config.Prefix+".checkpoint.json"), version: config.Version,
 		maxBytes: config.MaxBytes, maxRecords: config.MaxRecords, key: config.Key, validate: config.Validate,
 		records: map[string]T{}}
 	if err := j.loadCheckpoint(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load local journal checkpoint %s: %w", j.checkpointPath, err)
 	}
 	if err := j.replay(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("replay local journal %s: %w", j.journalPath, err)
 	}
 	return j, nil
 }
@@ -260,7 +263,12 @@ func (j *Journal[T]) append(entry event[T]) error {
 	return file.Close()
 }
 
-func (j *Journal[T]) checkpoint() error {
+func (j *Journal[T]) checkpoint() (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("write local journal checkpoint %s: %w", j.checkpointPath, resultErr)
+		}
+	}()
 	body, err := j.checkpointBody(j.records)
 	if err != nil {
 		return err
@@ -319,7 +327,12 @@ func (j *Journal[T]) checkpointBody(records map[string]T) ([]byte, error) {
 	return body, nil
 }
 
-func (j *Journal[T]) resetJournal() error {
+func (j *Journal[T]) resetJournal() (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("reset local journal %s: %w", j.journalPath, resultErr)
+		}
+	}()
 	file, err := os.OpenFile(j.journalPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- fixed state path.
 	if err != nil {
 		return err
@@ -335,18 +348,29 @@ func (j *Journal[T]) resetJournal() error {
 	return file.Close()
 }
 
-func readBounded(path string, maximum int64) ([]byte, error) {
+func readBounded(path string, maximum int64) (_ []byte, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("read local journal state %s: %w", path, resultErr)
+		}
+	}()
 	file, err := os.Open(path) // #nosec G304 -- caller supplies fixed state path.
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || info.Mode().Perm() != 0o600 || info.Size() > maximum {
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode().Perm() != 0o600 || info.Size() > maximum {
 		return nil, errors.New("local journal state has unsafe mode or size")
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maximum+1))
-	if err != nil || int64(len(raw)) > maximum {
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maximum {
 		return nil, errors.New("local journal state exceeds its bound")
 	}
 	return raw, nil

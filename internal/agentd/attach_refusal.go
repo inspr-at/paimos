@@ -21,6 +21,9 @@ var ErrAttachExchange = errors.New("attach exchange could not complete")
 // Only the authenticated kernel-checked local helper gets these fixed next
 // steps. Server text is used only for exact legacy matches, never interpolated.
 func attachRefusal(err error) error {
+	if local, ok := err.(*AttachLocalError); ok && local.Code == "attach_version_mismatch" {
+		return local
+	}
 	code := "unknown"
 	var status *client.StatusError
 	var transport *url.Error
@@ -51,6 +54,8 @@ func attachRefusal(err error) error {
 			code = "enrollment_unavailable"
 		case status.Status == http.StatusGone && status.AttachRefusal == attachwatch.RefusalExpired:
 			code = "code_expired"
+		case status.Status == http.StatusForbidden && status.AttachRefusal == attachwatch.RefusalPollKeyUnknown && status.ReasonCode == "":
+			code = "poll_key_unknown"
 		case status.Status == http.StatusForbidden && (status.ReasonCode == "missing_key_scope" || status.ReasonCode == "missing_role_permission" || status.ReasonCode == "missing_project_access"):
 			code = "pairing_unavailable"
 		default:
@@ -69,6 +74,7 @@ var attachRefusalHints = map[string]string{
 	"code_expired":           "The attach code expired before activation. Run attach again and approve the new code in Aeon.",
 	"draining":               "This computer or harness enrollment is disconnecting. For a harness drain, use aeon-agentd add-harness; the old enrollment may keep draining. For a computer drain, let owned work finish, then pair the computer again. Run attach again with fresh approval; a running process does not bypass disconnect.",
 	"enrollment_unavailable": "This harness has no connected enrollment on the paired computer. Check its enrollments in Aeon, add the harness again with aeon-agentd add-harness if needed, then run attach again.",
+	"poll_key_unknown":       "agentd re-registers automatically when attach is retried. Run attach again in a few seconds and give fresh approval in Aeon; a daemon restart is not required.",
 	"registration_lost":      "Aeon no longer accepts this daemon's attach registration, for example after a server restart. When owned work permits, restart agentd, then run attach again and give fresh approval; re-pairing is not required.",
 	"pairing_unavailable":    "The paired computer or its authorization is unavailable. Check the computer, its enrollments, runtime key scope and owner's account permissions in Aeon, then restart agentd and run attach again.",
 	"scope_changed":          "The project, ticket or harness enrollment changed. Check the ticket's project, the owner's access and this computer's connected harness enrollments in Aeon, then run attach again.",
