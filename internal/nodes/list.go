@@ -627,7 +627,12 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				return err
 			}
+			stale, err := workqueue.Stale(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
 			for i := range page.Items {
+				page.Items[i].QueueStale = stale[page.Items[i].ID]
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
 				page.Items[i].Queued = queued[page.Items[i].ID]
 			}

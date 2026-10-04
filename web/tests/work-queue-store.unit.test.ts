@@ -3,9 +3,10 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { readQueue, addToQueue, moveQueue, removeFromQueue, queueReadiness } from '../src/lib/workQueue'
 import type { QueueSnapshot } from '../src/lib/workQueue'
+import { getNode } from '../src/lib/api'
 import { useWorkQueue } from '../src/stores/workQueue'
 import { resetPositions } from '../src/lib/position'
-vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), getNode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), getNode: vi.fn(async (id: string) => ({ id, key: 'AEON-1', kind_id: 'ticket', title: 'Work', body: '', state: 'open', fields: {}, parent_id: null, position: '0', created_at: '2026-10-04T00:00:00Z', updated_at: '2026-10-04T00:00:01Z', deleted_at: null })) }))
 vi.mock('../src/lib/workQueue', async original => ({ ...await original<typeof import('../src/lib/workQueue')>(), readQueue: vi.fn(), addToQueue: vi.fn(), moveQueue: vi.fn(), removeFromQueue: vi.fn(), queueReadiness: vi.fn() }))
 const snapshot = (manual_order = false): QueueSnapshot => ({ items: [], manual_order, capacity: { hours: 0, total: 2 } })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
@@ -91,4 +92,26 @@ it('refreshes a partial route change and reports loss of the former place withou
   await expect(store.add('p', 'a', { agent_id: 'agent', account_id: 'account', profile_id: 'profile', name: 'Builder', account: 'Pro', model: 'model', effort: 'high', available: false })).rejects.toThrow('left its previous queue place')
   expect(removeFromQueue).toHaveBeenCalledWith('a'); expect(addToQueue).toHaveBeenCalledOnce()
   expect(store.snapshots.p?.items).toEqual([]); expect(store.busy).toBe(false)
+})
+
+it('returns the stale Undo receipt and drops an old identity write result', async () => {
+  const store = useWorkQueue()
+  const receipt = { node_id: 'a', undo: { run_id: 'run-a', revision: '2026-10-04T00:00:01Z' } } as Awaited<ReturnType<typeof addToQueue>>
+  vi.mocked(addToQueue).mockResolvedValueOnce(receipt)
+  vi.mocked(readQueue).mockResolvedValue(snapshot())
+  expect((await store.add('p', 'a'))?.undo).toEqual(receipt.undo)
+  const pending = deferred<typeof receipt>()
+  vi.mocked(addToQueue).mockReturnValueOnce(pending.promise)
+  const writing = store.add('p', 'a')
+  resetPositions(); pending.resolve(receipt)
+  expect(await writing).toBeUndefined()
+  expect(store.snapshots).toEqual({})
+})
+
+it('reports a saved queue addition when the ticket refresh fails', async () => {
+  const store = useWorkQueue()
+  vi.mocked(addToQueue).mockResolvedValueOnce({ node_id: 'a' } as Awaited<ReturnType<typeof addToQueue>>)
+  vi.mocked(getNode).mockRejectedValueOnce(new Error('ticket read offline'))
+  await expect(store.add('p', 'a')).rejects.toThrow('Saved, but the ticket could not be refreshed: ticket read offline')
+  expect(store.busy).toBe(false)
 })

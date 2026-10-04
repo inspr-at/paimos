@@ -5,7 +5,7 @@ import { onReset } from '../lib/position'
 import { onAccessChange } from '../lib/authz'
 import { getNode, type ListItem } from '../lib/api'
 import { rowStore } from '../lib/rowStore'
-import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, queueReadiness, readyGaps, type QueueReadiness, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
+import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, queueReadiness, readyGaps, undoQueueAddition, staleProgress, staleWork, type QueueUndoToken, type QueueReadiness, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
 
 export const useWorkQueue = defineStore('workQueue', () => {
   // Read projections only; order and queue membership always come from the run service.
@@ -43,6 +43,10 @@ export const useWorkQueue = defineStore('workQueue', () => {
   }
   function entry(project: string, ticket: string) { return snapshots[project]?.items.find(item => item.ticket_id === ticket) ?? null }
   function firstShared(project: string) { return snapshots[project]?.items.find(item => !item.target_agent_id) ?? null }
+  function stale(row: ListItem) {
+    const saved = advice[row.id]
+    return staleWork(row) || (row.queue_stale === undefined && staleProgress(row) && saved?.revision === row.updated_at && saved.value.stale === true)
+  }
   function gaps(row: ListItem) {
     const saved = advice[row.id]
     return saved?.revision === row.updated_at ? saved.value.missing.filter(gap => gap !== 'status') : readyGaps(row)
@@ -56,16 +60,17 @@ export const useWorkQueue = defineStore('workQueue', () => {
     }).finally(() => { if (checking.get(key) === request) checking.delete(key) })
     checking.set(key, request); return request
   }
-  async function write(project: string, action: () => Promise<unknown>) {
+  async function write<T>(project: string, action: () => Promise<T>) {
     if (busy.value) throw new Error('A queue change is already being saved.')
     const started = epoch
     busy.value = true
     try {
-      await action()
+      const result = await action()
       if (started === epoch) {
         await load(project, true)
         if (errors[project]) throw new Error(`Saved, but the queue could not be refreshed: ${errors[project]}. Retry its read before another change.`)
       }
+      return started === epoch ? result : undefined
     }
     finally { if (started === epoch) busy.value = false }
   }
@@ -73,11 +78,11 @@ export const useWorkQueue = defineStore('workQueue', () => {
     const started = epoch
     const current = entry(project, ticket)
     const changingRoute = current && ((current.target_agent_id ?? null) !== (target?.agent_id ?? null) || (target && current.model_profile_id !== target.profile_id))
-    // Part A rejects changing an active entry's target. A deliberate route
-    // change replaces that entry through its existing remove/add operations.
+    // A deliberate route change replaces an existing queue entry.
     if (changingRoute) await removeFromQueue(ticket)
     if (started !== epoch) return
-    try { await addToQueue(ticket, target) }
+    let result
+    try { result = await addToQueue(ticket, target) }
     catch (e) {
       if (changingRoute && started === epoch) {
         await load(project, true)
@@ -87,9 +92,19 @@ export const useWorkQueue = defineStore('workQueue', () => {
     }
     if (started !== epoch) return
     const sent = rowStore.mark()
-    // New/Backlog become Open on add; adopt that authoritative node revision.
-    const node = await getNode(ticket).catch(() => null)
-    if (node && started === epoch) rowStore.adoptNode(node, sent, { show: true })
+    const node = await getNode(ticket).catch(e => { throw new Error(`Saved, but the ticket could not be refreshed: ${e instanceof Error ? e.message : 'request failed'}. Reload it before another change.`) })
+    if (started === epoch) rowStore.adoptNode(node, sent, { show: true })
+    return result
+  })
+  const undoAdd = (project: string, ticket: string, token: QueueUndoToken) => write(project, async () => {
+    const started = epoch
+    const result = await undoQueueAddition(ticket, token)
+    if (!result.removed) throw new Error('The queue change was not undone.')
+    if (started !== epoch) return
+    const sent = rowStore.mark()
+    const node = await getNode(ticket)
+    if (started === epoch) rowStore.adoptNode(node, sent, { show: true })
+    return result
   })
   const remove = (project: string, ticket: string) => write(project, () => removeFromQueue(ticket))
   const reset = (project: string) => write(project, () => resetQueue())
@@ -108,5 +123,5 @@ export const useWorkQueue = defineStore('workQueue', () => {
     const next = movedQueue(ids, ticket, direction)
     return next === ids ? Promise.resolve() : order(project, next, ticket)
   }
-  return { snapshots, errors, busy, load, entry, firstShared, gaps, checkReadiness, add, remove, reset, move, order }
+  return { snapshots, errors, busy, load, entry, firstShared, stale, gaps, checkReadiness, add, undoAdd, remove, reset, move, order }
 })
