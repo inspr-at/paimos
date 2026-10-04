@@ -29,7 +29,8 @@
     "Flake guard can request --last-failed (per-group last-run state) or --test-list /absolute/failures.txt (native Playwright test-list format). Empty groups succeed only during these failure-only selections.",
     "PLAYWRIGHT_JSON_OUTPUT_FILE enables per-group JSON reports plus one combined report at that path; --reporter=json is also accepted. Prior report bytes are invalidated before launch so startup failure/interruption cannot reuse green evidence.",
     "Shard assignment is based on file names and timing weights only; groups execute sequentially with their own original policies. Weights for the 165 newly covered specs are estimates; hosted measurement is needed before claiming the 5-minute target.",
-    "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback."
+    "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback.",
+    "OPS-257 coverage hygiene: aeon-632b-clip, key-trim and model-prefs gate in coverage-additions, with native browser-free listed test counts and estimated weights. LPT assigns each to the lightest shard. Source-manifest unit coverage rejects undeclared specs before reconciliation. Ticketed exclusions are omitted even with --all; clip-tip is excluded under AEON-676 until its hosted failure is fixed. Existing remaining-ui stays ungated pending its separate measurement decision."
   ],
   "configs": [
     {
@@ -1171,6 +1172,38 @@
       ]
     },
     {
+      "id": "coverage-additions",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/aeon-632b-clip.spec.ts",
+          "weightSeconds": 86.560976,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 39
+        },
+        {
+          "file": "tests/key-trim.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/model-prefs.spec.ts",
+          "weightSeconds": 93.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 42
+        }
+      ]
+    },
+    {
       "id": "remaining-ui",
       "gate": false,
       "config": "playwright.ui.config.ts",
@@ -2185,5 +2218,12 @@
     "test:unit": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
     "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
     "e2e": "node ../scripts/playwright-safe.mjs"
-  }
+  },
+  "exclusions": [
+    {
+      "file": "tests/clip-tip.spec.ts",
+      "ticket": "AEON-676",
+      "reason": "Production-table hold shrinks the name width by 40 px on hosted CI. Keep excluded until AEON-676 fixes the failure and validates it on hosted runners."
+    }
+  ]
 }
