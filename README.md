@@ -2361,6 +2361,15 @@ with read-only `aeon-agentd status --json` for the affected account. Queue error
 can therefore explain a subsequent probe timeout; the timeout alone does not
 identify the underlying cause. Raw errors and private bindings are not logged.
 
+Pairing reconciliation and runtime refresh failures report `pairing_sync_failed`
+with a fixed short cause in local account/harness status and subsequent lifecycle
+reports. They log `agentd pairing diagnostic` once per distinct cause per daemon
+process, without raw errors, paths or credentials. Polling stays blocked until
+reconciliation and runtime validation succeed; recovery clears the diagnostic.
+Revoked enrollments retain their fences without requiring an old local candidate;
+live enrollments match the approved account key and harness, independently of a
+changed display label. Unapproved live accounts still block reconciliation.
+
 ### Paired daemon socket paths
 
 Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
