@@ -429,17 +429,19 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
             <EtaCell v-if="etaOf(view) || working(view)" class="row-eta" align="start" :eta="etaOf(view)" :now="now" :missing="working(view)" />
           </span>
-          <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
-            <span class="exec-icon"><ExecutionMark :kind="exec.kind" :provider="exec.provider" /></span>
-            <span class="exec-copy">
-              <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
-              <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ exec.kind === 'ai' ? view.harness : exec.accountLine }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
+          <span class="execution-host" role="presentation">
+            <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
+              <span class="exec-icon"><ExecutionMark :kind="exec.kind" :provider="exec.provider" /></span>
+              <span class="exec-copy">
+                <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
+                <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ exec.kind === 'ai' ? view.harness : exec.accountLine }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
+              </span>
+              <TierCell v-if="serviceTiers.state(view.session).active_tier && serviceTiers.state(view.session).active_tier !== 'default'" class="phone-tier" :session="view.session" :name="view.name" phone />
             </span>
-            <TierCell v-if="serviceTiers.state(view.session).active_tier && serviceTiers.state(view.session).active_tier !== 'default'" class="phone-tier" :session="view.session" :name="view.name" phone />
-          </span>
-          <span role="cell" class="c-tier"><TierCell :session="view.session" :name="view.name" /></span>
-          <span role="cell" class="c-host">
-            <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels.get(view.session.host)" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
+            <span role="cell" class="c-tier"><TierCell :session="view.session" :name="view.name" /></span>
+            <span role="cell" class="c-host">
+              <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels.get(view.session.host)" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
+            </span>
           </span>
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
@@ -532,7 +534,8 @@ function rowClick(event: MouseEvent, id: string) {
 .table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
-.thead > span, .row > span { padding: 0 8px; min-width: 0; }
+.thead > span, .row > span, .execution-host > span { padding: 0 8px; min-width: 0; }
+.execution-host { display: contents; }
 .right { text-align: right; justify-content: flex-end; }
 /* Each header orders the families by its column; the mark shows key and direction.
    Labels never clip: right-aligned headers grow leftwards into the free end of the
@@ -696,7 +699,7 @@ function rowClick(event: MouseEvent, id: string) {
   .phone-tier { display: inline-flex; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
   .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
-  .row > span { padding: 0; }
+  .row > span, .execution-host > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
   .agent-link { grid-column: 1 / -1; grid-row: 1; display: grid; grid-template-columns: subgrid; align-items: start; }
@@ -715,13 +718,14 @@ function rowClick(event: MouseEvent, id: string) {
   .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
-  .c-exec { grid-column: 2 / 4; grid-row: 2; min-width: 0; margin-top: 6px; gap: 6px; }
+  /* The menu occupies the title line only. Execution and Host share the whole
+     line below it; a short host returns its spare width to the model/command. */
+  .execution-host { display: grid; grid-column: 2 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-top: 6px; }
+  .c-exec { min-width: 0; gap: 6px; }
   .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
-  .row > .c-host { display: flex; grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
-  .row > .c-host :deep(.host-badge) { max-width: 104px; }
-  /* Reserve the phone badge cap and rename control on the shared line. */
-  .row > .c-exec { padding-right: 132px; }
+  .execution-host > .c-host { display: flex; justify-self: end; padding: 0; }
+  .c-host :deep(.host-badge) { max-width: 104px; }
   /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
   .exec-copy { flex: 1; display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
   .exec-account { display: contents; }

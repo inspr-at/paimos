@@ -23,19 +23,19 @@ function expectHostBadgeFits(width: number, available: number, message: string) 
   expect(width, message).toBeLessThanOrEqual(available + 0.5)
 }
 
-async function modelGlyphSize(model: Locator) {
-  return model.evaluate(el => {
+async function modelGlyphSize(model: Locator, characters = 1) {
+  return model.evaluate((el, characters) => {
     const text = el.firstChild!
     const range = document.createRange()
     range.setStart(text, 0)
-    range.setEnd(text, 1)
+    range.setEnd(text, Math.min(characters, text.textContent!.length))
     const glyph = range.getBoundingClientRect(), box = el.getBoundingClientRect()
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')!
     context.font = getComputedStyle(el).font
     const ellipsis = el.scrollWidth > el.clientWidth ? context.measureText('…').width : 0
     return { width: glyph.width, required: glyph.width + ellipsis, available: box.right - glyph.left, slot: el.clientWidth }
-  })
+  }, characters)
 }
 
 function expectModelGlyphFits(glyph: Awaited<ReturnType<typeof modelGlyphSize>>, message: string, soft = false) {
@@ -223,17 +223,48 @@ test('execution kinds and person-specific host names on the real agents table', 
             expect.soft(harnessBox!.x + harnessBox!.width, `${child.display_label}: execution stays before host`).toBeLessThanOrEqual(badgeBox!.x + 0.5)
           }
         }
-        // The existing 132px phone reservation can hide model text at 390px.
-        // At tablet/desktop sizes, require room for a real glyph: the generated
-        // separator alone must never satisfy this guard.
-        for (const child of [ai, xai]) {
+        // Real execution text must fit beside Host even on phones: the
+        // generated separator alone must never satisfy this guard.
+        for (const child of [ai, xai, media, terminal]) {
           const model = page.locator(`[data-row="s:${child.id}"] .exec-model`)
-          await expect(model).toContainText(child.model)
-          await expect(model).toHaveAttribute('title', /fixture/)
-          if (width > 390) {
-            const glyph = await modelGlyphSize(model)
-            expectModelGlyphFits(glyph, `${width}px ${child.display_label}: a whole model character fits after the separator and before any ellipsis`, true)
-          }
+          await expect(model).toContainText(child.model || ('generator' in child ? child.generator : 'command' in child ? child.command : ''))
+          const characters = child === terminal ? terminal.command.length : width === 390 ? 3 : 1
+          const glyph = await modelGlyphSize(model, characters)
+          expectModelGlyphFits(glyph, `${width}px ${child.display_label}: ${characters} execution characters fit after the separator and before any ellipsis`, true)
+        }
+        if (width === 390) {
+          await expectStableControls({ controls: { host: workerHost, pencil, row, menu: row.locator('.more') }, scrollAreas: { row }, interactions: [
+            { name: 'hover compact host', run: async () => {
+              await workerHost.hover()
+              await expect(pencil).toHaveCSS('opacity', '1')
+            } },
+            { name: 'edit compact host draft', run: async () => {
+              await pencil.click()
+              await expect(dialog.getByRole('textbox')).toBeEnabled()
+              await dialog.getByRole('textbox').fill('Draft only')
+              await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
+            } },
+            { name: 'cancel compact host draft', run: async () => {
+              await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+              await expect(dialog).toHaveCount(0)
+              await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
+            } },
+          ] })
+          await workerHost.click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+          await dialog.getByRole('textbox').fill('mba')
+          await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+          await expect(workerHost.locator('.host-name')).toHaveText('mba')
+          expect((await workerHost.boundingBox())!.width).toBeLessThan(responsiveBadge!.width)
+          const shortHostModel = await modelGlyphSize(row.locator('.exec-model'), 3)
+          expectModelGlyphFits(shortHostModel, 'short host leaves real model text visible')
+          await workerHost.click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+          await dialog.getByRole('textbox').fill(longLabel)
+          await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+          await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
         }
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
         if (shots) await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
