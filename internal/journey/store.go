@@ -328,12 +328,17 @@ func loadImported(ctx context.Context, tx pgx.Tx, f *facts, releaseID **string) 
 		WHERE n.deleted_at IS NULL AND t.depth<64
 	), typed AS (
 		SELECT t.*,k.slug FROM tree t JOIN node_kinds k ON k.id=t.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
+	), imported_work AS (
+		SELECT id,state FROM typed WHERE slug='ticket'
+		 OR (slug='work' AND aeon_work_is_release_leaf(current_setting('aeon.tenant_id')::uuid,id))
+		UNION
+		SELECT n.id,n.state FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id
+		 WHERE jt.project_node_id=$1::uuid AND aeon_work_is_release_leaf(n.tenant_id,n.id)
 	)
 		SELECT (SELECT r.release_node_id::text FROM journey_releases r JOIN nodes n ON n.id=r.release_node_id AND n.tenant_id=r.tenant_id WHERE r.project_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.created_at DESC,n.id DESC LIMIT 1),
 		       (SELECT count(*) FROM journey_releases r WHERE r.project_node_id=$1::uuid),
-		       (SELECT count(*) FROM typed WHERE slug='ticket') + (SELECT count(*) FROM journey_tickets jt WHERE project_node_id=$1::uuid AND aeon_work_is_release_leaf(jt.tenant_id,jt.ticket_node_id)),
-		       (SELECT count(*) FROM typed WHERE slug='ticket' AND state<>'done') +
-		         (SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=$1::uuid AND n.deleted_at IS NULL AND n.state<>'done' AND aeon_work_is_release_leaf(n.tenant_id,n.id)),
+		       (SELECT count(*) FROM imported_work),
+		       (SELECT count(*) FROM imported_work WHERE state<>'done'),
 		       coalesce((SELECT bool_and(n.state='done') FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id WHERE r.project_node_id=$1::uuid),false)`, f.ProjectID).Scan(&latest, &releaseCount, &ticketCount, &openTickets, &allDone)
 	if err != nil {
 		return err

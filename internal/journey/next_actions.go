@@ -114,6 +114,12 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  SELECT p.id AS root,n.id,n.parent_id,n.kind_id,n.state,0 AS depth FROM roots p JOIN nodes n ON n.id=p.id WHERE p.imported AND p.current_release_node_id IS NULL
  UNION ALL SELECT t.root,n.id,n.parent_id,n.kind_id,n.state,t.depth+1 FROM tree t JOIN nodes n ON n.parent_id=t.id WHERE n.deleted_at IS NULL AND t.depth<64),
  typed AS (SELECT t.*,k.slug FROM tree t JOIN node_kinds k ON k.id=t.kind_id),
+ imported_work AS (
+ SELECT t.root,t.id,t.state FROM typed t WHERE t.slug='ticket'
+  OR (t.slug='work' AND aeon_work_is_release_leaf(current_setting('aeon.tenant_id')::uuid,t.id))
+ UNION
+ SELECT jt.project_node_id,n.id,n.state FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id
+  WHERE jt.project_node_id=ANY($1::uuid[]) AND aeon_work_is_release_leaf(n.tenant_id,n.id)),
  projects AS (
  SELECT p.*,coalesce(p.current_release_node_id,CASE WHEN p.imported THEN latest.release_node_id END) AS release_id,
   CASE WHEN p.current_release_node_id IS NOT NULL AND p.imported THEN 'plan'
@@ -124,8 +130,8 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  LEFT JOIN LATERAL (SELECT jr.release_node_id FROM journey_releases jr JOIN nodes n ON n.tenant_id=jr.tenant_id AND n.id=jr.release_node_id WHERE jr.project_node_id=p.id AND n.deleted_at IS NULL ORDER BY n.created_at DESC,n.id DESC LIMIT 1) latest ON p.imported AND p.current_release_node_id IS NULL
  CROSS JOIN LATERAL (SELECT count(*) AS total,coalesce(bool_and(n.state='done'),false) AS all_done FROM journey_releases jr JOIN nodes n ON n.tenant_id=jr.tenant_id AND n.id=jr.release_node_id WHERE jr.project_node_id=p.id) rc
  CROSS JOIN LATERAL (SELECT
-  (SELECT count(*) FROM typed t WHERE t.root=p.id AND t.slug='ticket')+(SELECT count(*) FROM journey_tickets jt WHERE jt.project_node_id=p.id AND aeon_work_is_release_leaf(jt.tenant_id,jt.ticket_node_id)) AS total,
-  (SELECT count(*) FROM typed t WHERE t.root=p.id AND t.slug='ticket' AND t.state<>'done')+(SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id AND n.deleted_at IS NULL AND n.state<>'done' AND aeon_work_is_release_leaf(n.tenant_id,n.id)) AS open) tc)
+  (SELECT count(*) FROM imported_work t WHERE t.root=p.id) AS total,
+  (SELECT count(*) FROM imported_work t WHERE t.root=p.id AND t.state<>'done') AS open) tc)
  SELECT jsonb_build_object(
  'Facts',jsonb_build_object(
  'ProjectID',p.id,'NodeKey',p.key,'ProjectKey',p.project_key,'Profile',p.profile,'Revision',p.revision,
