@@ -4938,6 +4938,24 @@
     {"kind":"browser","name":"the routed panel keeps usable list space and stable controls","config":"playwright.ui.config.ts","project":"","file":"tests/ticket-panel.spec.ts","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"dial content budget rejects fixed whitespace, clipped controls and overflow","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"an excluded value filters with \"not\", shows in its control and travels in the URL and the API","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
-    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"phone header retains the queue when the activity timestamp folds","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"phone header retains the queue when the activity timestamp folds","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"returns the stale Undo receipt and drops an old identity write result","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"reports a saved queue addition when the ticket refresh fails","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"refreshes queue membership after successful Undo even when the ticket read fails","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"refreshes queue membership without waiting for the successful Undo ticket read","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"reports both failed refreshes as a completed Undo and keeps the queue read error","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"reports the completed Undo when only the queue read fails","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"does not refresh or report success when Undo is refused","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"discards Undo refresh results after the identity resets","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"discards failed Undo refreshes after the identity resets","tier":"GATED-FULL"},
+    {"name":"stale progress is queueable only with authoritative idle evidence","kind":"node","file":"tests/work-queue.test.ts","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"stale progress queues as Open with Undo and keeps list controls still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"an ordinary title edit keeps stale work queueable without reloading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"assigned In progress explains who is working using the display status","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"live-work In progress stays disabled even when worker details are hidden","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"stale progress queued through readiness fixes also offers Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"successful Undo refreshes membership and reports a failed ticket read honestly","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/work-queue.spec.ts","name":"unassigning In progress work enables Queue directly from the mutation response","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
   ]
 }

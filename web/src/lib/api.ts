@@ -112,6 +112,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  queue_stale?: boolean
   human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string

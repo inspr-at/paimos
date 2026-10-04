@@ -19,6 +19,10 @@ import (
 )
 
 type qEntry struct {
+	Undo *struct {
+		RunID    string `json:"run_id"`
+		Revision string `json:"revision"`
+	} `json:"undo"`
 	NodeID string `json:"node_id"`
 	State  string
 	Queued *workqueue.Queued
@@ -400,5 +404,338 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 	global = f.queuePage(t)
 	if page.Count != 0 || !global.Manual || !slices.Equal(keys(global), []string{security, hidden}) {
 		t.Fatalf("empty visible reset modified hidden work: %+v", global)
+	}
+}
+
+// Regression: this positive recovery and every inverse fence fail on 9d81acc6.
+func TestStaleQueueRecoveryAndUndo(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	id := f.ticket(t, "in_progress", "high", map[string]any{"estimate_hours": 2, "acceptance_criteria": "Works", "security_review_required": true, "needs_review": false, "review_route": "manual", "custom": "keep"})
+	var node struct {
+		State      string
+		Fields     json.RawMessage
+		QueueStale bool `json:"queue_stale"`
+	}
+	f.call(t, f.person, "GET", "/api/nodes/"+id, nil, 200, &node)
+	if !node.QueueStale {
+		t.Fatal("idle progress was not projected as stale")
+	}
+	original := append(json.RawMessage(nil), node.Fields...)
+	e := f.addQueue(t, id, nil)
+	if e.State != "open" || e.Queued == nil || e.Undo == nil || e.Undo.RunID != e.Queued.RunID || e.Undo.Revision == "" {
+		t.Fatalf("recovery entry %+v", e)
+	}
+	f.call(t, f.person, "GET", "/api/nodes/"+id, nil, 200, &node)
+	if node.State != "open" || node.QueueStale {
+		t.Fatalf("queued node %+v", node)
+	}
+	var result struct{ Removed bool }
+	f.call(t, f.person, "POST", "/api/queue/"+id+"/undo", e.Undo, 200, &result)
+	if !result.Removed || len(f.queuePage(t).Items) != 0 {
+		t.Fatal("Undo failed to remove the queued run")
+	}
+	f.call(t, f.person, "GET", "/api/nodes/"+id, nil, 200, &node)
+	if node.State != "in_progress" || !node.QueueStale {
+		t.Fatalf("Undo did not restore stale progress: %+v", node)
+	}
+	var status string
+	var restored bool
+	var additions, removals, undos, created int
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT (SELECT status FROM agent_runs WHERE id=$2),
+ (SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.added'),
+ (SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.removed'),
+ (SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.add_undone'),
+ (SELECT count(*) FROM events WHERE node_id=$3 AND type='node.created'),
+ (SELECT fields=$4::jsonb FROM nodes WHERE id=$1)`, id, e.Undo.RunID, e.Run.OrderID, original).Scan(&status, &additions, &removals, &undos, &created, &restored)
+	})
+	if !restored {
+		t.Fatal("Undo did not restore the original fields")
+	}
+	if status != "cancelled" || additions != 1 || removals != 1 || undos != 1 || created != 1 {
+		t.Fatalf("run/audit = %s %d %d %d %d", status, additions, removals, undos, created)
+	}
+	f.call(t, f.person, "POST", "/api/queue/"+id+"/undo", e.Undo, 409, nil)
+}
+
+func TestStaleQueueEligibility(t *testing.T) {
+	f := setup(t)
+	for _, state := range []string{"in_progress", "In progress", "in-progress", "progress", "active"} {
+		id := f.ticket(t, state, "high", nil)
+		var ready struct{ Queueable, Ready, Stale bool }
+		f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
+		if !ready.Queueable || !ready.Ready || !ready.Stale {
+			t.Fatalf("idle %s readiness %+v", state, ready)
+		}
+		f.addQueue(t, id, nil)
+	}
+	for _, assignment := range []map[string]any{
+		{"assignee": f.person.ID}, {"assignee": map[string]any{"id": f.person.ID}},
+		{"assignee_id": f.person.ID}, {"classic": map[string]any{"assignee_id": "42"}},
+	} {
+		assignment["estimate_hours"] = 2
+		assignment["acceptance_criteria"] = "Tests pass"
+		id := f.ticket(t, "in_progress", "high", assignment)
+		var refusal struct {
+			Code      string
+			Readiness struct {
+				Missing   []string
+				Queueable bool
+			}
+		}
+		f.call(t, f.person, "POST", "/api/queue", map[string]string{"node_id": id}, 422, &refusal)
+		if refusal.Code != "queue_not_ready" || refusal.Readiness.Queueable || !slices.Contains(refusal.Readiness.Missing, "status") {
+			t.Fatalf("wrong rejection %+v", refusal)
+		}
+	}
+	// A queued work order attached outside the ticket queue still counts as live.
+	id := f.ticket(t, "in_progress", "high", nil)
+	o := f.order(t, nil)
+	f.run(t, o)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, o.NodeID, id)
+		return err
+	})
+	var ready struct{ Queueable, Stale bool }
+	f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
+	if ready.Queueable || ready.Stale {
+		t.Fatal("active order counted as idle")
+	}
+	f.call(t, f.person, "POST", "/api/queue", map[string]string{"node_id": id}, 422, nil)
+}
+
+// Mutation responses feed the row store directly. No GET/readiness reload may
+// be required between an ordinary edit and queueing idle In progress work.
+func TestStaleQueueAfterNodeMutation(t *testing.T) {
+	for _, change := range []string{"title", "body", "fields", "estimate", "same_kind", "move", "convert", "create", "unassign", "bulk_unassign", "bulk_priority"} {
+		t.Run(change, func(t *testing.T) {
+			f := setup(t)
+			nodes.New(f.d.App, nil).Mount(f.mux)
+			fields := map[string]any{"estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}
+			if change == "unassign" || change == "bulk_unassign" {
+				fields["assignee"] = f.person.ID
+			}
+			id := f.ticket(t, "in_progress", "high", fields)
+			if change == "unassign" || change == "bulk_unassign" {
+				var ready struct{ Queueable, Stale bool }
+				f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
+				if ready.Queueable || ready.Stale {
+					t.Fatal("assigned fixture must be ineligible before unassignment")
+				}
+			}
+			var kindID string
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT kind_id::text FROM nodes WHERE id=$1`, id).Scan(&kindID)
+			})
+			method, path, status := "PATCH", "/api/nodes/"+id, 200
+			var patch any
+			switch change {
+			case "title":
+				patch = map[string]any{"title": "Edited idle work"}
+			case "body":
+				patch = map[string]any{"body": "Edited description"}
+			case "fields":
+				patch = map[string]any{"fields": map[string]any{"priority": "low", "estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
+			case "unassign":
+				patch = map[string]any{"fields": map[string]any{"assignee": nil, "priority": "high", "estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
+			case "bulk_unassign":
+				method, path = "POST", "/api/nodes/bulk"
+				patch = map[string]any{"ids": []string{id}, "assignee": nil}
+			case "bulk_priority":
+				method, path = "POST", "/api/nodes/bulk"
+				patch = map[string]any{"ids": []string{id}, "priority": "low"}
+			case "estimate":
+				patch = map[string]any{"estimate_hours": 3}
+			case "same_kind":
+				patch = map[string]any{"kind_id": kindID}
+			case "move":
+				method, path, patch = "POST", path+"/move", map[string]any{"parent_id": nil}
+			case "convert":
+				method, path, patch = "POST", path+"/convert", map[string]any{"to_kind": "task"}
+			case "create":
+				method, path, status = "POST", "/api/nodes", 201
+				patch = map[string]any{"kind_id": kindID, "title": "New idle work", "state": "in_progress", "fields": map[string]any{"estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
+			}
+			type mutationNode struct {
+				ID         string
+				State      string
+				QueueStale bool `json:"queue_stale"`
+			}
+			var node mutationNode
+			if path == "/api/nodes/bulk" {
+				var result struct {
+					Items     []mutationNode
+					Unchanged []string
+					Skipped   []any
+				}
+				f.call(t, f.person, method, path, patch, status, &result)
+				if len(result.Items) != 1 || len(result.Unchanged) != 0 || len(result.Skipped) != 0 || result.Items[0].ID != id {
+					t.Fatalf("bulk mutation did not change exactly its target: %+v", result)
+				}
+				node = result.Items[0]
+			} else {
+				f.call(t, f.person, method, path, patch, status, &node)
+			}
+			if node.State != "in_progress" || !node.QueueStale {
+				t.Fatalf("mutation cleared idle-work eligibility: %+v", node)
+			}
+			e := f.addQueue(t, node.ID, nil)
+			if e.State != "open" || e.Queued == nil || e.Undo == nil {
+				t.Fatalf("queue directly after mutation: %+v", e)
+			}
+			var queuedEdit struct {
+				QueueStale bool `json:"queue_stale"`
+				Queued     *workqueue.Queued
+			}
+			if path == "/api/nodes/bulk" {
+				var result struct {
+					Items []struct {
+						QueueStale bool `json:"queue_stale"`
+						Queued     *workqueue.Queued
+					}
+				}
+				f.call(t, f.person, "POST", path, map[string]any{"ids": []string{node.ID}, "priority": "medium"}, 200, &result)
+				if len(result.Items) != 1 {
+					t.Fatalf("queued bulk edit missing mutation response: %+v", result)
+				}
+				queuedEdit = result.Items[0]
+			} else {
+				f.call(t, f.person, "PATCH", "/api/nodes/"+node.ID, map[string]any{"title": "Edited queued work"}, 200, &queuedEdit)
+			}
+			if queuedEdit.QueueStale || queuedEdit.Queued == nil || queuedEdit.Queued.RunID != e.Queued.RunID {
+				t.Fatalf("queued mutation lost current queue projection: %+v", queuedEdit)
+			}
+		})
+	}
+}
+
+func TestStaleQueueUndoFences(t *testing.T) {
+	for _, reason := range []string{"revision", "assignment", "session", "started", "replaced", "permission", "actor", "foreign"} {
+		t.Run(reason, func(t *testing.T) {
+			f := setup(t)
+			id := f.ticket(t, "in_progress", "high", nil)
+			e := f.addQueue(t, id, nil)
+			if e.Undo == nil {
+				t.Fatal("missing Undo token")
+			}
+			p, status := f.person, 409
+			switch reason {
+			case "revision":
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Changed',updated_at=updated_at+interval '1 microsecond' WHERE id=$1`, id)
+					return err
+				})
+			case "assignment":
+				// Intentionally preserve updated_at so the idle guard, rather
+				// than the earlier revision guard, must refuse this Undo.
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('assignee',$2::text) WHERE id=$1`, id, f.person.ID)
+					return err
+				})
+			case "session":
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					var project string
+					if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Project','open' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project); err != nil {
+						return err
+					}
+					// A live binding is independent of the ticket revision.
+					_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase)
+ VALUES($1,$2,$3,$4,'codex','local','unmanaged','worker','ship',$5,decode(repeat('cd',32),'hex'),'working')`, f.person.TenantID, project, f.agent.ID, id, []byte(id[:32]))
+					return err
+				})
+			case "started":
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='starting' WHERE id=$1`, e.Undo.RunID)
+					return err
+				})
+			case "replaced":
+				f.call(t, f.person, "DELETE", "/api/queue/"+id, nil, 200, nil)
+				f.addQueue(t, id, nil)
+			case "permission":
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES(current_setting('aeon.tenant_id')::uuid,'stale_reader','Reader'); INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,id,'nodes.read' FROM roles WHERE key='stale_reader'`)
+					return err
+				})
+				dbtest.BindRole(t, f.d, f.person.TenantID, f.person.ID, "stale_reader")
+				status = 403
+			case "actor":
+				p.ID = uuid()
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Other actor')`, p.TenantID, p.ID)
+					return err
+				})
+				dbtest.BindRole(t, f.d, p.TenantID, p.ID, "admin")
+			case "foreign":
+				p = f.foreign
+				dbtest.BindRole(t, f.d, p.TenantID, p.ID, "admin")
+				status = 404
+			}
+			var state, runStatus, revision string
+			var queuedNode *string
+			var fields json.RawMessage
+			var undos int
+			inspect := func() {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT n.state,n.updated_at::text,n.fields,r.status,r.queue_node_id::text,
+ (SELECT count(*) FROM events WHERE node_id=n.id AND type='queue.add_undone')
+ FROM nodes n JOIN agent_runs r ON r.id=$2 WHERE n.id=$1`, id, e.Undo.RunID).Scan(&state, &revision, &fields, &runStatus, &queuedNode, &undos)
+				})
+			}
+			inspect()
+			beforeRevision, beforeFields := revision, string(fields)
+			if reason == "assignment" || reason == "session" {
+				var unchanged bool
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT updated_at=$2::timestamptz FROM nodes WHERE id=$1`, id, e.Undo.Revision).Scan(&unchanged)
+				})
+				if !unchanged {
+					t.Fatal("fixture must preserve the queue revision to isolate the idle guard")
+				}
+			}
+			var refusal struct {
+				Error string `json:"error"`
+			}
+			f.call(t, p, "POST", "/api/queue/"+id+"/undo", e.Undo, status, &refusal)
+			if (reason == "assignment" || reason == "session") && refusal.Error != "ticket is no longer idle" {
+				t.Fatalf("Undo hit the wrong guard: %q", refusal.Error)
+			}
+			inspect()
+			if state != "open" || revision != beforeRevision || string(fields) != beforeFields || undos != 0 {
+				t.Fatalf("refused Undo changed ticket/audit: state=%s revision=%s fields=%s undos=%d", state, revision, fields, undos)
+			}
+			if reason != "started" && reason != "replaced" && (runStatus != "queued" || queuedNode == nil || *queuedNode != id) {
+				t.Fatalf("refused Undo lost queued run: status=%s ticket=%v", runStatus, queuedNode)
+			}
+		})
+	}
+}
+
+func TestStaleQueueSessionEligibility(t *testing.T) {
+	f := setup(t)
+	var project string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Project','open' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project)
+	})
+	for _, stopped := range []bool{false, true} {
+		id := f.ticket(t, "in_progress", "high", nil)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason)
+ VALUES($1,$2,$3,$4,'codex','local','unmanaged','worker','ship',$6,decode(repeat('cd',32),'hex'),CASE WHEN $5 THEN 'stopped' ELSE 'working' END,CASE WHEN $5 THEN now() END,CASE WHEN $5 THEN 'exited' END)`, f.person.TenantID, project, f.agent.ID, id, stopped, []byte(id[:32]))
+			return err
+		})
+		var ready struct{ Queueable, Stale bool }
+		f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
+		if ready.Queueable != stopped || ready.Stale != stopped {
+			t.Fatalf("stopped=%t readiness %+v", stopped, ready)
+		}
+		if stopped {
+			f.addQueue(t, id, nil)
+		} else {
+			f.call(t, f.person, "POST", "/api/queue", map[string]string{"node_id": id}, 422, nil)
+		}
 	}
 }

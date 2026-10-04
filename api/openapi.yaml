@@ -841,7 +841,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     post:
       operationId: addWorkQueue
-      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
+      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; In progress with no assignee and no live run/session is stale and also becomes Open. Stale additions return a revision-bound Undo token. Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
       security: [{session: []}, {agentKey: []}]
       requestBody:
         required: true
@@ -861,6 +861,24 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {description: Active run or changed target conflicts}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
+  /queue/{nodeId}/undo:
+    post:
+      operationId: undoStaleWorkQueue
+      description: Undo a stale ticket addition by its original actor with current queue management permission. Atomically cancel the same still-queued run and restore the prior In progress status. Refuses a changed ticket revision, assignment, live work, another queue entry or a started run. Records the removal and restoration.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QueueUndoToken'}
+      responses:
+        '200': {description: Queue addition undone, content: {application/json: {schema: {type: object, required: [removed], properties: {removed: {type: boolean}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Ticket or run changed since queueing}
   /queue/{nodeId}/readiness:
     get:
       operationId: workQueueReadiness
@@ -16271,6 +16289,7 @@ components:
       type: object
       required: [queueable, ready, missing, suggested_estimate_hours, security_review_required]
       properties:
+        stale: {type: boolean, description: In progress with no assignee and no live run or session.}
         queueable: {type: boolean}
         ready: {type: boolean}
         missing: {type: array, items: {type: string, enum: [status, estimate, criteria, blocker]}}
@@ -16300,10 +16319,18 @@ components:
         waiting: {type: boolean}
         wait_reason: {type: string}
         security_review_required: {type: boolean}
+    QueueUndoToken:
+      type: object
+      additionalProperties: false
+      required: [run_id, revision]
+      properties:
+        run_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
     WorkQueueEntry:
       type: object
       required: [node_id, key, title, state, priority, estimate_hours, queued]
       properties:
+        undo: {$ref: '#/components/schemas/QueueUndoToken'}
         node_id: {type: string, format: uuid}
         project_id: {type: [string, 'null'], format: uuid}
         key: {type: string}
@@ -18210,6 +18237,7 @@ components:
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
         queued: {$ref: '#/components/schemas/QueuedTicket'}
+        queue_stale: {type: boolean, description: 'Authoritative idle In progress eligibility: no assignee and no live agent run or bound session. Contains no worker identity. Rechecked on queue writes.'}
         id:
           type: string
           format: uuid

@@ -10,6 +10,7 @@ import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import QueueIndicator from './QueueIndicator.vue'
+import QueueStaleHint from './QueueStaleHint.vue'
 import type { QueuedTicket } from '../../lib/workQueue'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import TicketHours from '../business/TicketHours.vue'
@@ -50,7 +51,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
   <dl class="props" :class="layout">
     <div class="prop">
       <dt>Status</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" /><span>{{ statusMeta(item.state).label }}</span><span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button><QueueStaleHint :row="item" /></dd>
     </div>
     <div v-if="bound.length" class="prop agents-prop">
       <dt>Agents</dt>

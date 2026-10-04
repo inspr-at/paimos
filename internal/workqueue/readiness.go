@@ -10,6 +10,7 @@ import (
 
 // Readiness is advice only. Add and pickup recheck the live ticket.
 type Readiness struct {
+	Stale                  bool     `json:"stale"`
 	Queueable              bool     `json:"queueable"`
 	Ready                  bool     `json:"ready"`
 	Missing                []string `json:"missing"`
@@ -57,7 +58,10 @@ func Security(title, body string, fields map[string]any) bool {
 	required, _ := fields["security_review_required"].(bool)
 	return required || securityWords.MatchString(title+" "+body)
 }
-func Check(kind, state, title, body string, fields map[string]any, namedBlocker bool) Readiness {
+
+// stale is authoritative evidence from Stale under the mutation locks. Callers
+// without that evidence cannot queue progress.
+func Check(kind, state, title, body string, fields map[string]any, namedBlocker bool, stale ...bool) Readiness {
 	r := Readiness{Missing: []string{}, SuggestedEstimateHours: 2, SecurityReviewRequired: Security(title, body, fields)}
 	switch fields["complexity"] {
 	case "S":
@@ -70,6 +74,9 @@ func Check(kind, state, title, body string, fields map[string]any, namedBlocker 
 	switch State(state) {
 	case "new", "open", "backlog", "blocked":
 		r.Queueable = kind == "ticket" || kind == "task"
+	case "in_progress", "progress", "active":
+		r.Stale = (kind == "ticket" || kind == "task") && len(stale) == 1 && stale[0]
+		r.Queueable = r.Stale
 	}
 	if !r.Queueable {
 		r.Missing = append(r.Missing, "status")
