@@ -508,16 +508,16 @@ func TestStaleQueueEligibility(t *testing.T) {
 // Mutation responses feed the row store directly. No GET/readiness reload may
 // be required between an ordinary edit and queueing idle In progress work.
 func TestStaleQueueAfterNodeMutation(t *testing.T) {
-	for _, change := range []string{"title", "body", "fields", "estimate", "same_kind", "move", "convert", "create", "unassign"} {
+	for _, change := range []string{"title", "body", "fields", "estimate", "same_kind", "move", "convert", "create", "unassign", "bulk_unassign", "bulk_priority"} {
 		t.Run(change, func(t *testing.T) {
 			f := setup(t)
 			nodes.New(f.d.App, nil).Mount(f.mux)
 			fields := map[string]any{"estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}
-			if change == "unassign" {
+			if change == "unassign" || change == "bulk_unassign" {
 				fields["assignee"] = f.person.ID
 			}
 			id := f.ticket(t, "in_progress", "high", fields)
-			if change == "unassign" {
+			if change == "unassign" || change == "bulk_unassign" {
 				var ready struct{ Queueable, Stale bool }
 				f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
 				if ready.Queueable || ready.Stale {
@@ -539,6 +539,12 @@ func TestStaleQueueAfterNodeMutation(t *testing.T) {
 				patch = map[string]any{"fields": map[string]any{"priority": "low", "estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
 			case "unassign":
 				patch = map[string]any{"fields": map[string]any{"assignee": nil, "priority": "high", "estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
+			case "bulk_unassign":
+				method, path = "POST", "/api/nodes/bulk"
+				patch = map[string]any{"ids": []string{id}, "assignee": nil}
+			case "bulk_priority":
+				method, path = "POST", "/api/nodes/bulk"
+				patch = map[string]any{"ids": []string{id}, "priority": "low"}
 			case "estimate":
 				patch = map[string]any{"estimate_hours": 3}
 			case "same_kind":
@@ -551,12 +557,26 @@ func TestStaleQueueAfterNodeMutation(t *testing.T) {
 				method, path, status = "POST", "/api/nodes", 201
 				patch = map[string]any{"kind_id": kindID, "title": "New idle work", "state": "in_progress", "fields": map[string]any{"estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
 			}
-			var node struct {
+			type mutationNode struct {
 				ID         string
 				State      string
 				QueueStale bool `json:"queue_stale"`
 			}
-			f.call(t, f.person, method, path, patch, status, &node)
+			var node mutationNode
+			if path == "/api/nodes/bulk" {
+				var result struct {
+					Items     []mutationNode
+					Unchanged []string
+					Skipped   []any
+				}
+				f.call(t, f.person, method, path, patch, status, &result)
+				if len(result.Items) != 1 || len(result.Unchanged) != 0 || len(result.Skipped) != 0 || result.Items[0].ID != id {
+					t.Fatalf("bulk mutation did not change exactly its target: %+v", result)
+				}
+				node = result.Items[0]
+			} else {
+				f.call(t, f.person, method, path, patch, status, &node)
+			}
 			if node.State != "in_progress" || !node.QueueStale {
 				t.Fatalf("mutation cleared idle-work eligibility: %+v", node)
 			}
@@ -568,7 +588,21 @@ func TestStaleQueueAfterNodeMutation(t *testing.T) {
 				QueueStale bool `json:"queue_stale"`
 				Queued     *workqueue.Queued
 			}
-			f.call(t, f.person, "PATCH", "/api/nodes/"+node.ID, map[string]any{"title": "Edited queued work"}, 200, &queuedEdit)
+			if path == "/api/nodes/bulk" {
+				var result struct {
+					Items []struct {
+						QueueStale bool `json:"queue_stale"`
+						Queued     *workqueue.Queued
+					}
+				}
+				f.call(t, f.person, "POST", path, map[string]any{"ids": []string{node.ID}, "priority": "medium"}, 200, &result)
+				if len(result.Items) != 1 {
+					t.Fatalf("queued bulk edit missing mutation response: %+v", result)
+				}
+				queuedEdit = result.Items[0]
+			} else {
+				f.call(t, f.person, "PATCH", "/api/nodes/"+node.ID, map[string]any{"title": "Edited queued work"}, 200, &queuedEdit)
+			}
 			if queuedEdit.QueueStale || queuedEdit.Queued == nil || queuedEdit.Queued.RunID != e.Queued.RunID {
 				t.Fatalf("queued mutation lost current queue projection: %+v", queuedEdit)
 			}

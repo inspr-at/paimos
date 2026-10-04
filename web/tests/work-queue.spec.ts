@@ -562,16 +562,19 @@ test('unassigning In progress work enables Queue directly from the mutation resp
   await expect(queue).toHaveAttribute('data-tip', "Already in progress (Markus Barta), can't be queued.")
   const node = data.nodes.find(n => n.id === 'n-2')!
   let unassignments = 0
-  // Model the node PATCH projection, which the matching Go regression verifies.
-  await page.route('**/api/nodes/n-2', route => {
-    if (route.request().method() !== 'PATCH') return route.fallback()
-    const patch = route.request().postDataJSON() as { fields: Record<string, unknown> }
-    expect(patch.fields.assignee).toBeNull()
+  // List assignment uses the bulk mutation, even for one row. The matching Go
+  // regression verifies this response projection against the real handler.
+  await page.route('**/api/nodes/bulk', route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const patch = route.request().postDataJSON() as { ids: string[]; assignee: null; if_unmodified_since: Record<string, string> }
+    expect(patch.ids).toEqual(['n-2'])
+    expect(patch.assignee).toBeNull()
+    expect(patch.if_unmodified_since).toEqual({ 'n-2': node.updated_at })
     unassignments++
-    node.fields = patch.fields
+    node.fields = { ...node.fields, assignee: patch.assignee }
     node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString()
     node.queue_stale = true
-    return route.fulfill({ json: { ...node, kind_id: 'k-ticket', position: '0', deleted_at: null } })
+    return route.fulfill({ json: { event_id: 6000, items: [{ ...node, kind_id: 'k-ticket', position: '0', deleted_at: null }], unchanged: [], skipped: [] } })
   })
   const reads = () => calls.filter(call => call.method === 'GET' && call.path === '/api/nodes/n-2').length
   const before = reads()

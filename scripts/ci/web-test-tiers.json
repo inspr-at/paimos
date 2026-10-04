@@ -4948,7 +4948,7 @@
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"does not refresh or report success when Undo is refused","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"discards Undo refresh results after the identity resets","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"discards failed Undo refreshes after the identity resets","tier":"GATED-FULL"},
-    {"name":"stale progress is queueable only with authoritative idle evidence","leaf":"stale progress is queueable only with authoritative idle evidence","line":77,"kind":"node","file":"tests/work-queue.test.ts","tier":"GATED-FULL"},
+    {"name":"stale progress is queueable only with authoritative idle evidence","kind":"node","file":"tests/work-queue.test.ts","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"stale progress queues as Open with Undo and keeps list controls still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"an ordinary title edit keeps stale work queueable without reloading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"assigned In progress explains who is working using the display status","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
