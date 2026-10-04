@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
 import { isClipped, vClipTip } from '../directives/clipTip'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
@@ -26,6 +26,8 @@ import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { useLiveList } from '../lib/useLiveList'
 import { rowStore } from '../lib/rowStore'
+import { TICKET_PEEK } from '../lib/ticketPeek'
+import { scopeOwner } from '../lib/identityScope'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
@@ -84,6 +86,13 @@ const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
+// Links followed from a routed ticket reuse its panel and route guards. Other
+// project views retain the app peek (graphs, Knowledge and the plain list).
+const appPeek = inject(TICKET_PEEK, null)
+provide(TICKET_PEEK, {
+  open: (key, from) => { if (ticketKey.value) void openRelated(key); else appPeek?.open(key, from) },
+  openKey: computed(() => ticketKey.value ? ticketKey.value.toUpperCase() : appPeek?.openKey.value ?? null),
+})
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
 const descriptionExpanded = ref(false)
@@ -636,12 +645,14 @@ const panelPosition = computed(() => {
   return index === -1 ? null : { index, count }
 })
 async function resolvePanel() {
+  // Invalidate an older lookup even when the new route is empty or cached.
+  const request = ++panelGeneration
   const key = ticketKey.value
   const within = projectId.value
   panelError.value = ''
+  panelLoading.value = false
   if (!key || !within) return
   if (list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase()) || fetched.value?.key.toLowerCase() === key.toLowerCase()) return
-  const request = ++panelGeneration
   panelLoading.value = true
   try {
     const sent = rowStore.mark()
@@ -826,15 +837,20 @@ function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(step
 // Related tickets can live in another project: open them where they belong.
 async function openRelated(key: string, newTabRequested = false) {
   if (newTabRequested) { newTab(key); return }
+  const from = route.fullPath
+  const ownerScope = scopeOwner(session.identity)
+  const stale = () => route.fullPath !== from || scopeOwner(session.identity) !== ownerScope
   const here = key.split('-')[0] === routeKey.value || list.rows.value.some(row => row.key === key)
   if (!here) {
     try {
       const page = await listNodes({ q: key, limit: 25 })
+      if (stale()) return
       const owner = page.items.find(item => item.key === key)?.project
       const target = owner ? projects.byId(owner.id) : undefined
       if (target && target.id !== projectId.value) { follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(key)}`); return }
     } catch { /* fall back to this project, where the panel explains */ }
   }
+  if (stale()) return
   if (ticketKey.value) follow(ticketPath(key)); else openKey(key)
 }
 watch(ticketKey, key => { if (!key) openedFromList = false })
@@ -1627,7 +1643,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
       <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
@@ -1756,7 +1772,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="shownEntry.mode === 'dock' ? closeKnowledgeDock() : closeKnowledgeEntry()"
       />
       <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
-      <PanelSplitter v-if="ticketKey && !fullView" />
+      <PanelSplitter v-if="ticketKey && !fullView" class="early" :reserve="500" />
       <TicketWorkspace
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
@@ -1894,6 +1910,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   --panel-w: min(var(--knowledge-panel-user-w, var(--panel-default)), calc(100vw - 620px));
 }
 /* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
+.project-page.ticket-dock { --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw, calc(100vw - 500px)); }
+@media (min-width: 900px) {
+  .project-page.ticket-dock { padding-right: calc(var(--panel-w) + 22px); }
+  .project-page.ticket-dock :deep(.ticket-ws.panel) { width: var(--panel-w); }
+  .project-page.ticket-dock .toolbar-wrap { margin-right: 0; padding-right: 0; }
+}
 @media (min-width: 1100px) {
   .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
   .project-page.panel-open .toolbar-wrap { margin-right: 0; padding-right: 0; }

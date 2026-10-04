@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -395,3 +396,91 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 void me
+
+function linkedKnowledge() {
+  const data = fixtures()
+  const ticket = data.nodes.find(node => node.key === 'PHAROS-11')!
+  data.nodes.unshift({ ...ticket, id: 'knowledge-18', key: 'GUI-18', kind_slug: 'guideline', title: 'Concept PHAROS-11 · Ein Arbeitsknoten mit langen deutschen Erklärungen', body: 'Search 11 also matches this knowledge entry.', fields: {} })
+  return data
+}
+
+function barrier() {
+  let release!: () => void
+  const until = new Promise<void>(resolve => { release = resolve })
+  return { until, release }
+}
+
+for (const first of ['lookup', 'list'] as const) {
+  test(`deep link wins over a knowledge peek with ${first} answering first`, async ({ page }) => {
+    const delayed = barrier()
+    const arrived = barrier()
+    const calls = await mockWork(page, linkedKnowledge(), {
+      hold: call => {
+        const lookup = call.path === '/api/nodes' && call.query.get('q') === 'PHAROS-11'
+        const list = call.path === '/api/nodes' && call.query.get('limit') === '200'
+        if (first === 'lookup' ? list : lookup) return { until: delayed.until, computed: arrived.release }
+      },
+    })
+    try {
+      await page.goto('/p/PHAROS/PHAROS-11?q=11&type=ticket&peek=GUI-18')
+      await arrived.until
+      const ws = panel(page)
+      if (first === 'list') await expect(page.locator('#row-n-1')).toBeVisible()
+      await expect(ws).toHaveCount(1)
+      await expect(ws.getByRole('button', { name: 'Copy PHAROS-11' })).toBeVisible()
+      await expect(ws.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
+      delayed.release()
+      await expect(page.locator('#row-n-1')).toBeVisible()
+      await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?q=11&type=ticket')
+      await expect(ws).toHaveCount(1)
+      await expect(ws).not.toContainText('GUI-18')
+      await ws.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' }).click()
+      await ws.getByLabel('Title', { exact: true }).fill('The routed ticket was edited')
+      await page.keyboard.press('Enter')
+      await expect(ws.getByRole('heading', { name: 'The routed ticket was edited' })).toBeVisible()
+      expect(writes(calls).map(call => call.path)).toEqual(['/api/nodes/n-1'])
+    } finally { delayed.release() }
+  })
+}
+
+test('the routed panel keeps usable list space and stable controls', async ({ page }) => {
+  test.setTimeout(60_000)
+  const data = linkedKnowledge()
+  const title = 'Ein Arbeitsknoten: verlässliche Zuordnung und nachvollziehbare Änderungen im gesamten Projekt'
+  data.nodes.find(node => node.id === 'n-1')!.title = title
+  await mockWork(page, data)
+  for (const savedWidth of [null, 1000]) {
+    data.preferences.layout = savedWidth ? { panel: savedWidth } : {}
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto('/p/PHAROS/PHAROS-11?q=11&type=ticket&peek=GUI-18')
+        const ws = panel(page)
+        await expect(ws).toHaveCount(1)
+        await expect(ws.getByRole('heading', { name: title })).toBeVisible()
+        if (width >= 1024) {
+          const grid = page.getByRole('grid', { name: 'Tickets' })
+          await expect(page.locator('#row-n-1')).toBeVisible()
+          const listBox = (await grid.boundingBox())!
+          const panelBox = (await ws.boundingBox())!
+          expect(listBox.width).toBeGreaterThan(400)
+          expect(listBox.x + listBox.width).toBeLessThanOrEqual(panelBox.x)
+        }
+        await expectStableControls({
+          controls: { close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }) },
+          scrollAreas: { panel: ws },
+          interactions: [{ name: 'open and close actions', run: async () => {
+            await ws.getByRole('button', { name: 'More actions' }).click()
+            await expect(page.getByRole('menu')).toBeVisible()
+            await expect(page.getByRole('menuitem', { name: 'Open as full page' })).toBeVisible()
+            await expect(page.getByRole('menuitem', { name: 'Open in a new tab' })).toBeVisible()
+            await page.keyboard.press('Escape')
+            await expect(page.getByRole('menu')).toHaveCount(0)
+          } }],
+        })
+        await page.screenshot({ path: `test-results/aeon-687-wrongrec/${savedWidth ? 'wide' : 'default'}-${colorScheme}-${width}.png` })
+      }
+    }
+  }
+})

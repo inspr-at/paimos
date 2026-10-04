@@ -42,6 +42,8 @@ function pick(action: 'copyKey' | 'copyLink' | 'delete' | 'prev' | 'next') {
 }
 function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value = null; if (anchor) emit('move', anchor) }
 function pickConvert() { moreAnchor.value = null; emit('convert') }
+function pickView() { moreAnchor.value = null; if (props.mode === 'panel') emit('expand'); else emit('collapse') }
+function pickNewTab() { moreAnchor.value = null; emit('newTab') }
 const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
 const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
@@ -106,6 +108,8 @@ void props
         </template>
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
+        <button type="button" role="menuitem" class="menu-item" @click="pickView"><AppIcon :name="mode === 'panel' ? 'expand' : 'collapse'" :size="14" />{{ mode === 'panel' ? 'Open as full page' : 'Show beside the list' }}</button>
+        <button type="button" role="menuitem" class="menu-item" @click="pickNewTab"><AppIcon name="external" :size="14" />Open in a new tab</button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
@@ -162,6 +166,10 @@ void props
 @container panel-bar (max-width: 640px) {
   .has-trail .position, .crumb-item:not(:last-child) { display: none; }
   .trail-more { display: inline; }
+}
+/* A narrow dock uses More for these actions, independently of viewport width. */
+@container panel-bar (max-width: 420px) {
+  .wide-only, .position { display: none; }
 }
 @media (max-width: 720px) {
   .panel-bar { padding: 0 6px 0 12px; }

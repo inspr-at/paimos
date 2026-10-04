@@ -65,7 +65,7 @@ test('a known ticket key links, an unknown key stays text, and code is left alon
   expect(errors).toEqual([])
 })
 
-test('a plain click opens the ticket peek and a modified click opens the URL', async ({ page }) => {
+test('a plain click follows the routed ticket and a modified click opens the URL', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { ws } = await openDescribed(page)
   const link = ws.getByRole('link', { name: 'PHAROS-14: Visual acceptance of the version pill' })
@@ -76,11 +76,13 @@ test('a plain click opens the ticket peek and a modified click opens the URL', a
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
 
   await link.click()
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12?peek=PHAROS-14')
-  const peek = page.locator('.ticket-peek-host')
-  await expect(peek.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-14')
+  await expect(page.locator('.ticket-peek-host')).toHaveCount(0)
+  await expect(ws).toHaveCount(1)
+  await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
   await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-  await expect(link).toHaveAttribute('aria-current', 'true')
 })
 
 test('the epic panel keeps the Updated line against the status chips', async ({ page }) => {
