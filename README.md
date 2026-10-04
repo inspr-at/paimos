@@ -673,6 +673,33 @@ It measures the handler and JSON decoding; the nearest-rank p95 must be below
 history traversal or guarantee production latency. Shared or loaded runners
 are unsuitable for interpreting this budget.
 
+### CI push reuse (AEON-423)
+
+On a push to main, `scripts/ci-tree-reuse.mjs` searches for a successful `CI`
+merge-group run at that exact commit SHA and verifies its repository, workflow
+name/path/ID, latest run attempt, complete required jobs, all seven Go and twelve
+web shards, and successful execution steps. A verified match skips the heavy
+jobs before runner allocation and database startup; the existing required checks and aggregates
+report `reused merge_group run <id>`. One hosted `cache-prime` job still runs
+`npm ci`, installs Playwright Chromium and warms Go modules/builds, saving the
+same main-scoped dependency, browser and hosted Go shard cache keys restored
+by PR/queue jobs; its failure fails the required aggregates. `migration-compat` always
+runs against the latest release, including every step (AEON-415). Direct pushes
+without verified queue evidence, queue runs, manual runs, failed/cancelled
+or partial reruns, API errors and timeouts retain full validation. PRs keep
+the docs-only/spec-only classification above; the proof job itself runs only
+on main pushes. Lookup uses only
+read permissions, a ten-second network deadline, bounded responses and at most
+20 candidates; a failed proof job leaves outputs unset and runs full CI. Set
+`CI_TREE_REUSE=off` to disable lookup. PR-to-queue tree reuse and its registry
+publisher were removed to keep this path small; no tree comparisons or record
+writes remain. Offline fixtures run with `node --test scripts/ci-tree-reuse.test.mjs`
+and `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard ./scripts/ci-go-shards`;
+hosted savings and the cache-priming duration require coordinator measurement
+once the change reaches main. The verifier job list and execution steps are
+checked against the actual workflow and its full merge-queue matrices, so
+adding or changing a job cannot silently leave the reuse proof behind.
+
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
 `go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git

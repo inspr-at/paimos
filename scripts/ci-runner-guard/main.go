@@ -371,6 +371,20 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
+	// A push-only proof must fail open to full validation, with read-only authority.
+	proof := mapping(jobs["tree-reuse"])
+	if proof == nil || proof["continue-on-error"] != true {
+		return fmt.Errorf("tree-reuse must continue on error so proof failure cannot skip required CI jobs")
+	}
+	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
+		return fmt.Errorf("tree-reuse needs a bounded 5–10 minute timeout")
+	}
+	if proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
+		return fmt.Errorf("tree-reuse must run only on main pushes and expose only its proof step output")
+	}
+	if !reflect.DeepEqual(mapping(proof["permissions"]), map[string]any{"contents": "read", "actions": "read"}) {
+		return fmt.Errorf("tree-reuse needs read-only proof permissions")
+	}
 	for _, id := range []string{"runner-route", "ci-plan", "migration-compat"} {
 		job := mapping(jobs[id])
 		if job == nil {
@@ -395,7 +409,14 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		case "web-setup", "web-shard":
 			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
 		}
-		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") {
+		condition = "always() && needs.ci-plan.result == 'success' && (" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
+		switch id {
+		case "go-test":
+			condition += " && needs.runner-route.result == 'success'"
+		case "web-shard", "release-list-comparison":
+			condition += " && needs.web-setup.result == 'success'"
+		}
+		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") || !hasNeed(job["needs"], "tree-reuse") {
 			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
 		}
 	}
@@ -415,7 +436,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if context == "web" {
@@ -423,10 +444,10 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-shard"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
 			}
-		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run"}) {
+		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}) {
 			return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
 		}
 	}

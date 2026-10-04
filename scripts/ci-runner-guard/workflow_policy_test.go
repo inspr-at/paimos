@@ -442,9 +442,9 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 		}
 		for _, lane := range []string{"docs-only", "spec-only", "full"} {
 			t.Run(id+"/"+lane, func(t *testing.T) {
-				values := map[string]string{"CI_LANE": lane, "CI_PLAN": "success"}
+				values := map[string]string{"CI_LANE": lane, "CI_PLAN": "success", "REUSE": "none", "REUSE_PROOF": "skipped", "SOURCE_RUN": "", "CACHE_PRIME": "skipped"}
 				for name := range mapping(step["env"]) {
-					if name == "CI_LANE" || name == "CI_PLAN" {
+					if name == "CI_LANE" || name == "CI_PLAN" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" {
 						continue
 					}
 					values[name] = "skipped"
@@ -469,7 +469,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					t.Fatalf("legitimate %s gate rejected: %v", lane, err)
 				}
 				for name, expected := range values {
-					if name == "CI_LANE" {
+					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" {
 						continue
 					}
 					wrong := "success"
