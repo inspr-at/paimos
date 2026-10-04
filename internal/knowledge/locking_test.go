@@ -156,12 +156,11 @@ func TestKnowledgeLockedEligibilityAfterConcurrentDelete(t *testing.T) {
 	expect(t, call(t, f, f.a, "GET", "/api/knowledge/"+e.ID, nil), 200)
 }
 
-// Ordinary Knowledge Undo must enter pairing before tree, tenant and event
-// admission even with work-parent-status explicitly OFF. Pause a real PATCH
-// after pairing, observe Undo's wait, and probe the later fences before release.
+// Ordinary Knowledge Undo follows tenant -> pairing -> tree -> event even with
+// work-parent-status explicitly OFF. Pause a real PATCH after pairing, observe
+// Undo's tenant wait, and probe the later fences before release.
 func TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff(t *testing.T) {
-	// This fixture needs only a project and knowledge; do not depend on the
-	// retired ticket kind used by the older package-wide fixture.
+	// This fixture needs only a project and knowledge.
 	f := fixture{db: dbtest.Open(t)}
 	f.a = tenant.Principal{Kind: tenant.Person, Name: "Markus Barta"}
 	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('undo-pairing','Undo pairing') RETURNING id::text`).Scan(&f.a.TenantID); err != nil {
@@ -217,6 +216,13 @@ func TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff(t *testing.T) {
 		close(done)
 	}()
 	lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, writerPID, done)
+	var tenantWait bool
+	if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_stat_activity a WHERE $1::int=ANY(pg_blocking_pids(a.pid))
+ AND strpos(a.query,'SELECT id FROM tenants')>0
+ AND NOT EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.locktype='advisory' AND l.granted))`, writerPID).Scan(&tenantWait); err != nil {
+		t.Fatal(err)
+	}
 	probe, err := f.db.Admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -232,8 +238,8 @@ func TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff(t *testing.T) {
 	if err != nil || rollbackErr != nil {
 		t.Fatalf("fence probe: %v; rollback: %v", err, rollbackErr)
 	}
-	if lock != "advisory" || !treeFree || !eventFree {
-		t.Fatalf("Undo must wait on pairing before tree/event: lock=%q treeFree=%v eventFree=%v; PATCH=%d Undo=%d", lock, treeFree, eventFree, writeResult.Code, undoResult.Code)
+	if lock != "transactionid" || !tenantWait || !treeFree || !eventFree {
+		t.Fatalf("Undo must wait on tenant before pairing/tree/event: lock=%q tenantWait=%v treeFree=%v eventFree=%v; PATCH=%d Undo=%d", lock, tenantWait, treeFree, eventFree, writeResult.Code, undoResult.Code)
 	}
 	expect(t, writeResult, http.StatusOK)
 	expect(t, undoResult, http.StatusCreated)
