@@ -368,7 +368,11 @@ the live member set. Returning to leaf restores feature, position, source,
 estimate and scope/access flags; Undo follows the same reconciliation path.
 Explicit membership changes synchronize retained intent, including plan
 removal to backlog and compensating Undo, so subsequent children follow the
-latest choice. Released/frozen member rows
+latest choice. Changing parent placement invalidates its retained scope approval,
+including an ordinary move back to the original release. Membership events capture that
+flag so compensating Undo can restore the prior approval; restoration also
+requires fresh scope review when older retained metadata names another release.
+Other retained planning metadata stays intact. Released/frozen member rows
 and stored note snapshots remain unchanged. Live walkers, current-release journey
 calculations and new note captures exclude parents. Quick-create applies explicit inclusion
 even after automatic inheritance and advances each revision once. Membership

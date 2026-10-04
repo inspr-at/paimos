@@ -11,9 +11,10 @@ import (
 )
 
 type parentPlacement struct {
-	ParentID  string  `json:"parent_node_id"`
-	ReleaseID *string `json:"release_node_id"`
-	Exists    bool    `json:"exists,omitempty"`
+	ParentID              string  `json:"parent_node_id"`
+	ReleaseID             *string `json:"release_node_id"`
+	Exists                bool    `json:"exists,omitempty"`
+	RetainedScopeRequired *bool   `json:"retained_scope_revision_required,omitempty"`
 }
 
 // Match the paired tree writers: pairing -> tree -> tenant access fence ->
@@ -95,17 +96,27 @@ func expandWorkLeaves(ctx context.Context, tx pgx.Tx, project string, ids []stri
 func placeParents(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, parents []string, before, after *membershipSnapshot) error {
 	for _, id := range parents {
 		old := parentPlacement{ParentID: id}
-		err := tx.QueryRow(ctx, `SELECT release_node_id::text FROM work_parent_releases WHERE parent_node_id=$1 AND project_node_id=$2`, id, project).Scan(&old.ReleaseID)
+		err := tx.QueryRow(ctx, `SELECT release_node_id::text,(retained_membership->>'scope_revision_required')::boolean
+   FROM work_parent_releases WHERE parent_node_id=$1 AND project_node_id=$2`, id, project).Scan(&old.ReleaseID, &old.RetainedScopeRequired)
 		if err != nil && err != pgx.ErrNoRows {
 			return err
 		}
 		old.Exists = err == nil
-		if _, err = tx.Exec(ctx, `INSERT INTO work_parent_releases(tenant_id,parent_node_id,project_node_id,release_node_id) VALUES($1,$2,$3,$4)
-   ON CONFLICT(tenant_id,parent_node_id) DO UPDATE SET project_node_id=excluded.project_node_id,release_node_id=excluded.release_node_id`, p.TenantID, id, project, release); err != nil {
+		placed := parentPlacement{ParentID: id, ReleaseID: &release, Exists: true}
+		// Scope approval belongs to the prior placement. Invalidate it even if
+		// a later ordinary placement returns to that release; only Undo may
+		// restore the exact previous flag recorded in the event snapshot.
+		if err = tx.QueryRow(ctx, `INSERT INTO work_parent_releases(tenant_id,parent_node_id,project_node_id,release_node_id) VALUES($1,$2,$3,$4)
+   ON CONFLICT(tenant_id,parent_node_id) DO UPDATE SET project_node_id=excluded.project_node_id,release_node_id=excluded.release_node_id,
+    retained_membership=CASE WHEN work_parent_releases.retained_membership IS NOT NULL AND
+     ROW(work_parent_releases.project_node_id,work_parent_releases.release_node_id) IS DISTINCT FROM ROW(excluded.project_node_id,excluded.release_node_id)
+     THEN jsonb_set(work_parent_releases.retained_membership,'{scope_revision_required}','true'::jsonb)
+     ELSE work_parent_releases.retained_membership END
+   RETURNING (retained_membership->>'scope_revision_required')::boolean`, p.TenantID, id, project, release).Scan(&placed.RetainedScopeRequired); err != nil {
 			return err
 		}
 		before.Parents = append(before.Parents, old)
-		after.Parents = append(after.Parents, parentPlacement{ParentID: id, ReleaseID: &release, Exists: true})
+		after.Parents = append(after.Parents, placed)
 	}
 	return nil
 }

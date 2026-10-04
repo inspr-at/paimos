@@ -87,8 +87,12 @@ BEGIN
   IF rel IS NOT NULL AND NOT EXISTS(SELECT 1 FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id
    WHERE r.release_node_id=rel AND r.project_node_id=candidate.project_id AND r.state='planning' AND n.deleted_at IS NULL) THEN CONTINUE; END IF;
   IF retained IS NOT NULL THEN
+   -- Legacy/stale intent may name a different release than the saved approval.
+   -- Keep every other field, but require fresh scope review at that destination.
    INSERT INTO journey_tickets SELECT saved.* FROM jsonb_populate_record(NULL::journey_tickets,
-    jsonb_set(retained,'{release_node_id}',coalesce(to_jsonb(rel),'null'::jsonb))) saved
+    jsonb_set(jsonb_set(retained,'{release_node_id}',coalesce(to_jsonb(rel),'null'::jsonb)),
+     '{scope_revision_required}',CASE WHEN retained->'release_node_id' IS DISTINCT FROM coalesce(to_jsonb(rel),'null'::jsonb)
+      THEN 'true'::jsonb ELSE coalesce(retained->'scope_revision_required','true'::jsonb) END)) saved
     WHERE saved.tenant_id=candidate.tenant_id AND saved.ticket_node_id=candidate.id AND saved.project_node_id=candidate.project_id
     ON CONFLICT(tenant_id,ticket_node_id) DO NOTHING;
   ELSIF rel IS NOT NULL THEN
