@@ -108,14 +108,14 @@
     {
       "file": "1225_work_parent_status.sql",
       "sha256": "ca308ba6a7ae6379179984d55cb0dd6f9af8a0ddd8ef4cfca1259e81807d99bb",
-      "sourceCommit": "6d08470789386cb4eb5c7e34112364544174d505",
+      "sourceCommit": "5ea61160e6d864b68c17e851a05d3daaee463490",
       "ticket": "AEON-650",
       "reason": "AEON-648 owner-accepted Q5-Q7 and Q17, with the lead's concept review recorded on that ticket, require canonical derived parent status behind AEON-429. The classifier flags bounded dynamic feature lookup and transaction-local work buffers in function bodies, plus ALTER POLICY admitting only status_autopilot.derived, status_autopilot.retained and status_autopilot.causal_undo. Existing target and referenced-node visibility predicates stay intact; permanent rows, historical sessions and existing schema are not rewritten. The engine defaults OFF, does not backfill or activate flags, and requires System provisioning while OFF plus capacity/activation integration. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed. AEON-648 integration preserves main\u2019s recurrence event domain in the replaced policy; all reference checks stay intact."
     },
     {
       "file": "1230_work_leaf_aggregates.sql",
       "sha256": "2349e3db8af89f92c92ca10caf38235f5916ed4a2f51cc43dfdb5b69d6b0d4f9",
-      "sourceCommit": "d287210667acd0a6375febd3da0a146dc99fcc4a",
+      "sourceCommit": "5ea61160e6d864b68c17e851a05d3daaee463490",
       "ticket": "AEON-651",
       "reason": "AEON-648 owner-accepted Q10-Q12 and Q17, with the lead's concept review recorded on that ticket, require bounded leaf aggregates, planned estimates and latest open-leaf ETA. The classifier flags CREATE OR REPLACE of aeon_node_eta_progress, aeon_node_eta and aeon_release_note_snapshot, plus ALTER POLICY admitting status_autopilot.undone. Both historical ETA signatures retain the optional depth argument; invoker tenant/project RLS, the existing public-note whitelist, immutable frozen snapshots and target/referenced-node visibility predicates stay intact. No stored spend, session or Decision Desk identity is rewritten. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it does not make the incompatible AEON-649 kind retirement safe for older binaries and grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed. AEON-648 integration preserves main\u2019s recurrence event domain in the replaced policy; all reference checks stay intact."
     },
