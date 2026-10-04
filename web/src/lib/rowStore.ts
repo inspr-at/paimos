@@ -295,7 +295,10 @@ export class RowStore {
     const entry = this.entry(change.id)
     const order = change.revision && entry.revision ? compareRevision(change.revision, entry.revision) : 1
     if (order < 0) return 'older'
-    if (change.type === 'status_autopilot.derived' || change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
+    // Import reparenting, like derivation, can retain updated_at. Its hint
+    // must invalidate reads and record causal news even at that revision.
+    const sameRevisionChange = change.type === 'status_autopilot.derived' || change.type === 'import.parent_changed'
+    if (sameRevisionChange || change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
       entry.projectionChangedAt = ++this.clock
       entry.projectionHintPosition = change.eventId && change.eventId > 0 ? change.eventId : undefined
       if (change.eventId && change.eventId > 0) entry.projectionFloor = Math.max(entry.projectionFloor ?? 0, change.eventId)
@@ -305,7 +308,7 @@ export class RowStore {
       this.bury(entry, change.revision, this.clock + 1)
       return known ? 'known' : 'newer'
     }
-    if (order === 0 && !entry.tomb && change.type !== 'status_autopilot.derived') return 'known'
+    if (order === 0 && !entry.tomb && !sameRevisionChange) return 'known'
     if (entry.tomb) {
       // Only a restore ends a deletion: a creation (a restore reads as one),
       // or a revision newer than the tombstone's. One without revision (a

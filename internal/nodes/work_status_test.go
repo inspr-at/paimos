@@ -624,3 +624,84 @@ func TestWorkParentStatusCausalUndoAuditRedactsHiddenCause(t *testing.T) {
 	})
 	readAudit(true)
 }
+
+// The person-only decisions remain protected even when the event that changed
+// them also caused a parent status derivation. Preview exercises the same guard.
+func TestWorkCausalUndoProtectedTransitions(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial, patch string
+	}{
+		{"unpublish", `{"fields":{"roadmap_public":true}}`, `{"fields":{"roadmap_public":false},"state":"in_progress"}`},
+		{"publish", ``, `{"fields":{"roadmap_public":true},"state":"in_progress"}`},
+		{"complete_check", `{"human_check":"Inspect the release"}`, `{"human_check":null,"state":"in_progress"}`},
+		{"reopen_check", `{"human_check":"Inspect the release"}`, `{"human_check":"Inspect again","state":"in_progress"}`},
+	} {
+		for _, method := range []string{"GET", "POST"} {
+			t.Run(tc.name+"/"+method, func(t *testing.T) {
+				p := newPrincipal(t, "causal-protected")
+				parent := workNodeTest(t, p, "", "open")
+				child := workNodeTest(t, p, parent.ID, "open")
+				if tc.initial != "" {
+					status, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, tc.initial)
+					child = decode[nodeJSON](t, status, raw, 200)
+				}
+				if tc.name == "reopen_check" {
+					status, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"human_check":null}`)
+					child = decode[nodeJSON](t, status, raw, 200)
+				}
+				enableWorkStatusTest(t, p)
+				status, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, tc.patch)
+				after := decode[nodeJSON](t, status, raw, 200)
+				id, cause := lastDerivedTest(t, p, parent.ID)
+				agent := estimateAgent(t, p)
+				agent.Scopes = append(agent.Scopes, "events.read", "events.undo", "events.undo_other")
+				confirmation := fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause)
+				status, raw = causalCallTest(t, agent, method, id, confirmation)
+				if status != http.StatusForbidden || !strings.Contains(string(raw), "forbidden") {
+					t.Fatalf("agent protected %s: %d %s", method, status, raw)
+				}
+				current := currentWorkTest(t, p, child.ID)
+				if !current.UpdatedAt.Equal(after.UpdatedAt) || !sameString(current.HumanCheck, after.HumanCheck) || !reflectJSONEqual(estimateFieldsOf(t, current), estimateFieldsOf(t, after)) || current.State != after.State || currentWorkTest(t, p, parent.ID).State != "in_progress" {
+					t.Fatal("denied protected undo changed child or parent")
+				}
+				status, raw = causalCallTest(t, p, "GET", id, "")
+				if status != 200 {
+					t.Fatalf("person preview: %d %s", status, raw)
+				}
+				status, raw = causalCallTest(t, p, "POST", id, confirmation)
+				if status != 201 {
+					t.Fatalf("person undo: %d %s", status, raw)
+				}
+				restored := currentWorkTest(t, p, child.ID)
+				if !sameString(restored.HumanCheck, child.HumanCheck) || !reflectJSONEqual(estimateFieldsOf(t, restored), estimateFieldsOf(t, child)) || restored.State != child.State || currentWorkTest(t, p, parent.ID).State != "open" {
+					t.Fatal("person undo did not faithfully restore child and rederive parent")
+				}
+			})
+		}
+	}
+}
+
+func TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields(t *testing.T) {
+	p := newPrincipal(t, "causal-ordinary")
+	parent := workNodeTest(t, p, "", "open")
+	child := workNodeTest(t, p, parent.ID, "open")
+	status, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"fields":{"roadmap_public":true},"human_check":"Inspect the release"}`)
+	child = decode[nodeJSON](t, status, raw, 200)
+	enableWorkStatusTest(t, p)
+	agent := estimateAgent(t, p)
+	agent.Scopes = append(agent.Scopes, "events.read", "events.undo", "events.undo_other")
+	patchWorkTest(t, agent, child.ID, "in_progress")
+	id, cause := lastDerivedTest(t, p, parent.ID)
+	status, raw = causalCallTest(t, agent, "GET", id, "")
+	if status != 200 {
+		t.Fatalf("agent ordinary preview: %d %s", status, raw)
+	}
+	status, raw = causalCallTest(t, agent, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+	if status != 201 {
+		t.Fatalf("agent ordinary undo: %d %s", status, raw)
+	}
+	restored := currentWorkTest(t, p, child.ID)
+	if !sameString(restored.HumanCheck, child.HumanCheck) || !reflectJSONEqual(estimateFieldsOf(t, restored), estimateFieldsOf(t, child)) || restored.State != "open" {
+		t.Fatal("ordinary undo changed protected fields")
+	}
+}
