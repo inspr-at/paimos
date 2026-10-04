@@ -751,16 +751,17 @@ func TestRulesPublishDoesNotDeadlockWithAForeignKeyReference(t *testing.T) {
 	}
 }
 
-// The demotion guard relies on access changes locking the tenant row FOR
-// UPDATE, which conflicts with the NO KEY UPDATE taken by rules writes.
-func TestAccessChangesStillLockTheTenantForUpdate(t *testing.T) {
+// Both UPDATE and NO KEY UPDATE fences conflict with the NO KEY UPDATE taken
+// by rules writes. The project mutation order is exercised with real waits.
+func TestAccessChangesStillFenceTheTenant(t *testing.T) {
 	for _, file := range []string{"../authz/module.go", "../authz/project_members.go"} {
 		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") {
-			t.Fatalf("%s no longer locks the tenant row FOR UPDATE; revisit rules lockAccess", file)
+		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") &&
+			!strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE") {
+			t.Fatalf("%s no longer fences the tenant row; revisit rules lockAccess", file)
 		}
 	}
 }

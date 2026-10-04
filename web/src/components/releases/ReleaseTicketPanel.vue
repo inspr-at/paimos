@@ -162,7 +162,7 @@ defineExpose({
 <template>
   <div class="peek" :class="layout">
     <TicketWorkspace
-      ref="ws" :item="item" :ticket-key="item?.key ?? ref_?.key ?? current" :resolving="resolving" :resolve-error="error" :position="null" :now="now" mode="panel"
+      :key="`${me?.id ?? ''}/${current}`" ref="ws" :item="item" :ticket-key="item?.key ?? ref_?.key ?? current" :resolving="resolving" :resolve-error="error" :position="null" :now="now" mode="panel"
       :project="{ id: projectId ?? '', routeKey: project?.routeKey ?? '' }" :names="list.names" :me="me" :people="people" :trail="trail"
       :can-write="can('nodes.write', scope)" :can-delete="can('nodes.delete', scope)" :can-move="can('nodes.move', scope)"
       :can-link="can('relations.write', scope)" :can-unlink="can('relations.delete', scope)" :can-comment="can('comments.write', scope)"

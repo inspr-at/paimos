@@ -454,7 +454,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
-  draft.value = ''; replyTo.value = null; sendError.value = ''
+  draft.value = ''; replyTo.value = null; sendError.value = ''; sending.value = false
   const projectId = s.value.project_id
   boundProject = projectId
   boundSession = id
@@ -483,14 +483,17 @@ const hookReceipt = computed(() => hookReceipts(boundHookIds.value, statuses.val
 const showHookNotice = computed(() => hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
 async function send() {
   if (!draft.value.trim() || sending.value || composeBlock.value) return
+  const sessionId = s.value.id, viewer = me.value, request = readGeneration
+  const currentSend = () => request === readGeneration && sessionId === s.value.id && viewer === me.value
   sending.value = true; sendError.value = ''
   try {
     await agents.send(s.value, recipient.value, draft.value.trim(), level.value, replyTo.value?.id)
+    if (!currentSend()) return
     refreshedAt = Date.now()
     draft.value = ''; replyTo.value = null
-    await nextTick(); toBottom(true); refreshReceipts()
-  } catch (e) { sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
-  finally { sending.value = false }
+    await nextTick(); if (currentSend()) { toBottom(true); refreshReceipts() }
+  } catch (e) { if (currentSend()) sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
+  finally { if (currentSend()) sending.value = false }
 }
 function composerKeys(event: KeyboardEvent) {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }

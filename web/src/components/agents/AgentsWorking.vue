@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, reactive, useId, watch } from 'vue'
-import { CAP_MAX, limitMode, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingRows, type LimitMode } from '../../lib/agentsWorking'
+import { computed, reactive, useId, watch } from 'vue'
+import { limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { buildPools, POOL_ORDER } from '../../lib/capacity'
 import { useAgentPlan } from '../../lib/useAgentPlan'
 import { useAgents } from '../../stores/agents'
@@ -9,6 +9,7 @@ import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import HarnessMark from './HarnessMark.vue'
+import WorkingStepper from './WorkingStepper.vue'
 
 const agents = useAgents(), capacity = useCapacity(), session = useSession()
 const id = useId()
@@ -48,46 +49,35 @@ const now = computed(() => nowCopy(total.value, run.value, roomNow.value))
 const waits = computed(() => plan.value && snapshot.value ? waitingCopy(plan.value, snapshot.value, room.value, waiting.value) : '')
 const accounts = computed(() => roomNow.value === null ? 'Account room is not available yet.' : roomNow.value > 0 ? `Room for ${roomNow.value} more right now, ${run.value + roomNow.value} at once in all.` : 'Full right now.')
 const accountDetail = computed(() => rows.value.map(row => `${row.label} ${room.value[row.key] === null || room.value[row.key] === undefined ? 'not measured' : row.running + room.value[row.key]!}`).join(' · '))
-function keepFocus() {
-  const button = document.activeElement
-  if (!(button instanceof HTMLButtonElement)) return
-  const group = button.closest('.f-pm, .lim-step')
-  void nextTick(() => { if (button.disabled) group?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus() })
-}
 function changeTotal(delta: number) {
-  if (!plan.value || delta < 0 && total.value <= 0 || delta > 0 && total.value >= CAP_MAX) return
-  save(stepTotal(plan.value, delta)); keepFocus()
+  if (plan.value) save(stepTotal(plan.value, delta))
 }
-function changeLimit(key: string, delta: number, compact = false) {
+function changeLimit(key: string, delta: number) {
   if (!plan.value) return
   const row = rows.value.find(r => r.key === key)
-  if (!row || delta > 0 && row.shown >= CAP_MAX || delta < 0 && (compact ? row.mode === 'off' || row.mode === 'max' && row.shown <= 0 : row.shown <= 1)) return
-  const next = compact ? stepLimit(plan.value, key, row.effective, delta) : stepExpandedLimit(plan.value, key, row.shown, delta)
-  const value = next.limits[key]
+  if (row) editLimit(key, stepLimit(plan.value, key, row.effective, delta).limits[key]!)
+}
+function editLimit(key: string, value: HarnessLimit) {
+  if (!plan.value) return
+  const before = plan.value.limits[key]
+  if (typeof before === 'number') memo[key] = before
   if (typeof value === 'number') memo[key] = value
-  save(next)
-  keepFocus()
+  save(setLimit(plan.value, key, value))
+}
+function editTotal(value: HarnessLimit) {
+  if (plan.value && typeof value === 'number') save({ ...plan.value, total: value })
 }
 function changeMode(key: string, mode: LimitMode) {
   if (!plan.value || limitMode(plan.value.limits[key]) === mode) return
   const before = plan.value.limits[key]
   if (typeof before === 'number') memo[key] = before
-  save(setLimit(plan.value, key, mode === 'none' ? 'no_limit' : mode === 'off' ? 'off' : Math.max(1, memo[key] ?? (typeof before === 'number' ? before : 2))))
+  save(setLimit(plan.value, key, modeLimit(before, mode, memo[key])))
 }
-const nextMode = (key: string): LimitMode => ({ none: 'max', max: 'off', off: 'none' } as const)[limitMode(plan.value?.limits[key])]
+const nextMode = (key: string) => nextLimitMode(plan.value?.limits[key])
 function cycleLabel(row: typeof rows.value[number]) {
   const mode = nextMode(row.key), next = mode === 'none' ? 'no own limit' : mode === 'off' ? 'off' : `at most ${Math.max(1, memo[row.key] ?? (typeof row.limit === 'number' ? row.limit : 2))}`
   const now = row.mode === 'none' ? `up to ${row.effective} now, no own limit` : row.mode === 'max' ? `at most ${row.shown}` : 'off · no new starts'
   return `${row.label}: ${now}, ${row.running} running. Switch to ${next}.`
-}
-function stepKeys(event: KeyboardEvent, key?: string, compact = false) {
-  if (event.metaKey || event.ctrlKey || event.altKey || !(event.target instanceof HTMLElement) || !event.target.closest('button')) return
-  const delta = event.key === 'ArrowUp' || event.key === 'ArrowRight' ? 1 : event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -1 : 0
-  if (!delta) return
-  event.preventDefault()
-  if (key) {
-    changeLimit(key, delta, compact)
-  } else changeTotal(delta)
 }
 function modeKeys(event: KeyboardEvent, key: string) {
   if (event.metaKey || event.ctrlKey || event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -103,8 +93,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
   <section class="working glass-card" aria-label="Agents at once" :class="{ folded, many: rows.length > 3 }">
     <template v-if="plan && snapshot">
       <div class="f-bar">
-        <div class="f-dial"><span>Run up to</span>
-          <span class="f-total">
+        <div class="f-dial">
             <svg class="f-bot" :class="{ busy: run > 0 }" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g class="bob">
               <path class="stalk" d="M12 7.6V3.9" /><circle class="tip" cx="12" cy="2.5" r="1.65" />
               <rect class="ear" x="2.3" y="11.7" width="2.3" height="4.8" rx="1.15" /><rect class="ear" x="19.4" y="11.7" width="2.3" height="4.8" rx="1.15" />
@@ -112,22 +101,15 @@ function modeKeys(event: KeyboardEvent, key: string) {
               <template v-if="run"><g class="look"><g class="blink"><rect class="eye" x="8.2" y="11.9" width="2.4" height="3.3" rx="1.2" /><rect class="eye" x="13.4" y="11.9" width="2.4" height="3.3" rx="1.2" /></g></g><path class="smile" d="M10.5 17.1q1.5 1 3 0" /></template>
               <path v-else class="rest" d="M8.2 13.2q1.2 1.2 2.4 0M13.4 13.2q1.2 1.2 2.4 0M11 17.1h2" />
             </g></svg>
-            <span class="f-pm f-pm-total" @keydown="stepKeys($event)">
-              <button type="button" class="pm" aria-label="One agent fewer at once" data-tip="One agent fewer at once" :disabled="total <= 0" @click="changeTotal(-1)"><AppIcon name="minus" :size="12" /></button>
-              <span class="f-num" :aria-label="total === 0 ? 'Start nothing new' : `Run up to ${total} at once`">{{ total }}</span>
-              <button type="button" class="pm" aria-label="One agent more at once" data-tip="One agent more at once" :disabled="total >= CAP_MAX" @click="changeTotal(1)"><AppIcon name="plus" :size="12" /></button>
-            </span>
-          </span><span class="f-unit"><span><span class="f-opt">{{ total === 1 ? 'agent ' : 'agents ' }}</span>at once.</span><span class="f-ghost" aria-hidden="true"><span class="f-opt">{{ 'agents ' }}</span>at once.</span></span>
+          <span>Run up to</span>
+          <WorkingStepper :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" label="Agents at once" total @step="changeTotal" @edit="editTotal" />
+          <span class="f-unit"><span><span class="f-opt">{{ total === 1 ? 'agent ' : 'agents ' }}</span>at once.</span><span class="f-ghost" aria-hidden="true"><span class="f-opt">{{ 'agents ' }}</span>at once.</span></span>
         </div>
         <div class="f-chips" :class="{ concealed: !folded }" role="group" aria-label="Each harness" :inert="!folded || undefined" :aria-hidden="!folded || undefined">
           <span class="f-vsep" aria-hidden="true" />
           <div v-for="row in rows" :key="row.key" class="f-chip" :class="`is-${row.mode}`" :data-harness="row.key">
             <button type="button" class="f-mode" :aria-label="cycleLabel(row)" :data-tip="`${cycleLabel(row)}${row.mode === 'none' ? '\n' + noOwnTip(row.key, total) : ''}`" @click="changeMode(row.key, nextMode(row.key))"><HarnessMark :harness="row.key" :size="14" /></button>
-            <span class="f-pm" @keydown="stepKeys($event, row.key, true)">
-              <button type="button" class="pm" :aria-label="`${row.label}: ${row.shown <= 1 ? 'off · no new starts' : 'at most ' + (row.shown - 1)}`" :data-tip="`${row.label}: ${row.shown <= 1 ? 'off · no new starts' : 'at most ' + (row.shown - 1)}`" :disabled="row.mode === 'off' || row.mode === 'max' && row.shown <= 0" @click="changeLimit(row.key, -1, true)"><AppIcon name="minus" :size="10" /></button>
-              <span class="f-n" aria-hidden="true">{{ row.mode === 'off' ? 'off' : row.shown }}</span>
-              <button type="button" class="pm" :aria-label="`${row.label}: at most ${Math.min(CAP_MAX, row.shown + 1)}`" :data-tip="`${row.label}: at most ${Math.min(CAP_MAX, row.shown + 1)}`" :disabled="row.shown >= CAP_MAX" @click="changeLimit(row.key, 1, true)"><AppIcon name="plus" :size="10" /></button>
-            </span>
+            <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" />
           </div>
         </div>
         <p class="f-live" :data-tip="error || status" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || live }}</span><span v-if="saving" class="sr-only">Saving</span></p>
@@ -138,20 +120,16 @@ function modeKeys(event: KeyboardEvent, key: string) {
           <div class="f-head"><p class="eyebrow">Each harness may use</p><p class="col-note">Limits may add up to more than the total; the {{ total }} at once still caps them.</p></div>
           <ul class="rows f-rows">
             <li v-for="row in rows" :key="row.key" class="row" :class="`is-${row.mode}`" :data-key="row.key">
-              <HarnessMark :harness="row.key" :size="22" class="initial" />
-              <div class="label"><p class="name">{{ row.label }}</p><p class="sub">{{ row.sub }}</p></div>
+              <button type="button" class="f-mode initial" :aria-label="cycleLabel(row)" :data-tip="cycleLabel(row)" @click="changeMode(row.key, nextMode(row.key))"><HarnessMark :harness="row.key" :size="22" /></button>
+              <div class="label"><p class="name">{{ row.label }}</p><p class="sub" :data-tip="row.sub" tabindex="0">{{ row.sub }}</p></div>
               <div class="limit">
                 <div class="seg" role="radiogroup" :aria-label="`${row.label}: limit`" @keydown="modeKeys($event, row.key)">
                   <button v-for="[mode, label] in modes" :key="mode" type="button" role="radio" :data-mode="mode" :aria-checked="row.mode === mode" :tabindex="row.mode === mode ? 0 : -1" @click="changeMode(row.key, mode)">{{ label }}</button>
                 </div>
-                <div class="lim-step" @keydown="stepKeys($event, row.key)">
-                  <template v-if="row.mode === 'max'">
-                    <button type="button" class="step sm" :aria-label="`${row.label}: at most one fewer`" :disabled="row.shown <= 1" @click="changeLimit(row.key, -1)"><AppIcon name="minus" :size="13" /></button>
-                    <span class="lim-num" aria-live="polite" :aria-label="`${row.label}: at most ${row.shown}`">{{ row.shown }}</span>
-                    <button type="button" class="step sm" :aria-label="`${row.label}: at most one more`" :disabled="row.shown >= CAP_MAX" @click="changeLimit(row.key, 1)"><AppIcon name="plus" :size="13" /></button>
-                  </template>
-                  <span v-else class="lim-word" :data-tip="row.mode === 'none' ? noOwnTip(row.key, total) : undefined">{{ row.words }}</span>
+                <div class="lim-step">
+                  <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" />
                 </div>
+                <span class="lim-word" :data-tip="row.mode === 'none' ? noOwnTip(row.key, total) : undefined">{{ row.mode === 'max' ? '' : row.words }}</span>
               </div>
             </li>
           </ul>
@@ -174,9 +152,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 
 <style scoped>
 .f-dial { grid-area: dial; display: flex; align-items: center; gap: 8px; color: var(--ink); font: 600 16px/1.3 var(--font); letter-spacing: -.005em; white-space: nowrap; }
-/* Revision 6: the total and every harness use one pattern, − number + side by side inside a
-   hairline pill (the total's larger). Fixed boxes: stepping never moves a neighbour. */
-.f-total { display: flex; align-items: center; }
+/* Revision 10: the shared stepper keeps its round buttons and value slot in every mode. */
 .f-bot { flex: none; width: 22px; height: 22px; margin-right: 3px; overflow: visible; --rim: var(--teal); --face: color-mix(in srgb, var(--teal) 9%, var(--surface-raised)); }
 .f-bot:not(.busy) { --rim: var(--ink-3); --face: var(--surface-raised); }
 .f-bot .stalk { fill: none; stroke: var(--rim); stroke-width: 1.5; stroke-linecap: round; }
@@ -197,10 +173,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 @keyframes f-look { 0%, 34%, 100% { transform: translateX(0); } 40%, 56% { transform: translateX(.8px); } 62%, 80% { transform: translateX(-.6px); } 86% { transform: translateX(0); } }
 @keyframes f-blink { 0%, 90%, 100% { transform: scaleY(1); } 93% { transform: scaleY(.12); } 96% { transform: scaleY(1); } }
 @keyframes f-tip { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
-.f-dial .f-pm { padding: 2px; }
-.f-dial .pm { width: 26px; height: 26px; color: var(--teal-ink); }
 .step.ghost:focus-visible { box-shadow: var(--focus-ring); }
-.f-num { flex: none; width: 30px; text-align: center; color: var(--teal-ink); font: 700 19px/1 var(--font); font-variant-numeric: tabular-nums; }
 /* "agent" or "agents": the room of the longer word is kept, so nothing after it moves. */
 .f-unit { display: inline-grid; }
 .f-unit > * { grid-area: 1 / 1; }
@@ -209,18 +182,9 @@ function modeKeys(event: KeyboardEvent, key: string) {
 .f-mode { display: grid; place-items: center; flex: none; width: 26px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink); cursor: pointer; }
 .f-mode > svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
 .f-mode:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.f-n { flex: none; width: 24px; height: 16px; text-align: center; color: var(--ink); font: 650 14px/16px var(--font); font-variant-numeric: tabular-nums; }
-/* No limit of its own: the effective number, muted. Off: the mark dimmed and the word. */
-.f-chip.is-none .f-n { color: var(--ink-3); font-weight: 500; }
+/* Off dims the mark; the shared stepper owns its value state. */
 .f-chip.is-off .f-mode { color: var(--ink-3); opacity: .6; }
-.f-chip.is-off .f-n { color: var(--ink-3); font-weight: 500; font-size: 12.5px; line-height: 16px; }
-.f-pm { display: flex; align-items: center; flex: none; padding: 1px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line-2); }
-.f-chip.is-off .f-pm { box-shadow: inset 0 0 0 1px var(--line); }
-.pm { display: grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-2); cursor: pointer; transition: background .15s ease; }
-@media (hover: hover) { .step.ghost:hover:not(:disabled) { background: var(--row-hover); color: var(--teal-ink); } .f-mode:hover { background: var(--row-hover); } .pm:hover:not(:disabled) { background: var(--row-hover); color: var(--teal-ink); } }
-.pm:active:not(:disabled) { color: var(--teal-ink); }
-.pm:disabled { opacity: .3; cursor: default; }
-.pm:focus-visible { outline: none; box-shadow: var(--focus-ring); color: var(--teal-ink); }
+@media (hover: hover) { .step.ghost:hover:not(:disabled) { background: var(--row-hover); color: var(--teal-ink); } .f-mode:hover { background: var(--row-hover); } }
 .f-live > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .f-live b { color: var(--ink); font-weight: 650; }
 .f-fold { grid-area: fold; color: var(--ink-2); }
@@ -254,20 +218,19 @@ p { margin: 0; }
 .f-bar { display: grid; align-items: center; gap: 6px 24px; min-height: 36px; grid-template-columns: auto minmax(0, 1fr) 28px; grid-template-areas: "dial live fold" "chips chips chips"; }
 .f-chips { grid-area: chips; display: flex; align-items: center; margin-left: 0; justify-content: start; flex-wrap: wrap; gap: 6px 24px; }
 .f-chips.concealed { display: none; }
-.f-chip { display: flex; align-items: center; gap: 2px; width: 98px; border-radius: 999px; transition: background-color .6s ease; position: relative; }
+.f-chip { display: flex; align-items: center; gap: 2px; width: 112px; border-radius: 999px; transition: background-color .6s ease; position: relative; }
 .f-chip + .f-chip::before { content: ''; position: absolute; width: 1px; height: 12px; left: -12px; background: var(--line-2); }
 .f-vsep { flex: none; width: 1px; height: 18px; margin-right: 14px; background: var(--line-2); display: none; }
 .rows { gap: 0; margin-top: 6px; display: grid; padding: 0; list-style: none; }
-.row { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 14px; padding: 9px 6px; border-radius: 0; background: none; border-top: 1px solid var(--line); display: grid; align-items: center; height: 60px; box-sizing: border-box; }
+.row { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 14px; padding: 9px 6px; border-radius: 0; background: none; border-top: 1px solid var(--line); display: grid; align-items: center; min-height: 76px; box-sizing: border-box; }
 .label { min-width: 0; }
 .name { color: var(--ink); font: 650 14.5px/1.3 var(--font); }
 .sub { overflow: hidden; color: var(--ink-3); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.limit { display: flex; align-items: center; gap: 8px; }
+.limit { display: grid; grid-template-columns: max-content max-content; align-items: start; gap: 6px 8px; }
 .limit .seg { flex: none; }
 .limit .seg button { height: 28px; padding: 0 11px; }
-.lim-step { width: 178px; justify-content: flex-start; padding-left: 4px; display: flex; align-items: center; gap: 4px; height: 32px; }
-.lim-num { flex: none; width: 28px; text-align: center; color: var(--ink); font: 700 16px/1 var(--font); font-variant-numeric: tabular-nums; }
-.lim-word { text-align: left; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.lim-step { display: flex; align-items: center; height: 32px; }
+.lim-word { grid-column: 1 / -1; min-height: 18px; color: var(--ink-3); font-size: 12.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
 .step { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); cursor: pointer; transition: background .15s ease; }
 .step:disabled { opacity: .35; cursor: default; }
 .step:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -286,7 +249,7 @@ p { margin: 0; }
 .load-state { color: var(--ink-3); font-size: 13.5px; }
 @container working (min-width: 1120px) {
   .f-bar { grid-template-columns: auto auto minmax(0, 1fr) 28px; grid-template-areas: "dial chips live fold"; gap: 6px 24px; }
-  .f-chips { max-width: 360px; margin-left: -10px; gap: 6px 24px; }
+  .f-chips { max-width: 410px; margin-left: -10px; gap: 6px 24px; }
   .f-chips.concealed { display: flex; visibility: hidden; }
   .f-vsep { display: block; margin-right: -10px; }
   .many .f-bar { grid-template-columns: auto minmax(0, 1fr) 28px; grid-template-areas: "dial live fold" "chips chips chips"; }
@@ -298,40 +261,51 @@ p { margin: 0; }
   .working { padding: 10px 10px 12px 14px; }
   .f-dial { gap: 6px; font-size: 14px; }
   .f-bot { width: 20px; height: 20px; }
-  .f-num { width: 26px; font-size: 18px; }
   /* Fixed chips spread over the line: a harness switching mode never moves its neighbours. */
   .f-vsep { display: none; }
-  .f-chip { width: 92px; gap: 0; }
-  .f-mode { width: 22px; height: 32px; }
-  .f-n { width: 20px; }
-  .f-pm { padding: 1px; }
-  .pm { width: 24px; height: 24px; }
-  .f-dial .pm { width: 30px; height: 30px; }
+  .f-chip { width: 104px; gap: 0; }
+  .f-mode { width: 26px; height: 32px; }
   .f-body { margin-right: 4px; }
   /* Phone: the switch takes the full width; the limit or its words sit on their own line under it. */
-  .limit { grid-column: 1 / -1; flex-wrap: wrap; gap: 8px; }
+  .limit { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) max-content; gap: 6px 8px; }
   .sub { min-height: 0; display: block; white-space: nowrap; }
 
   .f-right { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .working .f-right dt { padding-top: 0; }
   .working .f-right dd + dt { margin-top: 10px; }
   .f-bar { gap: 6px 8px; grid-template-columns: minmax(0, 1fr) 28px; grid-template-areas: "dial fold" "chips chips" "live live"; }
-  .f-chips { margin-left: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 92px); justify-content: space-between; gap: 6px 0; }
+  .f-chips { margin-left: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 104px); justify-content: space-between; gap: 6px 0; }
   .f-chips.concealed { display: none; }
   .f-chip:nth-of-type(3n + 1)::before { content: none; }
   .f-chip + .f-chip::before { left: -8px; }
-  .row { grid-template-columns: 22px minmax(0, 1fr); gap: 6px 10px; padding: 10px 4px; height: 126px; grid-template-rows: 34px 68px; }
-  .limit .seg { flex: 1 1 100%; }
+  .row { grid-template-columns: 22px minmax(0, 1fr); gap: 6px 10px; padding: 10px 4px; min-height: 134px; grid-template-rows: 34px auto; }
+  .limit .seg { grid-column: 1 / -1; display: flex; }
   .limit .seg button { flex: 1; padding: 0 11px; height: 34px; }
   .limit .seg button::before { content: none; }
-  .lim-step { height: 32px; gap: 4px; padding-left: 2px; width: 100%; }
-  .lim-step .step.sm { width: 32px; height: 32px; }
+  .lim-step { grid-column: 1; height: 32px; }
+  .lim-word { grid-column: 2; align-self: center; }
   .f-live { justify-self: stretch; font-size: 13px; white-space: nowrap; justify-content: flex-start; }
 }
 @container working (max-width: 320px) {
-  .f-chips { grid-template-columns: repeat(2, 92px); justify-content: start; column-gap: 24px; }
+  .f-chips { grid-template-columns: repeat(2, 104px); justify-content: start; column-gap: 24px; }
   .f-chip:nth-of-type(3n + 1)::before { content: ''; }
   .f-chip:nth-of-type(2n + 1)::before { content: none; }
 }
-@media (prefers-reduced-motion: reduce) { .f-fold svg, .f-chip { transition: none; } .step, .pm { transition: none; } }
+@media (pointer: coarse) {
+  .f-mode, .step.ghost { width: 44px; height: 44px; }
+  .f-bar, .many .f-bar { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "dial fold" "chips chips" "live live"; }
+  .f-dial { flex-wrap: wrap; }
+  .f-dial .f-unit { flex: none; }
+  .f-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); gap: 6px 12px; max-width: none; margin-left: 0; }
+  .f-chips.concealed { display: none; }
+  .f-vsep, .f-chip + .f-chip::before { display: none; }
+  .f-chip { width: 184px; }
+  .row { grid-template-columns: 44px minmax(0, 1fr); }
+  .limit { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) max-content; }
+  .limit .seg { grid-column: 1 / -1; display: flex; }
+  .limit .seg button { height: 44px; flex: 1; }
+  .lim-step { grid-column: 1 / -1; height: 44px; }
+  .lim-word { grid-column: 1 / -1; align-self: start; }
+}
+@media (prefers-reduced-motion: reduce) { .f-fold svg, .f-chip { transition: none; } .step { transition: none; } }
 </style>

@@ -434,10 +434,12 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
     // ---------- Audit ----------
     if (path === '/api/audit') {
       if (!need('audit.read')) return fail(route, 403, 'forbidden', 'You need Read the access log.')
-      // Like internal/authz/audit.go: oldest first after ?after=<id>, 50 a page,
-      // names resolved, snapshots under data.
+      // Like internal/authz/audit.go: legacy oldest first after ?after=<id>,
+      // or newest first with order=desc and before, 50 a page.
+      const descending = url.searchParams.get('order') === 'desc'
       const after = Number(url.searchParams.get('after') ?? 0)
-      const items = world.events.filter(e => !after || e.id > after)
+      const before = Number(url.searchParams.get('before') ?? Infinity)
+      const items = world.events.filter(e => descending ? e.id < before : e.id > after).sort((a, b) => descending ? b.id - a.id : a.id - b.id)
       const page = items.slice(0, 50).map(e => {
         const snap = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : {})
         const either = Object.keys(snap(e.after)).length ? snap(e.after) : snap(e.before)
@@ -445,7 +447,8 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         const projectId = typeof either.project_id === 'string' ? either.project_id : ''
         return { id: e.id, type: e.type, at: e.at, actor: principalRef(e.actor_principal_id), subject: subjectId ? principalRef(subjectId) : null, project: projectId ? { id: projectId, key: world.projects[projectId]?.key ?? '' } : null, data: { before: e.before, after: e.after } }
       })
-      return route.fulfill({ json: { items: page, next_after: items.length > 50 ? page.at(-1)!.id : null } })
+      const next = items.length > 50 ? page.at(-1)!.id : null
+      return route.fulfill({ json: { items: page, next_after: descending ? null : next, ...(descending ? { next_before: next } : {}) } })
     }
     // ---------- Agent keys ----------
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: world.keys } })

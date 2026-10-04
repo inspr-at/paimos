@@ -9,12 +9,13 @@ import (
 )
 
 type Permission struct {
-	Key            string   `json:"key"`
-	Group          string   `json:"group"`
-	Description    string   `json:"description"`
-	Risk           string   `json:"risk"`
-	GrantableAt    []string `json:"grantable_at"`
-	AgentGrantable bool     `json:"agent_grantable"`
+	Key                       string   `json:"key"`
+	Group                     string   `json:"group"`
+	Description               string   `json:"description"`
+	Risk                      string   `json:"risk"`
+	GrantableAt               []string `json:"grantable_at"`
+	AgentGrantable            bool     `json:"agent_grantable"`
+	OwnerWorkstationGrantable bool     `json:"owner_workstation_grantable"`
 }
 
 // Registry is the versioned permission catalog. Each key is unique and uses
@@ -68,6 +69,9 @@ func makeRegistry() []Permission {
 	}
 	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
 	out = append(out, Permission{Key: "agents.plan.read", Group: "Agents", Description: "Read the person's agent start plan and running counts", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
+	for i := range out {
+		out[i].OwnerWorkstationGrantable = out[i].AgentGrantable || OwnerWorkstationPermission(out[i].Key)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }

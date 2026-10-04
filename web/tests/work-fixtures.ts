@@ -3,6 +3,7 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page, Route } from '@playwright/test'
+import { hideChoice, hiddenStates } from '../src/lib/hideStates'
 import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
@@ -21,6 +22,7 @@ export interface MockNode {
   queue_stale?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
+  recurrence?: import('../src/lib/api').NodeRecurrence
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
   estimate?: import('../src/lib/estimates').TicketEstimate
@@ -40,6 +42,9 @@ export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'nam
   }
 }
 export interface MockOptions {
+  // Kind-specific status buckets, as configured on the server. Omitted
+  // entries retain the normal spelling-based fallback.
+  workBuckets?: Record<string, Record<string, ReturnType<typeof workBucket>>>
   conflictAlways?: string
   delayChildren?: number
   readOnly?: boolean
@@ -174,6 +179,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
     // The server always states finished on an estimate; false unless a spec sets it.
     ...(node.eta ? { eta: { finished: false, ...node.eta } } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(node.recurrence ? { recurrence: node.recurrence } : {}),
     ...(node.planning ? { planning: usage ? node.planning : { ...node.planning, cost: undefined } } : {}),
     ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
@@ -197,7 +203,11 @@ function projectItem(project: Fixtures['projects'][number]) {
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
 // Same buckets as the project summary: a category is not modelled here.
-// Archived stays in the total only; every other non-closed state is open.
+// Archived has a separate count; every other non-closed state is open.
+function canonicalWorkStatus(state: string) {
+  const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return ['active', 'inprogress'].includes(norm) ? 'in_progress' : norm === 'canceled' ? 'cancelled' : norm
+}
 function workBucket(state: string): 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived' {
   const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
   if (norm === 'cancelled' || norm === 'canceled') return 'cancelled'
@@ -279,8 +289,14 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
+  const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
   await page.route('**/api/**', async arrived => {
-    const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+    const request = arrived.request(), url = new URL(request.url()), method = request.method(), query = url.searchParams
+    // Preferences use an encoded path segment; model the server's decoded key
+    // and keep Call.path consistent with the fixture's logical preference keys.
+    const path = url.pathname.startsWith('/api/preferences/')
+      ? `/api/preferences/${decodeURIComponent(url.pathname.slice('/api/preferences/'.length))}`
+      : url.pathname
     const held = options.hold?.({ path, method, query })
     const route = held ? heldRoute(arrived, held) : arrived
     let body: unknown = null
@@ -534,12 +550,17 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const archived = query.get('include_archived') === 'true'
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
         const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
-        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
+        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0, archived: 0 }
+        const statusCounts = new Map<string, { state: string; bucket: ReturnType<typeof workBucket>; count: number }>()
         for (const node of work) {
-          const bucket = workBucket(node.state)
-          if (bucket !== 'archived') tally[bucket]++
+          const bucket = bucketOf(node)
+          tally[bucket]++
+          const state = canonicalWorkStatus(node.state)
+          const key = `${state}:${bucket}`, previous = statusCounts.get(key)
+          statusCounts.set(key, { state, bucket, count: (previous?.count ?? 0) + 1 })
         }
-        return { id: p.id, key: p.key, title: p.title, state: p.state, ...tally, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
+        const { archived: archivedCount, ...counts } = tally
+        return { id: p.id, key: p.key, title: p.title, state: p.state, ...counts, archived_count: archivedCount, status_counts: [...statusCounts.values()], status_counts_truncated: false, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {
@@ -568,6 +589,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
+        .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
+        .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
         .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
@@ -577,7 +600,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
         .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
         .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => query.get('hide_closed') !== 'true' || !['done', 'cancelled', 'archived'].includes(workBucket(n.state)))
+        .filter(n => {
+          if (query.get('hide_closed') !== 'true') return true
+          const choice = hideChoice(n.state, bucketOf(n))
+          return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
+        })
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {

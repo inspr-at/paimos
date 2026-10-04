@@ -110,3 +110,6 @@ func mapDB(err error) error {
 	}
 	return err
 }
+
+// WriteDecisionError preserves the approval route's existing public error mapping.
+func WriteDecisionError(w http.ResponseWriter, err error) { writeResult(w, 0, nil, err) }

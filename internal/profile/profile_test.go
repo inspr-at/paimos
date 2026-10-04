@@ -45,6 +45,7 @@ func person(t *testing.T, d *dbtest.DB, slug, email string) tenant.Principal {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindRole(t, d, p.TenantID, p.ID, "member")
 	return p
 }
 func mux(d *dbtest.DB, store attachments.Store) *http.ServeMux {

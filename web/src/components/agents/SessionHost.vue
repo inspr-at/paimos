@@ -65,7 +65,7 @@ async function save(reset = false) {
         <label>Your name for this computer<input ref="input" v-model="draft" aria-label="Your name for this computer" maxlength="128" data-autofocus :disabled="busy" /></label>
         <p>Only you see this name. Registered host: {{ host }}</p>
         <p v-if="error" role="alert">{{ error }}</p>
-        <div class="host-buttons"><button class="btn primary" :disabled="busy" type="submit">Save</button><button class="btn" :disabled="busy" type="button" @click="save(true)">Use '{{ host }}'</button><button class="btn" type="button" @click="close(true)">Cancel</button></div>
+        <div class="host-buttons"><button class="btn primary" :disabled="busy" type="submit">Save</button><button class="btn" :disabled="busy" type="button" @click="save(true)">Use registered name</button><button class="btn" type="button" @click="close(true)">Cancel</button></div>
       </form>
     </FloatingPanel>
   </span>

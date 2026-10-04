@@ -36,6 +36,7 @@ import (
 	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -49,6 +50,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
+	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -87,7 +89,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 	}
 	modules := []httpapi.Module{
 		authModule, &tokens.Module{}, &host.Module{}, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), tenantbrand.New(nil), modelprovider.New(nil, nil), relations.New(nil),
-		events.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
+		events.New(nil), features.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}), themes.New(nil),
 		imports.New(nil), inbox.New(nil), chat.New(nil), messaging, harness.New(nil), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil),
@@ -95,7 +97,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		journey.New(nil), requirements.New(nil), releases.New(nil), recurrences.New(nil), statusautopilot.New(nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false, nil),
-		hours.New(nil, nil), directory.New(nil, nil),
+		hours.New(nil, nil), directory.New(nil, nil), &phoneapprovals.Module{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(http.ResponseWriter, *http.Request) {})

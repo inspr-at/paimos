@@ -34,6 +34,7 @@ export const router = createRouter({
       children: [
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
+        { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
           const entry = parseEntryParam(to.query.entry)
@@ -90,13 +91,14 @@ export const router = createRouter({
     // eslint-disable-next-line no-restricted-syntax -- a route of the page, not a request
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
+    { path: '/phone-approvals/:kind(approval|attach)/:requestId', component: () => import('./views/PhoneApprovalView.vue'), meta: { title: 'Review approval' } },
     { path: '/pacing', redirect: '/agents' },
     // The release history is a sheet over the page (App.vue); its own links open it over Projects.
     { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
     // Settings: Personal for everyone; Workspace, Business and Projects for admins.
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|developer|agent-rules|accounts|workspace|business|projects|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|agent-rules|accounts|workspace|business|projects|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
@@ -178,6 +180,7 @@ router.beforeEach(async (to, from) => {
   if (!session.identity && to.path !== '/signin') {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
+    if (to.path.startsWith('/phone-approvals/')) return { path: '/signin', query: { return: to.fullPath } }
     if (wasSignedIn) return signInAgain(to.fullPath)
     dropAttachCode()
     return '/signin'

@@ -190,7 +190,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.recovery-dialog { position: fixed; inset: 96px 0 auto; margin: 0 auto; width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 112px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
+.recovery-dialog { position: fixed; inset: 96px 0 auto; margin: 0 auto; width: min(clamp(520px, 44vw, 960px), calc(100vw - 28px)); max-height: calc(100dvh - 112px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
 .recovery-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box; max-height: min(660px, calc(100dvh - 114px)); }
 .recovery-body { flex: 1; align-content: start; display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }

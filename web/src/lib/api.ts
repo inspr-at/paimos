@@ -21,8 +21,21 @@ import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
 import { rowStore } from './rowStore.ts'
+import type { HistoryFilter, Recurrence, RecurrenceHistoryEntry, RecurrenceInput, RecurrencePreview, RecurrenceRelease, RecurrenceResult } from './recurrences'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
+
+export const listRecurrences = (projectId: string, after?: string, signal?: AbortSignal) => json<Page<Recurrence>>(`/recurrences${query({ project_id: projectId, after })}`, 'GET', undefined, {}, signal)
+export const getRecurrence = (id: string, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}`, 'GET', undefined, {}, signal)
+export const createRecurrence = (input: RecurrenceInput, signal?: AbortSignal) => json<Recurrence>('/recurrences', 'POST', input, {}, signal)
+export const updateRecurrence = (id: string, input: RecurrenceInput, revision: number, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}`, 'PUT', { ...input, expected_revision: revision }, {}, signal)
+export const pauseRecurrence = (id: string, paused: boolean, revision: number, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}/${paused ? 'pause' : 'resume'}`, 'POST', { expected_revision: revision }, {}, signal)
+export const deleteRecurrence = (id: string, revision: number, signal?: AbortSignal) => json<void>(`/recurrences/${encodeURIComponent(id)}`, 'DELETE', { expected_revision: revision }, {}, signal)
+export const runRecurrence = (id: string, input: { idempotency_key: string; expected_revision: number; force_overlap?: boolean; release_key?: string }, signal?: AbortSignal) => json<RecurrenceResult>(`/recurrences/${encodeURIComponent(id)}/run-now`, 'POST', input, {}, signal)
+export const previewRecurrenceDraft = (input: RecurrenceInput, signal?: AbortSignal) => json<RecurrencePreview>('/recurrences/preview', 'POST', input, {}, signal)
+export const previewRecurrence = (id: string, signal?: AbortSignal) => json<RecurrencePreview>(`/recurrences/${encodeURIComponent(id)}/preview?count=4`, 'GET', undefined, {}, signal)
+export const recurrenceHistory = (id: string, filter: HistoryFilter, before?: number, signal?: AbortSignal) => json<{ items: RecurrenceHistoryEntry[]; next_cursor: number | null }>(`/recurrences/${encodeURIComponent(id)}/history${query({ filter, before })}`, 'GET', undefined, {}, signal)
+export const recurrenceReleases = (id: string, signal?: AbortSignal) => json<{ items: RecurrenceRelease[]; truncated: boolean }>(`/recurrences/${encodeURIComponent(id)}/releases`, 'GET', undefined, {}, signal)
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {
@@ -112,6 +125,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  recurrence?: NodeRecurrence
   queue_stale?: boolean
   human_check?: string | null
   estimate?: TicketEstimate
@@ -120,6 +134,11 @@ export interface WorkNode {
   position: string; created_at: string; updated_at: string; deleted_at?: string | null
 }
 export interface Page<T> { items: T[]; next_cursor: string | null }
+export interface NodeRecurrence {
+  id: string; project_id: string; project_key: string; number: number
+  trigger: import('./recurrences').RecurrenceTrigger
+  retired: boolean
+}
 export interface SearchHit { node: WorkNode; score: number }
 export interface NodeCreate {
   human_check?: string | null
@@ -218,7 +237,8 @@ export interface ListQuery {
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
-  q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  q?: string; hide_closed?: boolean; hide_states?: string[]; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  work_state?: string[]; work_bucket?: WorkCountBucket[]
   // Only these nodes (at most 200), every other filter still applied (AEON-326).
   ids?: string[]
 }
@@ -231,7 +251,12 @@ export interface ProjectSummary {
   open: number; in_progress: number; done: number; cancelled?: number; total: number; last_activity: string
   // The people (and agents) most recently active in the project, newest first; absent on older servers.
   people?: ProjectPerson[]
+  archived_count?: number
+  status_counts?: ProjectStatusCount[]
+  status_counts_truncated?: boolean
 }
+export type WorkCountBucket = 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived'
+export interface ProjectStatusCount { state: string; bucket: WorkCountBucket; count: number }
 export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent'; has_avatar?: boolean }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}

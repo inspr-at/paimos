@@ -66,7 +66,9 @@
         "internal/config/**",
         "internal/httpapi/**",
         "cmd/**",
-        "embed.go"
+        "embed.go",
+        "internal/phoneapprovals/**",
+        "internal/features/**"
       ]
     },
     {
@@ -127,7 +129,8 @@
         "internal/knowledge/**",
         "internal/embedding/**",
         "internal/search/**",
-        "internal/greetings/**"
+        "internal/greetings/**",
+        "internal/markdownsource/**"
       ]
     },
     {
@@ -136,6 +139,7 @@
       "title": "Product domain A: nodes, business, imports",
       "paths": [
         "internal/nodes/**",
+        "internal/workstate/**",
         "internal/business/**",
         "internal/importer/**",
         "internal/imports/**",
@@ -157,6 +161,7 @@
         "internal/requirements/**",
         "internal/questions/**",
         "internal/decisiondesk/**",
+        "internal/deskdelivery/**",
         "internal/outcomes/**",
         "internal/relations/**",
         "internal/projectgroups/**",

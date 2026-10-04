@@ -2,6 +2,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
+import { useAgents } from '../../stores/agents'
+import SessionPauseActions from '../agents/SessionPauseActions.vue'
+import PauseEvidence from '../agents/PauseEvidence.vue'
+const agents = useAgents()
 import DeliveryRating from './DeliveryRating.vue'
 import { loadNodeRatings, type SessionRating } from '../../lib/deliveryRating'
 import {
@@ -39,6 +43,8 @@ async function load(id: string) {
       loadNodeRatings(id, abort.signal),
     ])
     if (request === generation) {
+      if (!agents.loaded) await agents.loadAll()
+      if (request !== generation) return
       report.value = next
       const map = new Map<string, SessionRating>()
       for (const row of rated ?? []) map.set(row.session_id, row)
@@ -164,6 +170,8 @@ function rowName(session: TicketAgentSession): string {
                 <span v-if="modelFigures(model)">{{ modelFigures(model) }}</span>
               </li>
             </ul>
+            <SessionPauseActions v-if="agents.sessionById(session.id)" :session="agents.sessionById(session.id)!" />
+            <PauseEvidence v-if="agents.sessionById(session.id)?.pause" :session="agents.sessionById(session.id)!" :now="agents.now" />
             <DeliveryRating v-if="session.phase === 'stopped' && ratings.get(session.id)" :session-id="session.id" :initial="ratings.get(session.id)" />
           </li>
         </ul>

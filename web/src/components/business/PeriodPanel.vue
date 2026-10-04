@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { approvePeriod, getPeriod, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { approvePeriod, getPeriodSnapshot, type PeriodSnapshot, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { absoluteTime } from '../../lib/work'
@@ -10,6 +10,7 @@ import { dayKey, periodLabel, timeOfDay, WEEKDAYS } from '../../lib/week'
 import { formatClock, formatSpan } from './duration'
 import { sumAmounts } from './money'
 import { useBusiness } from '../../stores/business'
+import { useSession } from '../../stores/session'
 import AppIcon from './BizIcon.vue'
 import MoneyText from './MoneyText.vue'
 
@@ -19,20 +20,26 @@ import MoneyText from './MoneyText.vue'
 const props = defineProps<{ period: TimePeriod; entries: TimeEntry[]; nodes: Map<string, { key: string; title: string }>; loading: boolean }>()
 const emit = defineEmits<{ close: []; approved: [period: TimePeriod]; reload: [] }>()
 const business = useBusiness()
+const session = useSession()
+const viewer = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
 const busy = ref(false)
-const digest = ref('')
-const revision = ref(0)
+const snapshot = ref<PeriodSnapshot | null>(null)
+const readError = ref('')
+const reading = ref(false)
+let generation = 0
+const entries = computed(() => snapshot.value?.entries ?? [])
+const digest = computed(() => snapshot.value?.digest ?? '')
 const who = computed(() => business.nameOf(props.period.principal_id))
 const agent = computed(() => business.principals.find(p => p.id === props.period.principal_id)?.kind === 'agent')
-const total = computed(() => props.entries.reduce((sum, e) => sum + e.duration_seconds, 0))
+const total = computed(() => entries.value.reduce((sum, e) => sum + e.duration_seconds, 0))
 const amounts = computed(() => {
   const by = new Map<string, string[]>()
-  for (const e of props.entries) by.set(e.currency, [...(by.get(e.currency) ?? []), e.amount])
+  for (const e of entries.value) by.set(e.currency, [...(by.get(e.currency) ?? []), e.amount])
   return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, list]) => ({ currency, amount: sumAmounts(list) }))
 })
 const byTicket = computed(() => {
   const map = new Map<string, { id: string; seconds: number; amounts: Map<string, string[]> }>()
-  for (const e of props.entries) {
+  for (const e of entries.value) {
     const row = map.get(e.node_id) ?? { id: e.node_id, seconds: 0, amounts: new Map() }
     row.seconds += e.duration_seconds
     row.amounts.set(e.currency, [...(row.amounts.get(e.currency) ?? []), e.amount])
@@ -42,33 +49,46 @@ const byTicket = computed(() => {
 })
 const byDay = computed(() => {
   const map = new Map<string, TimeEntry[]>()
-  for (const e of [...props.entries].sort((a, b) => a.started_at.localeCompare(b.started_at))) { const key = dayKey(new Date(e.started_at)); map.set(key, [...(map.get(key) ?? []), e]) }
+  for (const e of [...entries.value].sort((a, b) => a.started_at.localeCompare(b.started_at))) { const key = dayKey(new Date(e.started_at)); map.set(key, [...(map.get(key) ?? []), e]) }
   return [...map.entries()].map(([key, list]) => ({ key, date: new Date(list[0].started_at), list, seconds: list.reduce((s, e) => s + e.duration_seconds, 0) }))
 })
 const running = computed(() => Date.parse(props.period.ends_at) > Date.now())
-async function readDigest() {
-  try { const fresh = await getPeriod(props.period.id); digest.value = fresh.digest; revision.value = fresh.period.revision }
-  catch { digest.value = '' }
+async function readSnapshot() {
+  const id = props.period.id, request = ++generation, person = viewer.value
+  snapshot.value = null; readError.value = ''; reading.value = true; busy.value = false
+  if (!person) { reading.value = false; return }
+  try {
+    const fresh = await getPeriodSnapshot(id)
+    if (request === generation && id === props.period.id && person === viewer.value && session.authenticationCurrent()) snapshot.value = fresh
+  } catch (e) { if (request === generation) readError.value = e instanceof Error ? e.message : 'This period could not be read.' }
+  finally { if (request === generation) reading.value = false }
 }
-watch(() => [props.period.id, props.period.revision, props.entries.length], readDigest, { immediate: true })
+watch(() => [props.period.id, props.period.revision, props.entries, viewer.value], readSnapshot, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => { generation++ })
 
 async function approve() {
-  if (busy.value || !digest.value) return
+  const shown = snapshot.value, request = generation
+  if (busy.value || !shown || reading.value || props.loading || shown.period.id !== props.period.id) return
+  const person = viewer.value
+  const current = () => request === generation && shown === snapshot.value && shown.period.id === props.period.id && !!person && person === viewer.value && session.authenticationCurrent()
+  const name = who.value
   const ok = await confirmAction({
-    title: `Approve ${who.value}’s hours for ${periodLabel(props.period.starts_at, props.period.ends_at)}?`,
-    body: `${props.entries.length} ${props.entries.length === 1 ? 'entry' : 'entries'}, ${formatSpan(total.value)}. The approval covers exactly these entries and closes the period: nothing more can be logged in it.${running.value ? ' The period has not ended yet.' : ''}`,
+    title: `Approve ${name}’s hours for ${periodLabel(shown.period.starts_at, shown.period.ends_at)}?`,
+    body: `${shown.entries.length} ${shown.entries.length === 1 ? 'entry' : 'entries'}, ${formatSpan(total.value)}. The approval covers exactly these entries and closes the period: nothing more can be logged in it.${running.value ? ' The period has not ended yet.' : ''}`,
     confirmLabel: 'Approve period',
   })
-  if (!ok) return
+  if (!ok || !current()) return
   busy.value = true
   try {
-    const period = await approvePeriod(props.period.id, revision.value, digest.value)
-    toast(`Approved ${who.value}’s hours for ${periodLabel(period.starts_at, period.ends_at)}.`)
+    const period = await approvePeriod(shown.period.id, shown.period.revision, shown.digest)
+    if (!current()) return
+    toast(`Approved ${name}’s hours for ${periodLabel(period.starts_at, period.ends_at)}.`)
     emit('approved', period)
   } catch (e) {
-    if (e instanceof APIError && e.status === 409) { toast('Entries changed since you opened this period. The latest entries are shown; review them again.', { tone: 'error' }); emit('reload') }
+    if (!current()) return
+    if (e instanceof APIError && e.status === 409) { toast('Entries changed since you opened this period. Review the latest entries again.', { tone: 'error' }); void readSnapshot(); emit('reload') }
     else toast(`Not approved: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
-  } finally { busy.value = false }
+  } finally { if (current()) busy.value = false }
 }
 </script>
 
@@ -93,7 +113,8 @@ async function approve() {
       </div>
       <p v-if="period.state === 'approved' && period.approval" class="approved-line"><AppIcon name="seal" :size="14" />Approved by {{ business.nameOf(period.approval.approved_by_principal_id) }} · covers {{ formatSpan(period.approval.total_seconds) }} exactly</p>
 
-      <div v-if="loading" class="sk"><span class="skeleton" /><span class="skeleton s" /></div>
+      <div v-if="loading || reading" class="sk"><span class="skeleton" /><span class="skeleton s" /></div>
+      <p v-else-if="readError" class="empty-line" role="alert">{{ readError }} <button type="button" class="btn sm" @click="readSnapshot">Try again</button></p>
       <template v-else-if="entries.length">
         <section class="block" aria-labelledby="by-ticket-title">
           <h3 id="by-ticket-title" class="eyebrow">By ticket</h3>
@@ -125,7 +146,7 @@ async function approve() {
     </div>
     <footer v-if="period.state === 'open' && business.admin" class="actions">
       <p class="note">{{ running ? 'Still running: approving closes it now.' : 'Approving closes the period for new entries.' }}</p>
-      <button type="button" class="btn primary" :disabled="busy || !digest || loading" @click="approve"><AppIcon name="seal" :size="13" />{{ busy ? 'Approving…' : 'Approve period' }}</button>
+      <button type="button" class="btn primary" :disabled="busy || !digest || loading || reading" @click="approve"><AppIcon name="seal" :size="13" />{{ busy ? 'Approving…' : 'Approve period' }}</button>
     </footer>
   </aside>
 </template>

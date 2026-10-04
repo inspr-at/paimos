@@ -887,6 +887,12 @@
       ],
       "specs": [
         {
+          "file": "tests/record-ownership.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
           "file": "tests/no-shift.spec.ts",
           "weightSeconds": 114.05848,
           "weightSource": "web-13",
@@ -908,7 +914,7 @@
           "file": "tests/accounts-computers.spec.ts",
           "weightSeconds": 32.233918,
           "weightSource": "web-13",
-          "listedTests": 13
+          "listedTests": 26
         },
         {
           "file": "tests/agents-top.spec.ts",
@@ -939,6 +945,34 @@
           "weightSeconds": 37.192982,
           "weightSource": "web-13",
           "listedTests": 15
+        }
+      ]
+    },
+    {
+      "id": "recurrences",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {
+        "AEON_RECURRENCE_SHOTS": "${RUNNER_TEMP}/aeon-recurrence-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-573 recurring work and anchored-control regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/recurrences.spec.ts",
+          "weightSeconds": 45.0,
+          "weightSource": "estimate"
+        },
+        {
+          "file": "tests/recurrence-marker.spec.ts",
+          "weightSeconds": 45.0,
+          "weightSource": "estimate"
         }
       ]
     },
@@ -1144,6 +1178,12 @@
           "weightSeconds": 35.820513,
           "weightSource": "status-autopilot-ui-2",
           "listedTests": 11
+        },
+        {
+          "file": "tests/features.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
         }
       ]
     },
@@ -1217,6 +1257,27 @@
           "listedTests": 42
         }
       ]
+    },
+    {
+      "id": "project-header",
+      "gate": true,
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/project-header.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        }
+      ],
+      "env": {}
     },
     {
       "id": "remaining-ui",
@@ -1579,6 +1640,11 @@
           "listedTests": 90
         },
         {
+          "file": "tests/hide-states.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
+        },
+        {
           "file": "tests/hours-edit.spec.ts",
           "weightSeconds": 24.414634,
           "weightSource": "unmeasured-test-rate",
@@ -1676,12 +1742,6 @@
         },
         {
           "file": "tests/knowledge-shots.spec.ts",
-          "weightSeconds": 33.292683,
-          "weightSource": "unmeasured-test-rate",
-          "listedTests": 15
-        },
-        {
-          "file": "tests/knowledge.spec.ts",
           "weightSeconds": 33.292683,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 15
@@ -1841,6 +1901,11 @@
           "weightSeconds": 33.292683,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 15
+        },
+        {
+          "file": "tests/project-status-counts.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
         },
         {
           "file": "tests/projects.spec.ts",
@@ -2131,6 +2196,12 @@
           "listedTests": 28
         },
         {
+          "file": "tests/theme-settings.spec.ts",
+          "weightSeconds": 79.902439,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 36
+        },
+        {
           "file": "tests/theme.spec.ts",
           "weightSeconds": 2.219512,
           "weightSource": "unmeasured-test-rate",
@@ -2207,6 +2278,137 @@
           "weightSeconds": 17.756098,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 8
+        }
+      ]
+    },
+    {
+      "id": "aeon-624-dialogs",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/dialog-widths.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/dialog-full-text.spec.ts",
+          "weightSeconds": 115.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 52
+        },
+        {
+          "file": "tests/role-picker-layout.spec.ts",
+          "weightSeconds": 184.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 83
+        }
+      ]
+    },
+    {
+      "id": "theme-agents",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/theme-agents.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        }
+      ]
+    },
+    {
+      "id": "phone-approvals",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-455 phone approval regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/phone-approvals.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        }
+      ]
+    },
+    {
+      "id": "agent-pause",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/agent-pause.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        }
+      ]
+    },
+    {
+      "id": "decision-knowledge",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-564 Decision Knowledge history and presentation regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/knowledge.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        }
+      ]
+    },
+    {
+      "id": "webcore-recovery",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/webcore-recovery.spec.ts",
+          "weightSeconds": 12,
+          "weightSource": "unmeasured-test-count-estimate",
+          "listedTests": 4
         }
       ]
     }

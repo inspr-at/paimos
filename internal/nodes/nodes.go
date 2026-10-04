@@ -25,6 +25,7 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
+	Recurrence *nodeRecurrence   `json:"recurrence,omitempty"`
 	QueueStale bool              `json:"queue_stale"`
 	Queued     *workqueue.Queued `json:"queued,omitempty"`
 	HumanCheck *string           `json:"human_check"`
@@ -197,6 +198,11 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Estimate = views[id]
+		recurrences, err := loadNodeRecurrences(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Recurrence = recurrences[id]
 		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, err

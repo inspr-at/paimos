@@ -69,6 +69,12 @@ required before merge/release. Before rolling back below this fence, set all
 residency requirements to `any` or pause dispatch; older binaries cannot enforce
 these stamps.
 
+AEON-580's unchanged `1116_owner_workstation.sql` has an exact-byte exception
+for its validated key constraints and replacement approval guard. Existing keys
+retain their defaults; the marked-key decision path keeps self-approval refused.
+The exception is a draft-CI review artifact. Coordinator review and the existing
+previous-binary compatibility gate remain required before merge/release.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement

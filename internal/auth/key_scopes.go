@@ -96,6 +96,10 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 
 // Normalize every delta at the transaction entry point, including internal callers.
 func normalizeKeyScopeDelta(delta *keyScopeDelta) (*keyScopeDelta, error) {
+	return normalizeWorkstationScopeDelta(delta, false)
+}
+
+func normalizeWorkstationScopeDelta(delta *keyScopeDelta, marked bool) (*keyScopeDelta, error) {
 	if delta == nil {
 		return nil, nil
 	}
@@ -109,7 +113,7 @@ func normalizeKeyScopeDelta(delta *keyScopeDelta) (*keyScopeDelta, error) {
 		}
 	}
 	var err error
-	out.Add, err = cleanScopes(delta.Add)
+	out.Add, err = cleanKeyScopes(delta.Add, marked)
 	if err != nil || len(delta.Remove) > maxScopeInput {
 		return nil, errKeyScopes
 	}
@@ -121,7 +125,7 @@ func normalizeKeyScopeDelta(delta *keyScopeDelta) (*keyScopeDelta, error) {
 		out.Remove = append(out.Remove, scope)
 	}
 	if extension := delta.RoleExtension; extension != nil {
-		add, err := cleanScopes(extension.Add)
+		add, err := cleanKeyScopes(extension.Add, marked)
 		if err != nil || len(add) == 0 || !uuidRe.MatchString(extension.RoleID) {
 			return nil, errKeyScopes
 		}
@@ -145,14 +149,10 @@ func keyScopeExpiry(raw json.RawMessage, now time.Time) (*time.Time, error) {
 
 func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id string, delta *keyScopeDelta) (keyScopeView, error) {
 	view := keyScopeView{Grantable: []string{}, RoleGrantable: []string{}}
-	if p.Kind != tenant.Person || p.ID == "" {
+	if (p.Kind != tenant.Person && !authz.OwnerWorkstation(p)) || p.ID == "" {
 		return view, authz.ErrForbidden
 	}
-	delta, err := normalizeKeyScopeDelta(delta)
-	if err != nil {
-		return view, err
-	}
-	err = m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// Match role management and rotation: tenant first, then key. All live
 		// grants, role extensions, cleanup and audit share this transaction.
 		var locked string
@@ -163,6 +163,10 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 			return err
 		}
 		key, err := lockAgentKey(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		delta, err = normalizeWorkstationScopeDelta(delta, key.OwnerWorkstation)
 		if err != nil {
 			return err
 		}
@@ -244,9 +248,19 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 		if err != nil {
 			return err
 		}
+		if key.OwnerWorkstation && role != nil && (role.Key == "owner" || role.Key == "admin") && editor.Workspace.Role != nil && editor.Workspace.Role.Key == "owner" {
+			watch, err := authz.WorkstationWatchCeilingTx(ctx, tx, agent)
+			if err != nil {
+				return err
+			}
+			if watch {
+				ceiling = append(ceiling, "harness.watch")
+				editor.Workspace.Permissions = append(editor.Workspace.Permissions, "harness.watch")
+			}
+		}
 		mayManageRoles := slices.Contains(editor.Workspace.Permissions, "roles.manage")
 		for _, perm := range authz.Registry {
-			if !perm.AgentGrantable || !slices.Contains(editor.Workspace.Permissions, perm.Key) {
+			if !authz.KeyGrantable(perm.Key, key.OwnerWorkstation) || !slices.Contains(editor.Workspace.Permissions, perm.Key) {
 				continue
 			}
 			if slices.Contains(ceiling, perm.Key) {

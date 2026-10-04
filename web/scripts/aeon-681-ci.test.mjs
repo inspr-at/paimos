@@ -14,7 +14,7 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   const selection=plan('web',options)
   const browser=selection.all.filter(row=>row.kind==='browser')
   const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
-  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.has(key(row))))
+  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
   assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
   assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
   assert.equal(selection.full,true)

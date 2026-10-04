@@ -22,7 +22,7 @@ test('source manifest accounts for every spec, including nested files, before re
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
   assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
   assert.deepEqual(manifest.exclusions, [])
-  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts']) {
+  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
     assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
   }
 })
@@ -158,6 +158,12 @@ test('real manifest covers every non-excluded UI spec once for 1, 12 and 256 sha
   assert.equal(manifest.groups.find(g => g.id === 'performance').config, 'playwright.perf.config.ts')
   const release = manifest.groups.find(g => g.id === 'release')
   assert.equal(release.env.RELEASE_LIST_SHOTS, '${RUNNER_TEMP}/aeon-release-list-shots')
+  const recurrence = manifest.groups.find(g => g.id === 'recurrences')
+  assert.notEqual(recurrence.gate, false)
+  assert.deepEqual(recurrence.flags, ['--workers=1', '--trace=retain-on-failure'])
+  assert.equal(recurrence.env.AEON_RECURRENCE_SHOTS, '${RUNNER_TEMP}/aeon-recurrence-shots')
+  assert.deepEqual(recurrence.specs.map(s => s.file), ['tests/recurrences.spec.ts', 'tests/recurrence-marker.spec.ts'])
+  assert.equal(balanceShards(manifest, 12).flatMap(s => s.specs).filter(s => s.file === 'tests/recurrences.spec.ts').length, 1)
   assert.equal(files(manifest).filter(file => file === 'tests/access.spec.ts').length, 1)
   for (const e of manifest.ciInventory.filter(e => e.kind === 'browser-test' && e.config === 'playwright.ui.config.ts' && !e.revision)) {
     for (const file of e.specs) assert.ok(files(manifest).includes(file), `${e.id}: ${file}`)
@@ -370,6 +376,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const real = loadManifest()
   assert.equal(real.groups.find(g => g.id === 'remaining-ui').gate, false)
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
+  assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
 })
@@ -391,10 +398,11 @@ test('runtime reconciliation leaves new specs ungated, drops removed specs and r
   assert.equal(reconcileManifest(manifest, files(manifest)).manifest.groups.length, manifest.groups.length)
   assert.throws(() => reconcileManifest({ ...manifest, groups: [...manifest.groups, { ...group, id: 'unlisted' }] }, [...discovered, 'tests/x.spec.ts']), /reserved/)
   assert.equal(parseArgs(['--check', '--strict']).strict, true)
-  // The real manifest includes all four newly gated specs and main's key-layout gate.
+  // The real manifest keeps main's gates and any additional branch specs.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 54)
+  const declared = loadManifest().groups.filter(group => group.gate !== false).flatMap(group => group.specs)
+  assert.equal(JSON.parse(out.pop()).specs, declared.length)
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {

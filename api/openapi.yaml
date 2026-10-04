@@ -3,6 +3,19 @@ info:
   title: PAIMOS AEON API
   version: dev
   license: {name: AGPL-3.0-only}
+  description: >-
+    AEON-580 adds an explicit owner-workstation exception to the person-only
+    governance routes documented below. Unmarked keys are unchanged. Marked
+    keys may hold owner_workstation_grantable permissions within their live role
+    and creator ceilings; they remain agents. High-risk governance writes return
+    OwnerWorkstationStepUp (428) and accept the Aeon-Step-Up header. This exception
+    never permits ownership.transfer, customer-portal permissions or deciding
+    the acting agent's own approval requests. Marking itself requires an Owner
+    person session and matching Origin. Member reactivation and project-member
+    replacement require the same step-up as deactivation and workspace-role changes.
+    Confirmation summaries include the canonical query and stored route-target and
+    query-selected role names; requests return 400 if the complete summary cannot
+    fit within 256 UTF-8 bytes. Client confirmation is implemented in AEON-581.
 servers:
   - url: /api
 paths:
@@ -351,6 +364,85 @@ paths:
         '400': {description: Invalid bounded request}
         '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unavailable proof/binding}
+  /settings/features/{key}:
+    parameters:
+      - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+      - {name: project_id, in: query, schema: {type: string, format: uuid}}
+    put:
+      operationId: setFeatureOverride
+      description: Person with workspace settings.manage only. Set ON/OFF, or null to inherit (tenant inheritance is OFF). expected_revision is required, zero for an untouched scope. Stale writes return 409. Changed overrides append feature.updated atomically with actor and before/after snapshots; identical writes produce no event. Reset retains its revision to prevent stale writes after reset. Only shipped feature keys are accepted.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, expected_revision]
+              properties:
+                enabled: {type: [boolean, 'null']}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved override (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [feature, event_id]
+                properties:
+                  feature: {$ref: '#/components/schemas/FeatureSetting'}
+                  event_id: {type: [integer, 'null']}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /settings/features:
+    get:
+      operationId: listFeatureSettings
+      description: Person with settings.manage only. Lists the shipped catalog, effective state and override/revision in the selected tenant or visible project scope. No overrides are created by reading.
+      security: [{session: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Feature settings (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, items]
+                properties:
+                  project_id: {type: [string, 'null'], format: uuid}
+                  items: {type: array, items: {$ref: '#/components/schemas/FeatureSetting'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /features:
+    get:
+      operationId: evaluateFeatures
+      description: Evaluate shipped feature flags for the caller's tenant and optional visible project. Project override wins over tenant override; otherwise OFF. Flags never grant permissions. Read at request time, without a deployment or restart. Requires nodes.read in the selected project or any project for the tenant baseline.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Effective feature flags (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, items]
+                properties:
+                  project_id: {type: [string, 'null'], format: uuid}
+                  items: {type: array, items: {$ref: '#/components/schemas/FeatureEvaluation'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /themes:
     get:
       operationId: listThemes
@@ -536,33 +628,6 @@ paths:
         '400': {description: Invalid cursor or limit}
         '403': {description: Account read permission required}
 
-  /agentd/step-ups/{challenge_id}:
-    get:
-      operationId: getAgentdStepUp
-      summary: Fetch the server-authored confirmation through the paired daemon
-      description: >-
-        AEON-580 implements this endpoint; AEON-581 consumes it. Requires the paired
-        runtime bearer and that computer's lifecycle proof. The computer must be
-        the workstation bound to the challenged key, with a pinned confirmation key.
-        Never return nonce, digest or summary through the agent's 428 response.
-        Refuse expired, consumed, revoked, foreign-computer and foreign-tenant challenges.
-        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
-        concatenating the two lowercase 64-character hex wire strings. The client
-        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
-        The server must consume the proof atomically with the exact bound mutation.
-      security: [{agentKey: []}]
-      parameters:
-        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
-        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
-        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string}, description: 'Pairing lifecycle proof, daemon only; never log'}
-      responses:
-        '200':
-          description: Private daemon challenge; Cache-Control no-store
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/AgentdStepUpChallenge'}
-        '403': {description: Pairing or challenge refused}
-        '410': {description: Challenge expired or already consumed}
   /reviews/github:
     post:
       operationId: receiveReviewPullChange
@@ -593,7 +658,7 @@ paths:
   /recurrences:
     get:
       operationId: listRecurrences
-      description: Project-visible recurring work managed by the caller. recurrences.manage is required; agents require an explicit custom-role grant and key scope. Results are bounded to 100, with an optional after UUID cursor.
+      description: Project-visible recurring work. People need nodes.read; agents need an explicit recurrences.manage grant and key scope. Deleted definitions are omitted. Results are bounded to 100, with an optional after UUID cursor.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
@@ -616,7 +681,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getRecurrence
-      description: Read a visible recurrence with recurrences.manage in its project. Invisible IDs return 404.
+      description: Read a visible recurrence. People need nodes.read; agents need recurrences.manage. Invisible or deleted IDs return 404.
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: Recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
@@ -640,6 +705,53 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteRecurrence
+      description: Stop and retire a recurrence at expected_revision. Requires recurrences.manage inside the mutation transaction. Its definition, receipts, created tickets and audit history are retained. Appends recurrence.deleted. Deleted definitions cannot be run or edited.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '204': {description: Retired}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/preview:
+    post:
+      operationId: previewRecurrenceDraft
+      description: Validate an unsaved definition and preview the next four dates on the database clock, using the scheduler calendar engine. No definition or event is written. Requires recurrences.manage and a visible valid target. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceInput'}}}}
+      responses:
+        '200': {description: Preview, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrencePreview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/history:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: recurrenceHistory
+      description: Project-visible append-only recurrence events, newest first. Same read permissions as getRecurrence. Each page is bounded to 50; before is the previous next_cursor. Includes current node key, title and state only for visible live occurrence tickets.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: before, in: query, schema: {type: integer, minimum: 1}}
+        - {name: filter, in: query, schema: {type: string, enum: [all, created, skipped, changes], default: all}}
+      responses:
+        '200': {description: History, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RecurrenceHistoryEntry'}}, next_cursor: {type: [integer, 'null']}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/releases:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: recurrenceReleases
+      description: Published releases of this recurrence's project, from journey and immutable product history. Bounded to the newest 100, with truncated explicitly reported. Names are marketing codenames where supplied; version remains canonical. Receipts disable releases already attempted. Same read permissions as getRecurrence.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Release choices, content: {application/json: {schema: {type: object, required: [items, truncated], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RecurrenceRelease'}}, truncated: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /recurrences/{recurrenceId}/pause:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -673,7 +785,7 @@ paths:
       operationId: runRecurrenceNow
       description: Manually attempt one occurrence, including while paused. An idempotency_key is required; retrying it returns the original receipt without creating another ticket, even after template edits. Manual runs do not move the schedule or event cursor. Uses the overlap policy and existing queue readiness. The occurrence number counts both created and skipped attempts. Creates ordinary tickets with Recurring work system-actor provenance; appends recurrence.occurred or recurrence.skipped with a reason.
       security: [{session: []}, {agentKey: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [idempotency_key], properties: {idempotency_key: {type: string, minLength: 1, maxLength: 128}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [idempotency_key], properties: {idempotency_key: {type: string, minLength: 1, maxLength: 128}, expected_revision: {type: integer, minimum: 1}, force_overlap: {type: boolean, default: false, description: Explicitly confirmed manual override of skip policy; does not change the definition.}, release_key: {type: string, maxLength: 256, description: A server-issued release choice key. Event only; renders the trusted release name and version and shares its durable receipt identity with the scheduler.}}}}}}
       responses:
         '200': {description: Durable occurrence receipt, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceOccurrence'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -788,7 +900,7 @@ paths:
         '200': {description: Recorded answer with pending delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'code revision_conflict, replay_conflict or correction_unavailable'}
+        '409': {description: 'code revision_conflict or replay_conflict'}
         '422': {description: 'code outcome_unavailable'}
   /decision-desk:
     get:
@@ -980,6 +1092,7 @@ paths:
                     expected_revision: {type: integer, minimum: 0}
                     confirm_upgrade: {type: boolean, default: false, description: Explicit owner confirmation ends the upgrade suggestion period; requires ownership.transfer and never overrides server mode.}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Saved settings and new revision
           content:
@@ -1018,6 +1131,7 @@ paths:
                 mode: {type: string, enum: [inherit, on, off]}
                 expected_revision: {type: integer, minimum: 0}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Saved override
           content:
@@ -1079,6 +1193,7 @@ paths:
               properties:
                 action: {type: string, enum: [apply, dismiss]}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Applied or dismissed; returns an empty object}
         '400': {description: Invalid proposal or action}
         '403': {description: Person with settings.manage and nodes.write required; server Off forbids Apply}
@@ -2226,6 +2341,7 @@ paths:
       operationId: "publishRuleSet"
       description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot. A rule that copies a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
@@ -2258,6 +2374,7 @@ paths:
       operationId: "restoreRuleSet"
       description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version. Restoring a copy of a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
@@ -2352,6 +2469,7 @@ paths:
       operationId: "publishRuleSets"
       description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds the workspace budget: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged. A rule that copies a git-backed doctrine rule is 409 doctrine_duplicate and names Propose a change; the batch writes nothing."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Every set published, in request order"
@@ -2586,6 +2704,7 @@ paths:
       operationId: "setRuleBudget"
       description: "AEON-432. settings.manage in the workspace; people only. Sets the total budget (2,000 to 500,000 bytes; older clients never block saving) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Outside the product bounds returns 400 invalid_budget, including 500,001. Refused with 422 when a session file served now would no longer fit. Each client receives whole rules within min(budget, its reported limit), retaining all locked rules or failing closed. Publication and explanation use the workspace budget. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: "The saved budget"
           content:
@@ -2706,6 +2825,7 @@ paths:
               properties:
                 head_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: Proposal after approval attempt
           content:
@@ -2731,6 +2851,7 @@ paths:
                 machine_key: {type: string, pattern: "^[0-9a-f]{64}$"}
                 commit: {type: string, pattern: "^[0-9a-f]{40}$"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: Updated reported pin count
           content:
@@ -2881,6 +3002,7 @@ paths:
           application/json:
             schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the change
           content:
@@ -2903,6 +3025,7 @@ paths:
           application/json:
             schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the change
           content:
@@ -2918,6 +3041,7 @@ paths:
       operationId: removeDoctrineSource
       description: "settings.manage; person only. Stops indexing a repository and deletes its cached bytes. Git is not touched."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the change
           content:
@@ -2933,6 +3057,7 @@ paths:
       operationId: indexDoctrineSource
       description: "settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error. An unavailable credential grant prevents fetching and hides cached files until the operator authorizes this workspace/repository again."
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
           description: The doctrine layer after the attempt
           content:
@@ -3510,6 +3635,7 @@ paths:
       operationId: createRole
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '201': {description: Role created, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
         '403': {description: Permission denied or role escalation}
   /roles/{id}:
@@ -3519,6 +3645,7 @@ paths:
       operationId: updateRole
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Updated custom role, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
         '403': {description: Permission denied or role escalation}
     delete:
@@ -3526,6 +3653,7 @@ paths:
       parameters:
         - {name: reassign_to, in: query, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '204': {description: Custom role deleted}
         '409': {description: Role still has bindings}
   /members:
@@ -3561,6 +3689,7 @@ paths:
                       project_id: {type: string, format: uuid}
                       role_id: {type: string, format: uuid}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '201': {description: Agent ready for its first key, content: {application/json: {schema: {$ref: '#/components/schemas/AgentMember'}}}}
         '400': {description: 'Invalid name, description or role selection'}
         '403': {description: Requires a person with keys.manage and authority to grant the requested roles}
@@ -3573,6 +3702,7 @@ paths:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role_id], properties: {role_id: {type: [string, 'null'], format: uuid}}}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Updated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Invalid role; Guest is a project role (code project_only_role)}
         '403': {description: Permission denied or role escalation}
@@ -3607,6 +3737,7 @@ paths:
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '204': {description: Invite revoked}
         '404': {description: No such invite}
         '409': {description: Invite was already accepted}
@@ -3629,6 +3760,7 @@ paths:
       parameters:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '403': {description: Permission denied}
         '409': {description: 'Last active owner, already deactivated, or a connected computer (disconnect it under Agents first; code connected_computer)'}
@@ -3656,6 +3788,7 @@ paths:
               properties:
                 from_principal_id: {type: string, format: uuid}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Person with the new alias, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Alias would form a chain or a self-link}
         '403': {description: Permission denied}
@@ -3667,6 +3800,7 @@ paths:
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: from_principal_id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '204': {description: Alias removed}
         '404': {description: That alias is not linked to this person}
   /audit:
@@ -3675,7 +3809,9 @@ paths:
       summary: Access changes, with names resolved
       parameters:
         - {name: category, in: query, required: true, schema: {type: string, enum: [access]}}
-        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Return events with id greater than this cursor}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: Event id order; asc preserves the existing oldest-first contract}
+        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Return events with id greater than this cursor; only for asc order}
+        - {name: before, in: query, schema: {type: integer, minimum: 0}, description: Return events with id less than this cursor; only for desc order}
       responses:
         '200':
           description: One page of access events
@@ -4074,6 +4210,85 @@ paths:
         '200': {description: PNG with strong ETag; immutable cache only with matching v hash query}
         '304': {description: ETag matched}
         '404': {description: Person or avatar missing}
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the original confirmation challenge through the paired daemon
+      description: >-
+        Requires the computer's exact paired runtime bearer key and lifecycle proof.
+        Agents pass only challenge_id to agentd. The daemon fetches this resource at
+        its pinned server origin and displays this server-generated summary; it must
+        never display a summary forwarded by the requesting agent. A sibling key,
+        another computer or tenant, an inactive pairing or a consumed, superseded,
+        expired or signer-mismatched challenge cannot retrieve it. No proof in URLs.
+        AEON-580 implements this endpoint; AEON-581 consumes it. The computer must
+        be the workstation bound to the challenged key, with a pinned confirmation
+        key. Never return nonce, digest or summary through the agent's 428 response.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent or logged.}
+      responses:
+        '200':
+          description: Original challenge for this computer; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [summary, nonce, action_digest, expires_at, computer_id]
+                properties:
+                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action, escaped route, canonical query and stored target names including query-selected roles; at most 256 UTF-8 bytes, no control or format characters. Names and fields are never shortened or omitted to fit; an incomplete summary fails challenge creation with 400.'}
+                  nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  expires_at: {type: string, format: date-time}
+                  computer_id: {type: string, format: uuid}
+        '403': {description: Paired runtime and device proof required}
+        '404': {description: Challenge unavailable for this computer}
+        '410': {description: Challenge expired or already consumed}
+  /agent-keys/{id}/owner-workstation:
+    put:
+      operationId: setOwnerWorkstationKey
+      summary: Mark or unmark the owner's workstation key
+      description: >-
+        Workspace Owner person session only; keys cannot mark or unmark any key.
+        Marking requires the key's active agent to be the principal of the connected,
+        redeemed computer with a pinned P-256 Secure Enclave confirmation key.
+        One unrevoked marked key per tenant (and therefore per computer).
+        Marking grants no role and changes no scopes; use the scope endpoint to grant
+        governance permissions within the agent's role and original creator ceiling.
+        Unmarking removes governance scopes and invalidates outstanding challenges.
+        Ownership transfer and customer-portal permissions remain unavailable to keys;
+        a marked agent cannot decide its own approval requests.
+      security: [{session: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [owner_workstation]
+              properties:
+                owner_workstation: {type: boolean}
+                workstation_computer_id: {type: string, format: uuid, description: Required when marking; omitted when unmarking.}
+      responses:
+        '200':
+          description: Updated key metadata; no secret
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid request}
+        '403': {description: Owner person session required or computer binding invalid}
+        '404': {description: Key not in this tenant}
+        '409': {description: Key inactive or another marked key exists}
   /agent-keys:
     get:
       operationId: listAgentKeys
@@ -4146,6 +4361,7 @@ paths:
                   format: date-time
                   description: Future expiry for the new key; omitted or null means never. The UI defaults to 90 days and offers 30, 90, 365 days or never. Rotation uses this new expiry, not the old date.
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "201":
           description: Key created. token is shown only in this response.
           content:
@@ -4358,6 +4574,7 @@ paths:
                     role_id: {type: string, format: uuid}
                     add: {type: array, minItems: 1, maxItems: 256, items: {type: string}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Updated key metadata without a secret
           content:
@@ -4381,6 +4598,7 @@ paths:
           required: true
           schema: {type: string, format: uuid}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "204":
           description: Revoked
         "400":
@@ -4501,7 +4719,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total and archived_count. Existing fields retain their meanings; bounded status_counts and status_counts_truncated are additive.
           content:
             application/json:
               schema:
@@ -4520,6 +4738,19 @@ paths:
                         in_progress: {type: integer}
                         done: {type: integer}
                         cancelled: {type: integer}
+                        archived_count: {type: integer, minimum: 0}
+                        status_counts:
+                          type: array
+                          maxItems: 256
+                          description: Live descendant work counts by canonical status and work bucket, in one snapshot. Kind categories take precedence exactly as for Hide. Status spellings are trimmed, lowercased and space/hyphen normalized; active and inprogress map to in_progress, canceled to cancelled. A status used with different kind categories has one entry per bucket. Non-work and deleted nodes are excluded. Older servers may omit this additive field.
+                          items:
+                            type: object
+                            required: [state, bucket, count]
+                            properties:
+                              state: {type: string}
+                              bucket: {type: string, enum: [open, in_progress, done, cancelled, archived]}
+                              count: {type: integer, minimum: 0}
+                        status_counts_truncated: {type: boolean, description: More than 256 status/bucket pairs exist. Group totals remain exact; clients must disclose partial status counts.}
                         total: {type: integer}
                         last_activity: {type: string, format: date-time}
                         people:
@@ -4653,6 +4884,8 @@ paths:
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
         - {name: kind, in: query, description: Repeatable or comma-separated kind slugs or IDs, schema: {type: array, items: {type: string}}}
         - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
+        - {name: work_state, in: query, description: 'Canonical work statuses as in project status_counts. Recognises all stored spelling variants. Repeatable or comma-separated, with ! exclusions; at most 64 values of 64 characters each. Combines with other filters.', schema: {type: array, maxItems: 64, items: {type: string, maxLength: 64}}}
+        - {name: work_bucket, in: query, description: 'Work buckets using the same kind categories and fallback as project counts and Hide. Repeatable or comma-separated; at most five values. Combines with other filters.', schema: {type: array, maxItems: 5, items: {type: string, enum: [open, in_progress, done, cancelled, archived]}}}
         - {name: priority, in: query, description: Repeatable or comma-separated priorities or none; ! excludes, schema: {type: array, items: {type: string}}}
         - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none; ! excludes, schema: {type: array, items: {type: string}}}
         - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
@@ -4665,7 +4898,8 @@ paths:
         - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
-        - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
+        - {name: hide_closed, in: query, description: 'When true, omits the hide_states choices, defaulting to nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
+        - {name: hide_states, in: query, description: 'Closed statuses omitted when hide_closed is true. Defaults to all five. Kind-aware buckets and canonical spellings match project counts: delivered and accepted keep their names inside the done bucket; other done-bucket statuses use done, and exit buckets use cancelled or archived. At least one and at most five choices; ignored when hide_closed is false.', style: form, explode: false, schema: {type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: {type: string, enum: [done, delivered, accepted, cancelled, archived]}}}
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
@@ -6944,6 +7178,7 @@ paths:
       description: Person with settings.manage required. Uses revision compare-and-swap. API keys use the existing tenant-bound encrypted vault, never JSON settings or events. Omit api_key to preserve it; empty clears it. Changing base_url clears an omitted key. Saving makes no model request.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProviderWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved configuration, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProvider'}}}}
         '400': {description: Invalid configuration}
         '403': {$ref: '#/components/responses/Error'}
@@ -6960,6 +7195,7 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Chat endpoint responded, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {const: true}}}}}}
         '400': {description: Invalid request}
         '403': {$ref: '#/components/responses/Error'}
@@ -6976,6 +7212,7 @@ paths:
       description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with. Changes atomically append inbox.delivery_settings_changed with the actor and effective before/after policy. Unchanged policies append no event.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
         '400': {$ref: '#/components/responses/Error'}
   /settings/eta-interval:
@@ -7005,6 +7242,7 @@ paths:
               properties:
                 interval_minutes: {type: integer, minimum: 1, maximum: 240}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Updated interval
           content:
@@ -7036,6 +7274,7 @@ paths:
               properties:
                 short_name: {type: string, maxLength: 32}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '400': {description: Invalid short name}
         '403': {description: 'Not a person, or settings.manage missing'}
@@ -7067,6 +7306,7 @@ paths:
           image/webp: {schema: {type: string, format: binary}}
           image/svg+xml: {schema: {type: string, format: binary}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '400': {description: 'Wrong type, unreadable or animated image, unsupported static SVG feature, or outside the pixel bounds; includes a reason'}
         '403': {description: 'Not a person, or settings.manage missing'}
@@ -7075,6 +7315,7 @@ paths:
       operationId: deleteBrandLogo
       description: Removes the logo; the header falls back to the product mark (or, for dark, to the light logo). Person only; requires settings.manage.
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '403': {description: 'Not a person, or settings.manage missing'}
   /brand/logo/{variant}:
@@ -7108,6 +7349,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/AgentActivitySetting'}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
         '400': {description: Unknown mode}
         '403': {description: Settings permission required}
@@ -7138,6 +7380,7 @@ paths:
               properties:
                 heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
           description: Updated threshold
           content:
@@ -7460,7 +7703,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: sendProjectMessage
-      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent, so a reply to it is not found.
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent. An addressed person authenticated by session cookie, without Authorization or agent attribution, may answer it with inbox.manage, questions.read and questions.decide permission; this returns a pending Decision Desk answer. Every unauthorized or mismatched held reply uses the same not-found response as an unknown parent.
       requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
@@ -7563,6 +7806,156 @@ paths:
         '200': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals:
+    get:
+      operationId: getPhoneApprovalSettings
+      description: Own passkeys, subscription IDs and quiet hours; never returns push endpoints or private keys.
+      security: [{session: []}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/settings:
+    put:
+      operationId: setPhoneApprovalPreferences
+      description: Person-only opt-in preferences. Escalation changes notification recipients only.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalPreferences'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys/options:
+    post:
+      operationId: beginPhonePasskey
+      description: Platform passkey enrollment with required user verification, bound to authenticated person.
+      security: [{session: []}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCeremony'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys:
+    post:
+      operationId: finishPhonePasskey
+      description: Verify and persist a fresh platform registration.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCredentialProof'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePasskey'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys/{credentialId}:
+    delete:
+      operationId: revokePhonePasskey
+      description: Revoke own passkey and invalidate outstanding challenges.
+      security: [{session: []}]
+      parameters: [{name: credentialId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Revoked}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/subscriptions:
+    post:
+      operationId: subscribePhoneApprovals
+      description: Person-scoped Web Push opt-in; allowlisted public push providers only.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePushSubscription'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneSubscription'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/subscriptions/{subscriptionId}:
+    delete:
+      operationId: revokePhoneSubscription
+      description: Revoke own subscription.
+      security: [{session: []}]
+      parameters: [{name: subscriptionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Revoked}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /phone-approvals/{kind}/{requestId}:
+    get:
+      operationId: getPhoneApproval
+      description: Review live server context. Attach is restricted to its computer owner. Gates preserve existing permission checks.
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /phone-approvals/{kind}/{requestId}/options:
+    post:
+      operationId: beginPhoneDecision
+      description: Fresh 2-minute challenge includes request ID and hash, person, tenant, decision and reason.
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneDecision'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCeremony'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /phone-approvals/{kind}/{requestId}/decision:
+    post:
+      operationId: decidePhoneApproval
+      description: Verify required WebAuthn UV, origin, RP ID, signature, counter, request hash and one-use challenge in the existing decision transaction. Push payload never authorizes a decision. Missing, unauthorized, expired and already decided store requests return 404 request unavailable; phone verification errors retain their status.
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneDecisionProof'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /approvals:
     get:
       operationId: listApprovals
@@ -7587,6 +7980,7 @@ paths:
       parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalDecisionWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Decision, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -8966,7 +9360,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisationWrite'}}}}
       responses:
-        '201': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '400': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}:
     get:
@@ -8983,7 +9377,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisationWrite'}}}}
       responses:
-        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteCRMOrganisation
@@ -8991,7 +9385,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '204': {description: Deleted}
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/visibility:
     patch:
@@ -9002,7 +9396,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
       responses:
-        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/related:
     get:
@@ -9019,7 +9413,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [contact_node_id, expected_revision], properties: {contact_node_id: {type: string, format: uuid}, expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
-        '200': {description: Customer with new primary, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer with new primary, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/number/reformat:
     post:
@@ -9044,7 +9438,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactWrite'}}}}
       responses:
-        '201': {description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
   /crm/contacts/{contactId}:
     get:
       operationId: getCRMContact
@@ -9059,7 +9453,7 @@ paths:
       parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactWrite'}}}}
       responses:
-        '200': {description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
         '409': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteCRMContact
@@ -9067,7 +9461,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '204': {description: Deleted}
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
   /crm/documents/{attachmentId}/metadata:
     put:
       operationId: putCRMDocumentMetadata
@@ -9134,7 +9528,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}, {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
   /crm/providers:
     get:
       operationId: listCRMProviders
@@ -9228,7 +9622,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: expected_revision, in: query, required: true, schema: {type: integer, minimum: 1}}]
       responses:
-        '204': {description: Deleted}
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -9246,6 +9640,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettingsWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Updated settings, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettings'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /quote-profiles:
@@ -9426,7 +9821,7 @@ paths:
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
-        '201': {description: New quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: New quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/visibility:
     patch:
@@ -9437,7 +9832,7 @@ paths:
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
       responses:
-        '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/versions:
     get:
@@ -9837,6 +10232,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettingsWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9849,6 +10245,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9863,6 +10260,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9877,6 +10275,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9892,6 +10291,7 @@ paths:
       parameters: [{name: productId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalProductEdit'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Product after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -9906,6 +10306,7 @@ paths:
       parameters: [{name: featureId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFeatureEdit'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Feature after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10046,6 +10447,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10060,6 +10462,7 @@ paths:
       parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorPatch'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10072,6 +10475,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -10083,6 +10487,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10097,6 +10502,7 @@ paths:
       parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10109,6 +10515,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -10121,6 +10528,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCellWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Stored cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10136,6 +10544,7 @@ paths:
       parameters: [{name: cellId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Approved cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10150,6 +10559,7 @@ paths:
       parameters: [{name: correctionId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Closed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalClosed'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -10171,6 +10581,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10185,6 +10596,7 @@ paths:
       parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFulfillmentWrite'}}}}
       responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -10471,6 +10883,9 @@ components:
   # Additive optional response fields require a minor bump; removals, type changes,
   # and newly required fields require a major bump. Never add a version body field.
   headers:
+    MutationEventIds:
+      description: Exact event IDs committed by this mutation, comma separated in reverse append order for Undo. Absent for an unchanged record or when a complete bounded receipt cannot be supplied. Never resolve an absent or lost receipt by finding the newest event.
+      schema: {type: string, maxLength: 22528, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}
     PortalBinding:
       description: Published product UUID and settings revision; echo as X-Portal-Binding to bind participation and writes to the catalog on screen. JSON fields are unchanged.
       schema: {type: string, maxLength: 64, pattern: '^[0-9a-f-]{36}:[1-9][0-9]*$'}
@@ -10479,10 +10894,10 @@ components:
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
     JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
-    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.6']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.7']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -10884,6 +11299,23 @@ components:
       properties:
         expected_revision: {$ref: '#/components/schemas/ChatPosition'}
         offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600}
+    FeatureSetting:
+      allOf:
+        - {$ref: '#/components/schemas/FeatureEvaluation'}
+        - type: object
+          required: [override, revision]
+          properties:
+            override: {type: [boolean, 'null'], description: Override in the selected scope; null means inherit.}
+            revision: {type: integer, minimum: 0}
+    FeatureEvaluation:
+      type: object
+      required: [key, label, description, enabled, source]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        description: {type: string}
+        enabled: {type: boolean}
+        source: {type: string, enum: [default, tenant, project]}
     ThemeAccent:
       type: object
       additionalProperties: false
@@ -10915,6 +11347,8 @@ components:
             hover: {type: boolean}
             size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
             palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome]}
+            dim_inactive: {type: boolean, description: 'Dim idle and ended agents; omitted means true'}
+            inactive_opacity: {type: integer, minimum: 40, maximum: 80, description: 'Inactive opacity percent; omitted means 55'}
     Theme:
       type: object
       required: [id, tenant_id, name, scope, owner_principal_id, values, revision, created_at, updated_at]
@@ -11024,12 +11458,32 @@ components:
         meanwhile: {type: string, enum: [carries_on, parked, paused, stopped]}
         meanwhile_text: {type: string, maxLength: 2000}
         blocked_node_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
         suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
         ticket_id: {type: string, format: uuid}
         session_id: {type: string, format: uuid, description: Verified original public harness generation; never an arbitrary attribution UUID}
         source_request_id: {type: string, format: uuid, description: Optional owned inbox_compat_messages ID in this project and exact session}
         source_handover_id: {type: string, format: uuid, description: Reserved for a verified AEON-524 adapter; currently returns source_unavailable}
         anyway_reason: {type: string, minLength: 1, maxLength: 2000}
+    QuestionDoctrineTarget:
+      type: object
+      additionalProperties: false
+      required: [source_id, path, rule_key, rule_sha256]
+      properties:
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        tldr_en: {type: string, maxLength: 300}
+        tldr_de: {type: string, maxLength: 300}
+    QuestionOutcomeAvailability:
+      type: object
+      required: [outcome, available, why]
+      properties:
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        available: {type: boolean}
+        why: {type: string, description: Unavailable stamps have no shortcut; do not treat the stored suggestion as permission.}
+        mapping_present: {type: boolean, description: Cheap Doctrine mapping hint; the exact source and guard are validated only when deciding and applying.}
     QuestionDecisionInput:
       type: object
       additionalProperties: false
@@ -11041,6 +11495,8 @@ components:
         answer: {type: string, maxLength: 8000, description: Required for a custom answer; omit to use the option answer}
         reason: {type: string, maxLength: 2000}
         outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        ticket_revision: {type: string, format: date-time, description: Optional ticket updated_at from the screen; changes before commit conflict. The server also snapshots it for delayed application.}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
     QuestionAsker:
       type: object
       required: [id, principal_id, request_id, reply_root_id, comment_node_id, created_at, input]
@@ -11075,6 +11531,28 @@ components:
         decided_by: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
         deliver_after: {type: string, format: date-time}
+        replaces: {type: string, format: uuid, description: Previously dispatched answer replaced by this correction; immutable history is retained.}
+    QuestionEffectData:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket_id: {type: string, format: uuid}
+        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; person edits are preserved and flagged for review.}
+        knowledge_id: {type: string, format: uuid}
+        doctrine_id: {type: string, format: uuid, description: Pending AEON-444 inbox draft; publication needs the existing person-only action.}
+        supersedes: {type: string, format: uuid, description: Earlier outcome effect ID}
+        superseded_by: {type: string, format: uuid, description: Replacing outcome effect ID}
+        retryable: {type: boolean, description: False means automatic retry is stopped; review the failure and decide a new revision.}
+        review_required:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            required: [kind, ref, why]
+            properties:
+              kind: {type: string, enum: [criterion, doctrine]}
+              ref: {type: string}
+              why: {type: string}
     QuestionPending:
       type: object
       required: [id, revision, kind, state, deliver_after]
@@ -11087,6 +11565,12 @@ components:
         deliver_after: {type: string, format: date-time}
         effect_ref: {type: string}
         error_code: {type: string}
+        error_message: {type: string, description: Safe explanation of a failed effect; retryable effects recheck authority; final conflicts require a new decision.}
+        effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
+        receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
+        receipt_failure: {type: string}
+        delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
     Question:
       type: object
       required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]
@@ -11101,6 +11585,7 @@ components:
         askers: {type: array, items: {$ref: '#/components/schemas/QuestionAsker'}}
         answer: {$ref: '#/components/schemas/QuestionAnswer'}
         pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
+        outcomes: {type: array, items: {$ref: '#/components/schemas/QuestionOutcomeAvailability'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     QuestionPage:
@@ -11150,11 +11635,14 @@ components:
         timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
         start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}
         event: {type: string, enum: [release.published], description: Event only; the project's journey publications and configured product release history. Historical publications before creation and those during pause are ignored.}
+        event_start: {type: string, enum: [now, hour, morning], default: now, description: 'Event only; immediately, one hour later or next local morning at 06:00.'}
+        event_timezone: {type: string, maxLength: 128, description: 'Event only; IANA zone for next morning, default UTC.'}
     RecurrenceTemplate:
       type: object
       additionalProperties: false
       required: [title]
       properties:
+        name: {type: string, maxLength: 80, description: Human name of the recurrence; optional for existing CLI definitions.}
         title: {type: string, minLength: 1, maxLength: 512}
         description: {type: string, maxLength: 65536}
         acceptance_criteria: {type: array, maxItems: 100, items: {type: string, minLength: 1, maxLength: 4096}}
@@ -11190,6 +11678,42 @@ components:
             created_by_principal_id: {type: string, format: uuid}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+            last_result: {$ref: '#/components/schemas/RecurrenceResult'}
+            open_previous: {$ref: '#/components/schemas/RecurrenceResult'}
+    RecurrencePreview:
+      type: object
+      required: [times, trigger_kind]
+      properties:
+        times: {type: array, maxItems: 100, items: {type: string, format: date-time}}
+        trigger_kind: {type: string, enum: [time, event]}
+    RecurrenceResult:
+      allOf:
+        - {$ref: '#/components/schemas/RecurrenceOccurrence'}
+        - type: object
+          properties:
+            key: {type: string}
+            title: {type: string}
+            state: {type: string}
+    RecurrenceHistoryEntry:
+      type: object
+      required: [id, type, at, actor_name, before, after]
+      properties:
+        id: {type: integer}
+        type: {type: string}
+        at: {type: string, format: date-time}
+        actor_name: {type: string}
+        before: {type: [object, 'null']}
+        after: {type: [object, 'null']}
+        node: {type: [object, 'null'], properties: {key: {type: string}, title: {type: string}, state: {type: string}}}
+    RecurrenceRelease:
+      type: object
+      required: [key, name, version, published_at]
+      properties:
+        key: {type: string}
+        name: {type: string}
+        version: {type: string}
+        published_at: {type: string, format: date-time}
+        receipt: {$ref: '#/components/schemas/RecurrenceResult'}
     RecurrenceOccurrence:
       type: object
       required: [recurrence_id, occurrence_key, number, scheduled_at, outcome, reason]
@@ -12795,6 +13319,7 @@ components:
         risk: {type: string, enum: [low, medium, high]}
         grantable_at: {type: array, items: {type: string, enum: [workspace, project]}}
         agent_grantable: {type: boolean, description: A key may carry this permission. The scope picker is built from this flag.}
+        owner_workstation_grantable: {type: boolean, description: A specifically marked owner workstation key may carry this permission within its live role and creator ceilings.}
     AuthzRoleRef:
       type: object
       required: [id, key, name]
@@ -12937,7 +13462,8 @@ components:
       required: [items, next_after]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/AccessAuditEvent'}}
-        next_after: {type: [integer, 'null']}
+        next_after: {type: [integer, 'null'], description: Cursor for the next asc page; null in desc order}
+        next_before: {type: [integer, 'null'], description: "Cursor for the next desc page; present in desc order, null when complete"}
     AccessAuditEvent:
       type: object
       required: [id, type, at, actor, subject, project, data]
@@ -15667,6 +16193,7 @@ components:
       type: object
       required: [deadline_at, request_id, items, stop_in_flight]
       properties:
+        owner_principal_id: {type: string, format: uuid, readOnly: true, description: 'Canonical person whose deadline and plans this report describes, including when signed in through a linked identity.'}
         deadline_at: {type: [string, 'null'], format: date-time}
         request_id: {type: [string, 'null'], format: uuid}
         items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}
@@ -15754,10 +16281,20 @@ components:
         handover: {$ref: '#/components/schemas/HarnessHandover'}
         resume_requested_at: {type: string, format: date-time}
         successor_session_id: {type: string, format: uuid}
+    DeskAnswerReference:
+      type: object
+      required: [question_id, answer_id, revision]
+      description: Durable answer pointer. Fetch private answer text through the authorized question status API.
+      properties:
+        question_id: {type: string, format: uuid}
+        answer_id: {type: string, format: uuid}
+        revision: {type: integer}
+        replaces: {type: string, format: uuid}
     HarnessContinuation:
       type: object
       required: [succeeds_session_id, handover, brief]
       properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         succeeds_session_id: {type: string, format: uuid}
         handover: {$ref: '#/components/schemas/HarnessHandover'}
         brief: {type: string, description: 'Full continuation brief built from the durable handover, never truncated to the metadata brief label.'}
@@ -15787,6 +16324,7 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         service_tier: {$ref: '#/components/schemas/ServiceTier'}
         service_tier_revision: {type: integer, minimum: 0}
         service_tier_request: {type: [string, 'null'], enum: [default, fast, fastest, null], description: Pending agent-requested tier available on session list rows without opening the panel.}
@@ -15815,6 +16353,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        owner_principal_id: {type: [string, 'null'], format: uuid, readOnly: true, description: 'Canonical person who owns this generation; null or omitted when no owner is recorded. Wind-down selects only the caller-owned running sessions, even for administrators.'}
         display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
         model: {$ref: '#/components/schemas/HarnessModel'}
         model_raw: {type: [string, 'null'], maxLength: 128, readOnly: true, description: Original cleaned model string before separating an effort suffix; retained for audit.}
@@ -16470,6 +17009,92 @@ components:
       properties:
         decision: {type: string, enum: [approved, denied]}
         reason: {type: string}
+    PhoneApprovalPreferences:
+      type: object
+      additionalProperties: false
+      required: [enabled, time_zone, quiet_start, quiet_end, escalation_minutes]
+      properties:
+        enabled: {type: boolean}
+        time_zone: {type: string, maxLength: 100}
+        quiet_start: {type: integer, minimum: 0, maximum: 1439, description: Local minute of day; equal endpoints disable quiet hours.}
+        quiet_end: {type: integer, minimum: 0, maximum: 1439}
+        escalation_minutes: {type: integer, minimum: 5, maximum: 1440}
+    PhonePasskey:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    PhoneSubscription:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    PhonePushSubscription:
+      type: object
+      additionalProperties: false
+      required: [endpoint, keys]
+      properties:
+        endpoint: {type: string, format: uri, maxLength: 2048}
+        keys:
+          type: object
+          additionalProperties: false
+          required: [auth, p256dh]
+          properties:
+            auth: {type: string, maxLength: 64}
+            p256dh: {type: string, maxLength: 128}
+    PhoneApprovalSettings:
+      type: object
+      required: [available, push_available, preferences, passkeys, subscriptions]
+      properties:
+        available: {type: boolean}
+        push_available: {type: boolean}
+        vapid_public_key: {type: string}
+        preferences: {$ref: '#/components/schemas/PhoneApprovalPreferences'}
+        passkeys: {type: array, items: {$ref: '#/components/schemas/PhonePasskey'}}
+        subscriptions: {type: array, items: {$ref: '#/components/schemas/PhoneSubscription'}}
+    PhoneCredentialProof:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, credential]
+      properties:
+        challenge_id: {type: string, format: uuid}
+        credential: {type: object, description: Serialized PublicKeyCredential registration or assertion.}
+    PhoneDecision:
+      type: object
+      additionalProperties: false
+      required: [decision, request_hash]
+      properties:
+        decision: {type: string, enum: [approved, denied]}
+        reason: {type: string, maxLength: 4000}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+    PhoneDecisionProof:
+      type: object
+      additionalProperties: false
+      required: [decision, request_hash, challenge_id, credential]
+      properties:
+        decision: {type: string, enum: [approved, denied]}
+        reason: {type: string, maxLength: 4000}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        challenge_id: {type: string, format: uuid}
+        credential: {type: object}
+    PhoneCeremony:
+      type: object
+      required: [challenge_id, publicKey]
+      properties:
+        challenge_id: {type: string, format: uuid}
+        publicKey: {type: object, description: WebAuthn JSON options; base64url byte fields decoded by client.}
+    PhoneApprovalReview:
+      type: object
+      required: [kind, request_id, request_hash, pending]
+      properties:
+        kind: {type: string, enum: [approval, attach]}
+        request_id: {type: string, format: uuid}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        pending: {type: boolean}
+        approval: {$ref: '#/components/schemas/Approval'}
+        attach: {$ref: '#/components/schemas/AttachView'}
     Approval:
       allOf:
         - {$ref: '#/components/schemas/ApprovalProposal'}
@@ -17689,11 +18314,38 @@ components:
         error: {type: string, enum: [unauthorized]}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
         oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
+    OwnerWorkstationStepUp:
+      type: object
+      description: >-
+        HTTP 428 for a marked key's high-risk governance action. Retry the identical
+        method, route (including query), body and conditional headers with
+        Aeon-Step-Up: <challenge_id>.<base64 signature>. nonce and action_digest are
+        lowercase 64-character hexadecimal strings. Sign their UTF-8 concatenation
+        (128 ASCII bytes, no separator or hex decoding) with ECDSA P-256/SHA-256;
+        the signature is ASN.1 DER in standard padded base64. The server verifies
+        against the computer's pairing-pinned key, never a request-supplied key.
+        Challenges expire after two minutes and are consumed once even if the
+        eventual action fails. They bind tenant, key, agent, computer, exact action
+        and signer. Changing marking, revoking, disconnecting or changing the signer
+        invalidates authority. All mutating keys, roles, settings, rules publication,
+        approval decisions, member removal/deactivation and workspace role changes
+        require step-up. All governance attempts are recorded in the access audit.
+        Agents must forward only challenge_id to agentd; agentd retrieves the original
+        challenge using GET /agentd/step-ups/{challenge_id} with its runtime bearer and
+        device proof. The agent receives no summary, nonce or action_digest.
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {type: string, const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
     Me:
       type: object
       description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
       required: [principal, tenant, identity, dev_mode]
       properties:
+        owner_workstation: {type: boolean}
+        workstation_computer_id: {type: string, format: uuid}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
         oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
         principal:
@@ -17758,6 +18410,8 @@ components:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
       properties:
+        owner_workstation: {type: boolean}
+        workstation_computer_id: {type: [string, 'null'], format: uuid}
         id:
           type: string
           format: uuid
@@ -17846,7 +18500,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
-              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, ticket]}
+              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, decision, ticket]}
               kind: {type: string, enum: [knowledge, ticket]}
               slug: {type: string}
               title: {type: string}
@@ -17866,7 +18520,7 @@ components:
               label: {type: string}
     KnowledgeType:
       type: string
-      enum: [runbook, guideline, memory, external-system, related-project]
+      enum: [runbook, guideline, memory, external-system, related-project, decision]
     KnowledgeStatus:
       type: string
       description: active is stored as backlog, archived as cancelled; any other stored state reads as active.
@@ -18209,6 +18863,14 @@ components:
             label: {type: string, const: Queued}
             meaning: {type: string}
             is_status: {type: boolean, const: false}
+        recurring:
+          type: object
+          description: The loop marker denotes occurrence tickets, not a ticket status.
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Recurring}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
         autopilot:
           type: object
           required: [enabled, effective_enabled, project_mode, rules]
@@ -18237,6 +18899,10 @@ components:
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
         queued: {$ref: '#/components/schemas/QueuedTicket'}
+        recurrence:
+          $ref: '#/components/schemas/NodeRecurrence'
+          readOnly: true
+          description: Read-only provenance on node GET and list responses, derived from a visible recurrence_occurrences receipt, never editable fields. Absent for ordinary tickets or an inaccessible source recurrence. Loaded once per bounded page, with no per-row HTTP requests. Retained after recurrence retirement.
         queue_stale: {type: boolean, description: 'Authoritative idle In progress eligibility: no assignee and no live agent run or bound session. Contains no worker identity. Rechecked on queue writes.'}
         id:
           type: string
@@ -18340,6 +19006,16 @@ components:
         complexity_by: {type: [string, 'null'], format: uuid, readOnly: true}
         complexity_at: {type: [string, 'null'], format: date-time, readOnly: true}
         complexity_confirmed: {type: boolean, readOnly: true}
+    NodeRecurrence:
+      type: object
+      required: [id, project_id, project_key, number, trigger, retired]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, description: Source recurrence project; may differ from a moved ticket's project.}
+        project_key: {type: string, description: Source project's current key for its settings route.}
+        number: {type: integer, minimum: 1, description: 'Receipt occurrence number, including skipped attempts.'}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
+        retired: {type: boolean, description: Retired sources retain their marker but cannot be managed.}
     NodeCreate:
       type: object
       required: [kind_id, title]
@@ -18780,6 +19456,12 @@ components:
         next_cursor:
           type: [string, 'null']
   parameters:
+    AeonStepUp:
+      name: Aeon-Step-Up
+      in: header
+      required: false
+      description: Single-use signed proof for the exact request; see OwnerWorkstationStepUp.
+      schema: {type: string, maxLength: 181}
     PortalBinding:
       name: X-Portal-Binding
       in: header
@@ -18907,6 +19589,13 @@ components:
           schema:
             $ref: '#/components/schemas/ViewPatch'
   responses:
+    OwnerWorkstationStepUpRequired:
+      description: A marked owner workstation key needs local confirmation for this exact action.
+      headers:
+        Cache-Control: {schema: {type: string, const: no-store}}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/OwnerWorkstationStepUp"}
     IntakeError:
       description: Intake refusal with a stable machine-readable code; Cache-Control no-store.
       content: {application/json: {schema: {$ref: '#/components/schemas/IntakeError'}}}

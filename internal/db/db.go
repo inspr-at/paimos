@@ -78,6 +78,16 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	if err := lockAgentScopeUse(ctx, tx, tenantID); err != nil {
 		return err
 	}
+	if guard, ok := ctx.Value(tenantGuardKey{}).(TenantGuard); ok {
+		if err := guard(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		// The guard may have waited behind an access change. Recompute project
+		// visibility under its fence rather than retaining the pre-lock snapshot.
+		if err := enterTenant(ctx, tx, tenantID); err != nil {
+			return fmt.Errorf("refresh guarded tenant: %w", err)
+		}
+	}
 	if err := fn(tx); err != nil {
 		if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok && IsStatementTimeout(err) {
 			limit.timedOut.Store(true)
@@ -85,6 +95,15 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// TenantGuard fences a request's authorization at the start of each transaction,
+// before a handler can take resource locks. It must only use the supplied tx.
+type TenantGuard func(context.Context, pgx.Tx, string) error
+type tenantGuardKey struct{}
+
+func WithTenantGuard(ctx context.Context, guard TenantGuard) context.Context {
+	return context.WithValue(ctx, tenantGuardKey{}, guard)
 }
 
 type transactionContextKey struct{}

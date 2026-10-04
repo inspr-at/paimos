@@ -24,11 +24,28 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"POST /api/projects/{projectId}/chat-roles":           "chat.bind",
-	"POST /api/projects/{projectId}/chat-threads/resolve": "chat.read",
-	"GET /api/chat-threads/{id}":                          "chat.read",
-	"POST /api/chat-threads/{id}/binding":                 "chat.bind",
-	"POST /api/chat-deliveries/binding/resolve":           "chat.receive",
+	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
+	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
+	"GET /api/chat-threads/{id}":                                    "chat.read",
+	"POST /api/chat-threads/{id}/binding":                           "chat.bind",
+	"POST /api/chat-deliveries/binding/resolve":                     "chat.receive",
+	"GET /api/me/phone-approvals":                                   "profile.read",
+	"PUT /api/me/phone-approvals/settings":                          "profile.write",
+	"POST /api/me/phone-approvals/passkeys/options":                 "profile.write",
+	"POST /api/me/phone-approvals/passkeys":                         "profile.write",
+	"DELETE /api/me/phone-approvals/passkeys/{credentialId}":        "profile.write",
+	"POST /api/me/phone-approvals/subscriptions":                    "profile.write",
+	"DELETE /api/me/phone-approvals/subscriptions/{subscriptionId}": "profile.write",
+	"GET /api/phone-approvals/{kind}/{requestId}":                   "profile.read",
+	"POST /api/phone-approvals/{kind}/{requestId}/options":          "profile.write",
+	"POST /api/phone-approvals/{kind}/{requestId}/decision":         "profile.write",
+
+	"GET /api/features":                          "nodes.read",
+	"GET /api/settings/features":                 "settings.manage",
+	"PUT /api/settings/features/{key}":           "settings.manage",
+	"GET /api/agentd/step-ups/{challenge_id}":    "harness.worker",
+	"PUT /api/agent-keys/{id}/owner-workstation": "keys.manage",
+	"GET /api/model-preferences":                 "models.read",
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",
@@ -44,7 +61,6 @@ var RoutePermissions = map[string]string{
 	"GET /api/key-trim-proposals":                        "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/restore":  "keys.manage",
-	"GET /api/model-preferences":                         "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
 	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
@@ -85,15 +101,21 @@ var RoutePermissions = map[string]string{
 	"GET /portal/{tenantSlug}/products/{productSlug}/catalog.json":                       "public",
 	"GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json":                       "public",
 
-	"GET /api/agents/plan":                                                      "agents.plan.read",
-	"GET /api/recurrences":                                                      "recurrences.manage",
+	"GET /api/agents/plan": "agents.plan.read",
+	// Read-only people enter with nodes.read. Recurrence handlers still require
+	// recurrences.manage for agents, including their explicit role and key scope.
+	"GET /api/recurrences":                                                      "nodes.read|recurrences.manage",
 	"POST /api/recurrences":                                                     "recurrences.manage",
-	"GET /api/recurrences/{recurrenceId}":                                       "recurrences.manage",
+	"POST /api/recurrences/preview":                                             "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}":                                       "nodes.read|recurrences.manage",
 	"PUT /api/recurrences/{recurrenceId}":                                       "recurrences.manage",
+	"DELETE /api/recurrences/{recurrenceId}":                                    "recurrences.manage",
 	"POST /api/recurrences/{recurrenceId}/pause":                                "recurrences.manage",
 	"POST /api/recurrences/{recurrenceId}/resume":                               "recurrences.manage",
 	"POST /api/recurrences/{recurrenceId}/run-now":                              "recurrences.manage",
-	"GET /api/recurrences/{recurrenceId}/preview":                               "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}/preview":                               "nodes.read|recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}/history":                               "nodes.read|recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}/releases":                              "nodes.read|recurrences.manage",
 	"POST /api/projects/{projectId}/questions":                                  "questions.ask",
 	"GET /api/projects/{projectId}/questions":                                   "questions.read",
 	"GET /api/questions/{questionId}":                                           "questions.read",

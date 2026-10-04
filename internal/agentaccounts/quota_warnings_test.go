@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -419,11 +421,8 @@ func TestQuotaWarningsReporterWithoutProjectAccess(t *testing.T) {
 	}
 }
 
-// The first report holds the actual tenant row lock after taking the shared
-// pairing/tree fences. The second is observed waiting at the pairing fence
-// for that backend in pg_blocking_pids before releasing the first.
-// The timeout guards against hangs; no sleep or elapsed-time assertion proves
-// concurrency.
+// Pause the first report at tenant entry and observe the second report waiting
+// on that same tenant fence before either can finish.
 type quotaFenceTrace struct {
 	first             atomic.Bool
 	acquired, started chan uint32
@@ -433,9 +432,8 @@ type quotaFenceContext struct{}
 
 func (q *quotaFenceTrace) TraceQueryStart(ctx context.Context, c *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	switch data.SQL {
-	case `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`:
-		q.started <- c.PgConn().PID()
 	case `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`:
+		q.started <- c.PgConn().PID()
 		return context.WithValue(ctx, quotaFenceContext{}, !q.first.Swap(true))
 	}
 	return ctx
@@ -478,12 +476,20 @@ func TestQuotaWarningsConcurrentComputersDeduplicate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	mod := fixedClockModule{Module: New(pool), at: now}
+	mux := http.NewServeMux()
+	mod.Mount(mux)
+	report := func(accountID, body string) int {
+		r := httptest.NewRequest("POST", "/api/agent-accounts/"+accountID+"/probe", strings.NewReader(body)).WithContext(tenant.WithPrincipal(ctx, f.runner))
+		r.Header.Set("Authorization", "Bearer "+f.token)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w.Code
+	}
 	firstBody := encoded(t, probeWrite{DaemonID: f.account.DaemonID, DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}})
 	secondBody := encoded(t, probeWrite{DaemonID: sibling.DaemonID, DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}})
 	results := make(chan int, 2)
 	go func() {
-		code, _ := call(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", firstBody)
-		results <- code
+		results <- report(f.account.ID, firstBody)
 	}()
 	var firstPID uint32
 	select {
@@ -491,16 +497,15 @@ func TestQuotaWarningsConcurrentComputersDeduplicate(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("first report did not acquire tenant fence")
 	}
-	<-trace.started
+	dbtest.Await(t, ctx, trace.started)
 	go func() {
-		code, _ := call(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+sibling.ID+"/probe", secondBody)
-		results <- code
+		results <- report(sibling.ID, secondBody)
 	}()
 	var secondPID uint32
 	select {
 	case secondPID = <-trace.started:
 	case <-ctx.Done():
-		t.Fatal("second report did not reach pairing fence")
+		t.Fatal("second report did not reach tenant fence")
 	}
 	for {
 		var blocked bool

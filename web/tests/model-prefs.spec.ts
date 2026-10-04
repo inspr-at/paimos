@@ -57,7 +57,13 @@ async function setup(page: Page, options: { mode?: ModelPreferences['residency_l
 }
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Which models do which work', exact: true })
 const row = (page: Page, kind: string) => dialog(page).locator(`[data-kind="${kind}"]`)
-async function open(page: Page) { await page.goto('/agents'); await page.getByRole('button', { name: 'Model preferences', exact: true }).click(); await expect(row(page, 'backend')).toBeVisible() }
+async function open(page: Page) {
+  await page.goto('/agents')
+  const trigger = page.getByRole('button', { name: 'More agent actions', exact: true })
+  await expectStableControls({ controls: { actions: trigger, add: page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }) }, interactions: [
+    { name: 'open model preferences from agent actions', run: async () => { await trigger.click(); await page.getByRole('menuitem', { name: 'Model preferences', exact: true }).click(); await expect(row(page, 'backend')).toBeVisible() } },
+  ] })
+}
 async function changeModel(page: Page) {
   await row(page, 'backend').getByRole('button', { name: 'Backend, normally: Automatic', exact: true }).click()
   const picker = page.getByRole('dialog', { name: 'Backend · Normally', exact: true })
@@ -96,6 +102,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     expect(accents.every(widths => widths.every(v => parseFloat(v) <= 1))).toBe(true)
     expect((await new AxeBuilder({ page }).include('.model-prefs-dialog').analyze()).violations).toEqual([])
     if (process.env.MODEL_PREFS_SHOTS) { mkdirSync(process.env.MODEL_PREFS_SHOTS, { recursive: true }); await page.screenshot({ path: join(process.env.MODEL_PREFS_SHOTS, `preferences-${width}-${theme}.png`) }) }
+    await modal.getByRole('button', { name: 'Done Esc' }).click()
+    await expect(page.getByRole('button', { name: 'More agent actions', exact: true })).toBeFocused()
   })
 }
 test('project gear, project-only kinds, locks, reviews, add/remove and planning explanation', async ({ page }) => {

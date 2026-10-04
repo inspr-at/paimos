@@ -4,15 +4,15 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { expectStableControls } from './helpers/stable'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
-import { expectStableControls } from './helpers/stable'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
-const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key-btn', { hasText: new RegExp(`^${key}$`) }) })
+const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.getByRole('button', { name: `Copy ${key}`, exact: true }) })
 async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number; relationBlocker?: boolean; failRead?: boolean; noStart?: boolean; stale?: boolean; staleMissing?: boolean; longTitle?: boolean; assigned?: boolean; live?: boolean } = {}) {
   mkdirSync(shots, { recursive: true })
   const data = fixtures()
@@ -383,6 +383,13 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
         })
         await page.screenshot({ path: join(shots, `queue-phone-${theme}-${density.toLowerCase()}.png`) })
       }
+    }
+    for (const width of [1024, 1440]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()
+      await expect(page.getByRole('dialog', { name: 'Work queue', exact: true })).toBeVisible()
+      await page.screenshot({ path: join(shots, `queue-${width}-${theme}.png`) })
+      await page.keyboard.press('Escape')
     }
     await page.setViewportSize({ width: 1600, height: 1000 })
   }

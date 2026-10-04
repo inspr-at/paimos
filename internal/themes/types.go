@@ -30,11 +30,13 @@ type Marker struct {
 	Custom *string `json:"custom"`
 }
 type Agents struct {
-	Avatar  string  `json:"avatar"`
-	Ring    *string `json:"ring"`
-	Hover   bool    `json:"hover"`
-	Size    *int    `json:"size"`
-	Palette string  `json:"palette"`
+	Avatar          string  `json:"avatar"`
+	Ring            *string `json:"ring"`
+	Hover           bool    `json:"hover"`
+	Size            *int    `json:"size"`
+	Palette         string  `json:"palette"`
+	DimInactive     *bool   `json:"dim_inactive,omitempty"`
+	InactiveOpacity *int    `json:"inactive_opacity,omitempty"`
 }
 type Values struct {
 	Primary         Accent `json:"primary"`
@@ -149,6 +151,9 @@ func (v Values) validate() error {
 		(a.Ring != nil && !oneOf(*a.Ring, "moving", "still", "off")) ||
 		(a.Size != nil && (*a.Size < 30 || *a.Size > 100)) ||
 		!oneOf(a.Palette, "standard", "protan", "deutan", "tritan", "monochrome") {
+		return ErrInvalid
+	}
+	if a.InactiveOpacity != nil && (*a.InactiveOpacity < 40 || *a.InactiveOpacity > 80) {
 		return ErrInvalid
 	}
 	return nil

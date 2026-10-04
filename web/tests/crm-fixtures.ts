@@ -136,6 +136,8 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
     return p.installation.enabled && p.installation.manifest_digest_sha256 === p.digest_sha256 && PERMS.business_crm.filter(x => x !== 'tools.invoke').every(x => p.installation.permissions.includes(x))
   }
   const handler = async (route: Route) => {
+    const firstEvent = data.events.length
+    const receipt = () => ({ 'X-Aeon-Event-Ids': data.events.slice(firstEvent).reverse().map(event => event.id).join(',') })
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), q = url.searchParams
     let body: Record<string, unknown> = {}
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
@@ -221,7 +223,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         const created = customer(id, `ORG-${20 + data.counter.next}`, String(body.name), { ...pickFields(body as unknown as MockCustomer), revision: 1 })
         data.customers.push(created)
         event(id, 'crm.customer_created', null, view(created))
-        return route.fulfill({ status: 201, json: view(created) })
+        return route.fulfill({ status: 201, headers: receipt(), json: view(created) })
       }
       const limit = Number(q.get('limit') ?? 50), offset = Number(q.get('offset') ?? 0)
       const archived = q.get('archived') ?? 'false'
@@ -243,7 +245,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
           const before = view(org)
           Object.assign(org, pickFields(body as unknown as MockCustomer), { name: String(body.name), revision: org.revision + 1 })
           event(id, 'crm.customer_updated', before, view(org))
-          return route.fulfill({ json: view(org) })
+          return route.fulfill({ headers: receipt(), json: view(org) })
         }
         if (method === 'DELETE') {
           const rel = data.related[id]
@@ -252,7 +254,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
           for (const c of data.contacts.filter(x => x.organisation_node_id === id && !x.deleted)) { c.deleted = true; event(c.id, 'crm.contact_deleted', contactView(data, c), null) }
           org.deleted = true
           event(id, 'crm.customer_deleted', view(org), null)
-          return route.fulfill({ status: 204, body: '' })
+          return route.fulfill({ status: 204, headers: receipt(), body: '' })
         }
       }
       if (rest === 'contacts') {
@@ -263,7 +265,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
           data.contacts.push(created)
           event(created.id, 'crm.contact_created', null, contactView(data, created))
           if (!org.primary_contact_node_id) { const before = view(org); org.primary_contact_node_id = created.id; org.revision += 1; event(id, 'crm.primary_contact_changed', before, view(org)) }
-          return route.fulfill({ status: 201, json: contactView(data, created) })
+          return route.fulfill({ status: 201, headers: receipt(), json: contactView(data, created) })
         }
         return route.fulfill({ json: data.contacts.filter(c => c.organisation_node_id === id && !c.deleted).sort((a, b) => a.name.localeCompare(b.name)).map(c => contactView(data, c)) })
       }
@@ -272,14 +274,14 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         const before = view(org)
         org.primary_contact_node_id = String(body.contact_node_id); org.revision += 1
         event(id, 'crm.primary_contact_changed', before, view(org))
-        return route.fulfill({ json: view(org) })
+        return route.fulfill({ headers: receipt(), json: view(org) })
       }
       if (rest === 'visibility' && method === 'PATCH') {
         if (body.expected_revision !== org.revision) return bad(route, 409, 'conflict', 'customer revision is stale')
         const before = view(org)
         org.archived = body.archived === true; org.revision += 1
         event(id, 'crm.customer_visibility_changed', before, view(org))
-        return route.fulfill({ json: view(org) })
+        return route.fulfill({ headers: receipt(), json: view(org) })
       }
       if (rest === 'related') return route.fulfill({ json: data.related[id] ?? { projects: [], quotes: [], hours: [], documents: [] } })
       if (rest === 'note-ai') {
@@ -313,7 +315,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         const before = view(org)
         org.customer_notes = draft.text; org.revision += 1; draft.applied = true
         event(id, 'crm.note_rewrite_applied', before, { customer: view(org), draft_id: draft.id })
-        return route.fulfill({ json: view(org) })
+        return route.fulfill({ headers: receipt(), json: view(org) })
       }
     }
     const contactMatch = /^\/api\/crm\/contacts\/([^/]+)$/.exec(path)
@@ -326,7 +328,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         const before = contactView(data, c)
         Object.assign(c, pickContact(body as unknown as MockContact), { name: String(body.name), revision: c.revision + 1 })
         event(c.id, 'crm.contact_updated', before, contactView(data, c))
-        return route.fulfill({ json: contactView(data, c) })
+        return route.fulfill({ headers: receipt(), json: contactView(data, c) })
       }
       if (method === 'DELETE') {
         const org = live(c.organisation_node_id)!
@@ -339,7 +341,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         const before = contactView(data, c)
         c.deleted = true
         event(c.id, 'crm.contact_deleted', before, null)
-        return route.fulfill({ status: 204, body: '' })
+        return route.fulfill({ status: 204, headers: receipt(), body: '' })
       }
       return route.fulfill({ json: contactView(data, c) })
     }

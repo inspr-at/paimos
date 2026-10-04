@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { usePreference } from '../src/lib/preferences.ts'
+import { setPreferenceOwner, usePreference } from '../src/lib/preferences.ts'
 
 type Body = Record<string, unknown>
 interface Pending { key: string; value: Body; release: () => void }
@@ -10,6 +10,7 @@ const stored = new Map<string, Body>()
 const inflight: Pending[] = []
 
 function install() {
+  setPreferenceOwner({ tenant: { id: 'preference-test' }, principal: { id: 'person' } })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const key = decodeURIComponent(String(input).split('/').pop() ?? '')
     if (init?.method !== 'PUT') return new Response(JSON.stringify({ value: stored.get(key) ?? null }), { status: 200 })

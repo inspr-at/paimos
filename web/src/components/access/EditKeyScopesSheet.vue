@@ -106,7 +106,7 @@ onMounted(load)
 </script>
 
 <template>
-  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
+  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" wide actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
     <div class="body" :aria-busy="busy">
       <p class="note">Changes to <span class="mono">{{ keyHint(agentKey.prefix) }}</span> apply immediately with the same key.</p>
       <template v-if="loaded">
@@ -164,7 +164,7 @@ onMounted(load)
 .scopes { margin: 0; padding: 0; border: 0; min-width: 0; }
 .scopes legend, .group-h { font: 500 10.5px/1.5 var(--mono); color: var(--ink-3); }
 .scopes legend { margin-bottom: 8px; }
-.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; row-gap: 4px; }
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
@@ -179,5 +179,7 @@ onMounted(load)
 .role-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .role-confirm h3 { font-size: 13px; font-weight: 600; }
 .failure .btn, .scope-toggle { justify-self: start; }
+@container access-body (min-width: 600px) { .scope-group { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container access-body (min-width: 900px) { .scope-group { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } }
 </style>
