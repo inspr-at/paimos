@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -35,9 +36,9 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	}, rt.toolWhoami)
 	mcp.AddTool(s, &mcp.Tool{Name: "ask", Description: "Leave a durable question for a person; return immediately with ID, state and destination. Same scoped contract as HTTP and CLI; request_id is required for retries."}, rt.toolAsk)
 	mcp.AddTool(s, &mcp.Tool{Name: "ask_status", Description: "Read your authorized question, answer revision and delivery state without waiting."}, rt.toolAskStatus)
-	addR1Tool(s, "issue_list", "List issues.", issueListArgs{})
-	addR1Tool(s, "issue_get", "Fetch one issue by key.", issueRefArgs{})
-	addR1Tool(s, "issue_create", "Create an issue.", issueCreateArgs{})
+	mcp.AddTool(s, &mcp.Tool{Name: "issue_list", Description: "List work items. work, epic, ticket and task alias the work kind after migration; names follow nesting."}, rt.toolIssueList)
+	mcp.AddTool(s, &mcp.Tool{Name: "issue_get", Description: "Read a work item including is_leaf, depth and level_name."}, rt.toolIssueGet)
+	mcp.AddTool(s, &mcp.Tool{Name: "issue_create", Description: "Create a work item; nesting decides its name. epic, ticket and task are compatibility aliases on migrated workspaces."}, rt.toolIssueCreate)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "issue_update",
 		Description: "Update an issue. A type or kind is refused with kind_change_not_allowed; other updates arrive in R1.",
@@ -56,7 +57,7 @@ type noArgs struct{}
 type issueListArgs struct {
 	Project  string `json:"project,omitempty" jsonschema:"project key"`
 	Status   string `json:"status,omitempty" jsonschema:"status filter"`
-	Type     string `json:"type,omitempty" jsonschema:"issue type"`
+	Type     string `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"page size"`
 	Offset   int    `json:"offset,omitempty" jsonschema:"pagination offset"`
 	Priority string `json:"priority,omitempty" jsonschema:"priority filter"`
@@ -69,7 +70,8 @@ type issueRefArgs struct {
 type issueCreateArgs struct {
 	Project     string   `json:"project" jsonschema:"project key"`
 	Title       string   `json:"title" jsonschema:"issue title"`
-	Type        string   `json:"type,omitempty" jsonschema:"issue type"`
+	Parent      string   `json:"parent,omitempty" jsonschema:"parent work item key; depth decides the name"`
+	Type        string   `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Status      string   `json:"status,omitempty" jsonschema:"initial status"`
 	Description string   `json:"description,omitempty" jsonschema:"description markdown"`
 	Tags        []string `json:"tags,omitempty" jsonschema:"tag names preserved when filing the issue"`
@@ -108,7 +110,7 @@ func (rt *runtime) toolIssueUpdate(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, nil, err
 	}
 	current := kinds.slug(n.KindID)
-	if current == requested {
+	if k, ok := kinds.issueKind(requested); ok && k.ID == n.KindID {
 		if strings.TrimSpace(in.Title) != "" || strings.TrimSpace(in.Status) != "" || strings.TrimSpace(in.Description) != "" {
 			return nil, nil, errors.New("issue_update arrives in R1")
 		}
@@ -153,7 +155,7 @@ type knowledgeUpdateArgs struct {
 type searchArgs struct {
 	Query   string `json:"query" jsonschema:"free-text query"`
 	Project string `json:"project,omitempty" jsonschema:"project key"`
-	Type    string `json:"type,omitempty" jsonschema:"issue type"`
+	Type    string `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"page size"`
 }
 
@@ -175,5 +177,36 @@ func addR1Tool[In any](s *mcp.Server, name, description string, _ In) {
 		Description: description + " Not in the Aeon API yet.",
 	}, func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, any, error) {
 		return nil, nil, errors.New(name + " arrives in R1")
+	})
+}
+
+// A request-local runtime keeps MCP calls from racing on shared output sinks.
+// These tools use the same authorization and compatibility paths as the CLI.
+func (rt *runtime) issueTool(run func(*runtime) error) (*mcp.CallToolResult, any, error) {
+	copy := *rt
+	var out bytes.Buffer
+	copy.stdout = &out
+	copy.stderr = &out
+	copy.jsonOut = true
+	if err := run(&copy); err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.String()}}}, nil, nil
+}
+func (rt *runtime) toolIssueList(ctx context.Context, req *mcp.CallToolRequest, in issueListArgs) (*mcp.CallToolResult, any, error) {
+	return rt.issueTool(func(r *runtime) error {
+		return r.listIssues(in.Project, in.Status, in.Type, in.Priority, "", in.Limit, in.Offset)
+	})
+}
+func (rt *runtime) toolIssueGet(ctx context.Context, req *mcp.CallToolRequest, in issueRefArgs) (*mcp.CallToolResult, any, error) {
+	return rt.issueTool(func(r *runtime) error { return r.getIssue(in.Ref) })
+}
+func (rt *runtime) toolIssueCreate(ctx context.Context, req *mcp.CallToolRequest, in issueCreateArgs) (*mcp.CallToolResult, any, error) {
+	tags := append([]string(nil), in.Tags...)
+	if in.Bug {
+		tags = append(tags, "bug")
+	}
+	return rt.issueTool(func(r *runtime) error {
+		return r.createIssue(issueInput{Project: in.Project, Title: in.Title, Type: in.Type, Status: in.Status, Parent: in.Parent, Description: in.Description, Tags: tags})
 	})
 }

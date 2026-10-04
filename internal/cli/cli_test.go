@@ -351,7 +351,7 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(toolText(res), "issue_list arrives in R1") {
+	if !res.IsError || strings.Contains(toolText(res), "arrives in R1") {
 		t.Fatalf("issue_list %#v text %q", res.IsError, toolText(res))
 	}
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
@@ -361,8 +361,8 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(toolText(res), "issue_create arrives in R1") {
-		t.Fatalf("fix marker arguments rejected before the existing placeholder: %q", toolText(res))
+	if !res.IsError || strings.Contains(toolText(res), "arrives in R1") {
+		t.Fatalf("missing issue API did not surface an honest error: %q", toolText(res))
 	}
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "search",

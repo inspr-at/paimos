@@ -3183,3 +3183,19 @@ five-second context deadlines, preserving shorter caller deadlines. Exceeding a
 budget or deadline returns an explicit failure (node APIs: 503), never a partial
 aggregate. Larger lists should narrow their scope. RLS, exact-money permissions,
 historical spend and session identities are unchanged.
+
+
+Work vocabulary (AEON-655) is managed in Workspace settings, independently of appearance. A leaf always uses the leaf name (default Ticket); parents use their project-relative level (Epic, Story, then Level N). Only live work children make a parent; a project resets depth. Naming and the parent status explanation use the existing `work-parent-status` flag, whose production activation remains owned by AEON-429. Create a work item; nesting decides its name. Lead status scripts must write leaves only.
+
+| Surface | Before migration | After work-kind migration |
+| --- | --- | --- |
+| REST `kind_id` | Configured Epic/Ticket/Task UUID | Canonical Work UUID; retired UUIDs are rejected, never guessed |
+| REST list `kind=epic,ticket,task` | Requested old kinds | Each old slug also matches Work; use `shape=parent` / `shape=leaf` and `depth=N` for structure |
+| REST `epic` projection/filter | Nearest Epic/subtree | Nearest Work ancestor/subtree; property name retained for compatibility |
+| REST node/list/tree/Graph | Existing fields retained | Additive `is_leaf`, `depth`, `level_name`, `level_icon`; non-work nodes omit shape fields |
+| CLI `issue --type work,epic,ticket,task` | Old types remain accepted | Old type names resolve to canonical Work for creation/listing; same-kind updates are no-ops |
+| CLI JSON | Original `type` | Canonical `type=work`, plus `is_leaf`, `depth`, `level_name`, `level_icon` |
+| MCP `issue_list`, `issue_get`, `issue_create` | Same configured-kind paths as CLI | Same aliases and JSON as CLI; `parent` on creation decides nesting |
+| Saved views | Existing kind filters retained | Old kind slugs match Work; Parents/Leaves and depth round-trip through URL and saved filters |
+
+Vocabulary writes require a person with `settings.manage`, check the current permission under the tenant fence, compare the supplied revision, and append an event. At most 32 parent levels and 60 characters per name are accepted. Empty values keep stable names and icons. Historical sessions, event snapshots and Decision Desk identities are unchanged. Integration seam: AEON-429 must provide its feature storage/service; AEON-652 owns server-side lifecycle enforcement. This package does not activate flags or change external lead scripts.

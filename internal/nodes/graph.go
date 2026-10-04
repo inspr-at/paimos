@@ -29,6 +29,7 @@ type TicketGraph struct {
 // is a visible ticket or epic; an invisible parent's id is never returned.
 // ReleaseID is the journey release when that release node is visible.
 type TicketGraphNode struct {
+	*WorkShape
 	ID             string    `json:"id"`
 	Key            string    `json:"key"`
 	Title          string    `json:"title"`
@@ -110,11 +111,11 @@ func loadTicketGraph(ctx context.Context, tx pgx.Tx, tenantID, projectID string,
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  LEFT JOIN nodes parent_node ON parent_node.tenant_id=n.tenant_id AND parent_node.id=n.parent_id AND parent_node.deleted_at IS NULL
  LEFT JOIN node_kinds parent_kind ON parent_kind.tenant_id=parent_node.tenant_id AND parent_kind.id=parent_node.kind_id
-   AND parent_kind.slug IN ('ticket','epic')
+   AND parent_kind.slug IN ('work','ticket','epic','task')
  LEFT JOIN journey_tickets jt ON jt.tenant_id=n.tenant_id AND jt.ticket_node_id=n.id AND jt.project_node_id=$2::uuid
  LEFT JOIN nodes release_node ON release_node.tenant_id=n.tenant_id AND release_node.id=jt.release_node_id AND release_node.deleted_at IS NULL
  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND n.project_id=$2::uuid
-   AND k.slug IN ('ticket','epic')
+   AND k.slug IN ('work','ticket','epic','task')
    AND ($3::bool OR (`+ticketGraphCategorySQL+`) <> 'done')
  ORDER BY n.updated_at DESC, n.id
  LIMIT $4`, tenantID, projectID, includeClosed, ticketGraphNodeLimit+1)
@@ -146,6 +147,13 @@ func loadTicketGraph(ctx context.Context, tx pgx.Tx, tenantID, projectID string,
 	for i, n := range g.Nodes {
 		ids[i] = n.ID
 		members[n.ID] = true
+	}
+	shapes, err := loadWorkShapes(ctx, tx, ids)
+	if err != nil {
+		return g, err
+	}
+	for i := range g.Nodes {
+		g.Nodes[i].WorkShape = shapes[g.Nodes[i].ID]
 	}
 	// Both ends must be in the returned set. Row-level security already hides a
 	// relation when either end is in a project the caller cannot see, so that

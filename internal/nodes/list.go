@@ -96,6 +96,10 @@ type sortKey struct {
 type listQuery struct {
 	KindID      *string   `json:"kind_id"`
 	Kinds       []string  `json:"kinds"`
+	Shapes      []string  `json:"shapes,omitempty"`
+	ShapesNot   []string  `json:"shapes_not,omitempty"`
+	Depths      []string  `json:"depths,omitempty"`
+	DepthsNot   []string  `json:"depths_not,omitempty"`
 	States      []string  `json:"states"`
 	Priorities  []string  `json:"priorities"`
 	Assignees   []string  `json:"assignees"`
@@ -162,7 +166,7 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+var validFacet = map[string]bool{"shape": true, "depth": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -253,6 +257,18 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		out.KindID = &id
 	}
 	var err error
+	if out.Shapes, out.ShapesNot, err = negatedList(r, "shape", func(v string) (string, bool) { return v, v == "parent" || v == "leaf" }); err != nil {
+		return out, err
+	}
+	if out.Depths, out.DepthsNot, err = negatedList(r, "depth", func(v string) (string, bool) {
+		n, e := strconv.Atoi(v)
+		return strconv.Itoa(n), e == nil && n >= 1 && n <= 50000
+	}); err != nil {
+		return out, err
+	}
+	if len(out.Depths)+len(out.DepthsNot) > 32 {
+		return out, badRequest("too many depths")
+	}
 	if out.Kinds, err = queryList(r, "kind"); err != nil {
 		return out, err
 	}
@@ -444,6 +460,8 @@ func listFingerprint(q listQuery) string {
 	return hex.EncodeToString(sum[:])
 }
 func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
+	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
+	defer cancel()
 	var mark *listCursor
 	if q.Cursor != "" {
 		env, err := openCursor(q.Cursor)
@@ -629,6 +647,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 					page.Items[i].Eta = &copied
 				}
 			}
+		}
+		projected := make([]*nodeJSON, len(page.Items))
+		for i := range page.Items {
+			projected[i] = &page.Items[i].nodeJSON
+		}
+		if err := enrichNodes(ctx, tx, projected); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -1000,7 +1025,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
             SELECT id,tenant_id FROM nodes WHERE tenant_id=ek.tenant_id AND kind_id=ek.id AND deleted_at IS NULL OFFSET 0
         ) e
         CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
-        WHERE ek.tenant_id=current_setting('aeon.tenant_id')::uuid AND ek.slug='epic'
+        WHERE ek.tenant_id=current_setting('aeon.tenant_id')::uuid AND ek.slug IN ('epic','work')
           AND (` + arg(all) + `::bool OR e.id::text=ANY(` + arg(ids) + `::text[]))
           AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
         UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
@@ -1010,7 +1035,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		epicMatch := func(values []string) string {
 			p := arg(values)
 			return `(n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(` + p + `::text[]))
-            OR ('none'=ANY(` + p + `::text[]) AND k.slug<>'epic' AND n.id NOT IN (SELECT id FROM epic_members)))`
+            OR ('none'=ANY(` + p + `::text[]) AND n.id NOT IN (SELECT id FROM epic_members)))`
 		}
 		add(q.Epics, epicMatch)
 		add(q.EpicsNot, not(epicMatch))
@@ -1036,6 +1061,21 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			}
 			value := `aeon_field_date(n.fields->>'` + dateFieldKeys[q.DateField] + `')`
 			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
+		}
+	}
+	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot) > 0 {
+		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`
+		depth := `(SELECT s.depth::text FROM aeon_work_shape(n.id) s)`
+		for _, f := range []struct {
+			expr    string
+			in, out []string
+		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}} {
+			if len(f.in) > 0 {
+				conditions += " AND " + f.expr + "=ANY(" + arg(f.in) + "::text[])"
+			}
+			if len(f.out) > 0 {
+				conditions += " AND NOT (" + f.expr + "=ANY(" + arg(f.out) + "::text[]))"
+			}
 		}
 	}
 	from, scopeCondition := "nodes n", ""
@@ -1096,7 +1136,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
             coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
-        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
+        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR (k.slug='work' AND $2::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY($2::text[]))
         AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
         AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
@@ -1262,10 +1302,10 @@ func listSQL(q listQuery, anchor any) (string, []any) {
         WITH RECURSIVE up AS (
             SELECT par.id,par.parent_id,par.kind_id,par.key,par.title,1 AS depth WHERE par.id IS NOT NULL
             UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,up.depth+1 FROM up
-                JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('epic','project')
+                JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('work','epic','project')
                 JOIN nodes a ON a.id=up.parent_id AND a.deleted_at IS NULL
             WHERE up.depth<32
-        ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug='epic' ORDER BY u.depth LIMIT 1
+        ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug IN ('epic','work') ORDER BY u.depth LIMIT 1
     ) epic ON true` + moneyJoin + `
     ORDER BY s.rn`
 	return sql, args
@@ -1285,6 +1325,12 @@ func facetSQL(q listQuery) (string, []any) {
 	// Tag, cost unit and release counts read fields per row; they are only part
 	// of the query when asked for.
 	extra := ""
+	if want("shape") {
+		extra += ` UNION ALL SELECT 'shape',CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
+	}
+	if want("depth") {
+		extra += ` UNION ALL SELECT 'depth',s.depth::text FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
+	}
 	if want("human_check") {
 		extra += `
     UNION ALL SELECT 'human_check',CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END FROM filtered f JOIN nodes n ON n.id=f.id`
@@ -1465,7 +1511,12 @@ func (m *Module) nodeTree(ctx context.Context, tenantID string, q treeQuery) (tr
 		for i, item := range items {
 			page.Items[i] = treeEntry{Node: item.node, Depth: item.depth}
 		}
-		return nil
+		rows.Close()
+		projected := make([]*nodeJSON, len(page.Items))
+		for i := range page.Items {
+			projected[i] = &page.Items[i].Node
+		}
+		return enrichNodes(ctx, tx, projected)
 	})
 	return page, err
 }

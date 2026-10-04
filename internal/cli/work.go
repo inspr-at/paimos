@@ -17,6 +17,10 @@ import (
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
+	IsLeaf              *bool             `json:"is_leaf,omitempty"`
+	Depth               int               `json:"depth,omitempty"`
+	LevelName           string            `json:"level_name,omitempty"`
+	LevelIcon           string            `json:"level_icon,omitempty"`
 	Queued              *workqueue.Queued `json:"queued,omitempty"`
 	EstimateHours       *float64          `json:"estimate_hours,omitempty"`
 	EstimateSource      string            `json:"estimate_source,omitempty"`
@@ -71,7 +75,7 @@ type issueInput struct {
 	Tags        []string
 }
 
-var issueKinds = map[string]bool{"epic": true, "ticket": true, "task": true}
+var issueKinds = map[string]bool{"work": true, "epic": true, "ticket": true, "task": true}
 
 func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 	fields := fieldMap(n.Fields)
@@ -90,6 +94,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		estimate = &h
 	}
 	return issueView{
+		IsLeaf: n.IsLeaf, Depth: n.Depth, LevelName: n.LevelName, LevelIcon: n.LevelIcon,
 		Queued:        n.Queued,
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
@@ -183,7 +188,7 @@ func (rt *runtime) listIssues(project, status, typ, priority, assignee string, l
 		q.Set("state", status)
 	}
 	if typ != "" {
-		k, ok := kinds.bySlug[typ]
+		k, ok := kinds.issueKind(typ)
 		if !ok {
 			return rt.fail(fmt.Errorf("node kind %q is not configured", typ), "")
 		}
@@ -315,6 +320,9 @@ func (rt *runtime) createIssue(in issueInput) error {
 		parentID = parent.ID
 	}
 	fields := map[string]any{}
+	if kind.Slug == "work" && kindName != "work" {
+		fields["legacy_kind_slug"] = kindName
+	}
 	if in.Estimate != "" {
 		hours, err := parseEstimate(in.Estimate)
 		if err != nil {
@@ -419,7 +427,7 @@ func (rt *runtime) noteKindUpdate(ref, requested string) error {
 		return err
 	}
 	current := kinds.slug(n.KindID)
-	if current == requested {
+	if k, ok := kinds.issueKind(requested); ok && k.ID == n.KindID {
 		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
 		return nil
 	}
@@ -445,7 +453,7 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		return rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
 	}
 	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
-		if slug := kinds.slug(n.KindID); slug != "ticket" && slug != "task" {
+		if slug := kinds.slug(n.KindID); slug != "work" && slug != "ticket" && slug != "task" {
 			return usagef("--role, --area and --complexity apply to tickets and tasks")
 		}
 	}

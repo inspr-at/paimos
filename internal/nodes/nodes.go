@@ -26,6 +26,7 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
+	*WorkShape
 	Queued     *workqueue.Queued `json:"queued,omitempty"`
 	HumanCheck *string           `json:"human_check"`
 	Estimate   *estimateView     `json:"estimate,omitempty"`
@@ -204,7 +205,7 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Queued = queued[id]
-		return nil
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
@@ -260,11 +261,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		fields, err := validateFields(schema, in.Fields)
-		if err == nil && (kind.Slug == "ticket" || kind.Slug == "task") {
+		if err == nil && (kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task") {
 			fields, err = humanCheckFields(p, fields, nil, nil, humanCheck, true)
 		}
-		if humanCheck != nil && kind.Slug != "ticket" && kind.Slug != "task" {
-			return badRequest("human_check is for tickets and tasks")
+		if humanCheck != nil && kind.Slug != "work" && kind.Slug != "ticket" && kind.Slug != "task" {
+			return badRequest("human_check is for work items, tickets and tasks")
 		}
 		if err == nil {
 			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
@@ -334,10 +335,10 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node = loaded
-		if kind.Slug == "ticket" {
+		if kind.Slug == "work" || kind.Slug == "ticket" {
 			node.Warnings = ticketbenefits.Issues(fields)
 		}
-		if p.Kind == tenant.Agent && (kind.Slug == "ticket" || kind.Slug == "task") {
+		if p.Kind == tenant.Agent && (kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task") {
 			var f map[string]any
 			_ = json.Unmarshal(fields, &f)
 			if f["estimate_hours"] == nil {
@@ -349,7 +350,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node.Estimate = views[loaded.ID]
-		return nil
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
@@ -421,7 +422,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return err
 			}
 			node.Estimate = views[id]
-			return nil
+			return enrichNodes(ctx, tx, []*nodeJSON{&node})
 		}
 		if hours, ok := raw["estimate_hours"]; ok {
 			if _, replaces := raw["fields"]; replaces {
@@ -508,8 +509,8 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		nextCheck := current.HumanCheck
 		rawCheck, checkChanged := raw["human_check"]
 		if checkChanged {
-			if kind.Slug != "ticket" && kind.Slug != "task" {
-				return badRequest("human_check is for tickets and tasks")
+			if kind.Slug != "work" && kind.Slug != "ticket" && kind.Slug != "task" {
+				return badRequest("human_check is for work items, tickets and tasks")
 			}
 			nextCheck, err = parseHumanCheck(rawCheck)
 			if err != nil {
@@ -517,7 +518,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			sets = append(sets, "human_check = "+add(nextCheck))
 		}
-		if kind.Slug == "ticket" || kind.Slug == "task" {
+		if kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task" {
 			nextFields, err = humanCheckFields(p, nextFields, current.Fields, current.HumanCheck, nextCheck, checkChanged)
 			if err != nil {
 				return err
@@ -559,7 +560,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		node.Estimate = views[id]
-		return nil
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, dbErr("update node", err)
 }
@@ -690,7 +691,7 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 			return err
 		}
 		node = loaded
-		return nil
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
