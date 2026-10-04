@@ -136,6 +136,14 @@ func pauseAllowed(s Session, owner string, admin bool, parent string) bool {
 
 func savePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, next Pause, event string) (Session, error) {
 	before := s
+	s, err := writePause(ctx, tx, s, next)
+	if err != nil {
+		return s, err
+	}
+	return s, record(ctx, tx, p, s, event, before, s)
+}
+
+func writePause(ctx context.Context, tx pgx.Tx, s Session, next Pause) (Session, error) {
 	raw, err := json.Marshal(next)
 	if err != nil {
 		return s, err
@@ -144,7 +152,7 @@ func savePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, ne
 	if err != nil {
 		return s, err
 	}
-	return s, record(ctx, tx, p, s, event, before, s)
+	return s, nil
 }
 
 func (m *Module) requestPause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -468,28 +476,45 @@ func resumeRecipe(s Session) resumeResult {
 }
 
 func requestResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (resumeResult, error) {
-	if s.ArchivedAt != nil || s.StoppedAt == nil || s.StopReason == nil || *s.StopReason != "paused" || s.Pause == nil || s.Pause.Handover == nil || (s.Pause.State != "paused" && s.Pause.State != "resume_requested" && s.Pause.State != "resumed") {
-		return resumeResult{}, workorders.Fail(409, "paused session with a handover required")
+	out, event, err := prepareResume(ctx, tx, p, s)
+	if err == nil && event != nil {
+		err = event()
 	}
+	return out, err
+}
+
+func prepareResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (resumeResult, func() error, error) {
+	if s.ArchivedAt != nil || s.StoppedAt == nil || s.StopReason == nil || *s.StopReason != "paused" || s.Pause == nil || s.Pause.Handover == nil || (s.Pause.State != "paused" && s.Pause.State != "resume_requested" && s.Pause.State != "resumed") {
+		return resumeResult{}, nil, workorders.Fail(409, "paused session with a handover required")
+	}
+	var event func() error
 	if s.Pause.State == "paused" {
+		before := s
 		next := *s.Pause
 		var now time.Time
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-			return resumeResult{}, err
+			return resumeResult{}, nil, err
 		}
 		next.State, next.ResumeRequestedAt = "resume_requested", &now
 		var err error
-		s, err = savePause(ctx, tx, p, s, next, "resume_requested")
+		s, err = writePause(ctx, tx, s, next)
 		if err != nil {
-			return resumeResult{}, err
+			return resumeResult{}, nil, err
 		}
+		event = func() error { return record(ctx, tx, p, s, "resume_requested", before, s) }
 	}
-	return resumeRecipe(s), nil
+	return resumeRecipe(s), event, nil
 }
 
 func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in resumeRequest
 	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	// Inline registration uses the same tenant -> hierarchy -> session order as
+	// ordinary registration and chat binding, including its access re-check.
+	var tenantID string
+	if err := tx.QueryRow(r.Context(), `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
 		return nil, err
 	}
 	if err := lockHierarchy(r.Context(), tx, r.PathValue("projectId")); err != nil {
@@ -506,8 +531,14 @@ func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if !pauseAllowed(s, owner, admin, parent) {
 		return nil, workorders.Fail(403, "session owner or proven parent coordinator required")
 	}
-	out, err := requestResume(r.Context(), tx, p, s)
-	if err != nil || in.Registration == nil {
+	out, event, err := prepareResume(r.Context(), tx, p, s)
+	if err != nil {
+		return out, err
+	}
+	if in.Registration == nil {
+		if event != nil {
+			err = event()
+		}
 		return out, err
 	}
 	if err = authz.RequireTx(r.Context(), tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}); err != nil {
@@ -526,7 +557,7 @@ func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	rr := r.Clone(r.Context())
 	rr.Body = ioBody(raw)
-	next, err := m.register(rr, tx, p)
+	next, err := m.registerBeforeEvents(rr, tx, p, event)
 	if err != nil {
 		return nil, err
 	}
@@ -790,7 +821,9 @@ func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, nex
 	if err != nil {
 		return next, err
 	}
-	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,owner_principal_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw), old.ownerID))
+	// Registration already resolved the retained owner before validating native
+	// context ownership. Completing resume must not change that identity later.
+	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw)))
 	if err != nil {
 		return next, err
 	}

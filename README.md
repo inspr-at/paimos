@@ -14,6 +14,39 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Agent conversation foundation
+
+AEON-618 R1 introduces a separate `chat-v1` identity contract in
+`api/openapi.yaml`. The server mounts it disabled by default; integration
+packages may opt in with `chat.New(pool, chat.Options{Enabled: true})`.
+This foundation does not enable chat delivery, wake, history migration or
+native process controls. Existing inbox, session and CLI contracts stay intact.
+History, read-marker, delivery, receipt, cancellation and stream definitions
+are reserved contracts marked `x-aeon-package` for R2/R3; R1 does not mount them.
+
+A person creates their own project role, resolves its lasting conversation,
+and selects an existing external inbox registration using the expected binding
+epoch. Lead identity is stored as `person_project`: one lead per person and
+project. Workers require distinct assignment slots. Handover preserves the
+conversation and prior binding records; a native session cannot be reused for
+another private role or person. Automation binding delegation is deferred.
+
+Workers use their scoped agent key and existing `X-Aeon-Worker-Lease` through
+`POST /api/chat-deliveries/binding/resolve`. The proof is checked against the
+exact live external registration (heartbeat or initial registration within two
+minutes), person, project, role and epoch. Public references and session IDs
+alone grant no access. Readiness omits account, quota, model, host and native
+reference metadata; no input/wake/receipt capability is advertised before
+receiver qualification. Registration and binding do not extend execution
+permissions or start an agent.
+
+New inbox rows have an internal `chat_thread_id` discriminator and restrictive
+participant RLS. Legacy reads, ACKs, replies, managed drains, streams, receipts,
+sweepers and notifications exclude that mode. The database rejects legacy
+transport projections of chat rows and cross-mode replies. Chat event hints
+are private, and nested legacy transactions clear verified chat context.
+Migration `1141_chat_identity.sql` preserves all existing rows without backfill.
+
 ## Theme API
 
 AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
@@ -660,6 +693,29 @@ It measures the handler and JSON decoding; the nearest-rank p95 must be below
 100 ms. Median and maximum are logged for diagnosis. It does not measure full
 history traversal or guarantee production latency. Shared or loaded runners
 are unsuitable for interpreting this budget.
+
+### CI push reuse (AEON-423)
+
+On a push to main, `scripts/ci-tree-reuse.mjs` searches for a successful `CI`
+merge-group run at that exact commit SHA and verifies its repository, workflow
+name/path/ID, latest run attempt, complete required jobs, all seven Go and twelve
+web shards, and successful execution steps. A verified match skips the heavy
+suite steps and database startup; the existing required checks and aggregates
+report `reused merge_group run <id>`. One hosted `cache-prime` job still runs
+`npm ci`, installs Playwright Chromium and warms Go modules/builds, saving the
+same main-scoped dependency, browser and hosted Go shard cache keys restored
+by PR/queue jobs; its failure fails both aggregates. `migration-compat` always
+runs against the latest release, including every step (AEON-415). Direct pushes
+without verified queue evidence, PRs, queue runs, manual runs, failed/cancelled
+or partial reruns, API errors and timeouts run the full suite. Lookup uses only
+read permissions, a ten-second network deadline, bounded responses and at most
+20 candidates; a failed proof job leaves outputs unset and runs full CI. Set
+`CI_TREE_REUSE=off` to disable lookup. PR-to-queue tree reuse and its registry
+publisher were removed to keep this path small; no tree comparisons or record
+writes remain. Offline fixtures run with `node --test scripts/ci-tree-reuse.test.mjs`
+and `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard ./scripts/ci-go-shards`;
+hosted savings and the cache-priming duration require coordinator measurement
+once the change reaches main.
 
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
@@ -1535,6 +1591,17 @@ A coordinator registered with the same principal, harness and native session
 reference automatically takes over its stopped or heartbeat-lost predecessor's
 live children. The transaction records one `harness.adopted` event per child and
 `harness.handed_over` on the old lead; stopped children remain historical.
+
+For opt-in chat, a native reference and every linked alias retain one person,
+chat role and project across registrations. Relationships persist even before
+first binding, so binding one reference claims the connected aliases without
+replaying older generations. Registration, replay, renaming and binding share
+one database store and table guards. Conflicting ownership rolls back the whole
+write; components larger than 1024 references fail closed. Ownership is never
+implicitly released by stopping, archiving or handing over a generation.
+Replacement claims precede stop-trigger reply-obligation events as well as
+registration events. This identity groundwork remains disabled by default.
+
 A healthy lead is never replaced. `harness run-heartbeat --role coordinator
 --source-session NATIVE_UUID` uses that stable native reference; use a fresh
 private state directory for the new process generation. After an unclean
