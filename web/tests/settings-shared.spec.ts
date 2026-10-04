@@ -271,3 +271,72 @@ test('phone sheet and popover actions follow a keyboard-shrunken visual viewport
   await form.getByRole('button', { name: /^Save/ }).click()
   await expect(writes(page)).toHaveText('1')
 })
+
+for (const height of [900, 300]) for (const kind of ['form', 'confirmation']) test(`overflowing ${kind} content scrolls with pinned actions at visual height ${height}`, async ({ page }) => {
+  await page.addInitScript(() => {
+    const viewport = new EventTarget()
+    Object.assign(viewport, { width: 390, height: 900, offsetTop: 0, offsetLeft: 0, scale: 1 })
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+  })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/tests/settings-shared-harness.html?overflow-content&fail-confirm&german')
+  await page.locator('[data-row="1"]').click()
+  if (kind === 'form') {
+    await page.getByRole('button', { name: 'Apply capacity' }).click()
+    await page.getByRole('dialog', { name: 'Warnschwellen für Kontingente ändern' }).getByRole('textbox', { name: 'Early notice' }).fill('fail-long')
+  } else {
+    await page.getByRole('button', { name: 'Footer menu' }).click()
+    await page.getByRole('menuitem', { name: 'Remove computer…' }).click()
+  }
+  const dialog = page.getByRole('dialog', { name: kind === 'form' ? 'Warnschwellen für Kontingente ändern' : 'Remove this computer?' })
+  const action = dialog.getByRole('button', { name: kind === 'form' ? /^Save/ : 'Remove computer', exact: kind !== 'form' })
+  const cancel = dialog.getByRole('button', { name: 'Cancel' })
+  const offsetTop = height === 900 ? 0 : 40
+  await page.evaluate(({ height, offsetTop }) => {
+    Object.assign(window.visualViewport!, { height, offsetTop })
+    window.visualViewport!.dispatchEvent(new Event('resize'))
+    window.visualViewport!.dispatchEvent(new Event('scroll'))
+  }, { height, offsetTop })
+  await expect.poll(() => dialog.evaluate(el => el.style.getPropertyValue('--vv-h'))).toBe(`${height}px`)
+  await expect.poll(async () => (await dialog.boundingBox())!.y + (await dialog.boundingBox())!.height).toBeLessThanOrEqual(offsetTop + height - 12 + .5)
+  await expect.poll(async () => (await dialog.boundingBox())!.y).toBeGreaterThanOrEqual(offsetTop + 12 - .5)
+  // Visibility alone accepts controls clipped by an overflow:hidden ancestor.
+  // Require the whole action row to fit inside both panel and visual viewport.
+  const frame = (await dialog.boundingBox())!
+  for (const control of [action, cancel]) {
+    const box = (await control.boundingBox())!
+    expect(box.y, 'action starts inside panel').toBeGreaterThanOrEqual(frame.y)
+    expect(box.y + box.height, 'action ends inside panel').toBeLessThanOrEqual(frame.y + frame.height + .5)
+    expect(box.y + box.height, 'action ends above keyboard').toBeLessThanOrEqual(offsetTop + height - 12 + .5)
+    await expect(control).toBeInViewport({ ratio: 1 })
+  }
+  const body = dialog.locator('.staged-body')
+  await expect.poll(() => body.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
+  await expectStableControls({ controls: { action, cancel, frame: dialog }, scrollAreas: { content: body }, interactions: [
+    { name: 'scroll all copy and fields', run: async () => {
+      await body.evaluate(el => { el.scrollTop = el.scrollHeight })
+      expect(await body.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+      if (kind === 'form') await expect(dialog.getByRole('textbox', { name: 'Weitere Warnschwelle 8' })).toBeInViewport({ ratio: 1 })
+      else await expect(dialog.locator('.keeps')).toBeInViewport()
+    } },
+    { name: 'failed write keeps actions pinned', run: async () => {
+      await action.click()
+      await expect(writes(page)).toHaveText('0')
+      await expect(dialog.getByRole('alert')).toContainText('The computer could not be reached')
+    } },
+    { name: 'read full failure', run: async () => {
+      await body.evaluate(el => { el.scrollTop = el.scrollHeight })
+      await expect(dialog.getByRole('alert')).toBeInViewport()
+      expect(await body.evaluate(el => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThanOrEqual(1)
+    } },
+  ] })
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.screenshot({ path: `test-results/aeon-695/overflow-${kind}-${height}-${theme}.png` })
+  }
+  await action.focus(); await page.keyboard.press('Tab')
+  if (kind === 'form') await expect(dialog.getByRole('textbox', { name: 'Early notice' })).toBeFocused()
+  else await expect(cancel).toBeFocused()
+  await cancel.click(); await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: kind === 'form' ? 'Apply capacity' : 'Footer menu' })).toBeFocused()
+})

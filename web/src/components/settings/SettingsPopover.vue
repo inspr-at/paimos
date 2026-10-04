@@ -41,6 +41,10 @@ const emit = defineEmits<{
 }>()
 const panel = ref<HTMLElement>()
 const selected = ref<SettingsMenuItem>()
+const stagedCopy = ref<HTMLElement>()
+const stagedActions = ref<HTMLElement>()
+const contentScrolls = ref(false)
+let stageObserver: ResizeObserver | undefined
 const confirmation = computed(() => selected.value?.confirmation ?? props.confirmation)
 const confirming = computed(() => !!selected.value || props.mode === 'confirmation')
 const role = computed(() => props.mode === 'menu' && !confirming.value ? 'menu' : 'dialog')
@@ -92,6 +96,29 @@ function place() {
   }
   placed.value = true
 }
+// Switch to a pinned footer only when the ordinary staged content cannot fit.
+// Measure copy separately from feedback so a failed write cannot move actions
+// by changing this layout. Short forms retain their natural, unpadded height.
+function fitStagedContent() {
+  const copy = stagedCopy.value, actions = stagedActions.value, root = panel.value
+  if (!copy || !actions || !root) { contentScrolls.value = false; return }
+  const stage = actions.parentElement!
+  const rootStyle = getComputedStyle(root), stageStyle = getComputedStyle(stage), actionStyle = getComputedStyle(actions)
+  const space = (style: CSSStyleDeclaration) => ['padding-top', 'padding-bottom', 'border-top-width', 'border-bottom-width']
+    .reduce((total, property) => total + (parseFloat(style.getPropertyValue(property)) || 0), 0)
+  const required = copy.getBoundingClientRect().height + actions.getBoundingClientRect().height
+    + (parseFloat(actionStyle.marginTop) || 0) + space(rootStyle) + space(stageStyle)
+  contentScrolls.value = required > parseFloat(rootStyle.maxHeight)
+}
+watch([stagedCopy, stagedActions, position], () => {
+  stageObserver?.disconnect()
+  fitStagedContent()
+  if (stagedCopy.value && stagedActions.value) {
+    stageObserver = new ResizeObserver(fitStagedContent)
+    stageObserver.observe(stagedCopy.value)
+    stageObserver.observe(stagedActions.value)
+  }
+}, { flush: 'post' })
 async function focusFirst() {
   await nextTick()
   if (!props.open) return
@@ -192,24 +219,29 @@ watch(() => props.open, async open => {
 }, { immediate: true })
 watch(() => props.contextKey, () => { if (props.open) close(false) })
 watch(() => props.anchor, () => { if (props.open && ownedAnchor) close(false) })
-onBeforeUnmount(cleanup)
+onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
 </script>
 <template>
   <Teleport to="body">
-    <div v-if="open" ref="panel" class="popover" :class="{ 'opens-up': opensUp, staged: mode === 'form' || confirming }" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
+    <div v-if="open" ref="panel" class="popover" :class="{ 'opens-up': opensUp, staged: mode === 'form' || confirming, 'content-scrolls': contentScrolls }" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
       <template v-if="mode === 'menu' && !confirming">
         <button v-for="item in items" :key="item.id" type="button" class="mi" :class="{ danger: item.confirmation }" role="menuitem" :disabled="item.disabled" @click="choose(item)"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span></button>
       </template>
       <div v-else-if="confirming && confirmation" class="confirm">
-        <h3>{{ confirmation.title }}</h3><p>{{ confirmation.effect }}</p><p class="keeps">{{ confirmation.keeps }}</p>
-        <div class="confirm-acts"><button type="button" class="btn sm" @click="close()">Cancel</button><button type="button" class="btn sm danger" :disabled="busy" @click="confirm">{{ confirmation.action }}</button></div>
-        <p v-if="error" class="feedback err" role="alert">{{ error }}</p>
+        <div class="staged-body">
+          <div ref="stagedCopy"><h3>{{ confirmation.title }}</h3><p>{{ confirmation.effect }}</p><p class="keeps">{{ confirmation.keeps }}</p></div>
+          <p v-if="contentScrolls && error" class="err" role="alert">{{ error }}</p>
+        </div>
+        <div ref="stagedActions" class="confirm-acts"><button type="button" class="btn sm" @click="close()">Cancel</button><button type="button" class="btn sm danger" :disabled="busy" @click="confirm">{{ confirmation.action }}</button></div>
+        <p v-if="!contentScrolls && error" class="feedback err" role="alert">{{ error }}</p>
       </div>
       <form v-else-if="mode === 'form'" class="qform" @submit.prevent="submit">
-        <h3>{{ label }}</h3><div class="form-fields"><slot :hint-id="error ? `${hintId} ${errorId}` : hintId" /></div>
-        <p :id="hintId" class="qhint">{{ hint }}</p>
-        <p v-if="error" :id="errorId" class="feedback err" role="alert">{{ error }}</p>
-        <div class="confirm-acts"><button type="button" class="btn sm" @click="close()">Cancel</button><button type="submit" class="btn sm primary" :disabled="busy" aria-keyshortcuts="Meta+Enter Control+Enter">{{ saveLabel }} <span class="save-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button></div>
+        <div class="staged-body">
+          <div ref="stagedCopy"><h3>{{ label }}</h3><div class="form-fields"><slot :hint-id="error ? `${hintId} ${errorId}` : hintId" /></div><p :id="hintId" class="qhint">{{ hint }}</p></div>
+          <p v-if="contentScrolls && error" :id="errorId" class="err" role="alert">{{ error }}</p>
+        </div>
+        <p v-if="!contentScrolls && error" :id="errorId" class="feedback err" role="alert">{{ error }}</p>
+        <div ref="stagedActions" class="confirm-acts"><button type="button" class="btn sm" @click="close()">Cancel</button><button type="submit" class="btn sm primary" :disabled="busy" aria-keyshortcuts="Meta+Enter Control+Enter">{{ saveLabel }} <span class="save-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button></div>
       </form>
     </div>
   </Teleport>
@@ -223,6 +255,8 @@ onBeforeUnmount(cleanup)
 .staged { display: flex; flex-direction: column; overflow: hidden; }
 .confirm, .qform { display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 6px; }
 .confirm > :not(.feedback), .qform > :not(.feedback) { flex: none; }
+.content-scrolls .staged-body { flex: 0 1 auto; min-height: 0; overflow: auto; overflow-wrap: anywhere; overscroll-behavior: contain; }
+.staged-body > .err { margin-top: 8px; font-size: 12px; }
 /* Feedback grows below a top anchor or above a bottom anchor. Once the
    viewport is full, only feedback scrolls; fields and actions stay put. */
 .feedback { order: 1; flex: 0 1 auto; min-height: 0; overflow: auto; overflow-wrap: anywhere; overscroll-behavior: contain; }

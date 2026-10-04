@@ -12,6 +12,7 @@ const context = ref('accounts-admin-person-1'), record = ref('computer-1')
 const empty = ref(false), long = ref(false), draft = ref('10'), error = ref(''), writes = ref(0), pending = ref(false)
 const query = new URLSearchParams(location.search)
 const german = query.has('german')
+const overflowing = query.has('overflow-content')
 const longError = 'Could not save. ' + 'The computer could not be reached; check its connection and try again. '.repeat(12)
 const formLabel = german ? 'Warnschwellen für Kontingente ändern' : 'Quota warnings'
 const items = computed<NeedsYouItem[]>(() => [
@@ -22,7 +23,7 @@ const items = computed<NeedsYouItem[]>(() => [
 const menu: SettingsMenuItem[] = [
   { id: 'read', label: 'Read quota now', detail: 'Ask for a fresh reading.', icon: 'refresh' },
   { id: 'disabled', label: 'Unavailable action', disabled: true },
-  { id: 'remove', label: 'Remove computer…', icon: 'trash', confirmation: { title: 'Remove this computer?', effect: 'New work stops and its sign-ins are blocked.', keeps: 'Accounts on other computers keep working.', action: 'Remove computer' } },
+  { id: 'remove', label: 'Remove computer…', icon: 'trash', confirmation: { title: 'Remove this computer?', effect: 'New work stops and its sign-ins are blocked.' + (overflowing ? ' Alle laufenden Arbeitsaufträge und Anmeldungen auf diesem Computer werden beendet.'.repeat(15) : ''), keeps: 'Accounts on other computers keep working.' + (overflowing ? ' Konten und Arbeitsaufträge auf anderen Computern bleiben unverändert.'.repeat(15) : ''), action: 'Remove computer' } },
 ]
 function show(event: Event) { opener.value = event.currentTarget as HTMLElement; open.value = true }
 function showMenu(event: Event) { anchor.value = event.currentTarget as HTMLElement; pop.value = !pop.value; form.value = false }
@@ -54,7 +55,7 @@ function save(owner: string | undefined) {
       <template #footer><button v-if="query.has('fail-confirm')" class="btn" @click="showMenu">Footer menu</button><button class="btn" @click="record = record === 'computer-1' ? 'computer-2' : 'computer-1'">Next computer</button><button class="btn primary" @click="showForm">Apply capacity</button></template>
     </SettingsDockedPanel>
     <SettingsPopover v-model:open="pop" :anchor="anchor" :frame="dock?.frame" :label="form ? formLabel : 'Computer actions'" :mode="form ? 'form' : 'menu'" :items="menu" :context-key="context" hint="Whole percent from 1 to 50." :error="error" :busy="pending" @select="select" @submit="save">
-      <template #default="{ hintId }"><label class="form-label">Early notice<input v-model="draft" class="field" :aria-describedby="hintId" /></label></template>
+      <template #default="{ hintId }"><label class="form-label">Early notice<input v-model="draft" class="field" :aria-describedby="hintId" /></label><label v-for="n in overflowing ? 8 : 0" :key="n">Weitere Warnschwelle {{ n }}<input class="field" :value="n" /></label></template>
     </SettingsPopover>
     <SettingsPopover v-model:open="otherPop" :anchor="otherAnchor" label="Other actions" :items="menu" />
   </main>
