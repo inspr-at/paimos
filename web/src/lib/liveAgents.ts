@@ -73,7 +73,7 @@ export function leadWorkerKey(agent: Pick<LiveAgent, 'session_id' | 'harness' | 
   return ['v', agent.harness, since].join('\u0001')
 }
 
-const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok'])
+const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok', 'gemini', 'opencode'])
 
 // Assignee cell order: the server's lead first, then the other live workers.
 // A lead the feed has not listed yet still shows, under its projected name.

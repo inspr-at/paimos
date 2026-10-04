@@ -18,8 +18,11 @@ import ListeningLabel from './ListeningLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
+import { currentActivity, workerActivity } from './activity'
 import HarnessBadge from './HarnessBadge.vue'
-import ProviderMark from './ProviderMark.vue'
+import ExecutionMark from './ExecutionMark.vue'
+import SessionHost from './SessionHost.vue'
+import { listHostLabels } from '../../lib/agents'
 import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
 import EtaCell from '../work/EtaCell.vue'
 import { etaFromSession } from '../../lib/eta'
@@ -30,6 +33,10 @@ import { controlPermitted, type ControlGrant } from '../../lib/managedControl'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
+import TierCell from './TierCell.vue'
+import { useServiceTiers } from '../../stores/serviceTiers'
+import { TIER_NAME } from '../../lib/serviceTier'
+const serviceTiers = useServiceTiers()
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
@@ -80,6 +87,9 @@ function toggleStopped(branch: Branch) {
   expanded.value[id] = true
 }
 const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.count - child.liveCount, 0)
+const descendants = (branch: Branch): SessionView[] => branch.children.flatMap(child => [child.view, ...descendants(child)])
+const activityLine = (branch: Branch) => branch.view.session.agent_activity_mode === 'off' ? '' :
+  (branch.view.session.role === 'coordinator' && !branch.view.session.stopped_at ? workerActivity(descendants(branch), props.now) : '') || currentActivity(branch.view, props.now)
 const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
 const otherChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
 const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
@@ -131,9 +141,23 @@ const grant = computed<ControlGrant>(() => ({ person: identity.identity?.princip
 // The chosen order is remembered per viewer in this browser; the page works without storage.
 const viewer = computed(() => identity.identity ? `${identity.identity.tenant.id}.${identity.identity.principal.id}` : '')
 watch(viewer, id => { sort.value = readSort(id) }, { immediate: true })
+const hostLabels = ref(new Map<string, string>())
+let hostRead = 0
+watch(viewer, async () => {
+  const read = ++hostRead
+  hostLabels.value = new Map()
+  if (!grant.value.person) return
+  try {
+    const labels = await listHostLabels()
+    if (read === hostRead) hostLabels.value = new Map([...labels.map(item => [item.host, item.label] as const), ...hostLabels.value])
+  } catch { /* The registered host remains the default; the editor retries its read. */ }
+}, { immediate: true })
+function renamedHost(host: string, label: string) {
+  hostLabels.value = new Map([...hostLabels.value, [host, label]])
+}
 const COLUMNS: { key: SortKey; label: string; cls?: string }[] = [
-  { key: 'state', label: 'State' }, { key: 'result', label: 'Intended result' }, { key: 'ticket', label: 'Ticket' },
-  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' }, { key: 'running', label: 'Running', cls: 'right c-elapsed' },
+  { key: 'state', label: 'State' }, { key: 'result', label: 'Name' }, { key: 'ticket', label: 'Ticket' },
+  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'host', label: 'Host', cls: 'c-host' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' }, { key: 'running', label: 'Running', cls: 'right c-elapsed' },
 ]
 const effectiveSort = computed(() => sort.value ?? DEFAULT_SORT)
 const ariaSort = (key: SortKey) => effectiveSort.value.key === key ? (effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending') : undefined
@@ -181,6 +205,13 @@ const inline = (view: SessionView, kind: SessionControl['kind']) => menuOf(view)
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
 function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
+function pickTier() {
+  const selected = menu.value
+  if (!selected) return
+  menu.value = null
+  serviceTiers.open(selected.view.session, selected.view.name, selected.anchor)
+}
+const tierRequestLabel = (view: SessionView) => view.session.service_tier_request ? `asks for ${TIER_NAME[view.session.service_tier_request]}` : ''
 const agents = useAgents()
 const moving = ref(false)
 const dragged = ref<SessionView | null>(null)
@@ -324,12 +355,15 @@ function rowClick(event: MouseEvent, id: string) {
 
     <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
-        <span v-for="column in COLUMNS" :key="column.key" role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
+        <template v-for="column in COLUMNS" :key="column.key">
+        <span role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
           <button type="button" class="th-sort" :class="{ on: sort?.key === column.key }" :data-tip="sortTip(column)" :aria-describedby="column.key === 'heartbeat' ? 'sort-beat-help' : undefined" @click="sortBy(column.key)">
             <span>{{ column.label }}</span>
             <span v-if="ariaSort(column.key)" class="sort-mark" aria-hidden="true"><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
           </button>
         </span>
+        <span v-if="column.key === 'execution'" role="columnheader" class="c-tier"><span tabindex="0" data-tip="Service tier: vendor serving speed and price. One chevron per offered tier. Click to change; Left/Right arrow: one step.">Tier</span></span>
+        </template>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
       <template v-for="group in BUCKETS" :key="group.id">
@@ -354,7 +388,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
           <span role="cell" class="c-state" :class="{ 'vendor-limit': view.session.vendor_limited }">
-            <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="view.session.archived_at ? 'Removed' : pendingLabel(view)" />
+            <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="view.session.archived_at ? 'Removed' : tierRequestLabel(view) || pendingLabel(view)" />
             <!-- No inbox (AEON-282) is the more specific cue; otherwise the listening cue (AEON-280). -->
             <span v-if="live(view) && view.session.management_mode === 'managed' && view.session.run_id && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
             <ListeningLabel v-else class="state-listen" :session="view.session" :now="now" compact />
@@ -373,6 +407,7 @@ function rowClick(event: MouseEvent, id: string) {
                   <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
                   <time v-if="view.session.heartbeat_at" class="ctx-beat" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
                 </span>
+                <span v-if="activityLine(branch)" class="current-activity" :title="activityLine(branch)">{{ activityLine(branch) }}</span>
               </span>
             </RouterLink>
             <span v-if="view.session.stopped_at && view.session.handed_over_to_id" class="lineage">
@@ -395,11 +430,16 @@ function rowClick(event: MouseEvent, id: string) {
             <EtaCell v-if="etaOf(view) || working(view)" class="row-eta" align="start" :eta="etaOf(view)" :now="now" :missing="working(view)" />
           </span>
           <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
-            <span class="exec-icon"><ProviderMark :provider="exec.provider" /></span>
+            <span class="exec-icon"><ExecutionMark :kind="exec.kind" :provider="exec.provider" /></span>
             <span class="exec-copy">
               <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
-              <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ view.harness }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
+              <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ exec.kind === 'ai' ? view.harness : exec.accountLine }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
             </span>
+            <TierCell v-if="serviceTiers.state(view.session).active_tier && serviceTiers.state(view.session).active_tier !== 'default'" class="phone-tier" :session="view.session" :name="view.name" phone />
+          </span>
+          <span role="cell" class="c-tier"><TierCell :session="view.session" :name="view.name" /></span>
+          <span role="cell" class="c-host">
+            <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels.get(view.session.host)" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
           </span>
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
@@ -444,6 +484,7 @@ function rowClick(event: MouseEvent, id: string) {
           </button>
           <hr class="menu-sep">
         </template>
+        <button v-if="!serviceTiers.unavailable(menu.view.session) || serviceTiers.canAsk(menu.view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(menu.view.session).pending || serviceTiers.busy[menu.view.session.id]" @click="pickTier"><AppIcon name="gauge" :size="16" /><span class="mi-text">{{ serviceTiers.canAsk(menu.view.session) ? 'Ask for a tier…' : 'Change tier…' }}</span></button>
         <RouterLink v-if="menuItems.other.includes('ticket') && menu.view.ticket" role="menuitem" class="menu-item" :to="menu.view.ticket.href" :data-autofocus="menuItems.control.length ? undefined : ''" @click="menu = null">
           <AppIcon name="link" :size="16" /><span class="mi-text"><span>Open {{ menu.view.ticket.key }}</span></span>
         </RouterLink>
@@ -471,6 +512,8 @@ function rowClick(event: MouseEvent, id: string) {
 </template>
 
 <style scoped>
+.c-tier { display: flex; align-items: center; justify-content: center; align-self: stretch; }
+.phone-tier { display: none; }
 .row.drop-over { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--ink-2); }
 .move-lead .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 38px; font-size: 11px; color: var(--ink-2); }
@@ -486,7 +529,7 @@ function rowClick(event: MouseEvent, id: string) {
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
 .quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 80px 76px; padding: 0 0 8px; }
+.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -566,6 +609,7 @@ function rowClick(event: MouseEvent, id: string) {
 .who { display: grid; min-width: 0; line-height: 1.25; }
 .result { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-context { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: 12px; font-weight: 450; }
+.current-activity { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The heartbeat has its own column on wide rows; phones say it inline here. */
 .ctx-beat { display: none; flex: none; white-space: nowrap; }
@@ -573,7 +617,7 @@ function rowClick(event: MouseEvent, id: string) {
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */
-.exec-icon { display: grid; place-items: center; flex: none; width: 28px; height: 16px; }
+.exec-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; }
 .exec-icon :deep(svg) { max-width: 28px; height: auto; max-height: 14px; }
 .exec-copy { display: grid; min-width: 0; line-height: 1.25; }
 .exec-model, .exec-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -625,28 +669,31 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 80px 76px; }
+/* Retain the pre-Host ticket allocation: the new column must not wrap ETA/%
+   or increase existing row heights. The other flexible tracks absorb Host. */
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 76px; }
 @container sessions (max-width: 980px) {
   .sort-bar { display: flex; }
-  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
+  .table { --state-width: 132px; grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(68px, .42fr) minmax(108px, .75fr) 80px 132px 64px 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(104px, .42fr) minmax(108px, .75fr) 80px 132px 64px 68px; }
   .c-elapsed { display: none; }
 }
-@container sessions (max-width: 760px) {
-  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 68px; }
+@container sessions (max-width: 800px) {
+  .table { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(68px, .42fr) minmax(108px, .7fr) 80px 132px 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(104px, .42fr) minmax(108px, .7fr) 80px 132px 68px; }
   .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }
 /* The menu floats outside the list container: size its targets by viewport. */
 @media (max-width: 720px) { .menu-item { min-height: 44px; align-items: center; } .menu-item > svg { margin-top: 0; } }
 /* Phones: identity, execution and state stack; actions stay in the overflow menu. */
-@container sessions (max-width: 560px) {
+@container sessions (max-width: 760px) {
   /* One text column beside the avatar column: title (two lines at most) with
      the heartbeat inline under it, one execution line, one state line, then a
      lead's worker toggles. The avatar column stays free for the tree lines. */
   .table { --tree-step: 28px; --title-line: 18px; display: block; }
-  .thead { display: none; }
+  .thead, .c-tier { display: none; }
+  .phone-tier { display: inline-flex; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
   .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
@@ -669,10 +716,12 @@ function rowClick(event: MouseEvent, id: string) {
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
   .c-exec { grid-column: 2 / 4; grid-row: 2; min-width: 0; margin-top: 6px; gap: 6px; }
-  .exec-icon { width: 18px; justify-items: start; }
+  .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
+  .row > .c-host { display: flex; grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
+  .row > .c-exec { padding-right: 132px; }
   /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
-  .exec-copy { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
+  .exec-copy { flex: 1; display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
   .exec-account { display: contents; }
   .exec-acct { display: none; }
   .exec-harness { order: -1; flex: none; font-size: 12px; color: var(--ink-2); }
@@ -692,7 +741,7 @@ function rowClick(event: MouseEvent, id: string) {
   .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
 }
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
-@container sessions (max-width: 560px) {
+@container sessions (max-width: 760px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
   /* With Default order showing, the tools take their own line rather than clip. */
   .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }

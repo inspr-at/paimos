@@ -11,7 +11,7 @@ export interface ReleaseChange { commit: string; subject: string; type: 'feat' |
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
-  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
+  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; pending?: string[]; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
 export interface ReleaseNoteCorrection { version: string; key: string; snapshot_sha256: string; reason: string; group?: string; pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string }
@@ -25,7 +25,7 @@ export interface Release {
   // The release's sci-fi codename from its sequence (AEON-430), English in
   // both languages. Absent on a reservation whose sequence another release took.
   codename?: string
-  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
+  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'candidate'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
 }
@@ -446,30 +446,7 @@ export function plainSubject(subject: string, tickets: string[] = []) {
   return displayText(text, tickets)
 }
 
-// ---------- Stats ----------
-export interface ReleaseStats { today: number; week: number; last: number | null; median: number | null; cadence: number[] }
-export function stats(releases: Release[], now: number, days = 14): ReleaseStats {
-  const published = releases.filter(r => r.state === 'published' && time(r)).sort((a, b) => time(a) - time(b))
-  const todayKey = dayKey(now)
-  const d = new Date(now)
-  // Calendar arithmetic, not multiples of 24 h, so daylight saving changes do not shift days.
-  const midnight = (back: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime()
-  const monday = midnight((d.getDay() + 6) % 7)
-  const gaps: number[] = []
-  for (let i = 1; i < published.length; i++) gaps.push(time(published[i]) - time(published[i - 1]))
-  gaps.sort((a, b) => a - b)
-  const median = gaps.length ? (gaps.length % 2 ? gaps[(gaps.length - 1) / 2] : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2) : null
-  const cadence = Array.from({ length: days }, (_, i) => {
-    const key = dayKey(midnight(days - 1 - i))
-    return published.filter(r => dayKey(time(r)) === key).length
-  })
-  return {
-    today: published.filter(r => dayKey(time(r)) === todayKey).length,
-    week: published.filter(r => time(r) >= monday).length,
-    last: published.length ? time(published[published.length - 1]) : null,
-    median, cadence,
-  }
-}
+// ---------- Spans ----------
 // "3 h 12 min", "2 days", "45 min".
 export function span(ms: number) {
   const minutes = Math.round(ms / 60_000)
@@ -494,7 +471,7 @@ export function compare(releases: Release[], a: string, b: string) {
 export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en', { numeric: true }) }
 
 // ---------- Search and filters ----------
-export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
+export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; other?: boolean; tickets?: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
@@ -505,6 +482,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
   if (f.fixes && !presented.fixes.length) return false
+  if (f.other && !presented.other.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
@@ -542,10 +520,14 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
 }
 
 // ---------- New since the last visit ----------
-// Releases newer than the one the person last saw; nothing on a first visit.
-export function newSince(releases: Release[], lastSeen: string | null) {
+// Visibility never changes the source history used by statistics or deep links.
+export function visibleReleases(releases: Release[], showReservedVersions = false): Release[] {
+  return releases.filter(r => showReservedVersions || r.state !== 'reserved')
+}
+// Visible releases newer than the one the person last saw; nothing on a first visit.
+export function newSince(releases: Release[], lastSeen: string | null, showReservedVersions = false) {
   if (!lastSeen) return new Set<string>()
-  return new Set(releases.filter(r => r.state === 'published' && r.version > lastSeen).map(r => r.version))
+  return new Set(visibleReleases(releases, showReservedVersions).filter(r => r.version > lastSeen).map(r => r.version))
 }
 export const shortCommit = (sha: string) => sha.slice(0, 7)
 

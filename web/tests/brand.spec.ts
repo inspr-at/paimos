@@ -35,11 +35,14 @@ test('a different brand names the title, header, footer, menu, release history a
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')
 
-  await page.locator('footer.app-footer .footer-name').click()
+  await page.locator('footer.app-footer .version-pill').click()
   const sheet = page.getByRole('dialog', { name: 'NOVA DAWN releases' })
   await expect(sheet).toBeVisible()
-  // The generation is a label, never a version.
-  await expect(sheet).toContainText('NOVA 3 · Release history')
+  // The generation is a label, never a version, and waits for Details (AEON-488).
+  await expect(sheet.locator('.head .eyebrow')).toHaveText('NOVA DAWN · RELEASE')
+  await sheet.getByRole('radio', { name: 'Details' }).click()
+  await expect(sheet.locator('.head .eyebrow')).toHaveText('NOVA DAWN · RELEASE')
+  await expect(sheet.locator('.detail-info')).toHaveText(/^NOVA 3 · DAWN releases · \d+ published$/)
   await expect(page).toHaveTitle('Releases · NOVA DAWN')
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')

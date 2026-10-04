@@ -51,8 +51,8 @@ func HarnessFailureReason(err error) string {
 // shared Node/SDK pins. Newer daemons may send other bounded code tokens: they
 // stay visible as needing attention with the raw code and no guessed fix.
 //
-// A ready harness may also list attention_accounts: a proper subset of its
-// enrolled accounts that still need a fix while a sibling can work. Reasons
+// A ready, blocked or login_required harness may list attention_accounts.
+// Ready requires a proper subset; blocked may name every enrollment. Reasons
 // use this same vocabulary. Commands are derived again from the reason and
 // are never stored on the attention entry. attention_count is the full size
 // of that subset, or a lower bound when an older report stopped at
@@ -92,14 +92,15 @@ const AttentionAccountLimit = 32
 // has not proved that every blocked account is present.
 const legacyAttentionCap = 5
 
-// AccountAttention names one enrolled account that still needs a fix while
-// its harness stays ready because another account of that harness can work.
+// AccountAttention names one enrolled account that needs a fix, even when
+// no sibling is ready.
 type AccountAttention struct {
-	AccountID string `json:"account_id"`
-	Reason    string `json:"reason"`
+	AccountID    string `json:"account_id"`
+	Reason       string `json:"reason"`
+	ReasonDetail string `json:"reason_detail,omitempty"`
 }
 
-// AttentionBlock is the validated partial block for one ready harness.
+// AttentionBlock is the validated account diagnostic block for one harness.
 // Count is the full number of blocked enrollments, or a lower bound when
 // Truncated is set and the sender did not prove a larger total. Truncated
 // means an account missing from Accounts is not ready.
@@ -111,10 +112,11 @@ type AttentionBlock struct {
 
 // HarnessDetail uses the same reason tokens and structured fix as BlockedAccount.
 // Unknown bounded tokens survive version skew; local diagnostics never leave the host.
-// Attention is set only for a ready harness and only for a proper subset.
+// Attention is account-scoped; ready harnesses require a proper subset.
 type HarnessDetail struct {
 	State              string             `json:"state"`
 	Reason             string             `json:"reason,omitempty"`
+	ReasonDetail       string             `json:"reason_detail,omitempty"`
 	Fix                HarnessFix         `json:"fix,omitzero"`
 	Attention          []AccountAttention `json:"attention_accounts,omitempty"`
 	AttentionCount     int                `json:"attention_count,omitempty"`
@@ -126,17 +128,21 @@ type HarnessDetail struct {
 // A malformed attention list is ignored; it does not drop the rest of the detail.
 func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 	var wire struct {
-		State     string          `json:"state"`
-		Reason    string          `json:"reason"`
-		Fix       json.RawMessage `json:"fix"`
-		Attention json.RawMessage `json:"attention_accounts"`
-		Count     json.RawMessage `json:"attention_count"`
-		Truncated json.RawMessage `json:"attention_truncated"`
+		State        string          `json:"state"`
+		Reason       string          `json:"reason"`
+		ReasonDetail json.RawMessage `json:"reason_detail"`
+		Fix          json.RawMessage `json:"fix"`
+		Attention    json.RawMessage `json:"attention_accounts"`
+		Count        json.RawMessage `json:"attention_count"`
+		Truncated    json.RawMessage `json:"attention_truncated"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
 	}
 	*d = HarnessDetail{State: wire.State, Reason: wire.Reason}
+	if wire.State == "blocked" || wire.State == "login_required" {
+		d.ReasonDetail = decodeProbeDetail(wire.Reason, wire.ReasonDetail)
+	}
 	if len(wire.Fix) > 0 && wire.Fix[0] == '{' {
 		_ = json.Unmarshal(wire.Fix, &d.Fix)
 	}
@@ -177,11 +183,15 @@ func decodeAttention(raw json.RawMessage) []AccountAttention {
 	}
 	var kept []AccountAttention
 	for _, item := range items {
-		var parsed AccountAttention
+		var parsed struct {
+			AccountID    string          `json:"account_id"`
+			Reason       string          `json:"reason"`
+			ReasonDetail json.RawMessage `json:"reason_detail"`
+		}
 		if json.Unmarshal(item, &parsed) != nil {
 			continue
 		}
-		kept = append(kept, parsed)
+		kept = append(kept, AccountAttention{AccountID: parsed.AccountID, Reason: parsed.Reason, ReasonDetail: decodeProbeDetail(parsed.Reason, parsed.ReasonDetail)})
 	}
 	if len(kept) == 0 {
 		return nil
@@ -202,7 +212,7 @@ var harnessCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 //     including Nix/Home Manager.
 func RecoveryFix(harness, reason string) HarnessFix {
 	switch harness {
-	case "claude", "codex", "cursor", "grok", "pi":
+	case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
 	default:
 		return HarnessFix{}
 	}
@@ -221,6 +231,10 @@ func RecoveryFix(harness, reason string) HarnessFix {
 			command = "claude auth login"
 		case "cursor":
 			command = "cursor-agent login"
+		case "gemini":
+			command = "gemini"
+		case "opencode":
+			command = "opencode auth login"
 		case "pi":
 			// pi signs in from its own prompt with /login.
 			command = "pi"
@@ -246,7 +260,7 @@ func KnownHarnessState(state string) bool {
 // Callers scope reports to enrolled harnesses and check legacy-state agreement.
 func HarnessReport(harness, state, reason string) (HarnessDetail, bool) {
 	switch harness {
-	case "claude", "codex", "cursor", "grok", "pi":
+	case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
 	default:
 		return HarnessDetail{}, false
 	}
@@ -267,14 +281,14 @@ func HarnessReport(harness, state, reason string) (HarnessDetail, bool) {
 	return d, true
 }
 
-// PartialAttention keeps a ready harness's blocked accounts only when they
-// are a proper subset of the enrolled accounts. Empty reasons, unknown
-// account ids, malformed codes and a list that covers every enrollment are
-// dropped. The result is sorted by account id. Accounts past
+// PartialAttention keeps account-scoped diagnostics for ready, blocked and
+// login_required harnesses. Only ready requires a proper subset. Empty reasons,
+// unknown account ids and malformed codes are dropped. The result is sorted
+// by account id. Accounts past
 // AttentionAccountLimit stay in Count and Truncated is set; they are not
 // reported as ready.
 func PartialAttention(harness string, enrolledIDs []string, state string, items []AccountAttention) AttentionBlock {
-	if state != "ready" || len(items) == 0 {
+	if (state != "ready" && state != "blocked" && state != "login_required") || len(items) == 0 {
 		return AttentionBlock{}
 	}
 	enrolled := map[string]bool{}
@@ -283,7 +297,7 @@ func PartialAttention(harness string, enrolledIDs []string, state string, items 
 			enrolled[id] = true
 		}
 	}
-	if len(enrolled) < 2 {
+	if len(enrolled) == 0 || (state == "ready" && len(enrolled) < 2) {
 		return AttentionBlock{}
 	}
 	seen := map[string]bool{}
@@ -292,14 +306,15 @@ func PartialAttention(harness string, enrolledIDs []string, state string, items 
 		if item.Reason == "" || !enrolled[item.AccountID] || seen[item.AccountID] {
 			continue
 		}
-		if _, ok := HarnessReport(harness, "blocked", item.Reason); !ok {
+		detail, ok := HarnessReport(harness, "blocked", item.Reason)
+		if !ok {
 			continue
 		}
 		seen[item.AccountID] = true
-		kept = append(kept, AccountAttention{AccountID: item.AccountID, Reason: item.Reason})
+		kept = append(kept, AccountAttention{AccountID: item.AccountID, Reason: item.Reason, ReasonDetail: detail.WithProbeDetail(harness, item.ReasonDetail).ReasonDetail})
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].AccountID < kept[j].AccountID })
-	if len(kept) == 0 || len(kept) >= len(enrolled) {
+	if len(kept) == 0 || (state == "ready" && len(kept) >= len(enrolled)) {
 		return AttentionBlock{}
 	}
 	block := AttentionBlock{Accounts: kept, Count: len(kept)}
@@ -345,5 +360,9 @@ func ResolveAttention(harness, state string, enrolledIDs []string, items []Accou
 			enrolled[id] = true
 		}
 	}
-	return PartialAttention(harness, enrolledIDs, state, items).WithDeclaredTotal(declaredCount, declaredTruncated, len(enrolled))
+	limit := len(enrolled)
+	if state == "blocked" || state == "login_required" {
+		limit++ // The declared count may cover every enrolled account.
+	}
+	return PartialAttention(harness, enrolledIDs, state, items).WithDeclaredTotal(declaredCount, declaredTruncated, limit)
 }

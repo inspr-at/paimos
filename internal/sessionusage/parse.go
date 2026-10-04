@@ -127,6 +127,9 @@ func classify(source string, fields map[string]json.RawMessage) (usageRecord, in
 	if source == "codex" {
 		return classifyCodex(fields)
 	}
+	if source == "gemini" || source == "opencode" {
+		return classifyACP(source, fields)
+	}
 	return classifyCursor(fields)
 }
 
@@ -301,8 +304,8 @@ func reportID(session, model string, seq int64) string {
 }
 
 func normalizeOptions(opt Options) (Options, error) {
-	if opt.Source != "codex" && opt.Source != "cursor" {
-		return Options{}, fmt.Errorf("%w: source must be codex or cursor", ErrRejected)
+	if opt.Source != "codex" && opt.Source != "cursor" && opt.Source != "gemini" && opt.Source != "opencode" {
+		return Options{}, fmt.Errorf("%w: unsupported usage source", ErrRejected)
 	}
 	if !opt.FromStart && opt.Previous == nil {
 		return Options{}, fmt.Errorf("%w: explicit from-start assertion or checkpoint required", ErrRejected)

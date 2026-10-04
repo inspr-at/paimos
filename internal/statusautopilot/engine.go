@@ -139,7 +139,9 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
  LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state') episode ON true
  LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2) activity ON true
  LEFT JOIN LATERAL (SELECT max(greatest(h.created_at,h.heartbeat_at,h.stopped_at)) at,
- bool_or(h.phase IN ('starting','working','stopping') AND h.stopped_at IS NULL AND h.archived_at IS NULL AND coalesce(h.heartbeat_at,h.created_at)>=$3) live
+ bool_or(h.archived_at IS NULL AND (
+ (h.phase IN ('starting','working','stopping') AND h.stopped_at IS NULL AND coalesce(h.heartbeat_at,h.created_at)>=$3)
+ OR (h.stop_reason='paused' AND h.pause_record->>'state' IN ('paused','resume_requested')))) live
  FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id) work ON true
  LEFT JOIN LATERAL (SELECT max(r.created_at) at FROM work_order_reviews r WHERE r.ticket_node_id=n.id AND r.tenant_id=n.tenant_id AND r.pull_request IS NOT NULL) review ON true
  WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL ORDER BY n.id FOR UPDATE OF n`, ids, Job, now.Add(-15*time.Minute))
@@ -215,6 +217,9 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO status_autopilot_receipts(tenant_id,node_id,rule,anchor,event_id) VALUES($1,$2,$3,$4,$5)`, p.TenantID, n.ID, d.Rule, d.Anchor, ev.ID)
 	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule=$2 AND anchor=$3 AND status='pending'`, n.ID, d.Rule, d.Anchor); err != nil {
 		return err
 	}
 	// The audit reason is also a durable comment for stalled, shipped, accepted

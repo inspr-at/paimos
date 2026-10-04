@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -77,6 +78,10 @@ func (q *controlRelay) take(key string) string {
 }
 
 func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return m.queueManagedControl(r, tx, p, false)
+}
+
+func (m *Module) queueManagedControl(r *http.Request, tx pgx.Tx, p tenant.Principal, allowTier bool) (any, error) {
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "only a person may control a managed session")
 	}
@@ -96,6 +101,9 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	r.Body = http.MaxBytesReader(nil, r.Body, 16384)
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
+	}
+	if in.Kind == "tier" && !allowTier {
+		return nil, workorders.Fail(400, "use the service tier endpoint with an expected revision")
 	}
 	if !workorders.UUID(in.RequestID) || (in.Kind != "steer" && in.Kind != "interrupt" && in.Kind != "stop" && !settingKind(in.Kind)) || !validSetting(in.Kind, in.Value) || len(in.Text) > 8192 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) || (in.Kind == "steer" && strings.TrimSpace(in.Text) == "") || (in.Kind != "steer" && in.Text != "") {
 		return nil, workorders.Fail(400, "request id, typed operation and bounded text or setting value required")
@@ -126,7 +134,11 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err != nil {
 		return nil, err
 	}
-	if s.Harness != "claude" || !forceAvailable(s, now) || !has(s, managedControlCapability) || !has(s, in.Kind) {
+	qualified := s.Harness == "claude" && has(s, managedControlCapability) && has(s, in.Kind)
+	if in.Kind == "tier" {
+		qualified = (s.Harness == "claude" || s.Harness == "codex") && has(s, servicetier.Capability)
+	}
+	if !qualified || !forceAvailable(s, now) || s.StoppedAt != nil || s.ArchivedAt != nil {
 		return nil, workorders.Fail(409, "live sandboxed managed control unavailable for this adapter")
 	}
 	if *s.ProcessOwnership != in.Ownership {
@@ -147,7 +159,7 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 			return nil, err
 		}
 		var pending bool
-		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind IN ('rename','model','effort') AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
+		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind IN ('rename','model','effort','tier') AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
 			return nil, err
 		}
 		if pending {
@@ -162,7 +174,11 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		return nil, workorders.Fail(429, "session control quota reached")
 	}
 	identity, _ := json.Marshal(in.Ownership)
-	c, err := scanControl(tx.QueryRow(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value) SELECT $1,$2,$3,$4,coalesce(max(sequence),0)+1,$5,$6::jsonb,$7,clock_timestamp()+interval '45 seconds',nullif($8,'') FROM harness_controls WHERE session_id=$3 RETURNING `+controlColumns, p.TenantID, in.RequestID, s.ID, in.Kind, p.ID, string(identity), dg, in.Value))
+	ttl := 45
+	if in.Kind == "tier" {
+		ttl = 86400
+	} // wait for a safe point, still bound to the exact process
+	c, err := scanControl(tx.QueryRow(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value) SELECT $1,$2,$3,$4,coalesce(max(sequence),0)+1,$5,$6::jsonb,$7,clock_timestamp()+make_interval(secs=>$9),nullif($8,'') FROM harness_controls WHERE session_id=$3 RETURNING `+controlColumns, p.TenantID, in.RequestID, s.ID, in.Kind, p.ID, string(identity), dg, in.Value, ttl))
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +219,13 @@ func (m *Module) expireControls(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	}
 	for _, c := range expired {
 		m.controlText.take(relayKey(p.TenantID, s.ID, c.ID))
+		if c.Kind == "tier" {
+			if err = completeTierHistory(r.Context(), tx, p, s, c); err != nil {
+				return err
+			}
+		}
+	}
+	for _, c := range expired {
 		if err = record(r.Context(), tx, p, s, "control_completed", nil, c); err != nil {
 			return err
 		}
@@ -240,7 +263,7 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 }
 
 func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session, c Control) (bool, error) {
-	if c.ExpectedOwnership == nil || c.Kind == "force_stop" {
+	if (c.ExpectedOwnership == nil && (c.RequestPayload == nil || !c.RequestPayload.StopNow && c.RequestPayload.Level != "pause_quickly")) || c.Kind == "force_stop" {
 		return true, nil
 	}
 	var id string
@@ -248,7 +271,10 @@ func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	if err != nil {
 		return false, err
 	}
-	actor := tenant.Principal{TenantID: p.TenantID, ID: id, Kind: tenant.Person}
+	actor := tenant.Principal{TenantID: p.TenantID, ID: id}
+	if err = tx.QueryRow(r.Context(), `SELECT kind FROM principals WHERE id=$1`, id).Scan(&actor.Kind); err != nil {
+		return false, err
+	}
 	err = authz.RequireTx(r.Context(), tx, actor, "harness.control", authz.Scope{ProjectID: s.ProjectID})
 	if errors.Is(err, authz.ErrForbidden) {
 		return false, nil

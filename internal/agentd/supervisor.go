@@ -20,16 +20,19 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 type Config struct {
+	StepUps           *StepUpManager
 	MaxTokens         int64
 	MaxTurns          int64
 	API               API
@@ -42,6 +45,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
+	// Now supplies the capacity scheduler clock; deadlines still use contexts.
+	Now func() time.Time
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
 	PollDiagnostic func(string)
@@ -104,9 +109,11 @@ type owned struct {
 	record          Record
 	harness         HarnessSession
 	heartbeatSeq    int64
+	pauseWakeAt     time.Time
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
+	modelReports    map[string]bool // successful content-free evidence IDs, bounded per run
 	capacityPending map[string]capacity.Reading
 	vendorLimit     *capacity.LimitHit
 	inboxCapable    bool
@@ -130,54 +137,65 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
-	startedAt           time.Time
-	capacityStartedAt   time.Time
-	capacityAccountID   string
-	quotaKey            []byte // Tenant HMAC key, memory only; never passed to a child.
-	signalsPublished    map[string]AccountSignals
-	statuslineMu        sync.Mutex
-	statuslinePlans     map[string]statuslinePlan
-	statuslineEnabled   map[string]bool
-	capacityInterval    time.Duration
-	capacityLast        map[string]time.Time
-	capacitySaved       map[string]time.Time
-	capacityAttempt     map[string]time.Time
-	capacityCapturing   bool
-	maxTokens, maxTurns int64
-	profilePermissions  map[string]bool
-	harnessFailed       map[string]bool
-	dispatchMu          sync.Mutex
-	state               *agentsetup.Store
-	closing             bool
-	blockedAccounts     map[string]bool
-	probedAccounts      map[string]bool
-	accountBilling      map[string]string
-	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
-	pollDiagnostic      func(string)
-	pollDiagnosticMu    sync.Mutex
-	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
-	loginRequired       map[string]bool
-	harnessHoldReasons  map[string]string
-	dependencyReasons   map[string]string
-	harnessHolds        map[string]string
-	dependencyErrors    map[string]string
-	mu                  sync.Mutex
-	api                 API
-	journal             *localjournal.Journal[Record]
-	lock                *os.File
-	adapters            map[string]Adapter
-	runs                map[string]*owned
-	tenantID            string
-	principalID         string
-	daemonID            string
-	generation          string
-	workspace           string
-	estimates           map[string]int64
-	accounts            []EnrolledAccount
-	heartbeatInterval   time.Duration
-	maxRunDuration      time.Duration
-	prepareScratch      func(string) (string, error)
-	newHarnessID        func() (string, error)
+	stepUps                *StepUpManager
+	capacityNow            func() time.Time
+	capacityWake           chan struct{}
+	capacityCheckMu        sync.Mutex
+	capacityChecks         map[string]capacityCheckState
+	capacityCheckHeartbeat map[string]bool
+	capacityCheckConnected map[string]bool
+	capacityCheckRefresh   map[string]bool
+	startedAt              time.Time
+	capacityStartedAt      time.Time
+	capacityAccountID      string
+	quotaKey               []byte // Tenant HMAC key, memory only; never passed to a child.
+	signalsPublished       map[string]AccountSignals
+	statuslineMu           sync.Mutex
+	statuslinePlans        map[string]statuslinePlan
+	statuslineEnabled      map[string]bool
+	capacityInterval       time.Duration
+	capacityLast           map[string]time.Time
+	capacitySaved          map[string]time.Time
+	capacityAttempt        map[string]time.Time
+	capacityCapturing      bool
+	maxTokens, maxTurns    int64
+	profilePermissions     map[string]bool
+	harnessFailed          map[string]bool
+	dispatchMu             contextMutex
+	state                  *agentsetup.Store
+	closing                bool
+	blockedAccounts        map[string]bool
+	probedAccounts         map[string]bool
+	accountBilling         map[string]string
+	probePendingSince      map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
+	pollDiagnostic         func(string)
+	pollDiagnosticMu       sync.Mutex
+	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
+	loginRequired          map[string]bool
+	signInUnverified       map[string]bool
+	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
+	probeReasonDetails     map[string]string // Allowlisted explanations, protected by mu.
+	harnessHoldReasons     map[string]string
+	dependencyReasons      map[string]string
+	harnessHolds           map[string]string
+	dependencyErrors       map[string]string
+	mu                     sync.Mutex
+	api                    API
+	journal                *localjournal.Journal[Record]
+	lock                   *os.File
+	adapters               map[string]Adapter
+	runs                   map[string]*owned
+	tenantID               string
+	principalID            string
+	daemonID               string
+	generation             string
+	workspace              string
+	estimates              map[string]int64
+	accounts               []EnrolledAccount
+	heartbeatInterval      time.Duration
+	maxRunDuration         time.Duration
+	prepareScratch         func(string) (string, error)
+	newHarnessID           func() (string, error)
 	// lifetime is the daemon context. Cancelling it ends a clean Codex idle
 	// wait so shutdown does not sit out the wake window. A busy turn is left
 	// to finish; the idle wait is not armed again afterwards.
@@ -234,6 +252,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if c.CapacityInterval == 0 {
 		c.CapacityInterval = 5 * time.Minute
+	}
+	if c.Now == nil {
+		c.Now = time.Now
 	}
 	if c.CapacityInterval < time.Second {
 		return nil, errors.New("invalid capacity interval")
@@ -323,9 +344,22 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+	s.capacityNow = c.Now
+	s.capacityWake = make(chan struct{}, 1)
+	if err := s.loadCapacityChecks(); err != nil {
+		return nil, err
+	}
+	if _, checks := s.api.(capacityChecksAPI); checks {
+		if pi, ok := s.adapters[Pi].(*PiAdapter); ok {
+			pi.probeMu.Lock()
+			pi.capacityManaged = true
+			pi.probes = map[string]piProbeResult{}
+			pi.probeMu.Unlock()
+		}
+	}
 	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
 	for _, account := range s.accounts {
 		s.probePendingSince[account.ID] = s.startedAt
@@ -556,12 +590,44 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			delete(s.dependencyErrors, account.ID)
 			delete(s.dependencyReasons, account.ID)
 		}
-		s.blockedAccounts[account.ID] = err != nil || !available
+		captureFailure := s.capacityChecks[account.ID].LastResult
+		s.blockedAccounts[account.ID] = err != nil || !available || captureFailure == "identity_mismatch" || captureFailure == "authentication_failed"
 		s.probedAccounts[account.ID] = err == nil && available
 		delete(s.probePendingSince, account.ID)
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
 		// local dependency failure never does (AEON-342).
 		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.signInUnverified == nil {
+			s.signInUnverified = map[string]bool{}
+		}
+		s.signInUnverified[account.ID] = !status.OK && status.Failure == ProbeUnverified && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.probeFailureReasons == nil {
+			s.probeFailureReasons = map[string]string{}
+		}
+		delete(s.probeFailureReasons, account.ID)
+		if s.probeReasonDetails == nil {
+			s.probeReasonDetails = map[string]string{}
+		}
+		delete(s.probeReasonDetails, account.ID)
+		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
+			reason := "probe_failed"
+			if status.Failure == ProbeAuthFailed {
+				reason = "login_required"
+			}
+			s.probeReasonDetails[account.ID] = agentsetup.SafeProbeDetail(reason, status.ReasonDetail)
+		}
+		if captureFailure == "identity_mismatch" {
+			s.probeFailureReasons[account.ID] = ProbeIdentityMismatch
+		}
+		if captureFailure == "authentication_failed" {
+			s.loginRequired[account.ID] = true
+		}
+		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
+			switch status.Failure {
+			case ProbeIdentityMismatch, ProbeTimeout, ProbeProtocol, ProbeLaunchFailed:
+				s.probeFailureReasons[account.ID] = status.Failure
+			}
+		}
 		if s.harnessFailed == nil {
 			s.harnessFailed = map[string]bool{}
 		}
@@ -571,6 +637,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile) || errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
+		s.capacityProbeConnection(account.ID, err == nil && available)
 		if probeErr != nil {
 			failures = append(failures, errors.New("harness failed to start"))
 		}
@@ -642,7 +709,9 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 }
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
-	s.dispatchMu.Lock()
+	if err := s.dispatchMu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	capturing := s.capacityCapturing
@@ -953,12 +1022,15 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
+	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || profile.Harness == Gemini || profile.Harness == OpenCode)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox")
 		if !managedPolicy {
 			caps = append(caps, "steer")
 		}
+	}
+	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
+		caps = append(caps, servicetier.Capability)
 	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel}
 	if profile.Harness != Codex {
@@ -968,6 +1040,20 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
 	if err != nil {
 		return err
+	}
+	if api, ok := s.api.(serviceTierAPI); ok {
+		report := servicetier.Advertised(profile.Harness, profile.Model, "unknown")
+		if reporter, ok := adapter.(serviceTierAdapter); ok {
+			observed, e := reporter.ServiceTiers(ctx, StartRequest{Profile: profile, AccountKey: route.AccountKey, Workspace: s.workspace})
+			if e == nil {
+				report = observed
+			}
+		}
+		active := "default"
+		if err = api.ReportServiceTiers(ctx, entry.harness, servicetier.Reports(report.Harness, report.Model, report.HarnessVersion), &active); err != nil {
+			return err
+		}
+		entry.harness.ServiceTier = active
 	}
 	s.mu.Lock()
 	billing := s.accountBilling[route.AccountID]
@@ -1016,8 +1102,22 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				entry.doneRequested = true
 				entry.mu.Unlock()
 			}
+			reportActivity := func(doing string) (string, bool) {
+				entry.mu.Lock()
+				id := entry.harness.ID
+				entry.mu.Unlock()
+				mode := agentactivity.Off
+				if policy, ok := s.api.(interface{ SessionActivityMode(string) string }); ok {
+					mode = policy.SessionActivityMode(id)
+				}
+				if mode != agentactivity.Summary || doing == "" {
+					return mode, false
+				}
+				s.observe(entry, AdapterEvent{Doing: doing})
+				return mode, true
+			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone})
+				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1063,9 +1163,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	launchedAt := time.Now()
-	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+	// The accepted duration includes startup, before the monitor exists.
+	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
+	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
+	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+	cancelStart()
 	if err != nil {
+		cancelRun()
+		if errors.Is(err, errModelInvalid) {
+			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
+		}
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
 		entry.mu.Lock()
@@ -1085,6 +1193,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.monitorDone = make(chan struct{})
 	done := entry.monitorDone
 	entry.mu.Unlock()
+	go func() { <-done; cancelRun() }()
 	entry.budgetMu.Lock()
 	entry.budgetProcess, entry.budgetTools = proc, entry.tools
 	entry.budgetMu.Unlock()
@@ -1127,6 +1236,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
+	wakeTimer := time.NewTimer(time.Hour)
+	if !wakeTimer.Stop() {
+		<-wakeTimer.C
+	}
+	defer wakeTimer.Stop()
 	var inboxTicks <-chan time.Time
 	if inbox {
 		inboxTicker := time.NewTicker(2 * time.Second)
@@ -1134,6 +1248,24 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		inboxTicks = inboxTicker.C
 	}
 	for {
+		entry.mu.Lock()
+		wake := entry.pauseWakeAt
+		entry.mu.Unlock()
+		var wakeTicks <-chan time.Time
+		if !wakeTimer.Stop() {
+			select {
+			case <-wakeTimer.C:
+			default:
+			}
+		}
+		if !wake.IsZero() {
+			delay := time.Until(wake)
+			if delay < time.Millisecond {
+				delay = time.Millisecond
+			}
+			wakeTimer.Reset(delay)
+			wakeTicks = wakeTimer.C
+		}
 		beat := false
 		select {
 		case <-done:
@@ -1141,6 +1273,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		case <-ticker.C:
 			beat = true
 		case <-inboxTicks:
+		case <-wakeTicks:
+			entry.mu.Lock()
+			entry.pauseWakeAt = time.Time{}
+			entry.mu.Unlock()
+			beat = true
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
@@ -1176,6 +1313,30 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if len(ev.ModelReports) > 0 {
+		s.reportModels(entry, ev.ModelReports)
+	}
+	if ev.ErrorCode == "model_invalid" {
+		s.reportModelState(entry, "invalid")
+	}
+	mode := agentactivity.Summary
+	if policy, ok := s.api.(interface{ SessionActivityMode(string) string }); ok {
+		entry.mu.Lock()
+		id := entry.harness.ID
+		entry.mu.Unlock()
+		mode = policy.SessionActivityMode(id)
+	}
+	if mode != agentactivity.Off && (ev.ToolActivity != nil || ev.Doing != "") {
+		entry.mu.Lock()
+		if ev.ToolActivity != nil && agentactivity.ValidAuto(ev.ToolActivity.Text) && ev.ToolActivity.Source == "auto" {
+			copy := *ev.ToolActivity
+			entry.harness.ToolActivity = &copy
+		}
+		if text, valid := agentactivity.CleanSummary(ev.Doing); valid && mode == agentactivity.Summary {
+			entry.harness.Doing, entry.harness.DoingAt = text, time.Now().UTC()
+		}
+		entry.mu.Unlock()
+	}
 	s.observeBudget(entry, ev)
 	if ev.VendorLimit != nil {
 		s.observeVendorLimit(entry, ev.VendorLimit)
@@ -1188,6 +1349,11 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	}
 	if len(ev.Capacity) > 0 {
 		s.observeCapacity(entry, ev.Capacity)
+	}
+	if ev.HarnessTier != "" && servicetier.Valid(ev.HarnessTier) {
+		entry.mu.Lock()
+		entry.harness.ServiceTier = ev.HarnessTier
+		entry.mu.Unlock()
 	}
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
@@ -1223,6 +1389,19 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 			}
 		}
 		entry.mu.Unlock()
+	}
+	// Only positive, model-bound vendor usage can clear an invalid-model pause.
+	workingModel := ""
+	if ev.SessionUsage != nil && ev.SessionUsage.OutputTokens != nil && *ev.SessionUsage.OutputTokens > 0 {
+		workingModel = ev.SessionUsage.Model
+	} else if ev.ModelEvidence == "vendor_reported" && ev.OutputTokensDelta > 0 {
+		workingModel = ev.EffectiveModel
+	}
+	entry.mu.Lock()
+	confirmed := workingModel != "" && workingModel == entry.harness.Model
+	entry.mu.Unlock()
+	if confirmed {
+		s.reportModelState(entry, "working")
 	}
 	if ev.Kind == "" {
 		return
@@ -1440,12 +1619,25 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 		for len(entry.pending) > 0 {
 			control := entry.pending[0]
 			outcome, reason := "applied", "agentd_applied"
-			if control.Kind == "force_stop" {
+			stopNow := control.Kind == "stop" && control.RequestPayload != nil && control.RequestPayload.StopNow
+			operation := control.Kind
+			if stopNow {
+				if control.ExpectedGeneration != entry.harness.ID {
+					return ErrGeneration
+				}
+				operation = "force_stop"
+			}
+			if operation == "force_stop" {
 				reason = "owned_group_signalled_root_exited"
 			}
+			if control.Kind == "tier" && entry.usage != nil {
+				if err := entry.usage.flush(ctx); err != nil {
+					return err
+				}
+			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if entry.managedPolicy && control.Kind != "force_stop" {
+				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
+			if (entry.managedPolicy || control.Kind == "tier") && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -1457,6 +1649,8 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 					outcome, reason, err = "rejected", "setting_rejected", nil
 				case err != nil:
 					outcome, reason, err = "rejected", "outcome_unconfirmed", nil
+				case control.Kind == "tier":
+					reason = "tier_applied_safe_point"
 				case control.Kind == "effort":
 					reason = "setting_applied_next_turn"
 				case control.Kind == "model" || control.Kind == "rename":
@@ -1591,6 +1785,7 @@ func inboxMessageText(item HarnessDelivery) string {
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
 	}
@@ -1660,7 +1855,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	defer entry.controlMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if (entry.managedPolicy && !fromRecoveryQueue && !inbox) || (isSetting(req.Operation) && !entry.managedPolicy) {
+	if (entry.managedPolicy && !fromRecoveryQueue && !inbox) || (isSetting(req.Operation) && req.Operation != "tier" && !entry.managedPolicy) {
 		return Receipt{}, ErrUnsupported
 	}
 
@@ -1699,7 +1894,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
-		if !entry.managedPolicy {
+		if !entry.managedPolicy && req.Operation != "tier" {
 			return Receipt{}, ErrUnsupported
 		}
 		if entry.budgetStopReason() != "" {
@@ -1798,7 +1993,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		entry.mu.Lock()
 	}
 	if err != nil {
-		if inbox || (entry.managedPolicy && fromRecoveryQueue) {
+		if inbox || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
 			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
 		}
@@ -1904,15 +2099,32 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 			}
 		}
 		entry.mu.Unlock()
-		if err := s.api.HeartbeatHarness(ctx, session, phase); err != nil {
+		var pause *HarnessPause
+		var err error
+		beatStarted := time.Now()
+		if api, ok := s.api.(pauseHeartbeatAPI); ok {
+			pause, err = api.HeartbeatHarnessPause(ctx, session, phase)
+		} else {
+			err = s.api.HeartbeatHarness(ctx, session, phase)
+		}
+		if err != nil {
 			return err
 		}
 		entry.mu.Lock()
 		entry.heartbeatSeq = session.ActivitySequence
+		entry.pauseWakeAt = time.Time{}
+		if pause != nil && pause.WakeInMS > 0 && pause.WakeInMS <= 86400000 {
+			entry.pauseWakeAt = beatStarted.Add(time.Duration(pause.WakeInMS) * time.Millisecond)
+		}
 		for len(entry.metadataPending) > 0 && entry.metadataPending[0].seq <= change.seq {
 			entry.metadataPending = entry.metadataPending[1:]
 		}
 		entry.mu.Unlock()
+		if phase == "working" && pause != nil {
+			if err := s.deliverHarnessPause(ctx, entry, pause); err != nil {
+				return err
+			}
+		}
 		if change.seq == 0 {
 			return nil
 		}

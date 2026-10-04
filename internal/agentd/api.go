@@ -17,8 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -27,9 +29,11 @@ import (
 // Remote uses a scoped agent key through AEON's public HTTP contract.
 // NewRemote callers should pin the base URL to HTTPS or a trusted loopback.
 type Remote struct {
+	activityModes        map[string]string
 	Client               *client.Client
 	mu                   sync.RWMutex
 	daemonID, generation string
+	accountLinkProof     string
 }
 
 func NewRemote(baseURL, token string) *Remote {
@@ -202,6 +206,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
+		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(s.ID + "/advertised/" + s.Model + "/" + s.ReasoningEffort), Harness: harness, Model: s.Model, Effort: s.ReasoningEffort, Status: "advertised"}}
+		}
 	}
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
@@ -229,6 +236,11 @@ func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix str
 }
 
 func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
+	_, err := r.HeartbeatHarnessPause(ctx, s, phase)
+	return err
+}
+
+func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
 	sequence := s.ActivitySequence
 	if sequence == 0 {
 		sequence = 1
@@ -246,11 +258,39 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
+		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) && s.Harness != "" {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(s.ID + "/advertised/" + s.Model + "/" + s.ReasoningEffort), Harness: s.Harness, Model: s.Model, Effort: s.ReasoningEffort, Status: "advertised"}}
+		}
 	}
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
 	}
-	return r.harnessWorker(ctx, s, "/heartbeat", body, nil)
+	r.mu.RLock()
+	mode := r.activityModes[s.ID]
+	r.mu.RUnlock()
+	if mode != agentactivity.Off && s.ToolActivity != nil {
+		body["tool_activity"] = s.ToolActivity
+	}
+	if mode == agentactivity.Summary && s.Doing != "" {
+		if text, valid := agentactivity.CleanSummary(s.Doing); valid {
+			body["doing"] = text
+			body["doing_at"] = s.DoingAt
+		}
+	}
+	var result struct {
+		Mode  string        `json:"agent_activity_mode"`
+		Pause *HarnessPause `json:"pause"`
+	}
+	err := r.harnessWorker(ctx, s, "/heartbeat", body, &result)
+	if err == nil && agentactivity.Mode(result.Mode) {
+		r.mu.Lock()
+		if r.activityModes == nil {
+			r.activityModes = make(map[string]string)
+		}
+		r.activityModes[s.ID] = result.Mode
+		r.mu.Unlock()
+	}
+	return result.Pause, err
 }
 
 func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessControl, error) {
@@ -416,6 +456,16 @@ type ProbeStatusReporter interface {
 
 // ProbeStatus reports a probe and, when it failed, only its cause category.
 func (r *Remote) ProbeStatus(ctx context.Context, accountID, daemonID, generation string, status ProbeStatus) error {
+	// Keep historical server probe causes unchanged. Finer bounded reasons
+	// travel in lifecycle details, never with vendor output or identity.
+	if !status.OK {
+		switch status.Failure {
+		case ProbeAuthFailed:
+			status.Failure = ProbeAuthFailed
+		default:
+			status.Failure = ProbeUnavailable
+		}
+	}
 	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "available": status.OK}
 	if !status.OK && (status.Failure == ProbeAuthFailed || status.Failure == ProbeUnavailable) {
 		body["failure"] = status.Failure
@@ -457,4 +507,14 @@ func (r *Remote) RefuseVerification(ctx context.Context, run, daemon, generation
 	return r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(run)+"/claim", map[string]any{
 		"daemon_id": daemon, "daemon_generation": generation, "reservation_ids": []string{}, "verification_unavailable": reason,
 	}, nil)
+}
+
+// Unknown policy fails closed locally until the first accepted heartbeat.
+func (r *Remote) SessionActivityMode(id string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if mode := r.activityModes[id]; agentactivity.Mode(mode) {
+		return mode
+	}
+	return agentactivity.Off
 }

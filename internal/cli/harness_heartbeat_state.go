@@ -20,6 +20,10 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	ModelSent             bool                    `json:"model_sent,omitempty"`
+	SentModel             string                  `json:"sent_model,omitempty"`
+	SentEffort            string                  `json:"sent_effort,omitempty"`
+	ActivityMode          string                  `json:"agent_activity_mode,omitempty"`
 	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
 	AppliedModelSequence  int64                   `json:"applied_model_sequence,omitempty"`
@@ -58,6 +62,10 @@ type heartbeatDisk struct {
 	TerminalReason        string                  `json:"terminal_reason,omitempty"`
 	Closed                bool                    `json:"closed,omitempty"`
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
+
+	// The observation fence survives clearing RequestedModel and helper
+	// restarts. Keep the existing JSON key for compatibility with saved state.
+	RequestedModelBaseline *heartbeatModelBaseline `json:"requested_model_baseline,omitempty"`
 }
 
 // heartbeatCodexCursor is the Codex scan context that must survive between
@@ -105,10 +113,12 @@ type heartbeatPendingUsage struct {
 }
 
 type heartbeatSession struct {
-	id    string
-	lease string
-	disk  heartbeatDisk
-	hold  heartbeatHold
+	// pauseWakeAt is derived from a DB-clock hint and never persisted or used as signal authority.
+	pauseWakeAt time.Time
+	id          string
+	lease       string
+	disk        heartbeatDisk
+	hold        heartbeatHold
 	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
 	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
 	stopReason string
@@ -116,7 +126,7 @@ type heartbeatSession struct {
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock":
+	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
 		return true
 	default:
 		return false

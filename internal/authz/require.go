@@ -4,6 +4,8 @@ package authz
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -69,11 +71,9 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if !ok || pool == nil {
 		return ErrNoStore
 	}
-	effective, err := Load(ctx, pool, p, scope.ProjectID)
-	if err != nil {
-		return err
-	}
-	return permitEffective(p, permission, effective, scope)
+	return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+		return requireTx(ctx, tx, p, permission, scope)
+	})
 }
 
 func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
@@ -84,7 +84,10 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	if err != nil {
 		return err
 	}
-	return permitEffective(p, permission, effective, scope)
+	if err := permitEffective(p, permission, effective, scope); err != nil {
+		return err
+	}
+	return recordKeyScopeUseTx(ctx, tx, p, permission)
 }
 
 // RequireInProjects decides permission in each listed project separately; ""
@@ -107,6 +110,8 @@ func RequireInProjects(ctx context.Context, tx pgx.Tx, p tenant.Principal, permi
 
 // RequireTx makes a decision inside an existing db.InTenant transaction. It
 // is used by handlers whose resource lock and access check must be atomic.
+// A keyed agent must also be the principal in InTenant's context, so the key
+// usage fence is acquired at entry, before any handler resource locks.
 func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
 	return requireTx(ctx, tx, p, permission, scope)
 }
@@ -253,6 +258,17 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 		perms := []string{}
 		if builtin {
 			perms = builtinPermissions(key)
+			// Recurrence automation is an explicit agent grant, even for an
+			// agent bound to Owner/Admin. A custom role and key scope are required.
+			if p.Kind == tenant.Agent {
+				filtered := make([]string, 0, len(perms))
+				for _, permission := range perms {
+					if !contains(builtinAgentExclusions, permission) {
+						filtered = append(filtered, permission)
+					}
+				}
+				perms = filtered
+			}
 		} else if perm != nil {
 			perms = []string{*perm}
 		}
@@ -294,6 +310,31 @@ func (g grants) allows(permission, projectID string) bool {
 // the database again: permission in the workspace (projectID "") or in that
 // project, capped by an agent key's creator and scopes.
 type ProjectCheck func(permission, projectID string) bool
+
+// GrantedProjectIDsTx resolves a bounded set from the caller's bindings,
+// including linked identities and key ceilings, rather than from resource logs.
+// Callers handle workspace authority before requesting this project-only set.
+func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) ([]string, error) {
+	own, err := readGrants(ctx, tx, p)
+	if errors.Is(err, ErrForbidden) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	check, err := ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for id := range own.projects {
+		if check(permission, id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
 
 // ProjectsTx reads the caller's bindings (and its key creator's) once, inside
 // an existing db.InTenant transaction, for pages that decide per project for
@@ -347,15 +388,43 @@ func ProjectGrantable(key string) bool {
 	return false
 }
 
-// selfPermission names the workspace-only permissions a project role still
+// Built-in agent exclusions are shared with the key dialogs and browser mocks.
+// Custom roles may explicitly grant these permissions; person grants stay intact.
+//
+//go:embed builtin_agent_exclusions.json
+var builtinAgentExclusionsJSON []byte
+
+var builtinAgentExclusions = func() []string {
+	var definition struct {
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(builtinAgentExclusionsJSON, &definition); err != nil {
+		panic("invalid embedded built-in agent exclusions")
+	}
+	return definition.Permissions
+}()
+
+// Project self-service permissions are the workspace-only permissions a role
 // needs to use its projects: the caller's own profile and effective access,
 // and reading node kinds (tenant configuration every node view renders).
-func selfPermission(key string) bool {
-	switch key {
-	case "authz.read", "profile.read", "profile.write", "profile.portal_read", "profile.portal_write", "kinds.read":
-		return true
+// The key dialogs import the same definition; agent-grantability still comes
+// from the registry, so customer-portal permissions remain person-only.
+//
+//go:embed project_self_permissions.json
+var projectSelfPermissionsJSON []byte
+
+var projectSelfPermissions = func() []string {
+	var definition struct {
+		Permissions []string `json:"permissions"`
 	}
-	return false
+	if err := json.Unmarshal(projectSelfPermissionsJSON, &definition); err != nil {
+		panic("invalid embedded project self-service permissions")
+	}
+	return definition.Permissions
+}()
+
+func selfPermission(key string) bool {
+	return contains(projectSelfPermissions, key)
 }
 
 func intersect(grants, ceiling []string) []string {

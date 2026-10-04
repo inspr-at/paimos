@@ -68,7 +68,7 @@ func resolveHeartbeatUsage(o heartbeatOptions) (usageTarget, error) {
 		return usageTarget{}, nil
 	}
 	switch source {
-	case "claude", "codex", "cursor", "grok":
+	case "claude", "codex", "cursor", "grok", "gemini", "opencode":
 	default:
 		return usageTarget{}, usagef("invalid --usage-source")
 	}
@@ -96,7 +96,7 @@ func usageSourceOf(o heartbeatOptions) string {
 		return "claude"
 	}
 	switch o.Harness {
-	case "claude", "codex", "cursor", "grok":
+	case "claude", "codex", "cursor", "grok", "gemini", "opencode":
 		return o.Harness
 	default:
 		return ""
@@ -114,12 +114,12 @@ func locateUsageFile(o heartbeatOptions, source string) string {
 			return ""
 		}
 		return findClaudeTranscript(o.ClaudeProjects, id)
-	case "cursor":
+	case "cursor", "gemini", "opencode":
 		if o.StateDir == "" {
 			return ""
 		}
-		path := filepath.Join(o.StateDir, "cursor.jsonl")
-		if regularUsageFile("cursor", path) {
+		path := filepath.Join(o.StateDir, source+".jsonl")
+		if regularUsageFile(source, path) {
 			return path
 		}
 		return ""
@@ -147,6 +147,12 @@ func locateUsageFile(o heartbeatOptions, source string) string {
 // Discovery belongs to the registered generation, including after a helper
 // restart. Pin its first match so another session cannot inherit its cursor.
 func resolveSessionHeartbeatUsage(o heartbeatOptions, session *heartbeatSession) (usageTarget, error) {
+	return resolveSessionHeartbeatUsageWithBinding(o, session, true)
+}
+
+// Model observation previews a POST and must not save proposed request state
+// while discovering its source. Usage reporting binds the source after success.
+func resolveSessionHeartbeatUsageWithBinding(o heartbeatOptions, session *heartbeatSession, bind bool) (usageTarget, error) {
 	if session == nil || o.UsageFile != "" || o.Transcript != "" || o.UsageID != "" || validUUID(o.SourceSession) {
 		return resolveHeartbeatUsage(o)
 	}
@@ -167,7 +173,7 @@ func resolveSessionHeartbeatUsage(o heartbeatOptions, session *heartbeatSession)
 		return resolveHeartbeatUsage(o)
 	}
 	target, err := resolveHeartbeatUsage(o)
-	if err == nil && target.Path != "" {
+	if bind && err == nil && target.Path != "" {
 		session.disk.UsageSource, session.disk.UsagePath = source, target.Path
 		if err = saveHeartbeatSession(session); err != nil {
 			return usageTarget{}, err

@@ -4,6 +4,7 @@
 package agentsecurity
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -31,6 +32,20 @@ func TestUnsignedDaemonCannotAccessKeychainOrEnclave(t *testing.T) {
 	}
 }
 
+func TestCancelledEnclaveOperationStopsBeforeNativeAccess(t *testing.T) {
+	// A pre-cancelled caller must never reach Security.framework or a Touch ID
+	// prompt. The unsigned fixture would otherwise return ErrDenied.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	signer := DefaultSigner()
+	if public, err := signer.Create(ctx, "cancelled-fixture"); public != "" || !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled creation reached native access")
+	}
+	if proof, err := signer.Sign(ctx, "cancelled-fixture", make([]byte, 32), "Allow watching the conversation codex session PID 40 on Fixture Mac"); proof != "" || !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled signing reached native access")
+	}
+}
+
 func TestEnclaveCreateRefusesAnExistingTag(t *testing.T) {
 	if got := enclaveCreateDisposition(0); got != -25299 {
 		t.Fatalf("existing key disposition %d", got)
@@ -40,6 +55,13 @@ func TestEnclaveCreateRefusesAnExistingTag(t *testing.T) {
 	}
 	if got := enclaveCreateDisposition(-25299); got != -25299 {
 		t.Fatalf("duplicate status changed to %d", got)
+	}
+	// A denied or unreadable item must not become an absent key, which would
+	// let setup proceed with a fresh key or downgrade to Aeon approval.
+	for _, status := range []int{-25293, -25308, -50} {
+		if got := enclaveCreateDisposition(status); got != status {
+			t.Fatalf("lookup failure %d changed to %d", status, got)
+		}
 	}
 }
 

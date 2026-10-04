@@ -76,13 +76,20 @@ dc config --quiet
 dc pull
 dc up -d --wait --wait-timeout 180
 curl --fail --silent --show-error http://127.0.0.1:8080/api/health
+curl --fail --silent --show-error http://127.0.0.1:8080/api/ready
 ```
 
-If you changed `AEON_HTTP_PORT`, use that port in the health request. The expected
-body is `{"status":"ok","db":"ok"}`. The server applies embedded database
-migrations automatically before listening. Postgres initialization creates the
-`aeon` database, a non-superuser `aeon` login, and the vector extension on the
-first start of an empty database volume. It does not rerun for an existing volume.
+If you changed `AEON_HTTP_PORT`, use that port in both requests. The expected
+health body is `{"status":"ok","db":"ok"}`; readiness returns
+`{"status":"ready"}`. Compose probes `/api/ready`, which returns HTTP 503 when
+the database cannot be reached or the app is not accepting requests. `/api/health`
+is a liveness report: it returns HTTP 200 even when its `db` field is `down`.
+The server applies embedded database migrations automatically before listening.
+Postgres initialization creates the `aeon` database, a non-superuser `aeon` login,
+and the vector extension on the first start of an empty database volume. It does
+not rerun for an existing volume.
+The Postgres healthcheck requires TCP acceptance, a query against the `aeon`
+database, and the installed `vector` extension.
 
 Preparation generates four independent 32-byte random hex secrets without
 printing them. `db-super` is for Postgres initialization and maintenance;
@@ -155,6 +162,19 @@ dc start aeon
 Check every command's exit status, and record the current image digest and configuration with the backup.
 Periodically restore into a separate recovery host to verify the backup.
 
+`paimos files verify --tenant SLUG` checks the tenant's shared blob store:
+attachments (including soft-deleted/history references), avatars and their undo
+history, confirmation receipts, and immutable quote profile assets used by
+frozen versions. `paimos files gc --tenant SLUG` is a dry run; `--apply` deletes
+only unreferenced files at least seven days old. Writers and cleanup serialize
+on the same tenant/hash database lock through reference commit or file unlink.
+Multi-file transactions reserve their complete blob set in tenant/hash order
+before publishing files or appending events, including all profiles in a
+showcase apply. The storage guard rejects new out-of-order or post-event locks.
+Upgrade every writer and operator CLI before using cleanup: older binaries do
+not participate in this protocol. Verify reports pre-existing missing or corrupt
+files; cleanup does not repair them.
+
 Before upgrading, read the target release notes, take a verified backup, and
 record the old pinned image. Update `AEON_IMAGE` to the new explicit version or
 digest, then run `dc pull aeon` and `dc up -d --no-deps --wait --wait-timeout 180
@@ -182,10 +202,21 @@ the host files directory is not writable by UID 65532. If health succeeds but
 sign-in fails, check issuer discovery, client ID, redirect URI, bootstrap email,
 and the externally visible public URL. Health does not test OIDC authentication.
 
+If first-run initialization fails, restarting Postgres can leave it accepting
+connections against a partially initialized volume. The healthcheck remains
+unhealthy if the `aeon` database or `vector` extension is missing. Fix the cause
+reported by initialization, stop the stack, and preserve the failed volume for
+inspection. Recreate the database volume only after confirming it contains no
+data to retain, then start against the fresh volume so initialization runs again.
+For an installation with existing data, use the verified backup/recovery procedure
+above instead of discarding its volume.
+
 The **Self-hosting compose** CI workflow boots this exact Compose stack in prod
 mode with a discovery-only mock OIDC container and the pinned published image.
-It checks database health, embedded web, the authorization-code/PKCE redirect,
-the non-superuser role, pgvector, UID/GID 65532, and files surviving app recreation
+It checks database health, rejection of missing database/extension states,
+app health during a database outage and recovery, embedded web, the
+authorization-code/PKCE redirect, the non-superuser role, pgvector, UID/GID 65532,
+and files surviving app recreation
 and a database restart. It runs for relevant guide/Compose/Dockerfile changes
 and weekly. The mock cannot issue tokens; full authentication remains covered
 by the auth package tests and must be verified with your own provider during

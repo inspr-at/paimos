@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/client"
@@ -90,6 +91,7 @@ type localConsentResult struct {
 }
 
 type AttachLocalRequest struct {
+	Doing      string `json:"doing,omitempty"`
 	Operation  string `json:"operation"`
 	ID         string `json:"id,omitempty"`
 	Digest     string `json:"request_digest,omitempty"`
@@ -101,15 +103,16 @@ type AttachLocalRequest struct {
 	StatusOnly bool   `json:"status_only,omitempty"`
 }
 type AttachLocalView struct {
-	ConsentMode string               `json:"consent_mode,omitempty"`
-	Reason      string               `json:"reason,omitempty"`
-	ID          string               `json:"id"`
-	Origin      string               `json:"origin"`
-	Snapshot    attachwatch.Snapshot `json:"snapshot"`
-	Digest      string               `json:"request_digest"`
-	State       string               `json:"state"`
-	Code        string               `json:"user_code,omitempty"`
-	SessionID   *string              `json:"session_id,omitempty"`
+	AgentActivityMode string               `json:"agent_activity_mode,omitempty"`
+	ConsentMode       string               `json:"consent_mode,omitempty"`
+	Reason            string               `json:"reason,omitempty"`
+	ID                string               `json:"id"`
+	Origin            string               `json:"origin"`
+	Snapshot          attachwatch.Snapshot `json:"snapshot"`
+	Digest            string               `json:"request_digest"`
+	State             string               `json:"state"`
+	Code              string               `json:"user_code,omitempty"`
+	SessionID         *string              `json:"session_id,omitempty"`
 	// ExpiresAt is the server's expiry of a request that waits for approval; the
 	// helper uses it to say how long the code stays valid.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
@@ -129,7 +132,7 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	return &AttachManager{cfg: c, observe: observeAttachProcess, ancestry: observeAttachProcessIdentity, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
-	v := AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
+	v := AttachLocalView{AgentActivityMode: s.view.AgentActivityMode, ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
 	if !s.view.ExpiresAt.IsZero() {
 		expires := s.view.ExpiresAt
 		v.ExpiresAt = &expires
@@ -336,10 +339,23 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	s.sequence++
 	req.Sequence = s.sequence
 	if s.view.State == "active" && s.tail != nil {
+		s.tail.activityEnabled = agentactivity.Mode(s.view.AgentActivityMode) && s.view.AgentActivityMode != agentactivity.Off
 		req.Text, err = s.tail.next()
 		if err != nil {
 			m.end(ctx, in.ID, s)
 			return AttachLocalView{}, err
+		}
+	}
+	if s.view.State == "active" {
+		if s.tail != nil {
+			req.ToolActivity = s.tail.activity
+		}
+		if s.view.AgentActivityMode == agentactivity.Summary && in.Doing != "" {
+			text, valid := agentactivity.CleanSummary(in.Doing)
+			if !valid {
+				return AttachLocalView{}, errors.New("invalid public activity summary")
+			}
+			req.Doing = &text
 		}
 	}
 	observed, err = m.observe(s.snapshot.Process.PID)
@@ -358,12 +374,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	req.Text = ""
 	if err != nil {
 		m.end(ctx, in.ID, s)
-		refusal := attachRefusal(err)
-		var detail *AttachLocalError
-		if errors.As(refusal, &detail) {
-			return AttachLocalView{}, refusal
-		}
-		return AttachLocalView{}, errors.New("watch unreachable or revoked; attach again")
+		return AttachLocalView{}, attachRefusal(err)
 	}
 	if view.Digest != s.snapshot.Digest() || view.RequestID != in.ID || view.Snapshot != s.snapshot {
 		m.end(ctx, in.ID, s)
@@ -411,27 +422,6 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	s.view = view
 	s.touched = time.Now()
 	return m.localView(in.ID, s), nil
-}
-
-// Only the authenticated kernel-checked local helper gets these fixed next
-// steps. Never reflect arbitrary server messages or identifiers into a terminal.
-func attachRefusal(err error) error {
-	var status *client.StatusError
-	if errors.As(err, &status) {
-		switch {
-		case status.Status == http.StatusTooManyRequests && status.Message == attachwatch.LiveLimitMessage:
-			return &AttachLocalError{Code: "attach_live_limit", Hint: fmt.Sprintf("%d attach requests already wait for approval in Aeon; approve or decline one there or let one expire, then run attach again", attachwatch.LiveMax)}
-		case status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden && status.AttachRefusal == attachwatch.RefusalPairing:
-			return &AttachLocalError{Code: "attach_pairing_revoked", Hint: "This computer's pairing no longer authenticates. Check paired computers in Aeon; if revoked, pair this computer again, then run attach again."}
-		case status.Status == http.StatusConflict && status.AttachRefusal == attachwatch.RefusalVersion:
-			return &AttachLocalError{Code: "attach_version_mismatch", Hint: "Aeon and agentd use incompatible attach versions. Update Aeon and paimos-agentd, restart agentd, then run attach again; existing pairing keys remain valid."}
-		case (status.Status == http.StatusForbidden || status.Status == http.StatusConflict) && status.AttachRefusal == attachwatch.RefusalTicket:
-			return &AttachLocalError{Code: "attach_ticket_not_visible", Hint: "The ticket or its project is unavailable to the pairing owner. Check the ticket belongs to the selected project and the owner has project access, then run attach again."}
-		case status.Status == http.StatusGone && status.AttachRefusal == attachwatch.RefusalExpired:
-			return &AttachLocalError{Code: "attach_code_expired", Hint: "The attach code expired before activation. Run attach again and approve the new code in Aeon."}
-		}
-	}
-	return errors.New("paired instance refused attach")
 }
 
 func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token string) {

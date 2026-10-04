@@ -176,7 +176,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       </button>
       <button
         ref="filterButton" type="button" class="btn sm facet-btn more-btn" :class="{ on: secondaryActive }" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
-        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
+        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, human check, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
       >
         <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
         <span v-if="secondaryActive" class="facet-count mono">{{ secondaryActive }}</span>
@@ -211,7 +211,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
     </button>
 
     <button v-if="!graph" type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
-    <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" @click="emit('openSheet')">
+    <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
 

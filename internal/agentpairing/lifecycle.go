@@ -19,8 +19,25 @@ import (
 // Lock is acquired before work-order/run/account locks by every paired
 // dispatch, claim, probe, settlement and lifecycle mutation. This serializes
 // revocation with in-flight credentials that passed the HTTP auth boundary.
+// Keep this primitive pairing-only: run polling and telemetry do not need tree.
 func Lock(ctx context.Context, tx pgx.Tx) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+
+// LockMutation enters an account/lifecycle transaction in the shipped order:
+// pairing, tree, tenant, then resource rows. Take the tree before the new tenant
+// authorization fence, even if this particular operation does not need tree;
+// callers may later write tree rows. Call only at transaction entry, before
+// resource locks. NO KEY UPDATE permits FK checks while RequireTx sees live grants.
+func LockMutation(ctx context.Context, tx pgx.Tx) error {
+	if err := Lock(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`)
 	return err
 }
 
@@ -212,10 +229,15 @@ func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_requests SET state='revoked' WHERE (computer_id=$1 OR details->>'existing_computer_id'=$1::text) AND state IN ('pending','approved','redeemed')`, id); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return cancelDisconnectedAccountLinks(ctx, tx, id)
 }
 func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
+	if err := cancelDisconnectedAccountLinks(ctx, tx, computer); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
   AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting'))`, computer)
 	if err != nil {
@@ -254,7 +276,7 @@ func disconnectRequest(ctx context.Context, tx pgx.Tx, rec record) error {
 	if rec.Details.ExistingComputerID == "" {
 		return revokeComputer(ctx, tx, *rec.ComputerID)
 	}
-	return nil
+	return cancelDisconnectedAccountLinks(ctx, tx, *rec.ComputerID)
 }
 
 // reportProgress appends agent_pairing.reported for the person who approved
@@ -429,11 +451,12 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 		if agentsetup.KnownHarnessState(detail.State) {
 			statuses[harness] = detail.State
 		}
+		detail = detail.WithProbeDetail(harness, report.ReasonDetail)
 		// Never persist client-supplied commands, paths or diagnostics: the
 		// fix is derived from the harness and reason code. Attention on a
-		// non-ready report is ignored. A ready report keeps only enrolled
-		// accounts that are a proper subset and still need a fix.
-		if detail.State == "ready" {
+		// blocked/login_required report may name every enrolled account;
+		// a ready report requires a proper subset.
+		if detail.State == "ready" || detail.State == "blocked" || detail.State == "login_required" {
 			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
 			detail.Attention = block.Accounts
 			detail.AttentionCount = block.Count

@@ -74,6 +74,7 @@ func TestTicketBenefitMigrationPreservesHistoryAndCustomSchema(t *testing.T) {
 				"route_role_confirmed", "area_confirmed",
 				"complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed",
 				"roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at",
+				"human_check_completed",
 			}
 			if len(parsed.Properties) != len(want) || parsed.Additional || custom["type"] != "string" {
 				t.Fatalf("custom schema lost: %s", schema)

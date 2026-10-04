@@ -61,6 +61,7 @@ export function modelProvider(model: string): ModelProvider {
 }
 
 export interface SessionExecution {
+  kind: 'ai' | 'media' | 'terminal'
   model: string
   effort: string
   modelLine: string
@@ -72,12 +73,18 @@ export interface SessionExecution {
 
 // Unknown fields are omitted, never filled with "unknown" words.
 export function sessionExecution(view: SessionView): SessionExecution {
+  const harness = view.session.harness
+  if (harness === 'media' || harness === 'terminal') {
+    const label = (harness === 'media' ? view.session.generator : view.session.command)?.trim() ?? ''
+    return { kind: harness, model: label, effort: '', modelLine: label, account: '', accountLine: harness === 'media' ? 'Media' : 'Terminal', provider: 'unknown', providerLabel: harness === 'media' ? 'Media' : 'Terminal' }
+  }
   const reported = view.session.model?.trim() ?? ''
   const model = reported || view.model?.trim() || ''
   const effort = model ? (view.session.reasoning_effort?.trim() || '') : ''
   const account = view.session.account_label?.trim() || view.account?.trim() || ''
   const provider = modelProvider(model)
   return {
+    kind: 'ai',
     model,
     effort,
     modelLine: [model, effort].filter(Boolean).join(' · '),

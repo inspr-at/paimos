@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -19,9 +20,14 @@ func (rt *runtime) harnessRun() *Command {
 	var role string
 	return &Command{Name: "run", Short: "Register a short job, heartbeat it, and stop its session on exit", Use: "harness run --label LABEL --ticket KEY --role reviewer -- <command> [args...]", minArgs: 1, maxArgs: -1,
 		addFlags: func(fs *flagSet) {
+			fs.string(&o.LinkAccountID, "account-id", 0, "optional enrolled account UUID for the one-code ownership prompt")
+			fs.string(&o.LinkSetupRoot, "setup-root", 0, "private pairing state for account linking")
+			fs.string(&o.LinkSocket, "socket", 0, "owner-only daemon socket for account linking")
 			fs.string(&o.Project, "project", 'p', "project key (defaults to the ticket prefix)")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name (defaults to the caller)")
 			fs.string(&o.Harness, "harness", 0, "adapter family (defaults to the command name)")
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Label, "label", 0, "public session label")
 			fs.string(&o.Ticket, "ticket", 0, "ticket key")
 			fs.string(&role, "role", 0, "reviewer, fixer, worker or coordinator")
@@ -97,6 +103,7 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	if !ownedprocess.TrackingSupported() {
 		return errors.New("harness run requires process ownership support on this platform")
 	}
+	o.OwnedStop = true
 	o.applyRuntimeDefaults()
 	// Registration and private persistence precede execution: even a command
 	// that exits immediately has one durable generation and one stop.
@@ -115,6 +122,8 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	if ctx.Err() != nil {
 		return errors.Join(&exitError{code: 143}, finish())
 	}
+	stopLink := rt.startAccountLink(ctx, o)
+	defer stopLink()
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = rt.stdin, rt.stdout, rt.stderr
 	if !ownedprocess.Configure(cmd) {
@@ -137,10 +146,23 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 			done <- life.Wait()
 		}
 	}()
+	stopControls := make(chan string, 1)
 	beatCtx, cancelBeat := context.WithCancel(context.WithoutCancel(ctx))
 	beatDone := make(chan error, 1)
 	go func() {
-		beatDone <- rt.heartbeatLoop(beatCtx, o, heartbeatDeps{alive: func(int) bool { return true }}, &session)
+		beatDone <- rt.heartbeatLoop(beatCtx, o, heartbeatDeps{alive: func(int) bool { return true }, stopOwned: func(ctx context.Context, pause *harness.Pause, deadline time.Time) error {
+			if !verified || !validUUID(pause.StopControlID) {
+				return errors.New("owned stop unavailable")
+			}
+			if err := life.SignalBefore(ctx, true, deadline); err != nil {
+				return err
+			}
+			select {
+			case stopControls <- pause.StopControlID:
+			default:
+			}
+			return nil
+		}}, &session)
 	}()
 	var childErr error
 	select {
@@ -159,9 +181,22 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	// The stop names how the job ended: a clean exit finishes it, any other exit
 	// fails it, and an interrupt is a plain stop (AEON-437). Set before the loop
 	// that closes the session sees the cancellation.
-	session.stopReason = jobStopReason(ctx.Err() != nil, childErr)
 	cancelBeat()
 	beatErr := <-beatDone
+	requestedStop := false
+	select {
+	case id := <-stopControls:
+		requestedStop = true
+		completeCtx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
+		completeErr := rt.harnessDoCtx(completeCtx, "POST", harnessPath(session.disk.ProjectID, session.id)+"/controls/"+id+"/complete", session.lease, map[string]string{"outcome": "applied", "reason": "owned_group_signalled_root_exited"}, nil)
+		cancel()
+		if completeErr != nil {
+			beatErr = errors.Join(beatErr, completeErr)
+		}
+	default:
+	}
+	session.stopReason = jobStopReason(ctx.Err() != nil || requestedStop, childErr)
+	beatErr = errors.Join(beatErr, finish())
 	if beatErr != nil {
 		fmt.Fprintf(rt.stderr, "harness: session cleanup needs recovery with run-heartbeat --state-dir %s\n", o.StateDir)
 	}

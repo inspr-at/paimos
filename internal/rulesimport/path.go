@@ -53,7 +53,7 @@ func Prohibited(path string) error {
 func componentProhibited(part string, blockHarness bool) bool {
 	low := strings.ToLower(part)
 	switch low {
-	case ".inspr", ".ssh", ".aws", ".gnupg", ".paimos", ".aeon", ".config", ".cursor", ".local", ".cache", ".azure", ".kube", ".docker", ".grok", ".pi", "secrets", "secret", "credentials", "credentials.json", "auth", "auth.json", "config", "config.json", "transcripts", "transcript", "sessions", "keychains":
+	case ".inspr", ".ssh", ".aws", ".gnupg", ".paimos", ".aeon", ".config", ".cursor", ".local", ".cache", ".azure", ".kube", ".docker", ".grok", ".pi", ".gemini", ".opencode", "secrets", "secret", "credentials", "credentials.json", "auth", "auth.json", "config", "config.json", "transcripts", "transcript", "sessions", "keychains":
 		return true
 	case ".codex", ".claude":
 		return blockHarness

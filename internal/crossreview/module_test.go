@@ -145,8 +145,13 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	if v.Status != "queued" || v.ReviewerFamily == nil || *v.ReviewerFamily != "anthropic" || v.GateOpen || v.RunID == nil {
 		t.Fatalf("invalid queued review: %+v", v)
 	}
-	if len(v.Ladder) != 3 || !strings.Contains(strings.Join(v.Ladder[0].SkipReasons, ","), "author family") || len(v.Ladder[1].SkipReasons) == 0 {
+	if len(v.Ladder) != 5 || !strings.Contains(strings.Join(v.Ladder[0].SkipReasons, ","), "author family") || len(v.Ladder[1].SkipReasons) == 0 || v.Ladder[2].ProfileID != f.profile || !v.Ladder[2].Selected {
 		t.Fatal("fallback reasons were lost")
+	}
+	for _, candidate := range v.Ladder[3:] {
+		if candidate.Selected || len(candidate.SkipReasons) == 0 {
+			t.Fatal("unqualified new fallback selected", candidate)
+		}
 	}
 	var replay Review
 	f.call(t, f.person, "POST", path, in, 201, &replay)

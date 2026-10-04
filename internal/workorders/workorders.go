@@ -233,16 +233,33 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 // Create preserves the ordinary node, criteria and event path for typed orders.
 // The caller owns authorization and the tenant transaction.
 func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) (Order, error) {
+	o, changes, err := CreateDeferred(ctx, tx, p, in)
+	if err != nil {
+		return Order{}, err
+	}
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return Order{}, err
+		}
+	}
+	return o, nil
+}
+
+// CreateDeferred prepares the ordinary order and node snapshots without taking
+// the event counter. Composite writers append the returned changes only after
+// all node, queue and run locks have been acquired. The caller owns the tenant
+// transaction, authorization and tree lock; rollback discards the entire unit.
+func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) (Order, []events.Change, error) {
 	if strings.TrimSpace(in.Title) == "" || len(in.Criteria) == 0 || !validBudget(in.MaxCost, in.MaxDuration) || !validID(in.Parent) || !validID(in.Assignee) {
-		return Order{}, Fail(400, "title, criteria, valid budget and IDs required")
+		return Order{}, nil, Fail(400, "title, criteria, valid budget and IDs required")
 	}
 	for _, c := range in.Criteria {
 		if strings.TrimSpace(c) == "" {
-			return Order{}, Fail(400, "empty criterion")
+			return Order{}, nil, Fail(400, "empty criterion")
 		}
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
-		return Order{}, err
+		return Order{}, nil, err
 	}
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
@@ -250,29 +267,29 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 	 (SELECT coalesce(max(position),0)+1024 FROM nodes WHERE parent_id IS NOT DISTINCT FROM $4::uuid AND deleted_at IS NULL)
 	 FROM node_kinds k WHERE k.slug='work_order' RETURNING id::text`, p.TenantID, in.Title, in.Body, in.Parent).Scan(&id)
 	if err != nil {
-		return Order{}, err
+		return Order{}, nil, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,max_cost_micros,max_duration_seconds) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, id, p.ID, in.Assignee, in.MaxCost, in.MaxDuration); err != nil {
-		return Order{}, err
+		return Order{}, nil, err
 	}
 	for i, c := range in.Criteria {
 		if _, err = tx.Exec(ctx, `INSERT INTO work_criteria(tenant_id,work_order_id,position,description) VALUES($1,$2,$3,$4)`, p.TenantID, id, i, c); err != nil {
-			return Order{}, err
+			return Order{}, nil, err
 		}
 	}
 	o, err := Load(ctx, tx, id, false)
 	if err != nil {
-		return Order{}, err
+		return Order{}, nil, err
 	}
 	// Preserve the created node snapshot as well as its typed work-order detail.
 	var node json.RawMessage
 	if err = tx.QueryRow(ctx, `SELECT to_jsonb(n)-'tenant_id' FROM nodes n WHERE id=$1`, id).Scan(&node); err != nil {
-		return Order{}, err
+		return Order{}, nil, err
 	}
-	if err = Record(ctx, tx, p, id, "node.created", nil, node); err != nil {
-		return Order{}, err
-	}
-	return o, Record(ctx, tx, p, id, "work_order.created", nil, o)
+	return o, []events.Change{
+		{NodeID: &id, Type: "node.created", After: node},
+		{NodeID: &id, Type: "work_order.created", After: o},
+	}, nil
 }
 
 func (m *module) patch(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

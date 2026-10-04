@@ -9,7 +9,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -17,11 +19,13 @@ import (
 )
 
 const (
-	Codex  = "codex"
-	Claude = "claude"
-	Pi     = "pi"
-	Cursor = "cursor"
-	Grok   = "grok"
+	Codex    = "codex"
+	Claude   = "claude"
+	Pi       = "pi"
+	Cursor   = "cursor"
+	Grok     = "grok"
+	Gemini   = "gemini"
+	OpenCode = "opencode"
 )
 
 var (
@@ -86,19 +90,27 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
-	Activity         string                 `json:"-"`
-	Ownership        *ownedprocess.Identity `json:"-"`
-	ActivitySequence int64                  `json:"-"`
-	ID               string                 `json:"id"`
-	ProjectID        string                 `json:"project_id"`
-	Lease            string                 `json:"-"`
-	Harness          string                 `json:"-"`
-	Model            string                 `json:"model,omitempty"`
-	ReasoningEffort  string                 `json:"reasoning_effort,omitempty"`
-	AccountLabel     string                 `json:"account_label,omitempty"`
+	ServiceTier      string                  `json:"service_tier,omitempty"`
+	Doing            string                  `json:"-"`
+	DoingAt          time.Time               `json:"-"`
+	ToolActivity     *agentactivity.Activity `json:"-"`
+	Activity         string                  `json:"-"`
+	Ownership        *ownedprocess.Identity  `json:"-"`
+	ActivitySequence int64                   `json:"-"`
+	ID               string                  `json:"id"`
+	ProjectID        string                  `json:"project_id"`
+	Lease            string                  `json:"-"`
+	Harness          string                  `json:"-"`
+	Model            string                  `json:"model,omitempty"`
+	ReasoningEffort  string                  `json:"reasoning_effort,omitempty"`
+	AccountLabel     string                  `json:"account_label,omitempty"`
 }
 
 type HarnessControl struct {
+	ExpectedGeneration string `json:"expected_generation"`
+	RequestPayload     *struct {
+		StopNow bool `json:"stop_now"`
+	} `json:"request_payload,omitempty"`
 	// deadline is local, monotonic, and never serialized or persisted.
 	deadline          time.Time
 	ExpiresInMS       int64                  `json:"expires_in_ms"`
@@ -139,6 +151,7 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	ServiceTier            string                  `json:"service_tier,omitempty"`
 	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow            string                  `json:"limit_window,omitempty"`
 	LimitResetsAt          *time.Time              `json:"limit_resets_at,omitempty"`
@@ -217,6 +230,11 @@ type API interface {
 }
 
 type StartRequest struct {
+	ServiceTier string
+	// Lifetime is the accepted run budget rooted in the supervisor lifetime.
+	// The Start call's context only covers dispatch/startup and may end as soon
+	// as polling finishes. Adapters without a supervisor use the caller context.
+	Lifetime      context.Context
 	ManagedPolicy bool
 	Capabilities  []string // Exact capabilities advertised for this session.
 	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
@@ -243,7 +261,11 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
-	VendorLimit *capacity.LimitHit
+	ModelReports []modelreport.Observation
+	HarnessTier  string
+	Doing        string
+	ToolActivity *agentactivity.Activity
+	VendorLimit  *capacity.LimitHit
 
 	Activity               string // busy or idle, independent of the run process lifetime.
 	Capacity               []capacity.Reading
@@ -299,20 +321,28 @@ type AccountProber interface {
 	Probe(context.Context, string) bool
 }
 
-// ProbeStatus is an account probe with its cause. Failure is ProbeAuthFailed
-// only when the vendor's own status command ran and said this account is
-// signed out or signed in as someone else; errors, timeouts and unreadable
-// output are ProbeUnavailable. Vendor output never leaves the daemon.
+// ProbeStatus is an account probe with its bounded cause. Only ProbeAuthFailed
+// and ProbeIdentityMismatch describe confirmed authentication failures. Local
+// measurement failures never imply sign-out. The historical account-probe API
+// retains auth_failed/unavailable; lifecycle details can retain finer causes.
+// Vendor identity and output never leave the daemon.
 type ProbeStatus struct {
 	BillingMode       string
 	OpenRouterCredits *openrouter.Credits
 	OK                bool
 	Failure           string
+	ReasonDetail      string // Fixed publishable phrase; never raw vendor output.
 }
 
 const (
-	ProbeAuthFailed  = "auth_failed"
-	ProbeUnavailable = "unavailable"
+	ProbeAuthFailed       = "auth_failed"
+	ProbeUnavailable      = "unavailable"
+	ProbeIdentityMismatch = "identity_mismatch"
+	ProbeTimeout          = "timeout"
+	ProbeProtocol         = "protocol"
+	ProbeLaunchFailed     = "launch_failed"
+	// ProbeUnverified is local evidence, not a confirmed vendor sign-out.
+	ProbeUnverified = "sign_in_unverified"
 )
 
 // AccountStatusProber is the optional richer prober; adapters without it

@@ -15,6 +15,7 @@ const TITLE = 'Connect Hetzner Cloud for managed provisioning'
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
 async function open(page: Page, data = fixtures()) {
   const history = releaseHistory()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
   const calls = await mockWork(page, data)
   await mockReleases(page, history)
   await page.goto(`/releases/${history.releases[1].version}`)
@@ -40,7 +41,7 @@ test('a ticket key opens the ticket beside the history, with one lookup for the 
   await expect(chip).toHaveAttribute('aria-current', 'true')
   // The history stays: same address, the list and the release beside the ticket.
   await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
-  await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   const detail = (await sheet(page).locator('.detail').boundingBox())!
   const aside = (await panel(page).boundingBox())!
   expect(aside.x).toBeGreaterThanOrEqual(detail.x + detail.width)
@@ -91,7 +92,7 @@ test('the keyboard opens the panel, Esc closes it and returns focus to the key',
   await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
   await expect(panel(page)).toBeFocused()
   // The history's own keys stay out of the panel: j does not move the release.
-  const selected = sheet(page).getByRole('option', { selected: true })
+  const selected = sheet(page).getByRole('row', { selected: true })
   const before = await selected.getAttribute('id')
   await page.keyboard.press('j')
   await expect(selected).toHaveAttribute('id', before!)
@@ -144,7 +145,7 @@ test('another person or workspace starts without the earlier answers', async ({ 
   await page.route('**/api/nodes/lookup**', route => { lookups++; return route.fulfill({ json: { items: [] } }) })
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
   // Any navigation refreshes the session: step to the next release and back, one settled step at a time.
-  const rows = sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+  const rows = sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
   await rows.nth(2).click()
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   await rows.nth(1).click()
@@ -179,7 +180,7 @@ test('a ticket still on its way when the person or workspace changes never shows
   // Now someone else, in another workspace that has no such ticket; a navigation refreshes the session.
   await answerNothing(page)
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
-  await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').nth(2).click()
+  await sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').nth(2).click()
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
   // The held answer lands after this; it must not show.

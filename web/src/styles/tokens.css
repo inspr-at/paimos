@@ -10,6 +10,8 @@
   --ink-2: #4c6163;
   --ink-3: #5f7274;
   --mark-measured: rgba(32, 60, 61, 0.55);
+  --eff-line: rgba(32, 60, 61, 0.42); --eff-plan: rgba(32, 60, 61, 0.42);
+  --eff-1: #8a9a9b; --eff-2: #4f9f99; --eff-3: #0e6f6c; --eff-4: #c98a1f; --eff-5: #b0531e;
   --teal: #0e6f6c;
   --teal-ink: #0b5c59;
   --aqua: #a4e5df;
@@ -128,12 +130,15 @@
   --light-wash: rgba(255, 255, 255, 0.9);
   --aqua-wash: rgba(199, 239, 236, 0.6);
   --gold-wash: rgba(232, 192, 122, 0.12);
+  --level-default: #8a9a9b; --level-person: #0e6f6c; --level-project: #d69b31;
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
   --canvas: #102327;
   --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
+    --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);
+    --eff-1: #8fa8a7; --eff-2: #6cc4bb; --eff-3: #a4e5df; --eff-4: #e2b45a; --eff-5: #ef8f5a;
   --teal: #a4e5df; --teal-ink: #bff0eb;
   --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
   --gold-ink: #e2b45a; --ok: #7fd1a8; --warn: #e2b45a; --warn-ink: #e2b45a; --danger: #ef9d95;
@@ -170,6 +175,7 @@
   --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
   --focus-ring: 0 0 0 2px rgba(164, 229, 223, 0.75), 0 0 16px rgba(164, 229, 223, 0.35);
   --button-ink: #102327; --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+  --level-default: #8fa5a4; --level-person: #a4e5df; --level-project: #e2b45a;
   color-scheme: dark;
 }
 
@@ -177,6 +183,8 @@
   :root:not([data-theme="light"]) {
     --canvas: #102327;
     --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
+    --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);
+    --eff-1: #8fa8a7; --eff-2: #6cc4bb; --eff-3: #a4e5df; --eff-4: #e2b45a; --eff-5: #ef8f5a;
     --teal: #a4e5df; --teal-ink: #bff0eb;
     --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
     --gold-ink: #e2b45a; --ok: #7fd1a8; --warn: #e2b45a; --warn-ink: #e2b45a; --danger: #ef9d95;
@@ -213,6 +221,7 @@
     --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
     --focus-ring: 0 0 0 2px rgba(164, 229, 223, 0.75), 0 0 16px rgba(164, 229, 223, 0.35);
     --button-ink: #102327; --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+    --level-default: #8fa5a4; --level-person: #a4e5df; --level-project: #e2b45a;
     color-scheme: dark;
   }
 }
@@ -222,3 +231,6 @@
 @media (max-width: 600px) { :root { --footer-h: 44px; } }
 /* Registered, so the phone footer can fold away smoothly on scroll. */
 @property --footer-h { syntax: '<length>'; inherits: true; initial-value: 40px; }
+
+/* AEON-522: full amber tint and hairline for capacity/blocker waits. */
+:root { --queue-wait-ink: color-mix(in srgb, var(--warn-ink) 75%, var(--ink) 25%); --queue-wait-bg: color-mix(in srgb, var(--gold) 12%, transparent); --queue-wait-line: color-mix(in srgb, var(--gold) 42%, transparent); }

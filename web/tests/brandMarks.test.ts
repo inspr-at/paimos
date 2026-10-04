@@ -9,6 +9,8 @@ test('known harnesses and providers use distinct vendored silhouettes', () => {
   assert.equal(harnessBrand('grok'), 'grok')
   assert.equal(harnessBrand('cursor'), 'cursor')
   assert.equal(harnessBrand('pi'), 'pi')
+  assert.equal(harnessBrand('gemini'), 'google')
+  assert.equal(harnessBrand('opencode'), 'opencode')
   assert.equal(harnessBrand('other'), null)
   assert.equal(providerBrand('openai'), 'openai')
   assert.equal(providerBrand('xai'), 'xai')

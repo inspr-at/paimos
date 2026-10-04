@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -8,16 +9,19 @@ import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
+import QueueIndicator from './QueueIndicator.vue'
+import type { QueuedTicket } from '../../lib/workQueue'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import TicketHours from '../business/TicketHours.vue'
 import TicketEstimate from './TicketEstimate.vue'
+import TicketPlacement from './TicketPlacement.vue'
 import type { SaveResult } from '../../lib/useTicket'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 
 // Status, priority, assignee and release (editable popovers), type (read-only),
 // the parent epic, and estimate and dates only when they have values.
-const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult> }>()
+const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; queueEntry?: QueuedTicket | null; queueEditable?: boolean; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult>; savePlacement?: (fields: Record<string, unknown>) => Promise<SaveResult> }>()
 const emit = defineEmits<{ status: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; epic: [anchor: HTMLElement]; release: [anchor: HTMLElement]; openParent: [key: string] }>()
 
 function text(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
@@ -46,15 +50,15 @@ const target = (event: Event) => event.currentTarget as HTMLElement
   <dl class="props" :class="layout">
     <div class="prop">
       <dt>Status</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div v-if="bound.length" class="prop agents-prop">
       <dt>Agents</dt>
       <dd class="agent-chips">
         <RouterLink
           v-for="view in bound" :key="view.session.id" class="prop-btn agent-chip" :class="view.status.group" :to="`/agents/${view.session.id}`"
-          :aria-label="`${view.harness} ${view.name}: ${view.status.label}. Open the session`" :data-tip="`${view.harness} · ${view.status.label}`"
-        ><AppIcon name="agent" :size="13" class="faint" /><span class="agent-name">{{ view.name }}</span><AgentStateLabel class="agent-state" :class="{ quiet: view.status.state === 'working' }" :state="view.status.state" :label="view.status.label" /></RouterLink>
+          :aria-label="`${view.harness} ${view.name}: ${view.status.label}. Open the session`" :data-tip="`${view.name} · ${view.harness} · ${view.status.label}`"
+        ><AppIcon name="agent" :size="13" class="faint" /><span v-clip-tip class="agent-name">{{ view.name }}</span><AgentStateLabel class="agent-state" :class="{ quiet: view.status.state === 'working' }" :state="view.status.state" :label="view.status.label" /></RouterLink>
       </dd>
     </div>
     <div class="prop">
@@ -63,7 +67,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     </div>
     <div class="prop">
       <dt>Assignee</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="a" :aria-label="`Assignee: ${item.assignee?.name ?? 'nobody'}. Change assignee`" @click="emit('assignee', target($event))"><PersonAvatar v-if="item.assignee" :id="item.assignee.id" :name="item.assignee.name" :size="18" /><AppIcon v-else name="user" :size="13" class="faint" /><span :class="{ unset: !item.assignee }">{{ item.assignee?.name ?? 'Unassigned' }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable && !queueEditable" aria-haspopup="menu" aria-keyshortcuts="a" :aria-label="`Assignee: ${item.assignee?.name ?? 'nobody'}. Change assignee`" @click="emit('assignee', target($event))"><QueueIndicator v-if="queueEntry" :entry="queueEntry" /><PersonAvatar v-else-if="item.assignee" :id="item.assignee.id" :name="item.assignee.name" :size="18" /><AppIcon v-else name="user" :size="13" class="faint" /><span v-if="!queueEntry" :class="{ unset: !item.assignee }">{{ item.assignee?.name ?? 'Unassigned' }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div class="prop">
       <dt>Type</dt>
@@ -93,6 +97,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <div v-if="layout === 'column'" class="prop"><dt>Created</dt><dd><time class="prop-static" :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time></dd></div>
     <!-- Last: logged hours arrive after the ticket, and nothing moves when they do. -->
     <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
+    <TicketPlacement :item="item" :editable="editable" :save="savePlacement" />
   </dl>
 </template>
 
@@ -125,11 +130,13 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .kind.epic { color: var(--gold); }
 .agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .row .agent-chips { flex-wrap: nowrap; }
-.agent-chip { text-decoration: none; }
+.agent-chip { min-width: 0; text-decoration: none; }
+.agent-chips { min-width: 0; max-width: 100%; }
+.agent-chip > svg, .agent-state { flex: none; }
 .agent-chip.needs { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
 .agent-state { font-size: 11.5px; }
 .agent-state.quiet :deep(.state-word) { display: none; }
-.agent-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .column .agent-chips { gap: 2px 10px; }
 .epic-chip { max-width: 100%; }
 .epic-chip .mono { font-size: 11px; color: var(--ink-2); }

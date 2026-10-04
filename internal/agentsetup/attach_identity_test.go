@@ -11,7 +11,7 @@ import (
 )
 
 func TestAttachIdentityRecordsNarrowVendorRoot(t *testing.T) {
-	for _, test := range []struct{ harness, pkg string }{{"claude", "@anthropic-ai/claude-code"}, {"codex", "@openai/codex"}, {"cursor", "@cursor/agent"}} {
+	for _, test := range []struct{ harness, pkg string }{{"claude", "@anthropic-ai/claude-code"}, {"codex", "@openai/codex"}, {"cursor", "@cursor/agent"}, {"gemini", "@google/gemini-cli"}, {"opencode", "opencode-linux-x64"}} {
 		t.Run(test.harness, func(t *testing.T) {
 			root := physicalTemp(t)
 			path := filepath.Join(root, ".ai-cli-updates", "package-v1", "lib", "node_modules", test.pkg, "bin", "harness")

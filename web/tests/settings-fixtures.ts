@@ -63,7 +63,7 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
       if (method === 'PUT') { const body = request.postDataJSON(); Object.assign(autopilot, { enabled: body.enabled, rules: body.rules, revision: autopilot.revision + 1 }) }
       return route.fulfill({ json: autopilot })
     }
-    if (path === '/api/status-autopilot/changes') return route.fulfill({ json: { items: [] } })
+    if (path === '/api/status-autopilot/changes' || path === '/api/status-autopilot/proposals') return route.fulfill({ json: { items: [] } })
     const autopilotProject = /^\/api\/projects\/([^/]+)\/status-autopilot$/.exec(path)
     if (autopilotProject) {
       const override = autopilotProjects[autopilotProject[1]!] ??= { mode: 'inherit', effective_enabled: true, revision: 0 }
@@ -118,6 +118,7 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
       data.greetings.push({ timezone: request.headers()['x-timezone'] ?? '' })
       return route.fulfill({ json: { salutation: 'Good afternoon', name: data.profile.preferred_name || data.profile.first_name, message: 'Small steps, shipped, beat big plans on paper.', id: 'g-small-steps' } })
     }
+    if (path === '/api/models/refresh' && method === 'GET') return route.fulfill({ json: { settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: false, interval_minutes: 1440 }, last_run_at: null, last_result: {}, sources: [], observations: [] } })
     if (path === '/api/portal/settings' && method === 'GET') return route.fulfill({ json: { enabled: false, slug: 'inspr' } })
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: data.keys } })
     if (path === '/api/quotes/settings' && method === 'GET') {

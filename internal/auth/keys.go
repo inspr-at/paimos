@@ -135,11 +135,12 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		RotateKeyID *string    `json:"rotate_key_id"`
-		Name        string     `json:"name"`
-		PrincipalID string     `json:"principal_id"`
-		Scopes      []string   `json:"scopes"`
-		ExpiresAt   *time.Time `json:"expires_at"`
+		RotateKeyID    *string    `json:"rotate_key_id"`
+		RotationScopes []string   `json:"rotation_scopes"`
+		Name           string     `json:"name"`
+		PrincipalID    string     `json:"principal_id"`
+		Scopes         []string   `json:"scopes"`
+		ExpiresAt      *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -150,11 +151,24 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.RotateKeyID != nil {
 		if !uuidRe.MatchString(*body.RotateKeyID) || body.Name != "" || body.PrincipalID != "" || body.Scopes != nil {
-			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at only")
+			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at or rotation_scopes only")
 			return
 		}
-		rec, err := m.rotateAgentKey(r.Context(), p, *body.RotateKeyID, body.ExpiresAt)
+		var scopes []string
+		if body.RotationScopes != nil {
+			var err error
+			scopes, err = cleanScopes(body.RotationScopes)
+			if err != nil {
+				writeBadRequest(w, "invalid rotation_scopes")
+				return
+			}
+		}
+		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes)
 		m.writeCreatedAgentKey(w, rec, err)
+		return
+	}
+	if body.RotationScopes != nil {
+		writeBadRequest(w, "rotation_scopes requires rotate_key_id")
 		return
 	}
 	name := strings.TrimSpace(body.Name)

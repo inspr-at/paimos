@@ -69,6 +69,23 @@ func decode(raw []byte) (map[string]any, error) {
 	if len(raw) > 1<<20 {
 		return nil, fault(413, "too_large")
 	}
+	return decodeJSON(raw)
+}
+
+// Only logical snapshots and content may exceed the ordinary event bound.
+// HTTP still admits at most 1 MiB; larger submissions arrive through staging.
+func decodeDocument(raw []byte) (map[string]any, error) {
+	obj, err := decodeJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 1<<20 && obj["contract"] != "aithema.spec.snapshot" && !(obj["contract"] == "aithema.journal.record" && obj["kind"] == "pending_op.content") {
+		return nil, fault(413, "too_large")
+	}
+	return obj, nil
+}
+
+func decodeJSON(raw []byte) (map[string]any, error) {
 	if !jsontext.Value(raw).IsValid() {
 		return nil, fault(400, "invalid_request")
 	}
@@ -158,7 +175,7 @@ func budget(kind string, body map[string]any) []byte {
 }
 
 func (v *Validator) Validate(raw []byte, contract string) (map[string]any, error) {
-	obj, err := decode(raw)
+	obj, err := decodeDocument(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +189,9 @@ func (v *Validator) Validate(raw []byte, contract string) (map[string]any, error
 		return nil, fault(400, "invalid_request")
 	}
 	supported := int64(1)
+	if in(contract, "aithema.journal.record", "aithema.spec.snapshot") {
+		supported = 2
+	}
 	if contract == "aithema.authz" {
 		supported = 0
 	}
@@ -196,8 +216,18 @@ func (v *Validator) Validate(raw []byte, contract string) (map[string]any, error
 	switch contract {
 	case "aithema.journal.record":
 		valid = recordValid(obj)
+		if valid && obj["kind"] == "pending_op.content" {
+			valid = v.contentValid(obj)
+		}
 	case "aithema.spec.snapshot":
 		valid = snapshotValid(obj)
+		for _, value := range array(obj["pending_ops"]) {
+			op := object(value)
+			if op["payload_kind"] == "pending_op.content" {
+				_, err := v.pendingReference(text(op["payload"]))
+				valid = valid && err == nil && number(obj["minor"]) >= 2 && number(obj["min_reader"]) >= 2
+			}
+		}
 	case "aithema.budget.message":
 		valid = budgetValid(obj)
 	}

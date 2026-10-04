@@ -146,21 +146,27 @@ test("CI expressions keep PRs and stale attempts on seven hosted shards", () => 
   }
 });
 
-test("key dialog CI passes concurrency limits to each runner and covers the shared access markup", () => {
+test("key dialog CI uses the hosted shards and covers the shared access markup", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-  const e2e = workflow.split("  e2e:\n")[1].split("\n  migration-compat:")[0];
-  assert.match(e2e, /sudo apt-get install -y -qq zsh fish/);
-  assert.ok(e2e.indexOf("Install shells for web unit checks") < e2e.indexOf("Key dialog layout regression"));
-  const step = e2e.split("      - name: Key dialog layout regression\n")[1].split("\n      - name:")[0];
-  const commands = step.split("        run: |\n")[1].trim().split("\n").map(line => line.trim());
-  // npm forwards trailing flags only to the last command in a compound script.
-  // Require each unit runner's own invocation, so Node's file fan-out is bounded too.
-  assert.match(commands[0], /^node .*--test(?: |$)/);
-  assert.match(commands[0], /(?:^| )--test-concurrency=1(?: |$)/);
-  assert.match(commands[0], /grep -v '\\.unit\\.test\\.ts\$'/);
-  assert.match(commands[1], /^npx vitest run \.unit\.test\.ts --maxWorkers=1$/);
-  assert.match(commands[2], /playwright .*tests\/key-layout\.spec\.ts --workers=1$/);
-  const accessStep = workflow.split("      - name: Access dialog regressions (hosted only)\n")[1].split("\n      - name:")[0];
-  assert.match(accessStep, /tests\/access\.spec\.ts/);
-  assert.match(accessStep, /tests\/key-dialog\.spec\.ts/);
+  const setup = workflow.split("  web-setup:\n")[1].split("\n  web-shard:")[0];
+  assert.match(setup, /sudo apt-get install -y -qq fish zsh/);
+  assert.ok(setup.indexOf("Install shells used by command round-trip unit tests") < setup.indexOf("Web unit checks (once)"));
+  assert.match(setup, /run: npm run test:unit/);
+  assert.doesNotMatch(workflow, /Key dialog layout regression|playwright .*tests\/key-layout\.spec\.ts/);
+  const shardJob = workflow.split("  web-shard:\n")[1].split("\n  web:")[0];
+  assert.match(shardJob, /runs-on: ubuntu-latest/);
+  assert.match(shardJob, /npm --prefix web run ci:web:shard/);
+  const manifest = JSON.parse(readFileSync(new URL("../web/ci-web-shards.json", import.meta.url), "utf8"));
+  const layoutGroups = manifest.groups.filter(group => group.specs.some(spec => spec.file === "tests/key-layout.spec.ts"));
+  assert.equal(layoutGroups.length, 1);
+  const layout = layoutGroups[0];
+  assert.notEqual(layout.gate, false);
+  assert.equal(layout.hostedOnly, true);
+  assert.equal(layout.config, "playwright.ui.config.ts");
+  assert.deepEqual(layout.flags, ["--workers=1"]);
+  const access = manifest.groups.find(group => group.id === "access-dialogs");
+  assert.equal(access.hostedOnly, true);
+  for (const file of ["tests/access.spec.ts", "tests/key-dialog.spec.ts"]) {
+    assert.ok(access.specs.some(spec => spec.file === file));
+  }
 });

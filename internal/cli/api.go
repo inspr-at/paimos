@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -15,20 +16,22 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type apiNode struct {
-	Warnings  []string        `json:"warnings,omitempty"`
-	ID        string          `json:"id"`
-	Key       string          `json:"key"`
-	KindID    string          `json:"kind_id"`
-	Title     string          `json:"title"`
-	Body      string          `json:"body"`
-	Fields    json.RawMessage `json:"fields"`
-	State     string          `json:"state"`
-	ParentID  *string         `json:"parent_id"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Queued    *workqueue.Queued `json:"queued,omitempty"`
+	Warnings  []string          `json:"warnings,omitempty"`
+	ID        string            `json:"id"`
+	Key       string            `json:"key"`
+	KindID    string            `json:"kind_id"`
+	Title     string            `json:"title"`
+	Body      string            `json:"body"`
+	Fields    json.RawMessage   `json:"fields"`
+	State     string            `json:"state"`
+	ParentID  *string           `json:"parent_id"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 type nodePage struct {
@@ -104,7 +107,9 @@ func (rt *runtime) api() (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.New(inst.URL, inst.APIKey), nil
+	c := client.New(inst.URL, inst.APIKey)
+	c.ConfirmStepUp = localStepUp(inst.URL, inst.AgentdStateRoot)
+	return c, nil
 }
 
 func (rt *runtime) do(method, path string, body, dest any) error {
@@ -116,7 +121,7 @@ func (rt *runtime) doCtx(ctx context.Context, method, path string, body, dest an
 }
 
 func (rt *runtime) doHeaders(method, path string, body, dest any, headers map[string]string) error {
-	return rt.doHeadersCtx(context.Background(), method, path, body, dest, headers)
+	return rt.doHeadersCtx(rt.context(), method, path, body, dest, headers)
 }
 
 func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
@@ -146,7 +151,7 @@ func (rt *runtime) ticketWebURL(key string) string {
 }
 
 func (rt *runtime) loadKinds() (kindTable, error) {
-	return rt.loadKindsCtx(context.Background())
+	return rt.loadKindsCtx(rt.context())
 }
 
 func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
@@ -170,7 +175,7 @@ func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
 }
 
 func (rt *runtime) kind(slug string) (apiKind, error) {
-	return rt.kindCtx(context.Background(), slug)
+	return rt.kindCtx(rt.context(), slug)
 }
 
 func (rt *runtime) kindCtx(ctx context.Context, slug string) (apiKind, error) {
@@ -194,7 +199,7 @@ func cloneValues(q url.Values) url.Values {
 }
 
 func (rt *runtime) walkNodes(q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
-	return rt.walkNodesCtx(context.Background(), q, stop)
+	return rt.walkNodesCtx(rt.context(), q, stop)
 }
 
 func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
@@ -203,6 +208,7 @@ func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(api
 		q.Set("limit", "200")
 	}
 	var all []apiNode
+	seen := map[string]bool{q.Get("cursor"): true}
 	for page := 0; page < 50; page++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -222,19 +228,27 @@ func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(api
 			}
 		}
 		if body.NextCursor == nil || strings.TrimSpace(*body.NextCursor) == "" {
-			break
+			return all, nil
 		}
+		if seen[*body.NextCursor] {
+			return nil, fmt.Errorf("incomplete node listing: repeated cursor")
+		}
+		seen[*body.NextCursor] = true
 		q.Set("cursor", *body.NextCursor)
 	}
-	return all, nil
+	return nil, fmt.Errorf("incomplete node listing: exceeds 50 pages")
 }
 
 func (rt *runtime) nodeByKey(key string) (apiNode, error) {
+	return rt.nodeByKeyCtx(rt.context(), key)
+}
+
+func (rt *runtime) nodeByKeyCtx(ctx context.Context, key string) (apiNode, error) {
 	key = strings.TrimSpace(key)
 	var found *apiNode
 	// q matches keys first (exact and prefix), so the key's node is in the
 	// first page instead of a walk over every node in the tenant.
-	_, err := rt.walkNodes(url.Values{"q": {key}}, func(n apiNode) bool {
+	_, err := rt.walkNodesCtx(ctx, url.Values{"q": {key}}, func(n apiNode) bool {
 		if n.Key == key {
 			found = &n
 			return true
@@ -246,7 +260,7 @@ func (rt *runtime) nodeByKey(key string) (apiNode, error) {
 	}
 	if found == nil {
 		var resolved apiNode
-		if err := rt.do(http.MethodGet, "/api/node-keys/"+url.PathEscape(key), nil, &resolved); err != nil {
+		if err := rt.doCtx(ctx, http.MethodGet, "/api/node-keys/"+url.PathEscape(key), nil, &resolved); err != nil {
 			return apiNode{}, rt.fail(fmt.Errorf("issue %q not found", key), "")
 		}
 		return resolved, nil
@@ -263,7 +277,7 @@ func keyPrefix(key string) string {
 }
 
 func (rt *runtime) projectNode(ref string) (apiNode, error) {
-	return rt.projectNodeCtx(context.Background(), ref)
+	return rt.projectNodeCtx(rt.context(), ref)
 }
 
 func (rt *runtime) projectNodeCtx(ctx context.Context, ref string) (apiNode, error) {
@@ -302,7 +316,7 @@ func fieldMap(raw json.RawMessage) map[string]any {
 		return map[string]any{}
 	}
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+	if err := decodeExactJSON(raw, &m); err != nil || m == nil {
 		return map[string]any{}
 	}
 	return m
@@ -401,4 +415,30 @@ func clipRunes(s string, n int, ellipsis string) string {
 		return ellipsis
 	}
 	return string(r[:n]) + ellipsis
+}
+
+// decodeExactJSON preserves numeric tokens in objects that may be written back.
+func decodeExactJSON(raw []byte, dest any) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	if err := d.Decode(dest); err != nil {
+		return err
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		return fmt.Errorf("expected one JSON value")
+	}
+	return nil
+}
+
+func fieldNumber(value any) (float64, bool) {
+	switch n := value.(type) {
+	case float64:
+		return n, true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }

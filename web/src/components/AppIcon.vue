@@ -2,6 +2,7 @@
 <script lang="ts">
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
+  | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
@@ -11,8 +12,8 @@ export type IconName =
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
-  | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
+  | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -20,9 +21,15 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-    <template v-if="name === 'sun'"><circle cx="8" cy="8" r="2.8" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M3.5 12.5l.9-.9M11.6 4.4l.9-.9" /></template>
+    <path v-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
+    <path v-else-if="name === 'queue-add'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M11.6 8.8v5.4M8.9 11.5h5.4" />
+    <path v-else-if="name === 'queue-on'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.6 11.6l1.9 1.9 3.6-3.9" />
+    <path v-else-if="name === 'queue-off'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.9 11.5h5.4" />
+    <path v-else-if="name === 'to-top'" d="M3.2 2.6h9.6M8 13.4V5.8M4.6 9.2 8 5.8l3.4 3.4" />
+    <template v-else-if="name === 'sun'"><circle cx="8" cy="8" r="2.8" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M3.5 12.5l.9-.9M11.6 4.4l.9-.9" /></template>
     <path v-else-if="name === 'moon'" d="M13.6 9.6A5.9 5.9 0 0 1 6.4 2.4a6 6 0 1 0 7.2 7.2Z" />
     <template v-else-if="name === 'users'"><circle cx="6.2" cy="5.6" r="2.4" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2s4.4 1.6 4.4 4.2M10.4 3.4a2.1 2.1 0 1 1 .9 4M12 9.6c1.4.4 2.4 1.6 2.4 3.6" /></template>
+    <template v-else-if="name === 'person-check'"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></template>
     <template v-else-if="name === 'user'"><circle cx="8" cy="5.4" r="2.6" /><path d="M2.8 14c0-2.9 2.3-4.6 5.2-4.6s5.2 1.7 5.2 4.6" /></template>
     <path v-else-if="name === 'chevron'" d="m4.5 6.3 3.5 3.5 3.5-3.5" />
     <path v-else-if="name === 'chevron-right'" d="m6.3 4.5 3.5 3.5-3.5 3.5" />
@@ -40,6 +47,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'tree'"><rect x="5.8" y="1.6" width="4.4" height="3.8" rx="1.1" /><rect x="1.6" y="10.8" width="4.2" height="3.6" rx="1.1" /><rect x="10.2" y="10.8" width="4.2" height="3.6" rx="1.1" /><path d="M8 5.4v2.4M3.7 10.8V8.6h8.6v2.2" /></template>
     <template v-else-if="name === 'search'"><circle cx="7" cy="7" r="4.4" /><path d="m10.3 10.3 3.5 3.5" /></template>
     <path v-else-if="name === 'list'" d="M5.6 4h8M5.6 8h8M5.6 12h8M2.4 4h.01M2.4 8h.01M2.4 12h.01" />
+    <path v-else-if="name === 'pin'" d="M5 2.5h6M6 2.5v4L4 9h8l-2-2.5v-4M8 9v4.5" />
+    <template v-else-if="name === 'lock'"><rect x="3" y="7" width="10" height="7" rx="1.6" /><path d="M5 7V5a3 3 0 0 1 6 0v2M8 10v1.5" /></template>
     <path v-else-if="name === 'plus'" d="M8 3v10M3 8h10" />
     <path v-else-if="name === 'close'" d="m4.2 4.2 7.6 7.6M11.8 4.2l-7.6 7.6" />
     <path v-else-if="name === 'edit'" d="m10.4 2.6 3 3L6 13l-3.6.6L3 10Z" />

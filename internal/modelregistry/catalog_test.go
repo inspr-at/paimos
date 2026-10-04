@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestCatalogMatchesClassicLadders(t *testing.T) {
+func TestCatalogV3Ladders(t *testing.T) {
 	profiles := catalogProfiles()
-	if len(profiles) != 33 {
+	if len(profiles) != 50 {
 		t.Fatalf("catalog has %d profiles", len(profiles))
 	}
 	slugOK := regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -17,6 +17,9 @@ func TestCatalogMatchesClassicLadders(t *testing.T) {
 	for _, profile := range profiles {
 		if !slugOK.MatchString(profile.Slug) || profile.Version != CatalogVersion {
 			t.Fatalf("bad slug %q", profile.Slug)
+		}
+		if KnownInvalid(profile.Model) {
+			t.Fatalf("known-invalid seed: %s", profile.Model)
 		}
 		seen[profile.Slug] = profile
 	}
@@ -35,11 +38,12 @@ func TestCatalogMatchesClassicLadders(t *testing.T) {
 		}
 	}
 	want := map[string][]string{
-		"scout":       {"codex-luna-medium", "claude-haiku-medium"},
-		"mechanical":  {"codex-luna-high", "claude-haiku-high"},
-		"build":       {"codex-terra-high", "claude-sonnet-high", "pi-anthropic-sonnet-high"},
-		"build-hard":  {"codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh"},
-		"review-gate": {"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "cursor-grok-xhigh"},
+		"scout":                {"codex-luna-medium", "claude-haiku-medium", "gemini-gemini-2-5-flash-4096"},
+		"mechanical":           {"codex-luna-high", "claude-haiku-high", "gemini-gemini-2-5-flash-16384"},
+		"build":                {"codex-6-1-sol-high", "claude-sonnet-high", "pi-anthropic-sonnet-high", "gemini-gemini-2-5-pro-16384", "opencode-ollama-qwen3-coder-default"},
+		"build-hard":           {"codex-6-1-sol-xhigh", "codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh", "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"},
+		"review-gate":          {"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "grok-4-7-xhigh", "cursor-grok-xhigh", "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"},
+		"review-gate-security": {"grok-4-7-xhigh", "cursor-grok-xhigh", "codex-6-1-sol-xhigh"},
 	}
 	for role, slugs := range want {
 		if stringsJoin(got[role]) != stringsJoin(slugs) {
@@ -55,7 +59,7 @@ func TestCommandTemplates(t *testing.T) {
 		want                   string
 	}{
 		{"codex", "gpt-6-astra", "xhigh", true, "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'"},
-		{"codex", "gpt-6-terra", "high", false, "codex exec -m gpt-6-terra -c model_reasoning_effort=high '{prompt}'"},
+		{"codex", "gpt-6.1-sol", "high", false, "codex exec -m gpt-6.1-sol -c model_reasoning_effort=high '{prompt}'"},
 		{"claude", "fable", "xhigh", true, "claude -p --model fable --effort xhigh --permission-mode plan '{prompt}'"},
 		{"cursor", "grok-4.7-xhigh", "xhigh", false, "cursor-agent --trust --model grok-4.7-xhigh -p '{prompt}'"},
 		{"cursor", "grok-4.7-xhigh", "xhigh", true, "cursor-agent --trust --mode ask --model grok-4.7-xhigh -p '{prompt}'"},
