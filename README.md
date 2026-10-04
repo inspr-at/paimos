@@ -3108,7 +3108,11 @@ At that revision, the row store rejects node responses sent before a newer
 accepted read or derived hint. Late list responses preserve status from newer
 node reads while still supplying list-only projections. List snapshots retain
 their server-position ordering; cross-source status uses request order when
-positions cannot be compared.
+positions cannot be compared. Status and its ordering fence form one snapshot:
+an accepted node payload applies before its fence advances, including when a
+full cache was already confirmed. A post-gap read applies the recovered status
+before confirming freshness. Named regressions and 300 reproducible seeded
+node/list/stream-gap interleavings check this against a small reference model.
 
 Rollout remains OFF until AEON-429's `features` table and service merge. Its
 catalog must register `work-parent-status` (label: “Parents follow their work”),

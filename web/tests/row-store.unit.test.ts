@@ -477,7 +477,175 @@ describe('RowStore: any delivery order ends at the server\'s state', () => {
   })
 })
 
+// A deliberately small reference model for unchanged-revision status. It has
+// no full-cache flag, display object, editor or row-store clock: an accepted
+// response supplies status; list responses additionally supply projections.
+interface StatusResponse {
+  source: 'node' | 'list'
+  sent: number
+  state: string
+  worker: string | null
+  position?: number
+}
+class StatusModel {
+  state = 'open'
+  worker: string | null = null
+  confirmed = 0
+  gapAt = 0
+  private status?: StatusResponse
+  private list?: { response: StatusResponse; arrived: number }
+  receive(response: StatusResponse, arrived: number) {
+    if (response.source === 'node') {
+      if (response.sent < this.confirmed) return
+    } else if (this.list) {
+      const previous = this.list.response
+      if (response.position !== undefined && previous.position !== undefined && response.position !== previous.position) {
+        // A request begun after delivery can observe a restored event log.
+        if (response.position < previous.position && response.sent <= this.list.arrived) return
+      } else if (response.sent < previous.sent) return
+    }
+    const previous = this.status
+    const comparable = response.position !== undefined && previous?.position !== undefined
+    if (!previous || comparable || response.sent >= previous.sent) {
+      this.state = response.state
+      this.status = response
+    }
+    if (response.source === 'list') {
+      this.worker = response.worker
+      this.list = { response, arrived }
+    }
+    this.confirmed = Math.max(this.confirmed, response.sent)
+  }
+  get current() { return this.confirmed > this.gapAt }
+}
+
+function runStatusModel(seed: number, steps = 100) {
+  const next = random(seed)
+  const pick = <T>(values: T[]): T => values[Math.floor(next() * values.length)]!
+  const rows = new RowStore()
+  const model = new StatusModel()
+  let server = { state: 'open', worker: null as string | null, position: 40 }
+  const pending: { source: 'node' | 'list'; sent: number; positioned: boolean }[] = []
+  const answers: StatusResponse[] = []
+  const trace: string[] = []
+  const states = ['open', 'doing', 'blocked', 'done', 'delivered']
+  const check = () => {
+    const context = `seed ${seed}: ${trace.join('; ')}`
+    expect(rows.latest('n1')?.state, context).toBe(model.state)
+    expect(rows.row('n1')?.state, context).toBe(model.state)
+    expect(rows.shown('n1')?.state, context).toBe(model.state)
+    expect(rows.row('n1')?.lead_worker?.name ?? null, context).toBe(model.worker)
+    expect(rows.current('n1'), context).toBe(model.current)
+    expect(rows.revision('n1'), context).toBe(at(1))
+    expect(rows.waiting('n1'), context).toBe(false)
+  }
+  const deliver = (response: StatusResponse) => {
+    trace.push(`${response.source}@${response.sent}=${response.state}/${response.worker}/p${response.position ?? '?'}`)
+    if (response.source === 'node') {
+      rows.adoptNode(node('n1', 1, { state: response.state }), response.sent, { show: true })
+    } else {
+      const copy = item('n1', 1, { state: response.state, lead_worker: response.worker ? { name: response.worker, key: `s:${response.worker}` } : null })
+      rows.adopt(response.position === undefined ? copy : stampAt(copy, { position: response.position }), response.sent, { show: true })
+    }
+    model.receive(response, rows.mark())
+    check()
+  }
+  // A confirmed full cache is a common starting point, not a node-only fixture.
+  for (let count = 0; count < 2; count++) deliver({ source: 'list', sent: rows.mark(), state: 'open', worker: null, position: 40 })
+  for (let step = 0; step < steps; step++) {
+    const op = Math.floor(next() * 6)
+    if (op === 0 || op === 1) {
+      const source = op === 0 ? 'node' : 'list'
+      pending.push({ source, sent: rows.mark(), positioned: source === 'list' && next() < 0.75 })
+      trace.push(`send ${source}`)
+    } else if (op === 2 && pending.length) {
+      const request = pending.splice(Math.floor(next() * pending.length), 1)[0]!
+      answers.push({ ...request, ...server, position: request.positioned ? server.position : undefined })
+      trace.push(`process ${request.source}=${server.state}`)
+    } else if (op === 3 && answers.length) {
+      deliver(answers.splice(Math.floor(next() * answers.length), 1)[0]!)
+    } else if (op === 4) {
+      server = { state: pick(states), worker: next() < 0.5 ? null : `worker-${step}`, position: server.position + 1 }
+      trace.push(`derive ${server.state}`)
+    } else if (op === 5) {
+      model.gapAt = rows.mark()
+      rows.gap()
+      trace.push('stream gap')
+    }
+    check()
+  }
+  // Deliver every remaining request in seeded order, then explicitly resync.
+  for (const request of pending) answers.push({ ...request, ...server, position: request.positioned ? server.position : undefined })
+  while (answers.length) deliver(answers.splice(Math.floor(next() * answers.length), 1)[0]!)
+  deliver({ source: 'node', sent: rows.mark(), state: server.state, worker: server.worker })
+  expect(rows.row('n1')?.state, `seed ${seed}: final node resync`).toBe(server.state)
+  expect(rows.current('n1'), `seed ${seed}: final node resync`).toBe(true)
+  deliver({ source: 'list', sent: rows.mark(), ...server })
+  expect(rows.row('n1')?.lead_worker?.name ?? null, `seed ${seed}: final list resync`).toBe(server.worker)
+}
+
+describe('RowStore: status acceptance matches the reference model', () => {
+  it('holds for 300 reproducible seeds of node/list processing, delivery, derivation and stream gaps', () => {
+    for (let seed = 1; seed <= 300; seed++) runStatusModel(seed)
+  })
+})
+
 describe('derived parent status', () => {
+  it('applies a changed node status before fencing an already confirmed full cache', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { state: 'open', lead_worker: { name: 'Worker', key: 's:worker' } }), rows.mark(), { show: true })!
+    rows.adopt(item('n1', 1, { state: 'open', lead_worker: { name: 'Worker', key: 's:worker' } }), rows.mark(), { show: true })
+    const older = rows.mark()
+    rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+    expect(row.state).toBe('done')
+    expect(rows.latest('n1')?.state).toBe('done')
+    expect(row.lead_worker?.name).toBe('Worker')
+    // Even a list that agrees with the node cannot repair a fence advanced
+    // without applying its payload; prove the node itself did the work above.
+    rows.adopt(item('n1', 1, { state: 'done', lead_worker: null }), older, { show: true })
+    expect(row.state).toBe('done')
+    expect(rows.latest('n1')?.state).toBe('done')
+    expect(row.lead_worker).toBeNull()
+    expect(rows.current('n1')).toBe(true)
+  })
+
+  it('successive same-revision node refreshes each apply their status to a full cache', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { state: 'open', children_count: 3 }), rows.mark(), { show: true })!
+    rows.adopt(item('n1', 1, { state: 'open', children_count: 3 }), rows.mark(), { show: true })
+    for (const state of ['doing', 'blocked', 'done', 'delivered']) {
+      const older = rows.mark()
+      rows.adoptNode(node('n1', 1, { state }), rows.mark(), { show: true })
+      expect(row.state).toBe(state)
+      expect(rows.latest('n1')?.state).toBe(state)
+      rows.adopt(item('n1', 1, { state: 'open', children_count: 4 }), older, { show: true })
+      expect(row.state).toBe(state)
+      expect(row.children_count).toBe(4)
+      expect(rows.revision('n1')).toBe(at(1))
+      expect(rows.current('n1')).toBe(true)
+    }
+  })
+
+  it('a post-gap node read resynchronizes changed status before marking a full cache current', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { state: 'open' }), rows.mark(), { show: true })!
+    rows.adopt(item('n1', 1, { state: 'open' }), rows.mark(), { show: true })
+    const beforeGap = rows.mark()
+    rows.gap()
+    expect(rows.current('n1')).toBe(false)
+    rows.adopt(item('n1', 1, { state: 'open' }), beforeGap, { show: true })
+    expect(rows.current('n1')).toBe(false)
+    const older = rows.mark()
+    rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+    expect(row.state).toBe('done')
+    expect(rows.latest('n1')?.state).toBe('done')
+    expect(rows.current('n1')).toBe(true)
+    rows.adopt(stampAt(item('n1', 1, { state: 'open', lead_worker: { name: 'Recovered worker', key: 's:recovered' } }), { position: 60 }), older, { show: true })
+    expect(row.state).toBe('done')
+    expect(row.lead_worker?.name).toBe('Recovered worker')
+    expect(rows.current('n1')).toBe(true)
+  })
+
   it('a node confirmation fences status even after a full cache was already confirmed', () => {
     const rows = new RowStore()
     const row = rows.adopt(item('n1', 1, { state: 'done' }), rows.mark(), { show: true })!
