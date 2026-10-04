@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { isWorkLeaf } from '../../lib/workVocabulary'
+import { isJourneyLeaf } from '../../lib/journeyWork'
 import { ACTION_LONG, gateApprovals, offeredApproval } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { plural, statusMeta } from '../../lib/work'
@@ -51,7 +51,7 @@ const releases = computed(() => ctx.data.releases.value)
 const stageState = computed(() => journey.value.stages.find(s => s.key === 'build')?.state ?? 'later')
 // Not reached and nothing to show yet: the stage says so once, with the way to where the journey is.
 const bare = computed(() => stageState.value === 'later' && !ctx.release.value && !releases.value.length)
-const openTickets = computed(() => ctx.data.work.value.value.filter(i => isWorkLeaf(i) && !statusMeta(i.state).closed).length)
+const openTickets = computed(() => ctx.data.work.value.value.filter(i => isJourneyLeaf(i) && !statusMeta(i.state).closed).length)
 const backlogLine = computed(() => openTickets.value ? `${plural(openTickets.value, 'open ticket')} wait in the backlog; release 1 is chosen from them.` : '')
 const left = computed(() => counts.value.open + counts.value.progress + counts.value.qa)
 const rejecting = ref(false)

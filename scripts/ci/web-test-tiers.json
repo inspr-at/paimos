@@ -7298,6 +7298,7 @@
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/journey-work.test.ts","name":"journey legacy ticket counts retain subdivisions until the canonical migration","tier":"GATED-FULL"}
   ]
 }
