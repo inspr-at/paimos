@@ -75,14 +75,12 @@ function assertSchema(value, schema, root = schema) {
 test('quarantine JSON validates against its schema and seeds only documented short-lived Go entries', () => {
   assertSchema(quarantine, quarantineSchema);
   assert.equal(validateQuarantine(quarantine), quarantine);
-  assert.equal(quarantine.entries.length, 2);
+  assert.equal(quarantine.entries.length, 1);
   assert.equal(quarantine.entries[0].id, goID);
   assert.equal(quarantine.entries[0].kind, 'go');
   assert.equal(quarantine.entries[0].owner, 'AEON-623');
   assert.match(quarantine.entries[0].note, /Fixed by AEON-623/);
-  assert.equal(quarantine.entries[1].id, 'internal/importer TestSourceRequestCapAndDelay');
-  assert.equal(quarantine.entries[1].kind, 'go');
-  assert.equal(quarantine.entries[1].owner, 'AEON-675');
+  assert.ok(quarantine.entries.every(entry => entry.owner !== 'AEON-675' && entry.id !== 'internal/importer TestSourceRequestCapAndDelay'));
   for (const entry of quarantine.entries) assert.ok(Date.parse(entry.expires) - Date.parse(entry.added) <= 7 * 86400000);
 });
 test('invalid quarantine configuration fails closed (schema, identities, dates, owner)', () => {
@@ -261,6 +259,67 @@ test('launch, truncation, interruption, missing parseable failures, and incomple
     assert.equal(answer.calls.length, 1);
     assert.equal(answer.evidence[0].label, 'FAILED');
   }
+});
+for (const kind of ['go', 'playwright']) {
+  const config = kind === 'go' ? quarantine : {
+    ...empty, entries: [{ ...quarantine.entries[0], kind, id: pwFailure().id }],
+  };
+  const output = kind === 'go' ? goResult() : pwJSON();
+  for (const signal of ['SIGTERM', 'SIGKILL']) {
+    test(`${kind} signal termination (${signal}) rejects quarantined output before first-attempt handling`, async () => {
+      for (const event of ['pull_request', 'merge_group']) {
+        const result = await guard([{ code: 1, signal, output }], {
+          kind, quarantine: config, env: { GITHUB_EVENT_NAME: event },
+        });
+        assert.equal(result.code, 1);
+        assert.equal(result.calls.length, 1);
+        assert.deepEqual(result.evidence.map(({ id, attempt, label }) => ({ id, attempt, label })), [
+          { id: '<command>', attempt: 1, label: 'FAILED' },
+        ]);
+        assert.equal(result.evidence[0].reason, `terminated by signal ${signal}`);
+      }
+    });
+    test(`${kind} signal termination (${signal}) rejects passing output before retry handling`, async () => {
+      const initialOutput = kind === 'go' ? goResult('TestReal') : pwJSON();
+      const retryOutput = kind === 'go' ? goResult('TestReal', 'pass') + goResult() : pwJSON('expected');
+      const id = kind === 'go' ? 'internal/harness TestReal' : pwFailure().id;
+      for (const code of [0, 1]) {
+        const result = await guard([
+          { code: 1, output: initialOutput }, { code, signal, output: retryOutput },
+        ], { kind, quarantine: kind === 'go' ? quarantine : empty });
+        assert.equal(result.code, 1);
+        assert.equal(result.calls.length, 2);
+        assert.deepEqual(result.evidence.map(({ id, attempt, label }) => ({ id, attempt, label })), [
+          { id, attempt: 2, label: 'RETRIED' }, { id, attempt: 2, label: 'FAILED AFTER RETRY' },
+        ]);
+        assert.equal(result.evidence.at(-1).reason, `terminated by signal ${signal}`);
+      }
+    });
+  }
+}
+test('signal termination stops the remaining merge-group retries', async () => {
+  const calls = [], evidence = [];
+  const results = [
+    { code: 1, output: goResult('TestReal') + goResult('TestNext') },
+    { code: 0, signal: 'SIGTERM', output: goResult('TestReal', 'pass') },
+    { code: 0, output: goResult('TestNext', 'pass') },
+  ];
+  const code = await runGuard({
+    command: ['go', 'test', './...'], kind: 'go', quarantine: empty, now,
+    env: { GITHUB_EVENT_NAME: 'merge_group' },
+    print: line => evidence.push(JSON.parse(line.slice('CI_FLAKE '.length))),
+    run: async command => {
+      calls.push(command);
+      assert.ok(results.length, 'unexpected command / extra retry');
+      return results.shift();
+    },
+  });
+  assert.equal(code, 1);
+  assert.equal(calls.length, 2, 'no other tests are retried after signal termination');
+  assert.equal(results.length, 1);
+  assert.equal(results[0].output, goResult('TestNext', 'pass'));
+  assert.deepEqual(evidence.map(({ label }) => label), ['RETRIED', 'FAILED AFTER RETRY']);
+  assert.equal(evidence.at(-1).reason, 'terminated by signal SIGTERM');
 });
 test('zero exit code cannot hide parsed real failures', async () => {
   const result = await guard([{ code: 0, output: goResult('TestReal') }], { env: { GITHUB_EVENT_NAME: 'pull_request' } });

@@ -333,9 +333,14 @@ func TestGCOnlyCollectsOldOrphansForSelectedTenant(t *testing.T) {
 	}
 	other := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, other, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'other-files','Other files')`, other); err != nil {
-			return err
-		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'other-files','Other files')`, other)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Bootstrap audit is committed before this separate blob mutation.
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, other, func(tx pgx.Tx) error {
 		var actor string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other person') RETURNING id::text`, other).Scan(&actor); err != nil {
 			return err
