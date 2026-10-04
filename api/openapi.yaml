@@ -3180,7 +3180,7 @@ paths:
         '400': {description: Invalid request}
         '403': {description: Account owner and person permission required}
         '404': {description: Enrollment not found}
-        '409': {description: Stale binding, active claimed check or unavailable enrollment}
+        '409': {description: 'Stale binding, active claimed check or unavailable enrollment'}
   /agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect:
     post:
       operationId: disconnectPairedEnrollment
