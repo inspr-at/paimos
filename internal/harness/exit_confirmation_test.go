@@ -2,11 +2,18 @@
 package harness_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -25,8 +32,36 @@ func TestWorkLeafUncertainExitConfirmation(t *testing.T) {
 			expect(t, w, 201)
 			id, lease := decode(t, w)["id"].(string), reg["worker_lease"].(string)
 			path := base + "/" + id
+			// Real bearer authentication needs the tenant encoded in the prefix.
+			// Only confirmation calls use the production middleware; setup keeps
+			// its person principal without fabricating an authenticated session.
+			parts := strings.Split(f.key, "_")
+			prefix := strings.ReplaceAll(f.agent.TenantID, "-", "") + "0123456789abcdef"
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET prefix=$1,scopes=ARRAY['harness.worker'] WHERE principal_id=$2`, prefix, f.agent.ID)
+				return err
+			})
+			f.key = "aeon_" + prefix + "_" + parts[2]
+			mod, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{7}, 32)}, f.db.App)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := (&httpapi.Server{Mux: f.mux, Pool: f.db.App, Middleware: []func(http.Handler) http.Handler{mod.Middleware}}).Handler()
+			confirm := func(body any, proof string) *httptest.ResponseRecorder {
+				t.Helper()
+				raw, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := httptest.NewRequest("POST", path+"/confirm-exit", bytes.NewReader(raw))
+				r.Header.Set("Authorization", "Bearer "+f.key)
+				r.Header.Set("X-Aeon-Worker-Lease", proof)
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				return w
+			}
 			body := map[string]any{"reason": "process_exited"}
-			expect(t, f.call(f.agent, "POST", path+"/confirm-exit", body, lease), 409)
+			expect(t, confirm(body, lease), 409)
 			if closure == "heartbeat_lost" {
 				age(t, f, id, "20 minutes", false)
 				if n := sweep(t, f); n != 1 {
@@ -72,28 +107,34 @@ func TestWorkLeafUncertainExitConfirmation(t *testing.T) {
 				t.Fatalf("uncertain stop did not retain work fence: %v", err)
 			}
 			expect(t, f.call(f.person, "POST", path+"/confirm-exit", body, lease), 403)
-			expect(t, f.call(f.agent, "POST", path+"/confirm-exit", body, "wrong-generation-lease-00000000000000000"), 403)
-			expect(t, f.call(f.agent, "POST", path+"/confirm-exit", map[string]any{"reason": "ownership_lost"}, lease), 400)
+			expect(t, confirm(body, "wrong-generation-lease-00000000000000000"), 403)
+			expect(t, confirm(map[string]any{"reason": "ownership_lost"}, lease), 400)
 			// Current key authority remains necessary even with the exact lease.
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY[]::text[] WHERE principal_id=$1`, f.agent.ID)
 				return err
 			})
-			expect(t, f.call(f.agent, "POST", path+"/confirm-exit", body, lease), 403)
+			expect(t, confirm(body, lease), 403)
+			assertBusy(true)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['harness.write'] WHERE principal_id=$1`, f.agent.ID)
+				return err
+			})
+			expect(t, confirm(body, lease), 403)
 			assertBusy(true)
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['harness.worker'] WHERE principal_id=$1`, f.agent.ID)
 				return err
 			})
-			w = f.call(f.agent, "POST", path+"/confirm-exit", body, lease)
+			w = confirm(body, lease)
 			expect(t, w, 200)
 			confirmed := decode(t, w)
 			if confirmed["stop_reason"] != "process_exited" {
 				t.Fatalf("confirmation did not record exit: %v", confirmed)
 			}
 			assertBusy(false)
-			expect(t, f.call(f.agent, "POST", path+"/confirm-exit", body, lease), 200)
-			expect(t, f.call(f.agent, "POST", path+"/confirm-exit", map[string]any{"reason": "process_failed"}, lease), 409)
+			expect(t, confirm(body, lease), 200)
+			expect(t, confirm(map[string]any{"reason": "process_failed"}, lease), 409)
 			// Confirmation cannot revive the historical generation.
 			status := 403
 			if beforeArchive != "" {
