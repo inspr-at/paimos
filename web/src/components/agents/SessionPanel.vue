@@ -176,7 +176,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div class="head-top">
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
-          <h2 class="name" :title="view.name">{{ view.name }}</h2>
+          <h2 class="name">{{ view.name }}</h2>
           <AgentStateLabel :state="view.status.state" :label="view.status.label" />
         </template>
         <span class="spacer" />
@@ -338,12 +338,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 }
 .panel-head { flex-shrink: 0; padding: 8px 10px 10px 18px; border-bottom: 1px solid var(--line); }
-.head-top { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.head-top { display: flex; align-items: flex-start; gap: 8px; min-height: 36px; }
 .head-actions { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
 .head-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
 .outside-note { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
-.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .state-text.needs { color: var(--gold-ink); }
 .head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }

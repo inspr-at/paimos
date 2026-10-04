@@ -719,6 +719,8 @@ defineExpose({ toggleHistory })
   .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
   .row > .c-host { display: flex; grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
+  .row > .c-host :deep(.host-badge) { max-width: 104px; }
+  /* Reserve the phone badge cap and rename control on the shared line. */
   .row > .c-exec { padding-right: 132px; }
   /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
   .exec-copy { flex: 1; display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }

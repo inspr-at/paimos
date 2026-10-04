@@ -141,7 +141,7 @@ async function copyCommand() {
           </span></div>
           <label v-for="scope in group.items" :key="scope.key" class="scope-row" :class="{ off: !held.has(scope.key) }">
             <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="busy || !allowed || !held.has(scope.key)" @change="toggle(scope.key)" />
-            <ScopeDetails :scope="scope"><span v-if="!held.has(scope.key)" class="unavailable">{{ why(scope.key) }}</span></ScopeDetails>
+            <ScopeDetails :scope="scope"><span v-if="!held.has(scope.key)" class="unavailable" :title="why(scope.key)">{{ why(scope.key) }}</span></ScopeDetails>
           </label>
         </div>
         <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
@@ -183,8 +183,9 @@ async function copyCommand() {
 .login-command { height: auto; min-height: 88px; resize: none; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 .copy-status { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .expiry-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.rotation-scopes { display: grid; gap: 8px; }
-.body { display: grid; gap: 14px; }
+.rotation-scopes { display: grid; gap: 8px; min-width: 0; }
+.body { display: grid; gap: 14px; min-width: 0; }
+.body > *, .note > span, .once > span { min-width: 0; overflow-wrap: anywhere; }
 .note, .once { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .note svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
 .label { padding: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
@@ -197,7 +198,7 @@ async function copyCommand() {
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 4px 0 2px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
-.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
+.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); min-width: 0; align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .unavailable { font-size: 11px; color: var(--ink-3); }
 .scope-row.off { cursor: default; }

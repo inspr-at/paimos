@@ -4,6 +4,10 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
+Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
+
+Capped Done gate, Rules Preview and document-profile headings reveal their complete text on hover, keyboard focus or tap. Their reader stays inside the viewport and scrolls for long identities. Press Arrow Down on a clipped heading to enter the reader; Escape closes it and returns focus to the heading. Heading and action positions stay in place. Rules Preview reserves the width of both **Change** and **Done** labels so toggling the selectors keeps the button still without a fixed pixel width.
+
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
@@ -618,6 +622,20 @@ just test         # Go tests
 just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
+
+CI runs on pushes to `main`, pull requests, merge-queue check requests and manual
+dispatches. A new push to `main` cancels superseded main CI runs to free runner
+capacity (AEON-585). Main's group is separate from PR and merge-queue groups:
+PRs keep their existing per-PR cancellation, while each queue and manual run
+keeps a unique group. Required checks remain `go`, `web`, `release-check` and
+`e2e`; the external `gate/cross-family` status is unchanged.
+
+The separate release rehearsal already cancels superseded runs per ref. Release
+tag builds still require a successful `release-image-check.yml` rehearsal for
+the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
+does not satisfy that gate. Main validation is retained, including when a merge
+group tested the same tree. Workflow policy tests live in
+`scripts/ci-runner-guard` and `scripts/releaseworkflow`.
 
 The ordinary activity tests check exact pagination through 240 same-ticket
 imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
