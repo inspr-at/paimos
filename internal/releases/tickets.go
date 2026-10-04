@@ -146,7 +146,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
   JOIN tree t ON t.id=f.feature_node_id
   JOIN nodes n ON n.id=f.feature_node_id AND n.tenant_id=f.tenant_id
   JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
-  WHERE f.project_node_id=$1 AND f.feature_node_id=$2 AND k.slug='epic'`, project, *in.FeatureID).Scan(&parent)
+  WHERE f.project_node_id=$1 AND f.feature_node_id=$2 AND k.slug IN ('work','epic')`, project, *in.FeatureID).Scan(&parent)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return out, fail(404, "feature not found in project")
 		}
@@ -155,7 +155,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 		}
 	}
 	var allows bool
-	if err := tx.QueryRow(ctx, `SELECT k.allowed_child_kinds IS NULL OR 'ticket'=ANY(k.allowed_child_kinds)
+	if err := tx.QueryRow(ctx, `SELECT k.allowed_child_kinds IS NULL OR CASE WHEN EXISTS(SELECT 1 FROM node_kinds WHERE slug='work') THEN 'work' ELSE 'ticket' END=ANY(k.allowed_child_kinds)
   FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
   WHERE n.id=$1 AND n.deleted_at IS NULL`, parent).Scan(&allows); err != nil {
 		return out, err
@@ -165,7 +165,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	}
 	var schema jsonschema.Schema
 	var schemaJSON []byte
-	if err := tx.QueryRow(ctx, `SELECT field_schema FROM node_kinds WHERE slug='ticket'`).Scan(&schemaJSON); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT field_schema FROM node_kinds WHERE slug IN ('work','ticket') ORDER BY (slug='work') DESC LIMIT 1`).Scan(&schemaJSON); err != nil {
 		return out, err
 	}
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
@@ -183,7 +183,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	err = tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,position)
   SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),$2,$3,
    coalesce((SELECT max(position)+1024 FROM nodes WHERE parent_id=$2 AND deleted_at IS NULL),1024)
-  FROM node_kinds k WHERE k.slug='ticket'
+  FROM node_kinds k WHERE k.slug IN ('work','ticket') ORDER BY (k.slug='work') DESC LIMIT 1
   RETURNING id::text,to_jsonb(nodes)||jsonb_build_object('position',position::text)`, p.TenantID, parent, in.Title).Scan(&id, &snapshot)
 	if err != nil {
 		return out, err

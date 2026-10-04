@@ -7,6 +7,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -78,11 +79,27 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	if err := lockAgentScopeUse(ctx, tx, tenantID); err != nil {
 		return err
 	}
+	active, err := beginWorkStatus(ctx, tx)
+	if err != nil {
+		return err
+	}
 	if err := fn(tx); err != nil {
 		if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok && IsStatementTimeout(err) {
 			limit.timedOut.Store(true)
 		}
 		return err
+	}
+	if active {
+		if group, ok := ctx.Value(workStatusGroupKey{}).(map[string]bool); ok {
+			group[tenantID] = true
+		}
+	}
+	if active {
+		if _, nested := ctx.Value(transactionContextKey{}).(pgx.Tx); !nested {
+			if err := flushWorkStatus(ctx, tx); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit(ctx)
 }
@@ -98,8 +115,27 @@ func InTransaction(ctx context.Context, pool *pgxpool.Pool, fn func(context.Cont
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := fn(context.WithValue(ctx, transactionContextKey{}, tx)); err != nil {
+	group := map[string]bool{}
+	grouped := context.WithValue(context.WithValue(ctx, transactionContextKey{}, tx), workStatusGroupKey{}, group)
+	if err := fn(grouped); err != nil {
 		return err
+	}
+	// Coalesce every nested tenant operation at the outer commit boundary.
+	tenants := make([]string, 0, len(group))
+	for id := range group {
+		tenants = append(tenants, id)
+	}
+	slices.Sort(tenants)
+	for _, id := range tenants {
+		if err := enterTenant(ctx, tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.work_status_entered',$1,true)`, id); err != nil {
+			return err
+		}
+		if err := flushWorkStatus(ctx, tx); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

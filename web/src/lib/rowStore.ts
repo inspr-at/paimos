@@ -31,7 +31,7 @@ import { compareRevision } from './liveUpdates.ts'
 import { positionOf } from './position.ts'
 
 // The change an event names (liveNodes' NodeChange, the part the store reads).
-export interface RowChange { id: string; change: 'created' | 'updated' | 'deleted'; revision: string | null; fields?: string[]; eventId?: number }
+export interface RowChange { id: string; change: 'created' | 'updated' | 'deleted'; revision: string | null; fields?: string[]; eventId?: number; type?: string }
 // What an event told the store. older: it knew a newer revision (a replay);
 // known: that revision; newer: something it did not know.
 export type News = 'older' | 'known' | 'newer'
@@ -227,10 +227,11 @@ export class RowStore {
     const behind = !!entry.latest && compareRevision(revision, entry.revision) < 0
     if (!early && order >= 0 && !behind) {
       // At least as new as the newest copy: this read confirms it.
+      const unversioned = sent >= entry.touched && entry.readAt < entry.touched
       entry.readAt = Math.max(entry.readAt, sent)
       // The same revision from a list page refreshes the projections a node
       // read does not carry; older copies are dropped.
-      if (order > 0 || full || !entry.full) {
+      if (order > 0 || full || !entry.full || unversioned) {
         const incoming = make()
         const staleCount = full && sent < entry.countChangedAt && !!entry.latest
         const copy = staleCount ? frozen({ ...incoming, children_count: entry.latest!.children_count }) : incoming
@@ -294,7 +295,7 @@ export class RowStore {
     const entry = this.entry(change.id)
     const order = change.revision && entry.revision ? compareRevision(change.revision, entry.revision) : 1
     if (order < 0) return 'older'
-    if (change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
+    if (change.type === 'status_autopilot.derived' || change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
       entry.projectionChangedAt = ++this.clock
       entry.projectionHintPosition = change.eventId && change.eventId > 0 ? change.eventId : undefined
       if (change.eventId && change.eventId > 0) entry.projectionFloor = Math.max(entry.projectionFloor ?? 0, change.eventId)
@@ -304,7 +305,7 @@ export class RowStore {
       this.bury(entry, change.revision, this.clock + 1)
       return known ? 'known' : 'newer'
     }
-    if (order === 0 && !entry.tomb) return 'known'
+    if (order === 0 && !entry.tomb && change.type !== 'status_autopilot.derived') return 'known'
     if (entry.tomb) {
       // Only a restore ends a deletion: a creation (a restore reads as one),
       // or a revision newer than the tombstone's. One without revision (a

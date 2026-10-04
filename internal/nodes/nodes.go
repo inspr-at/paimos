@@ -397,6 +397,11 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return badRequest("rename tags through /api/tags/{tagId}")
 			}
 		}
+		if _, statusWrite := raw["state"]; statusWrite {
+			if err := requireLeafStatusWrite(ctx, tx, id); err != nil {
+				return err
+			}
+		}
 		// Compare after SELECT FOR UPDATE, so competing patches cannot both
 		// consume the same timestamp. Advance even on equal clock readings.
 		if expected != nil && !current.UpdatedAt.Equal(*expected) {

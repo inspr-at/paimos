@@ -445,6 +445,17 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 			})
 			return id, false, false, nil
 		}
+		parent, err := db.WorkStatusParentTx(ctx, tx, id)
+		if err != nil {
+			return "", false, false, err
+		}
+		if parent && state != oldState {
+			classicID, _ := intField(original, "id")
+			*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: classicID, Key: key, Reason: "parent_status_derived"})
+			// Preserve the canonical state while still importing permitted
+			// content. The source status remains in its classic provenance.
+			state = oldState
+		}
 		var now any
 		var prior any
 		if err := decodeExactJSON(bodyJSON, &now); err != nil {
@@ -530,12 +541,19 @@ func importNodeDiverged(ctx context.Context, tx pgx.Tx, tenantID, nodeID string)
 	if err != nil {
 		return false, err
 	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, nodeID)
+	if err != nil {
+		return false, err
+	}
 	var have, baseline map[string]any
 	if err := json.Unmarshal(current, &have); err != nil {
 		return false, err
 	}
 	if err := json.Unmarshal(imported, &baseline); err != nil {
 		return false, err
+	}
+	if parent {
+		baseline["state"] = have["state"]
 	}
 	// The work-kind migration changes kind_id alone, retaining the original
 	// importer snapshot and fields.classic.type. Normalize only the exact

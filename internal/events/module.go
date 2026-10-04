@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,14 +44,25 @@ func WithUndoHandlers(handlers map[string]UndoFunc) Option {
 	}
 }
 
+// WithCausalUndoHandlers installs handlers available only through a previewed
+// derived-parent action, leaving ordinary event Undo availability unchanged.
+func WithCausalUndoHandlers(handlers map[string]UndoFunc) Option {
+	return func(m *module) {
+		for typ, fn := range handlers {
+			m.causalUndo[typ] = fn
+		}
+	}
+}
+
 type module struct {
-	pool *pgxpool.Pool
-	undo map[string]UndoFunc
+	pool       *pgxpool.Pool
+	undo       map[string]UndoFunc
+	causalUndo map[string]UndoFunc
 }
 
 // New returns a module for event history, SSE and registered resource undo.
 func New(pool *pgxpool.Pool, options ...Option) httpapi.Module {
-	m := &module{pool: pool, undo: make(map[string]UndoFunc)}
+	m := &module{pool: pool, undo: make(map[string]UndoFunc), causalUndo: make(map[string]UndoFunc)}
 	for _, option := range options {
 		option(m)
 	}
@@ -61,6 +73,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/events", m.list)
 	mux.HandleFunc("GET /api/events/stream", m.stream)
 	mux.HandleFunc("POST /api/events/{eventId}/undo", m.handleUndo)
+	mux.HandleFunc("GET /api/events/{eventId}/undo-preview", m.handleUndoPreview)
 }
 
 // These errors let resource undo handlers return safe API outcomes.
@@ -368,10 +381,33 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
+		if e.Type != derivedStatusEvent && e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]
+		causeID := int64(0)
+		if e.Type == derivedStatusEvent {
+			cause, causeFn, preview, err := m.causalChange(r.Context(), tx, p, e)
+			if err != nil {
+				return err
+			}
+			var confirm struct {
+				Cause int64 `json:"confirmed_cause_event_id"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&confirm); err != nil || confirm.Cause != preview.CauseEventID {
+				return ErrConflict
+			}
+			var trailing any
+			if err := decoder.Decode(&trailing); err != io.EOF {
+				return ErrConflict
+			}
+			causeID = cause.ID
+			fn = func(ctx context.Context, tx pgx.Tx, p tenant.Principal, _ Event) (Change, error) {
+				return causeFn(ctx, tx, p, cause)
+			}
+		}
 		if fn == nil || e.UndoOf != nil {
 			return ErrConflict
 		}
@@ -386,10 +422,22 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		change.UndoOf = &id
+		if causeID != 0 {
+			// Undo the original cause once, so sibling parent events cannot
+			// reopen the same child a second time. Keep the parent action as
+			// separate evidence without pretending its status was edited.
+			change.UndoOf = &causeID
+		} else {
+			change.UndoOf = &id
+		}
 		result, err = Append(r.Context(), tx, p, change)
 		if err != nil {
 			return err
+		}
+		if causeID != 0 {
+			if _, err := Append(r.Context(), tx, p, Change{NodeID: e.NodeID, Type: "status_autopilot.causal_undo", After: map[string]any{"id": *e.NodeID, "cause_event_id": causeID}, UndoOf: &id}); err != nil {
+				return err
+			}
 		}
 		items := []Event{result}
 		if err := redactAccountEvents(r.Context(), tx, p, items); err != nil {

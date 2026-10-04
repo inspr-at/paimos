@@ -49,6 +49,8 @@ func mapDB(err error) *httpError {
 		return badRequest("bad request")
 	case "P0001":
 		switch pgErr.Message {
+		case "parent status follows its children":
+			return conflictCoded("parent status follows its children", "parent_status_derived")
 		case "node has live children":
 			return conflict("node has live children")
 		case "child kind is not allowed under parent kind":

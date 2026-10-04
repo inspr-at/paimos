@@ -153,7 +153,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (item.value?.id !== target.id) return
     if (change) {
       if (change.fields.includes('project_id') && target.project) away = change.projectId !== target.project.id
-      if (!mine(change)) heldFields = [...new Set([...heldFields, ...change.fields])]
+      if (!mine(change) && change.type !== 'status_autopilot.derived') heldFields = [...new Set([...heldFields, ...change.fields])]
     }
     const deleted = rows.isDeleted(target.id) || away
     if (busy() && editing(target.id)) {
@@ -512,7 +512,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         // moved elsewhere) stays until the next load.
         const at = children.value.findIndex(entry => entry.id === change.id)
         const copy = at >= 0 && node && !rows.isDeleted(change.id) ? rows.latest(change.id) : undefined
-        if (copy && copy.parent_id === target.id && compareRevision(copy.updated_at, children.value[at].updated_at) > 0) children.value = children.value.map((child, i) => i === at ? copy : child)
+        if (copy && copy.parent_id === target.id && (compareRevision(copy.updated_at, children.value[at].updated_at) > 0 || change.type === 'status_autopilot.derived')) children.value = children.value.map((child, i) => i === at ? copy : child)
         return
       }
       sync(target, change)

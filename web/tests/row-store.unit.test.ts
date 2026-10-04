@@ -476,3 +476,19 @@ describe('RowStore: any delivery order ends at the server\'s state', () => {
     expect(failed).toEqual([])
   })
 })
+
+describe('derived parent status', () => {
+  it('updates a full cached row without changing the edit revision or opening a conflict', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { state: 'open' }), rows.mark(), { show: true })!
+    const edit = rows.edit('n1')!
+    rows.note({ id: 'n1', type: 'status_autopilot.derived', eventId: 41, change: 'updated', fields: ['state'], revision: at(1) })
+    rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark())
+    expect(rows.latest('n1')?.state).toBe('done')
+    expect(rows.waiting('n1')).toBe(false)
+    expect(edit.revision).toBe(at(1))
+    edit.end()
+    rows.show('n1')
+    expect(row.state).toBe('done')
+  })
+})

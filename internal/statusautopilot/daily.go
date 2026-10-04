@@ -119,7 +119,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 				after = nil
 			}
 			rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE k.slug='ticket' AND n.deleted_at IS NULL AND `+candidateStateSQL+` IN ('new','backlog','blocked','in_progress','inprogress','progress','active','done','delivered')
+ WHERE k.slug IN ('ticket','work') AND n.deleted_at IS NULL AND `+candidateStateSQL+` IN ('new','backlog','blocked','in_progress','inprogress','progress','active','done','delivered')
  AND ($1::uuid IS NULL OR n.id>$1) ORDER BY n.id LIMIT $2`, after, batchSize)
 			if err != nil {
 				return err

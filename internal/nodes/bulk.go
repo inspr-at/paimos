@@ -405,6 +405,15 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				}
 				fields = next
 			}
+			if plan.state != nil {
+				if err := requireLeafStatusWrite(ctx, tx, current.ID); err != nil {
+					if he, ok := err.(*httpError); ok && he.code == "parent_status_derived" {
+						result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: he.msg, Code: he.code})
+						continue
+					}
+					return err
+				}
+			}
 			state := current.State
 			if plan.state != nil {
 				state = *plan.state

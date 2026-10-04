@@ -279,6 +279,22 @@ describe('LiveNodeStore', () => {
   })
   afterEach(() => vi.useRealTimers())
 
+  it('refreshes a derived parent state at the same edit revision', async () => {
+    const panel = view(['n1'])
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    const revision = '2026-09-29T10:00:00Z'
+    const base = node('n1', revision, { state: 'open' })
+    rows.adoptNode(base, rows.mark(), { show: true })
+    fetchNode.mockResolvedValueOnce(node('n1', revision, { state: 'done' }))
+    latest().node(41, [{ id: 'n1', fields: ['state'], revision }], 'status_autopilot.derived', 'system')
+    await vi.waitFor(() => expect(panel.calls).toHaveLength(1))
+    expect(fetchNode).toHaveBeenCalledTimes(1)
+    expect(rows.row('n1')?.state).toBe('done')
+    expect(rows.revision('n1')).toBe(revision)
+    expect(panel.calls[0].node?.state).toBe('done')
+  })
+
   it('opens one live stream for all views and asks them to refetch after connecting', () => {
     const a = view(['n1']), b = view(['n2'])
     store.subscribe(a.v); store.subscribe(b.v)

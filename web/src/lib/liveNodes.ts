@@ -40,7 +40,7 @@ interface SourceLike {
   close(): void
 }
 
-export const NODE_EVENTS = ['node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
+export const NODE_EVENTS = ['status_autopilot.derived', 'node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
 
 // The node_changes of one stream event, in client shape.
@@ -292,7 +292,7 @@ export class LiveNodeStore {
       if (!showing.length) { this.settled(id); return }
       if (this.rows.isDeleted(id)) { this.settled(id); return }
       const cached = this.rows.latest(id)
-      if (cached && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
+      if (cached && dirty.change.type !== 'status_autopilot.derived' && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
         this.settled(id)
         for (const view of showing) view.changed(dirty.change, cached)
         return
@@ -310,7 +310,7 @@ export class LiveNodeStore {
       const news = this.rows.touchedSince(id, sent)
       if (node) this.rows.adoptNode(node, sent)
       else this.rows.gone(id, sent)
-      if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at))) continue
+      if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at) || this.dirty.get(id)?.change.type === 'status_autopilot.derived')) continue
       const change = this.dirty.get(id)?.change
       if (!change) return
       this.settled(id)

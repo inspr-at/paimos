@@ -31,6 +31,7 @@ type NodeChange struct {
 // Event types whose snapshots are nodes (node.project_moved wraps it in
 // "node", node.bulk_changed lists them in "items").
 var nodeChangeTypes = map[string]bool{
+	"status_autopilot.derived": true, "import.node_updated": true, "import.node_created": true,
 	"status_autopilot.changed": true, "status_autopilot.undone": true,
 	"node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
 	"node.project_moved": true, "node.deleted": true, "node.bulk_changed": true,
@@ -199,6 +200,9 @@ func summarizeNodeChanges(e Event) []NodeChange {
 // each node's project in the reader's transaction. A node the reader cannot
 // see has no project here (the event would not be visible either).
 func attachNodeChanges(ctx context.Context, tx pgx.Tx, tenantID string, items []Event) error {
+	if err := attachDerivation(ctx, tx, tenantID, items); err != nil {
+		return err
+	}
 	ids := make([]string, 0)
 	seen := make(map[string]bool)
 	for i := range items {

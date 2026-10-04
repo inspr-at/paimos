@@ -455,6 +455,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/crm/organisations/{organisationId}/sync":                                         "crm.write",
 	"POST /api/crm/providers/{providerId}/import":                                               "crm.manage",
 	"POST /api/events/{eventId}/undo":                                                           "events.undo",
+	"GET /api/events/{eventId}/undo-preview":                                                    "events.undo",
 	"POST /api/inbox/messages":                                                                  "inbox.send",
 	"POST /api/inbox/messages/{messageId}/ack":                                                  "inbox.send",
 	"POST /api/inbox/session-binding":                                                           "inbox.send",
