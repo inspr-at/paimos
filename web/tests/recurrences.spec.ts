@@ -244,6 +244,14 @@ for (const parent of [false, true]) {
     const create = editor(page).getByRole('button', { name: /^Create/ })
     const cancel = editor(page).getByRole('button', { name: /^Cancel/ })
     await expectStableControls({ controls: { create, cancel, parent: editor(page).getByRole('button', { name: 'Parent', exact: true }), clickedRow: editor(page).getByRole('radio', { name: 'Event', exact: true }) }, scrollAreas: { body: editor(page).locator('.editor-body') }, interactions: [{ name: 'Event trigger', run: async () => { await editor(page).getByRole('radio', { name: 'Event', exact: true }).evaluate(el => (el as HTMLElement).click()); await expect(create).toBeEnabled() } }] })
+    const shots = 'test-results/aeon-648-int-fix1'
+    mkdirSync(shots, { recursive: true })
+    await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('Wiederkehrende Arbeitsplanung mit ausführlicher Beschreibung und Prüfkriterien')
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.screenshot({ path: join(shots, `repeat-${parent ? 'parent' : 'leaf'}-${width}-${theme}.png`) })
+    }
     await editor(page).getByRole('textbox', { name: 'Name', exact: true }).press('Shift+R')
     await expect(editor(page)).toHaveCount(1)
     await cancel.click()

@@ -3707,6 +3707,11 @@
     {"kind":"go","package":"cmd/aeon","name":"TestMigrationBlockedExitCode","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon","name":"TestMigrationCommandRequiresCheckBeforeConnecting","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/db","name":"TestWorkMigrationPreflightPagesAllTenantsWithoutWrites","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/nodes","name":"TestWorkStatusEntryFencesTenantBeforeTree","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/nodes","name":"TestWorkStatusEntryFencesTenantBeforeTree","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentaccounts","name":"TestMigratedWorkRetainsAndEditsAccountPins","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkParentQueueRefusedWithLiveWorkChild","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestCanonicalWorkResidencyAdmissionAndLiveRecheck","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestCanonicalWorkLiveResidencyRecheck","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/db","name":"TestWorkRoutingUpgradePreservesResidencyAndPins","tier":"GATED-FULL"}
   ]
 }

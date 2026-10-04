@@ -7261,6 +7261,11 @@
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1024 light","tier":"GATED-FULL","config":"playwright.ui.config.ts","project":""},
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1024 dark","tier":"GATED-FULL","config":"playwright.ui.config.ts","project":""},
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1440 light","tier":"GATED-FULL","config":"playwright.ui.config.ts","project":""},
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1440 dark","tier":"GATED-FULL","config":"playwright.ui.config.ts","project":""}
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1440 dark","tier":"GATED-FULL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"canonical leaves and parents can repeat, and identity changes close the bound snapshot","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"Repeat creates children of a canonical parent and siblings of a canonical leaf","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/recurrences.unit.test.ts","name":"new recurrence templates use canonical work for migrated leaves and parents","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/recurrences.spec.ts","name":"migrated leaf Repeat menu and Shift+R keep the canonical target","tier":"NIGHTLY","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/recurrences.spec.ts","name":"migrated parent Repeat menu and Shift+R keep the canonical target","tier":"NIGHTLY","config":"playwright.ui.config.ts","project":""}
   ]
 }

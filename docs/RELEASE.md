@@ -1449,3 +1449,17 @@ never delete ledger rows or modify published migration bytes to retry.
 Integration retains ledger-owned 1237 for release-leaf lifecycle and renumbers
 only the unpublished colliding parent-benefit generation file to reserved
 1239. No published migration or release coordinate changes.
+
+AEON-648 integration fix round 1 retains per-work residency floors in admission
+and live routing, saved account/group pins, canonical Repeat actions/templates,
+and upgraded imported issue links. Reserved forward migration
+`1240_work_account_pins.sql` widens only the pin guard's target kinds and retains
+its tenant, live-target and harness checks. It has a pinned policy exception
+requiring consolidated coordinator review; historical SQL stays unchanged.
+Regression and validation evidence is in
+[aeon-648-int-fix1-evidence.json](qa/aeon-648-int-fix1-evidence.json).
+The deletion regression again retains a real queued run, generated order and
+capacity hold through a failed deletion. Migration 1238's retrospective
+AEON-655 ledger entry remains a coordinator action. Linux browser CI and
+OPS-247 remain unverified; local single-file Chromium evidence is not a
+replacement release gate. This fix round neither pushes to origin nor deploys.
