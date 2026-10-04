@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
-import { effectiveLimit, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingRows, type PlanSnapshot } from '../src/lib/agentsWorking'
+import { effectiveLimit, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type PlanSnapshot } from '../src/lib/agentsWorking'
+import type { PoolView } from '../src/lib/capacity'
 const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4, claude: 2, cursor: 'off' }, principal_id: 'owner', running: { codex: 12, claude: 1, cursor: 3 }, running_total: 16, source: 'plan', updated_at: null }
 describe('the one dial', () => {
   it('changes only the ceiling, preserving running agents and independent harness limits', () => {
@@ -57,6 +58,18 @@ describe('the one dial', () => {
     expect(waitingCopy(snapshot, under, room, [{ harness: 'cursor' }])).toBe('1 waiting: Cursor is off')
     expect(waitingCopy(snapshot, under, room, [{}])).toBe('1 waiting: ready for a start')
     expect(waitingCopy(snapshot, under, { codex: 0, claude: 0, cursor: 0 }, [{}])).toBe('1 waiting for room on an account')
+  })
+  it('never calls missing account ownership or routing a full account', () => {
+    const pool = (slots: number, measured = true) => ({ mark: 'codex', parallelRuns: slots, rows: [{ routing: measured ? { rank: 1, available_slots: slots } : undefined }] }) as PoolView
+    expect(workingAccountRoom([], true, ['codex', 'claude']).total).toBeNull()
+    expect(workingAccountRoom([pool(17)], false, ['codex']).total).toBeNull()
+    expect(workingAccountRoom([pool(0, false)], true, ['codex']).total).toBeNull()
+    const known = workingAccountRoom([pool(17)], true, ['codex', 'claude', 'cursor'])
+    expect(known).toEqual({ byHarness: { codex: 17, claude: null, cursor: null }, total: 17 })
+    expect(workingAccountRoom([pool(0)], true, ['codex']).total).toBe(0)
+    expect(liveCopy(20, 3, known.total)).toBe('3 running · room for 17 more')
+    expect(liveCopy(20, 3, 2)).toBe('3 running · room for 2 more')
+    expect(liveCopy(20, 0, null)).toBe('0 running · account room unknown')
   })
   it('includes all configured harnesses and counts beyond a lowered ceiling', () => {
     const rows = workingRows({ total: 1, limits: { grok: 30, pi: 'off', gemini: 'no_limit', opencode: 0 } }, snapshot, {}, null)

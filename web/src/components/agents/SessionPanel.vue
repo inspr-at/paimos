@@ -29,7 +29,7 @@ import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, currentActivity, activityDurations } from './activity'
 import { cleanActivityNote } from '../../lib/activityPrivacy'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
-import EtaCell from '../work/EtaCell.vue'
+import SessionEstimate from './SessionEstimate.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 import { quickRemoval } from './sessionActions'
@@ -240,7 +240,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-else> · no heartbeat yet</template>
         </p>
         <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
-        <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
+        <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><SessionEstimate labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="currentTimeline.length" class="activity-timeline" aria-label="Current activity history">
           <li v-for="(item, index) in currentTimeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at" :title="absoluteTime(item.at)">{{ item.duration }}</time><span>{{ item.text }}</span></li>

@@ -24,7 +24,7 @@ import ExecutionMark from './ExecutionMark.vue'
 import SessionHost from './SessionHost.vue'
 import { listHostLabels } from '../../lib/agents'
 import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
-import EtaCell from '../work/EtaCell.vue'
+import SessionEstimate from './SessionEstimate.vue'
 import { etaFromSession } from '../../lib/eta'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
@@ -71,6 +71,8 @@ const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket)
+// Count sessions, including folded descendants, rather than family roots.
+const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : branch.liveCount), 0)
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
@@ -140,7 +142,10 @@ const identity = useSession()
 const grant = computed<ControlGrant>(() => ({ person: identity.identity?.principal.kind === 'person', can }))
 // The chosen order is remembered per viewer in this browser; the page works without storage.
 const viewer = computed(() => identity.identity ? `${identity.identity.tenant.id}.${identity.identity.principal.id}` : '')
-watch(viewer, id => { sort.value = readSort(id) }, { immediate: true })
+watch(viewer, id => {
+  sort.value = readSort(id)
+  expanded.value = {}; history.value = {}; showStopped.value = false; showRemoved.value = false
+}, { immediate: true })
 const hostLabels = ref(new Map<string, string>())
 let hostRead = 0
 watch(viewer, async () => {
@@ -369,11 +374,11 @@ function rowClick(event: MouseEvent, id: string) {
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
-            <template v-if="showRemoved">Ended<span class="mono">{{ roots(group.id).length }}</span></template>
+            <template v-if="showRemoved">Ended<span class="mono">{{ bucketCount(group.id) }}</span></template>
             <button v-else-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
-              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span>
+              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ bucketCount(group.id) }}</span>
             </button>
-            <template v-else>{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span></template>
+            <template v-else>{{ group.label }}<span class="mono" data-tip="Live sessions in these families, including collapsed workers">{{ bucketCount(group.id) }}</span></template>
           </span>
         </div>
         <div
@@ -427,7 +432,7 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="c-ticket">
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
-            <EtaCell v-if="etaOf(view) || working(view)" class="row-eta" align="start" :eta="etaOf(view)" :now="now" :missing="working(view)" />
+            <SessionEstimate v-if="etaOf(view) || working(view)" class="row-eta" :eta="etaOf(view)" :now="now" :missing="working(view)" />
           </span>
           <span class="execution-host" role="presentation">
             <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">

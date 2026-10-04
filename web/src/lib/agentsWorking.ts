@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-540: the one start ceiling. Counts belong to the server's canonical
 // owner snapshot; limits are independent ceilings, never reservations.
-import { HARNESS_NAME, POOL_ORDER } from './capacity.ts'
+import { HARNESS_NAME, POOL_ORDER, type PoolView } from './capacity.ts'
 
 export const CAP_MAX = 30
 export const DEFAULT_TOTAL = 15
@@ -45,7 +45,20 @@ export function liveCopy(total: number, running: number, room: number | null) {
   if (running > total) return `${prefix} · winding down to ${total}`
   if (running === total) return `${prefix} · all ${total} in use`
   if (room === 0) return `${prefix} · accounts full`
-  return `${prefix} · room for ${total - running} more`
+  if (room === null) return `${prefix} · account room unknown`
+  return `${prefix} · room for ${Math.min(total - running, room)} more`
+}
+
+// Only measured, owned pools can establish room. An empty ownership match or
+// an absent routing projection is unknown, never evidence that accounts are full.
+// buildPools has already deduplicated quota aliases before these sums.
+export function workingAccountRoom(pools: Pick<PoolView, 'mark' | 'rows' | 'parallelRuns'>[], known: boolean, harnesses: string[]) {
+  const measured = (matching: typeof pools): number | null => known && matching.length > 0 && matching.every(p => p.rows.length > 0 && p.rows.every(r => !!r.routing))
+    ? matching.reduce((n, p) => n + p.parallelRuns, 0) : null
+  return {
+    byHarness: Object.fromEntries(harnesses.map(h => [h, measured(pools.filter(p => p.mark === h))])),
+    total: measured(pools),
+  }
 }
 export function statusCopy(total: number, running: number, room: number | null) {
   if (total === 0) return running ? `Start nothing new: the ${running} ${running === 1 ? 'agent' : 'agents'} running finish their work.` : 'Start nothing new. Nothing is running.'

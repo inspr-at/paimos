@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, reactive, useId, watch } from 'vue'
-import { CAP_MAX, limitMode, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingRows, type LimitMode } from '../../lib/agentsWorking'
+import { CAP_MAX, limitMode, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type LimitMode } from '../../lib/agentsWorking'
 import { buildPools, POOL_ORDER } from '../../lib/capacity'
 import { useAgentPlan } from '../../lib/useAgentPlan'
 import { useAgents } from '../../stores/agents'
@@ -21,23 +21,16 @@ watch(viewer, () => { for (const key of Object.keys(memo)) delete memo[key] })
 const ownAccounts = computed(() => new Set(agents.accounts.filter(a => a.owner_person_id
   ? a.owner_person_id === snapshot.value?.principal_id || a.owner_person_id === session.identity?.principal.id
   : a.registered_by_principal_id === snapshot.value?.principal_id || a.registered_by_principal_id === session.identity?.principal.id).map(a => a.id)))
-const room = computed<Record<string, number | null>>(() => {
+const accountRoom = computed(() => {
   const own = capacity.rows.filter(r => ownAccounts.value.has(r.id))
-  const out: Record<string, number | null> = {}
   const known = capacity.loaded && !capacity.stale && agents.accountsState === 'ready'
   // buildPools owns quota deduplication; two aliases never invent extra room.
   const pools = buildPools(own, agents.now)
-  for (const harness of POOL_ORDER) {
-    const matching = pools.filter(p => p.mark === harness)
-    if (!matching.length && !['codex', 'claude', 'cursor'].includes(harness) && !(harness in (plan.value?.limits ?? {})) && !(harness in (snapshot.value?.running ?? {}))) continue
-    out[harness] = known && matching.every(p => p.rows.every(r => !!r.routing)) ? matching.reduce((n, p) => n + p.parallelRuns, 0) : null
-  }
-  return out
+  const harnesses = POOL_ORDER.filter(h => pools.some(p => p.mark === h) || ['codex', 'claude', 'cursor'].includes(h) || h in (plan.value?.limits ?? {}) || h in (snapshot.value?.running ?? {}))
+  return workingAccountRoom(pools, known, harnesses)
 })
-const roomNow = computed(() => {
-  const values = Object.values(room.value)
-  return capacity.loaded && !capacity.stale && agents.accountsState === 'ready' && values.every(n => n !== null) ? values.reduce<number>((sum, n) => sum + (n ?? 0), 0) : null
-})
+const room = computed(() => accountRoom.value.byHarness)
+const roomNow = computed(() => accountRoom.value.total)
 const rows = computed(() => plan.value && snapshot.value ? workingRows(plan.value, snapshot.value, room.value, waiting.value) : [])
 const modes = [['none', 'No limit'], ['max', 'At most'], ['off', 'Off']] as const
 const total = computed(() => plan.value?.total ?? 0)
@@ -130,7 +123,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
             </span>
           </div>
         </div>
-        <p class="f-live" :data-tip="error || status" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || live }}</span><span v-if="saving" class="sr-only">Saving</span></p>
+        <p class="f-live" :data-tip="error || `Your sessions across projects, including sessions started outside PAIMOS. Other people's sessions appear in the live count above. ${status}`" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || `${live} · your agents` }}</span><span v-if="saving" class="sr-only">Saving</span></p>
         <button type="button" class="f-fold step ghost" :aria-expanded="!folded" :aria-controls="`${id}-body`" :aria-label="folded ? 'Show details' : 'Hide details'" :data-tip="folded ? 'Show details: each harness, accounts, waiting work' : 'Hide details: keep the one-line bar'" @click="toggleFold"><AppIcon name="chevron" :size="16" /></button>
       </div>
       <div :id="`${id}-body`" class="f-body" :hidden="folded">
