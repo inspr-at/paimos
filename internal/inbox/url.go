@@ -115,34 +115,32 @@ func resolveIPs(ctx context.Context, host string) ([]net.IP, error) {
 }
 
 func ambiguousNumeric(host string) bool {
-	if strings.ContainsAny(host, "xX") {
-		return true
-	}
-	digits := true
-	for _, c := range host {
-		if c < '0' || c > '9' {
-			digits = false
-			break
-		}
-	}
-	if digits {
-		return true
-	}
+	// inet_aton-style addresses allow one to four decimal, octal or hex
+	// components. A letter x inside a DNS label is not an address grammar.
 	parts := strings.Split(host, ".")
-	if len(parts) != 4 {
+	if len(parts) < 1 || len(parts) > 4 {
 		return false
 	}
 	for _, part := range parts {
 		if part == "" {
-			return true
+			return false
 		}
-		for _, c := range part {
-			if c < '0' || c > '9' {
+		digits := part
+		hex := strings.HasPrefix(strings.ToLower(part), "0x")
+		if hex {
+			digits = part[2:]
+			if digits == "" {
 				return false
 			}
 		}
-		if len(part) > 1 && part[0] == '0' {
-			return true
+		for _, c := range digits {
+			if c >= '0' && c <= '9' {
+				continue
+			}
+			if hex && ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				continue
+			}
+			return false
 		}
 	}
 	return net.ParseIP(host) == nil
