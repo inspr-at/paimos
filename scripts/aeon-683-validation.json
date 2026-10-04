@@ -1,7 +1,7 @@
 {
   "ticket": "AEON-683",
   "review": "review-cg76: committed phone correction, approved dial content guard, verified full repeated integrated evidence",
-  "tested_spec_revision": "Exact file hashes in fix5.branch_artifacts/runs, independently verified in fix6; committed source revision follows in fix6.committed_source_smoke",
+  "tested_spec_revision": "Implementation54c6badc5e2993fc3064a634466d57835306decd; file/report hashes in fix5 independently verified by fix6; exact combined owner trees and final smoke results in fix6",
   "new_behavior_changes": true,
   "product_defect": {
     "revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
@@ -3247,6 +3247,138 @@
     "validation_lane": "local macOS arm64, pinned Playwright Chromium headless shell under the unchanged host supervisor. Sequential batch acquires the same host lock once; every child verifies that supervisor. No readiness flag or safety guard changed.",
     "remote_validation": "Not run: no affected Go package; remote-test.sh accepts Go tests only, and fix6 explicitly forbids mbp2606. Browser readiness gate stays false. No approved local Linux Chromium lane found in Docker image inventory; no remote/Linux certification claimed.",
     "versioning": "No version-bearing change, project bootstrap, release or deployment; existing version and presentation pin preserved.",
-    "committed_source_smoke": "Pending implementation commit; will record exact source revision and targeted reports without changing product/test files."
+    "committed_source_smoke": {
+      "implementation_commit": "54c6badc5e2993fc3064a634466d57835306decd",
+      "runs": [
+        {
+          "name": "phone-smoke",
+          "stats": {
+            "startTime": "2026-10-04T11:04:36.303Z",
+            "duration": 2861.37,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "report_path": "tmp/aeon-683-fix6/phone-smoke.json",
+          "report_sha256": "5700dc2663e2642d8423730b7e87ba810431124919ebaed5da014364c0b63e79",
+          "log_path": "tmp/aeon-683-fix6/phone-smoke.log",
+          "log_sha256": "4db98dff7d09c66ae26929ca2cee73b1eb6a883581c955bc06f12a0998f67ab2",
+          "supervisor": {
+            "before": 0,
+            "peak": 4,
+            "after": 0,
+            "remaining_processes": 0,
+            "wall_ms": 3241,
+            "signal": null
+          }
+        },
+        {
+          "name": "dial-main-smoke",
+          "stats": {
+            "startTime": "2026-10-04T11:05:09.111Z",
+            "duration": 14681.424,
+            "expected": 4,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "report_path": "tmp/aeon-683-fix6/dial-main-smoke.json",
+          "report_sha256": "a35fd1a32e401d34c8c56f139f4091b1e85b6d851a214e14ce7601dad9bccd34",
+          "log_path": "tmp/aeon-683-fix6/dial-main-smoke.log",
+          "log_sha256": "c21f78869f781f06659d09f426377168a44a0d377b0e2ff3c945caf955ef4cda",
+          "supervisor": {
+            "before": 0,
+            "peak": 4,
+            "after": 0,
+            "remaining_processes": 0,
+            "wall_ms": 15104,
+            "signal": null
+          }
+        },
+        {
+          "name": "dial-final-repeat",
+          "command": [
+            "node",
+            "scripts/playwright-safe.mjs",
+            "-c",
+            "playwright.ui.config.ts",
+            "no-shift.spec.ts",
+            "--grep",
+            "Agents working dial and selectors|dial content budget",
+            "--repeat-each=20",
+            "--workers=1",
+            "--retries=0",
+            "--reporter=line,json"
+          ],
+          "cwd": "tmp/aeon-683-fix6/dial",
+          "stats": {
+            "startTime": "2026-10-04T11:05:36.142Z",
+            "duration": 278589.46,
+            "expected": 80,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "cases": {
+            "Agents working dial and selectors stay put at 1440": 20,
+            "Agents working dial and selectors stay put at 1024": 20,
+            "Agents working dial and selectors stay put at 390": 20,
+            "dial content budget rejects fixed whitespace, clipped controls and overflow": 20
+          },
+          "report_path": "tmp/aeon-683-fix6/dial-final-repeat.json",
+          "report_sha256": "320ba67805f5c59f61183a25b7ec00a5def2fa959580375215060fdf03393241",
+          "log_path": "tmp/aeon-683-fix6/dial-final-repeat.log",
+          "log_sha256": "754c86992a8476535cf2ef0f84676d77aefbff8bae8f1b1f828d713b6dd0d5d3",
+          "supervisor": {
+            "before": 0,
+            "peak": 4,
+            "after": 0,
+            "remaining_processes": 0,
+            "wall_ms": 279122,
+            "signal": null
+          }
+        }
+      ],
+      "passed": 85,
+      "scope": "Committed branch phone regression1 and dial widths/negative guard4; final exact AEON-647 integration tree dial widths and negative guard20 each. Prior four full spec20 runs remain hash-verified in fix5. Header final integration web files exactly match the full20 source; final Dial full source is reverified and tested after adding the compatible phone CSS."
+    },
+    "final_integrations": [
+      {
+        "lane": "header",
+        "implementation_commit": "54c6badc5e2993fc3064a634466d57835306decd",
+        "owner_revision": "e8ec19dcc96c423bb4997194f96f0f0fbbf1a91b",
+        "final_integration_tree": "5043460e8785c65d2b419e012d55e0a2e21ed059",
+        "snapshot_differences": []
+      },
+      {
+        "lane": "dial",
+        "implementation_commit": "54c6badc5e2993fc3064a634466d57835306decd",
+        "owner_revision": "b867b14f33f64c9e94cfd1a343ef54005a855d2b",
+        "final_integration_tree": "5b17e96fa621ff02bb470e308166884b3251f3d9",
+        "snapshot_differences": [
+          "web/src/views/ProjectView.vue"
+        ],
+        "final_snapshot_verified_files": 3608,
+        "final_snapshot_matches_integration_tree": true,
+        "final_snapshot_path": "tmp/aeon-683-fix6/dial"
+      }
+    ],
+    "ownership": {
+      "implementation_revision": "54c6badc5e2993fc3064a634466d57835306decd",
+      "refs": {
+        "work/aeon-646-hide": "e8ec19dcc96c423bb4997194f96f0f0fbbf1a91b",
+        "work/aeon-647-dial": "b867b14f33f64c9e94cfd1a343ef54005a855d2b",
+        "origin/main": "c5266ee91ad608b291f08f2a1be8700d78c164c9"
+      },
+      "accounts_diff": "",
+      "main_merge_tree": "bd1e61f40a0de11c4699dd173ea0a7254caa6014"
+    },
+    "completed_at": "2026-10-04T11:10:41.058745+00:00",
+    "screenshots_inspected": [
+      "tmp/aeon-683-fix5/evidence/header-aeon-683-phone-evidence-screenshots-shots/390-light-compact-header.png",
+      "tmp/aeon-683-fix5/evidence/header-aeon-683-phone-evidence-screenshots-shots/390-dark-comfortable-header.png"
+    ],
+    "remaining_coordinator_work": "Integrate the compatible own-branch correction through the owning AEON-646 release; run consolidated release QA/acceptance. No changes to owner refs/worktrees or tracker status. Remote/CI-equivalent Linux validation was unavailable under the explicit local-only/no-push/off-limits brief and is not claimed."
   }
 }
