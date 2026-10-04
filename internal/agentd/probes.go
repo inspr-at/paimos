@@ -536,13 +536,13 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		// An API-key login or a different email is explicitly another account;
 		// a login without an email says nothing about which account it is.
 		if status.AuthMethod == "api_key" {
-			return probeAuthFailed
+			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeAPIKeyLogin}
 		}
 		if strings.TrimSpace(status.Email) == "" {
 			return unavailable(agentsetup.ProbeEmailMissing)
 		}
 		if !strings.EqualFold(status.Email, a.Emails[key]) {
-			return probeAuthFailed
+			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity}
 		}
 	}
 	if code != 0 {

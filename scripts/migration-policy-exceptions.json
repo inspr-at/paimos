@@ -51,10 +51,40 @@
       "reason": "Replace the last-owner trigger function's tenant FOR UPDATE fence with FOR NO KEY UPDATE to preserve access-writer serialization while allowing tenant foreign-key key-share checks. The last-active-owner restriction, trigger signature and existing data remain unchanged; no table, column or route is removed. CREATE OR REPLACE FUNCTION is conservatively outside the classifier allowlist. This exact-byte exception requires coordinator review before merge/release; it does not grant acceptance or skip previous-binary compatibility probes."
     },
     {
+      "file": "1206_themes.sql",
+      "sha256": "5b289f99f660914f99861c22ba126dc09983d48c2811e735aa08af66a956ecc6",
+      "ticket": "AEON-641",
+      "reason": "Additive tenant themes and owner-only selections, with a fixed Porcelain seed for existing and future tenants. The classifier conservatively flags the tenant-loop DO backfill, ON CONFLICT DO NOTHING in the seed function, and REVOKE EXECUTE on fixed SECURITY DEFINER seed helpers. The events SELECT policy restricts only the new theme.* namespace; existing event types and previous-binary writes are unchanged. No existing table, column, route or constraint is removed. Exact bytes require coordinator review before merge/release and do not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
+      "file": "1207_theme_principal_links.sql",
+      "sha256": "6ca9500eecd6ccf7804921b275b0e6f51d101edbcae61af75799bfec36428a40",
+      "ticket": "AEON-641",
+      "reason": "Preserve immutable theme owners, choice rows and append-only audit through current principal links. Only theme-specific policies and guards change; no existing data, non-theme policy, route or column is removed. ALTER POLICY and CREATE OR REPLACE FUNCTION require this exact-byte coordinator-reviewed exception before merge/release, plus normal previous-binary compatibility probes. It grants no approval or release authority."
+    },
+    {
+      "file": "1208_theme_selection_generation.sql",
+      "sha256": "601ae9ff9206769a92e77704e27f0d361f11d24be373b2e7ce0d3af31cef41c5",
+      "ticket": "AEON-641",
+      "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
+    },
+    {
       "file": "1215_one_work_kind.sql",
       "sha256": "3c2353cc11a31d0a26c7465fe12f4e562ec5fdd0f695d62ba720520d0a75713b",
       "ticket": "AEON-649",
       "reason": "Owner-accepted AEON-648 concept Q4 explicitly retires epic/ticket/task in one atomic migration, with verified pre-migration backup as the only rollback. The starter, schema-extension and historical journey kind guards switch to work; the same-file Go hook reconciles schemas, refuses busy parents, rewrites allowed-child references, preserves node IDs/content and historical sessions/Decision Desk identities, then deletes legacy definitions and appends provenance events. This is a contract change and is incompatible with older binaries that assume retired kinds. Exact bytes are prepared for the coordinator consolidated review, not a package-worker approval or release waiver. Deployment requires release 122 published, drained merge/work queues, stopped writers, instance-specific verified backup/restore and the completed downstream work-node packages; it precedes AEON-596 ship adoption. No production backup, push or deployment is claimed by this local fixture drill."
+    },
+    {
+      "file": "1225_work_parent_status.sql",
+      "sha256": "16d756ce3a7a67ee04d53cf8fedf76c478db08c149d41a803d1ffd5f219ec952",
+      "ticket": "AEON-650",
+      "reason": "Work-parent status engine adds bounded guarded trigger/functions and expands only the derived/retained/causal-undo event visibility names, retaining existing tenant, project and referenced-node restrictions. The classifier conservatively rejects function replacement and ALTER POLICY. Activation defaults OFF and belongs to AEON-429; no permanent table or column is added and existing data is not backfilled. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval. Rollout uses AEON-649 maintenance, drained queues, stopped writers and instance-specific verified backup/restore; this exception does not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
+      "file": "1230_work_leaf_aggregates.sql",
+      "sha256": "14621b13bd555c1bfc1f8feded19c6db656e3d7d2cff148173384811a9dcb920",
+      "ticket": "AEON-651",
+      "reason": "Invoker-rights bounded leaf aggregation functions replace the published ETA function bodies while preserving their names, return signatures and optional depth argument. Existing nodes, estimates, sessions, usage and Decision Desk identities are not rewritten; no permanent table or column is added. The classifier conservatively rejects CREATE OR REPLACE FUNCTION. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval, under AEON-649 maintenance and instance-specific verified backup/restore. This exception does not waive previous-binary compatibility probes or grant release authority."
     }
   ]
 }

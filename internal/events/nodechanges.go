@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -68,10 +70,56 @@ func sameJSON(a, b json.RawMessage) bool {
 		return true
 	}
 	var x, y any
-	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+	decode := func(raw []byte, dest *any) error {
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.UseNumber()
+		return d.Decode(dest)
+	}
+	if !json.Valid(a) || !json.Valid(b) || decode(a, &x) != nil || decode(b, &y) != nil {
 		return false
 	}
-	return reflect.DeepEqual(x, y)
+	return reflect.DeepEqual(exactJSONNumbers(x), exactJSONNumbers(y))
+}
+
+// decimalNumber keeps numbers distinct from strings while comparing equivalent
+// spellings exactly. Exponents are represented, never expanded into digits.
+type decimalNumber struct{ Digits, Exponent string }
+
+func exactJSONNumbers(v any) any {
+	switch n := v.(type) {
+	case json.Number:
+		text := string(n)
+		sign := ""
+		if strings.HasPrefix(text, "-") {
+			sign = "-"
+			text = text[1:]
+		}
+		mantissa, power, _ := strings.Cut(strings.ToLower(text), "e")
+		exponent := new(big.Int)
+		if power != "" {
+			exponent.SetString(power, 10)
+		}
+		whole, fraction, _ := strings.Cut(mantissa, ".")
+		digits := strings.TrimLeft(whole+fraction, "0")
+		if digits == "" {
+			return decimalNumber{"0", "0"}
+		}
+		trimmed := strings.TrimRight(digits, "0")
+		exponent.Add(exponent, big.NewInt(int64(len(digits)-len(trimmed)-len(fraction))))
+		return decimalNumber{sign + trimmed, exponent.String()}
+	case map[string]any:
+		for key, value := range n {
+			n[key] = exactJSONNumbers(value)
+		}
+		return n
+	case []any:
+		for i, value := range n {
+			n[i] = exactJSONNumbers(value)
+		}
+		return n
+	default:
+		return v
+	}
 }
 
 func stringOf(raw json.RawMessage) *string {

@@ -287,7 +287,7 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 	}
 	for _, n := range nodes {
 		classic, _ := fieldMap(n.Fields)["classic"].(map[string]any)
-		if id, ok := classic["id"].(float64); ok && id == float64(classicID) {
+		if id, ok := classic["id"].(json.Number); ok && string(id) == strconv.Itoa(classicID) {
 			if err := rt.rejectEpicTicket(n); err != nil {
 				return nil, err
 			}

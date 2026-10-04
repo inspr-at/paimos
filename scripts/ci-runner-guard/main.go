@@ -19,19 +19,22 @@ import (
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
-const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}`
+const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
 // These exact mappings are the sole authority for workflow concurrency. Jobs
 // never own concurrency, and reusable workflows cannot enter a caller's group.
 var workflowConcurrency = map[string]map[string]any{
 	"ci.yml": {
-		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' }}`,
+		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}`,
 	},
 	"release.yml": {
 		"group": `release-${{ github.ref }}`, "cancel-in-progress": false,
 	},
 	"homebrew-tap.yml": {
-		"group": `homebrew-tap-${{ github.event.release.tag_name }}`, "cancel-in-progress": false,
+		"group": `homebrew-tap-${{ inputs.version }}`, "cancel-in-progress": false,
+	},
+	"verify-live.yml": {
+		"group": "aeon-live-verification", "cancel-in-progress": false,
 	},
 	"release-image-check.yml": {
 		"group": `release-image-check-${{ github.ref }}`, "cancel-in-progress": true,
@@ -366,18 +369,43 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
+	// A proof outage must remain an unset reuse output, never a failed need
+	// that skips the full suite. This includes checkout failures/timeouts.
+	proof := mapping(jobs["tree-reuse"])
+	if proof == nil || proof["continue-on-error"] != true {
+		return fmt.Errorf("tree-reuse must continue on error so proof failure cannot skip required CI jobs")
+	}
+	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
+		return fmt.Errorf("tree-reuse needs a bounded 5–10 minute timeout for checkout plus the 10 second proof")
+	}
+	if proof["if"] != nil || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
+		return fmt.Errorf("tree-reuse must always run and expose only its proof step output")
+	}
 	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
-		if id == "go-static" || id == "go-timing" {
+		if id != "runner-route" {
 			if _, exists := job["if"]; exists {
 				return fmt.Errorf("required CI job %q must run without an if condition", id)
 			}
+			if !hasNeed(job["needs"], "tree-reuse") {
+				return fmt.Errorf("required CI job %q must use the non-failing tree-reuse dependency", id)
+			}
 		}
 	}
-	for _, context := range []string{"go", "web", "release-check", "e2e"} {
+	migration := mapping(jobs["migration-compat"])
+	if migration["needs"] != nil {
+		return fmt.Errorf("migration-compat must remain independent of reuse proof")
+	}
+	steps, _ := migration["steps"].([]any)
+	for _, value := range steps {
+		if mapping(value)["if"] != nil {
+			return fmt.Errorf("migration-compat steps must remain unconditional")
+		}
+	}
+	for _, context := range []string{"go", "web", "release-check", "e2e", "migration-compat"} {
 		job := mapping(jobs[context])
 		if job == nil {
 			return fmt.Errorf("required check %q is missing", context)
@@ -389,11 +417,21 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
+			}
+		} else if context == "web" {
+			// OPS-257: web is the aggregate over setup and the sharded UI jobs, like go.
+			if job["if"] != "always()" {
+				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
+			}
+			if !reflect.DeepEqual(job["needs"], []any{"web-setup", "web-shard", "tree-reuse", "cache-prime"}) {
+				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
 			}
 		} else if _, exists := job["if"]; exists {
 			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
+		} else if context != "migration-compat" && !hasNeed(job["needs"], "tree-reuse") {
+			return fmt.Errorf("required check %q must use the non-failing tree-reuse dependency", context)
 		}
 	}
 	return nil

@@ -308,7 +308,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1215_one_work_kind.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql', '1215_one_work_kind.sql', '1225_work_parent_status.sql', '1230_work_leaf_aggregates.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -377,6 +377,21 @@ test('AEON-649 kind retirement pins its backup-only coordinator rollout exceptio
   assert.match(entry.reason, /No production backup, push or deployment is claimed/);
 });
 
+test('work status and aggregate replacements retain explicit coordinator-review exceptions', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  for (const [file, ticket] of [['1225_work_parent_status.sql', 'AEON-650'], ['1230_work_leaf_aggregates.sql', 'AEON-651']]) {
+    const entry = manifest.exceptions.find(entry => entry.file === file);
+    assert.equal(entry.ticket, ticket);
+    const source = readFileSync(new URL('../internal/db/migrations/' + file, import.meta.url), 'utf8');
+    assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
+    assert.equal(destructive(source), true);
+    assert.match(entry.reason, /coordinator consolidated review before merge\/release/);
+    assert.match(entry.reason, /instance-specific verified backup\/restore/);
+    assert.match(entry.reason, /does not waive previous-binary compatibility probes/);
+    assert.match(entry.reason, /not worker approval/);
+  }
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -385,7 +400,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1215_one_work_kind.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql', '1215_one_work_kind.sql', '1225_work_parent_status.sql', '1230_work_leaf_aggregates.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 

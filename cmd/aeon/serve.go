@@ -80,6 +80,7 @@ import (
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
+	"github.com/inspr-at/paimos/internal/themes"
 	"github.com/inspr-at/paimos/internal/ticketwork"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/inspr-at/paimos/internal/views"
@@ -356,7 +357,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			tenantbrand.New(pool),
 			workspaceModels,
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(themes.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
@@ -366,6 +367,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			projectgroups.New(pool),
 			historyMod,
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
+			themes.New(pool),
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),

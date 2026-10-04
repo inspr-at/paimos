@@ -324,3 +324,16 @@ rollout, the coordinator validates the AEON-429 integration and whole chain,
 including the parent UI, under AEON-649's maintenance/verified-backup gate. See
 the root README for the API contract, explicit bounds and read-serialization
 tradeoff. This worker neither pushes nor deploys.
+
+AEON-563's `1118_desk_matching.sql` adds an expression index over exact Q&A
+fingerprints and nullable per-asker source decision/revision pointers. Existing
+question/answer shapes and immutable human revisions remain available to older
+binaries. Question writes lock tenant, tree, authenticated key, question and
+decision before appending the event; access, key scopes and active decision state
+are checked inside that transaction. Matching preserves every membership's
+original input, ticket, session and reserved reply root. Reuse increments the
+source count once per membership and adds only inbox/comment effects due now;
+ask callers identify their new membership by its original request ID.
+P3 must use each pending effect's deadline rather than the source answer's human
+grace deadline. Corrections retain the original per-asker reuse pointers. Active
+Always publication and post-dispatch corrections remain P4/P3 responsibilities.
