@@ -18,7 +18,7 @@ import (
 func TestPlainMoveTransfersJourneyAndUndoRestoresIt(t *testing.T) {
 	p := newPrincipal(t, "plain-journey-move")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	source := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Source"}`)
 	target := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Target"}`)
 	noJourney := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"No journey"}`)
@@ -118,8 +118,8 @@ func TestPlainMoveTransfersJourneyAndUndoRestoresIt(t *testing.T) {
 func TestPlainMoveTransfersDescendantJourneyTickets(t *testing.T) {
 	p := newPrincipal(t, "subtree-journey-move")
 	projectKind := kindBySlug(t, p, "project")
-	epicKind := kindBySlug(t, p, "epic")
-	ticketKind := kindBySlug(t, p, "ticket")
+	epicKind := kindBySlug(t, p, "work")
+	ticketKind := kindBySlug(t, p, "work")
 	source := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Source"}`)
 	target := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Target"}`)
 	epic := mustNode(t, p, `{"kind_id":"`+epicKind.ID+`","title":"Epic","parent_id":"`+source.ID+`"}`)

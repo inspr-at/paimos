@@ -196,7 +196,7 @@ func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 	if err != nil {
 		return err
 	}
-	pl, err := newPlanningPlanner(ctx, tx, q.seen, seeds)
+	pl, err := newPlanningPlanner(ctx, tx, q.seen, seeds, true)
 	if err != nil {
 		return err
 	}
@@ -212,24 +212,27 @@ func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 // planningRates is the JSON the cost statements multiply. Sort and display
 // both read it, so an estimate is one product, not two.
 func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow) (json.RawMessage, error) {
-	pl, err := newPlanningPlanner(ctx, tx, seen, seeds)
+	pl, err := newPlanningPlanner(ctx, tx, seen, seeds, true)
 	if err != nil {
 		return nil, err
 	}
 	return pl.rates(ctx, tx)
 }
 
-func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow) (*planner, error) {
+func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow, estimates bool) (*planner, error) {
 	routes, err := resolvePlanRoutes(ctx, tx, seeds)
 	if err != nil {
 		return nil, err
 	}
-	samples, err := loadCalibrationSamples(ctx, tx, routes, seen.costVisible)
-	if err != nil {
-		return nil, err
+	var samples []calibrationSample
+	if estimates {
+		samples, err = loadCalibrationSamples(ctx, tx, routes, seen.costVisible)
+		if err != nil {
+			return nil, err
+		}
 	}
 	billing := map[string]planBilling{}
-	if len(routes) > 0 {
+	if estimates && len(routes) > 0 {
 		if billing, err = loadPlanBilling(ctx, tx, routes, seen); err != nil {
 			return nil, err
 		}
@@ -239,8 +242,10 @@ func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds
 		placements[seed.placementKey()] = seed
 	}
 	pl := &planner{placements: placements, routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
-	if err := pl.loadLearning(ctx, tx, seen.costVisible); err != nil {
-		return nil, err
+	if estimates {
+		if err := pl.loadLearning(ctx, tx, seen.costVisible); err != nil {
+			return nil, err
+		}
 	}
 	return pl, nil
 }
@@ -847,9 +852,18 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 	if err != nil {
 		return nil, err
 	}
-	models, running, err := loadPlanningModels(ctx, tx, ids)
-	if err != nil {
-		return nil, err
+	// Usage and model readers share the same session scope and visibility.
+	// With no sessions, there are no model identities or running counts to read.
+	models, running := map[string][]planningModel{}, map[string]int{}
+	if len(usage) > 0 {
+		models, running, err = loadPlanningModels(ctx, tx, ids)
+		if err != nil {
+			return nil, err
+		}
+	}
+	needsEstimates := false
+	for _, row := range rows {
+		needsEstimates = needsEstimates || row.hours != nil
 	}
 	visible := func(item listItem) bool { return item.Project != nil && cost(item.Project.ID) }
 	var pl *planner
@@ -857,12 +871,14 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		pl = shared[0]
 	}
 	if pl == nil {
-		pl, err = newPlanningPlanner(ctx, tx, seen, rows)
+		// With no sized leaves, calibration cannot contribute any displayed
+		// estimate. Still resolve routes and load historical usage normally.
+		pl, err = newPlanningPlanner(ctx, tx, seen, rows, needsEstimates)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if money == nil {
+	if money == nil && (needsEstimates || len(usage) > 0) {
 		money, err = loadPlanMicros(ctx, tx, ids, seen, pl)
 		if err != nil {
 			return nil, err
@@ -923,7 +939,7 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		pl, err = newPlanningPlanner(ctx, tx, seen, seeds)
+		pl, err = newPlanningPlanner(ctx, tx, seen, seeds, true)
 		if err != nil {
 			return nil, err
 		}

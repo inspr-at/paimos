@@ -23,8 +23,10 @@ import (
 // body search, the assignee sort and the new facets.
 func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	p := newPrincipal(t, "filters")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
 	mira := addPrincipalIn(t, p.TenantID, "mira")
-	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "ticket"), kindBySlug(t, p, "task")
+	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "work"), kindBySlug(t, p, "task")
 	create := func(kind, key, title, state, parent string, fields map[string]any, body string) nodeJSON {
 		t.Helper()
 		if fields == nil {
@@ -62,7 +64,7 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 		if !strings.Contains(query, "sort=") {
 			query += "&sort=key"
 		}
-		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket,task&"+query, "")
+		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&"+query, "")
 		page := decode[nodePage](t, status, body, http.StatusOK)
 		out := []string{}
 		for _, item := range page.Items {
@@ -145,7 +147,7 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	}
 
 	// Facets for tags, cost units and releases; a cursor binds the new filters.
-	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket,task&facets=tag,cost_unit,release,state&limit=1&tag=!none", "")
+	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&facets=tag,cost_unit,release,state&limit=1&tag=!none", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	if page.Facets["tag"]["BUG"]+page.Facets["tag"]["bug"] != 2 || page.Facets["tag"]["hsb8"] != 1 || page.Facets["cost_unit"]["Consulting"] != 1 || page.Facets["cost_unit"]["Support"] != 1 || page.Facets["release"]["none"] != 1 {
 		t.Fatalf("facets: %#v", page.Facets)
@@ -153,7 +155,7 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	if page.NextCursor == nil {
 		t.Fatal("expected a second page")
 	}
-	status, body = call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket,task&facets=tag,cost_unit,release,state&limit=1&tag=none&cursor="+url.QueryEscape(*page.NextCursor), "")
+	status, body = call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&facets=tag,cost_unit,release,state&limit=1&tag=none&cursor="+url.QueryEscape(*page.NextCursor), "")
 	if status != http.StatusBadRequest || !strings.Contains(string(body), "cursor") {
 		t.Fatalf("cursor across filters: %d %s", status, body)
 	}
@@ -189,7 +191,7 @@ func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 	t.Helper()
 	p := newPrincipal(t, "large-filters")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
@@ -231,8 +233,8 @@ func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 			if (len(page.Items) != 50 && len(page.Items) != 1) || page.NextCursor == nil {
 				t.Fatalf("large list result: %d", len(page.Items))
 			}
-			if path == paths[0] && page.Facets["kind"]["ticket"] != 2058 {
-				t.Fatalf("filtered ticket facet = %d, want 2058", page.Facets["kind"]["ticket"])
+			if path == paths[0] && page.Facets["kind"]["work"] != 2058 {
+				t.Fatalf("filtered ticket facet = %d, want 2058", page.Facets["kind"]["work"])
 			}
 			for _, item := range page.Items {
 				if item.ChildrenCount != 0 {
@@ -270,7 +272,7 @@ func addPrincipalIn(t *testing.T, tenantID, name string) struct{ ID string } {
 func TestListAssigneeFacetOverLargeImportedFields(t *testing.T) {
 	p := newPrincipal(t, "large-fields")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Imported project"}`)
 	// A workspace of people, most of them linked to classic accounts.
 	for i := 0; i < 14; i++ {
@@ -296,7 +298,7 @@ func TestListAssigneeFacetOverLargeImportedFields(t *testing.T) {
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes`); err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/nodes?within=" + root.ID + "&kind=ticket&facets=assignee,tag&limit=1"
+	path := "/api/nodes?within=" + root.ID + "&kind=work&facets=assignee,tag&limit=1"
 	var fastest time.Duration
 	for i := 0; i < 3; i++ {
 		start := time.Now()

@@ -40,7 +40,7 @@ interface SourceLike {
   close(): void
 }
 
-export const NODE_EVENTS = ['status_autopilot.derived', 'node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
+export const NODE_EVENTS = ['status_autopilot.derived', 'status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed', 'node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
 
 // The node_changes of one stream event, in client shape.
@@ -198,7 +198,7 @@ export class LiveNodeStore {
     }
     source.addEventListener('stream.ready', current(event => this.ready(event)))
     source.addEventListener('stream.ping', current(() => {}))
-    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS]) source.addEventListener(name, current(event => this.receive(event)))
+    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS, 'harness.usage_reported']) source.addEventListener(name, current(event => this.receive(event)))
     source.onerror = () => {
       if (this.source !== source) return
       // Distrust in-flight pages as soon as the stream is lost, including
@@ -271,8 +271,14 @@ export class LiveNodeStore {
     if (change.projectId) projects.add(change.projectId)
     const former = this.rows.latest(change.id)?.project?.id
     if (former) projects.add(former)
-    const membership = change.change !== 'updated' || ['node.moved', 'node.project_moved', 'node.kind_changed'].includes(change.type)
-    const parents = this.rows.aggregateParents(projects, membership)
+    const membership = change.change !== 'updated' || ['node.moved', 'node.project_moved', 'node.kind_changed', 'import.parent_changed'].includes(change.type)
+      || change.fields.some(field => ['parent_id', 'project_id', 'kind_id'].includes(field))
+    // A moved descendant need not have been loaded. The stream names only
+    // its destination, so no cached source means any held project may have
+    // lost it. Refresh held rows through their normal authorized reads.
+    const unknownSource = !former && (['node.moved', 'node.project_moved', 'import.parent_changed'].includes(change.type)
+      || change.fields.some(field => ['parent_id', 'project_id'].includes(field)))
+    const parents = this.rows.aggregateParents(unknownSource ? null : projects, membership || unknownSource)
     this.applyOne(change)
     // Parent status and revision can stay unchanged while leaf estimates,
     // sessions, spend or membership change. These are projection hints only;
@@ -324,7 +330,7 @@ export class LiveNodeStore {
       if (!showing.length) { this.settled(id); return }
       if (this.rows.isDeleted(id)) { this.settled(id); return }
       const cached = this.rows.latest(id)
-      if (cached && dirty.change.type !== 'status_autopilot.derived' && !aggregateHint(dirty.change) && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
+      if (cached && !['status_autopilot.derived', 'import.parent_changed'].includes(dirty.change.type) && !aggregateHint(dirty.change) && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
         this.settled(id)
         for (const view of showing) view.changed(dirty.change, cached)
         return
@@ -345,7 +351,7 @@ export class LiveNodeStore {
       else if (node) this.rows.adoptNode(node, sent)
       else this.rows.gone(id, sent)
       const change = this.dirty.get(id)?.change
-      const projectionChanged = change && (change.type === 'status_autopilot.derived' || aggregateHint(change))
+      const projectionChanged = change && (['status_autopilot.derived', 'import.parent_changed'].includes(change.type) || aggregateHint(change))
       if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at) || projectionChanged)) continue
       if (!change) return
       this.settled(id)

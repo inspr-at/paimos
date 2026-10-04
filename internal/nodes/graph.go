@@ -16,7 +16,8 @@ import (
 // ticketGraphNodeLimit is the most nodes one answer returns, newest first.
 const ticketGraphNodeLimit = 1500
 
-// TicketGraph is a body-free projection of one project's tickets and epics.
+// TicketGraph is a body-free projection of one project's work items and legacy
+// tickets and epics.
 // New mounts it on the existing nodes module; there is no plugin manifest.
 // The read runs inside db.InTenant and writes no event (AEON-196).
 type TicketGraph struct {
@@ -25,8 +26,9 @@ type TicketGraph struct {
 	Truncated bool              `json:"truncated"`
 }
 
-// TicketGraphNode is one ticket or epic. ParentID is set only when that parent
-// is a visible ticket or epic; an invisible parent's id is never returned.
+// TicketGraphNode is one work item, ticket or epic. ParentID is set only when
+// that parent is a visible work item, ticket or epic; an invisible parent's id
+// is never returned.
 // ReleaseID is the journey release when that release node is visible.
 type TicketGraphNode struct {
 	*WorkShape

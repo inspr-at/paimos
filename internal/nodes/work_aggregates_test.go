@@ -316,12 +316,17 @@ func TestWorkAggregatesCalibratedTokenEstimates(t *testing.T) {
 	}
 	parent := aggregateNode(t, w, "CAL-20", w.root.ID, "open", 100)
 	group := aggregateNode(t, w, "CAL-21", parent.ID, "open", 100)
-	leaf := aggregateNode(t, w, "CAL-22", group.ID, "open", 2)
+	// Match the measured route explicitly; the work classifier's default build
+	// route is a different model and must not borrow Codex's calibration.
+	leaf := w.node(t, "CAL-22", "work", group.ID, "open", map[string]any{
+		"estimate_hours": 2, "area": "backend", "route_role": "build-hard", "complexity": "M",
+	})
 	for _, sort := range []string{"key", "tokens", "-tokens", "list_cost", "paid"} {
 		got := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+sort)
 		a, b := got[parent.Key], got[leaf.Key]
 		if a == nil || b == nil || a.Tokens.Estimated == nil || b.Tokens.Estimated == nil || *a.Tokens.Estimated != 120000 || *a.Tokens.Estimated != *b.Tokens.Estimated || a.Children == nil || a.Children.Total != 1 || a.Children.Estimated != 1 {
-			t.Fatalf("leaf token sum sort %s parent=%+v leaf=%+v", sort, a, b)
+			detail, _ := json.Marshal(map[string]*planningView{"parent": a, "leaf": b})
+			t.Fatalf("leaf token sum sort %s: %s", sort, detail)
 		}
 	}
 	// Only leaves capture a new baseline; a former leaf's old snapshot stays put.
