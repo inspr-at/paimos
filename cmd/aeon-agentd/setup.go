@@ -78,6 +78,15 @@ func (l localPairing) Fence(ctx context.Context, daemon, account string) (agents
 	}
 	if l.supervisor != nil {
 		s, e := l.supervisor.Drain(agentd.DrainRequest{DaemonID: daemon, AccountID: account})
+		if errors.Is(e, agentd.ErrScope) && account != "" {
+			// Historical tombstones need a durable fence even after their
+			// runtime binding disappears. Preserve actual process/settlement
+			// evidence; absence from the runtime is not proof of cleanup.
+			status := l.supervisor.Lifecycle(account)
+			if _, enrolled := status.AccountStatuses[account]; status.DaemonID == daemon && !enrolled {
+				return localStatus(status), nil
+			}
+		}
 		return localStatus(s), e
 	}
 	client, err := l.client()
@@ -225,7 +234,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	// Read existing options before defaulting the workspace, so rerunning pair
 	// from another directory resumes the same approved request.
-	store, err := agentsetup.OpenStore(root, false)
+	openStore := func() (*agentsetup.Store, error) { return agentsetup.OpenStore(root, false) }
+	if command == "status" {
+		openStore = func() (*agentsetup.Store, error) { return agentsetup.OpenStoreReadOnly(root) }
+	}
+	store, err := openStore()
 	if err != nil && !(command == "setup" && errors.Is(err, os.ErrNotExist)) {
 		return err
 	}
@@ -546,13 +559,25 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 	if err != nil {
 		return err
 	}
-	// One line per harness that is not ready, then per blocked account; both
-	// use the shared reason codes and fix commands.
-	harnesses := make([]string, 0, len(p.HarnessDetails))
-	for harness, detail := range p.HarnessDetails {
-		if detail.State != "ready" {
-			harnesses = append(harnesses, harness)
+	if p.TouchIDConfirmation != "" {
+		confirmation := "Touch ID confirmation: " + p.TouchIDConfirmation
+		if p.TouchIDUpgradeCommand != "" {
+			confirmation += ": " + p.TouchIDUpgradeCommand
 		}
+		if _, err := fmt.Fprintln(out, confirmation); err != nil {
+			return err
+		}
+		if p.TouchIDUpgradeCommand != "" {
+			if _, err := fmt.Fprintln(out, "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."); err != nil {
+				return err
+			}
+		}
+	}
+	// Include healthy harnesses and each approved account, so a successful
+	// probe cannot disappear behind an unrelated verification failure.
+	harnesses := make([]string, 0, len(p.HarnessDetails))
+	for harness := range p.HarnessDetails {
+		harnesses = append(harnesses, harness)
 	}
 	sort.Strings(harnesses)
 	for _, harness := range harnesses {
@@ -561,8 +586,41 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		if detail.Reason != "" {
 			line += " reason " + detail.Reason
 		}
+		if detail.ReasonDetail != "" {
+			line += " detail " + detail.ReasonDetail
+		}
 		if detail.Fix.Command != "" {
 			line += " fix " + detail.Fix.Command
+		}
+		if _, err = fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	accounts := append([]agentsetup.Enrollment(nil), p.Accounts...)
+	sort.Slice(accounts, func(i, j int) bool { return accounts[i].AccountID < accounts[j].AccountID })
+	for _, account := range accounts {
+		detail, ok := p.AccountStatuses[account.AccountID]
+		if !ok || account.State != "connected" {
+			detail = agentsetup.HarnessDetail{State: account.State}
+			if account.State == "connected" {
+				detail.State = "unconfirmed"
+			}
+		}
+		line := "account " + account.AccountID + " harness " + account.Harness + " " + detail.State
+		if detail.Reason != "" {
+			line += " reason " + detail.Reason
+		}
+		if detail.ReasonDetail != "" {
+			line += " detail " + detail.ReasonDetail
+		}
+		if detail.Fix.Command != "" {
+			line += " fix " + detail.Fix.Command
+		}
+		if account.State == "connected" && detail.State == "ready" && account.VerificationState == "expired" && account.VerificationRunID != "" {
+			line += " verification expired — run verification again; run " + account.VerificationRunID
+			if account.Cleanup != "" {
+				line += "; local cleanup " + account.Cleanup
+			}
 		}
 		if _, err = fmt.Fprintln(out, line); err != nil {
 			return err

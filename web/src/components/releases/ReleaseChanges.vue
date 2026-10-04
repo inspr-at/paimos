@@ -23,7 +23,7 @@ const ticketsShown = (c: ReleaseChange) => props.soleTicket && c.tickets.length 
 const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
   { key: 'features', label: 'Features', icon: 'sparkle' },
   { key: 'fixes', label: 'Fixes', icon: 'bug' },
-  { key: 'other', label: 'Other changes', icon: 'gear' },
+  { key: 'other', label: 'Other', icon: 'gear' },
 ]
 const TYPE_LABEL: Record<ReleaseChange['type'], string> = { feat: 'feature', fix: 'fix', test: 'tests', docs: 'docs', refactor: 'refactor', chore: 'chore', release: 'release', other: '' }
 const countOf = (key: ChangeGroup) => key === 'other' ? presented.value.other.length : presented.value[key].length

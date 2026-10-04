@@ -350,7 +350,9 @@ test('agents: role and keys; a new key shows once; service principals are intern
   await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).toBeChecked()
   // The deployer is a Viewer: a scope beyond that role is disabled, with the reason.
   await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
-  await expect(sheet.locator('.scope-row').filter({ hasText: 'nodes.write' })).toContainText('beyond pharos-deployer’s role (Viewer)')
+  const unavailable = sheet.locator('.scope-row').filter({ hasText: 'nodes.write' })
+  await expect(unavailable.locator('.scope-id')).toHaveText('nodes.write')
+  await expect(unavailable.locator('.unavailable')).toHaveText('beyond pharos-deployer’s role (Viewer)')
   await sheet.getByRole('checkbox', { name: /nodes\.read/ }).uncheck()
   await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).not.toBeChecked()
   await sheet.getByRole('checkbox', { name: /nodes\.read/ }).check()

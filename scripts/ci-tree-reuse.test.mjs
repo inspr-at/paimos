@@ -1,238 +1,191 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as reuse from './ci-tree-reuse.mjs';
-const { decide, verifyRun, registry, transport, publish, cleanMergeTree, workflowPath } = reuse;
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { decide, verifyRun, transport, main, requiredJobs, executionSteps, workflowPath } from './ci-tree-reuse.mjs';
 
 const repository = 'inspr-at/paimos';
 const sha = 'a'.repeat(40);
-const tree = 'b'.repeat(40);
-const base = 'c'.repeat(40);
-const checkoutSHA = 'd'.repeat(40);
-const headTree = 'e'.repeat(40);
-const jobNames = ['tree-reuse', 'go', 'go-static', 'go-timing', 'web', 'release-check', 'e2e', 'footer-ui', 'status-help-ui', 'status-autopilot-ui', 'migration-compat', 'runner-route / route', ...Array.from({ length: 7 }, (_, index) => `go-test (${index + 1})`)];
-
-function fixture(event = 'push') {
-  const run = { id: 123, repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: 1, event, head_sha: sha, head_branch: 'main', pull_requests: [{ head: { sha, repo: { id: 10 } }, base: { sha: base, repo: { id: 10 } } }] };
-  const workflow = { id: 20, path: workflowPath };
-  const commit = { sha, tree: { sha: event === 'pull_request' ? headTree : tree } };
-  const checkout = { sha: checkoutSHA, tree: { sha: tree }, parents: [{ sha: base }, { sha }] };
-  const comparison = { status: 'diverged', merge_base_commit: { sha: 'f'.repeat(40) } };
-  const jobs = { total_count: jobNames.length, jobs: jobNames.map(name => ({ name, status: 'completed', conclusion: 'success' })) };
-  jobs.jobs[0].steps = [{ name: `Checkout tested commit ${checkoutSHA}`, status: 'completed', conclusion: 'success' }];
+const listPath = `actions/workflows/ci.yml/runs?event=merge_group&status=success&head_sha=${sha}&per_page=20`;
+function fixture(attempt = 1) {
+  const run = { id: 123, name: 'CI', repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: attempt, event: 'merge_group', head_sha: sha };
+  const workflow = { id: 20, name: 'CI', path: workflowPath };
+  const jobs = { total_count: requiredJobs.length + 1, jobs: requiredJobs.map(name => {
+    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard' : name.startsWith('web-shard (') ? 'Run balanced UI shard with merge-queue flake control' : undefined);
+    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : [] };
+  }) };
+  jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
+  const listed = { total_count: 1, workflow_runs: [{ id: 123, head_sha: sha, event: 'merge_group' }] };
   const calls = [];
   const api = async path => {
     calls.push(path);
+    if (path === listPath) return listed;
     if (path === 'actions/runs/123') return run;
     if (path === 'actions/workflows/ci.yml') return workflow;
-    if (path === `git/commits/${sha}`) return commit;
-    if (path === `git/commits/${checkoutSHA}`) return checkout;
-    if (path === `compare/${base}...${sha}?per_page=1`) return comparison;
-    if (path === 'actions/runs/123/attempts/1/jobs?per_page=100') return jobs;
-    throw new Error('Unexpected fixture request');
+    if (path === `actions/runs/123/attempts/${attempt}/jobs?per_page=100`) return jobs;
+    throw new Error(`Unexpected fixture request: ${path}`);
   };
-  const record = { schema: 'aeon.ci.tree-green.v1', repository, repository_id: 10, workflow_id: 20, workflow: workflowPath, run: 123, attempt: 1, sha, tree };
-  if (event === 'pull_request') record.checkout = checkoutSHA;
-  const mergeTree = async (baseSnapshot, headSnapshot, testedSnapshot) => {
-    assert.deepEqual([baseSnapshot, headSnapshot, testedSnapshot], [base, sha, checkoutSHA]);
-    calls.push('recompute clean merge');
-    return tree;
-  };
-  return { run, workflow, commit, checkout, jobs, record, calls, api, mergeTree };
+  return { run, workflow, jobs, listed, calls, api };
 }
+const check = (f, options = {}) => decide({ event: 'push', ref: 'refs/heads/main', sha, repository, api: f.api, ...options });
+const job = (f, name) => f.jobs.jobs.find(j => j.name === name);
 
-function check(f, overrides = {}) {
-  return decide({ event: 'merge_group', tree, repository, readRecord: async () => f.record, api: f.api, mergeTree: f.mergeTree, ...overrides });
-}
-
-test('equal target and verified source trees reuse', async () => {
+test('found: an exact-SHA successful merge-group full suite reuses with source note', async () => {
   const f = fixture();
-  const result = await check(f);
-  assert.equal(result.reuse, 'tree');
-  assert.equal(result.run, 123);
-  assert.equal(result.tree, tree);
-  assert(f.calls.includes(`git/commits/${sha}`));
-  assert(f.calls.some(path => path.includes('/attempts/1/jobs')));
+  assert.deepEqual(await check(f), { reuse: 'merge_group', run: 123, reason: 'reused merge_group run 123' });
+  assert.deepEqual(await verifyRun(repository, 123, f.api, sha), { run: 123, attempt: 1, sha });
+  assert(f.calls.includes(listPath));
+  assert(f.calls.includes('actions/runs/123/attempts/1/jobs?per_page=100'));
+  assert(!f.calls.some(p => /git\/|compare\/|pulls\/|statuses\//.test(p)));
 });
 
-test('a differing target tree runs the full suite', async () => {
-  const f = fixture();
-  assert.equal((await check(f, { tree: 'd'.repeat(40) })).reuse, 'none');
-  assert.equal(f.calls.length, 0);
+test('not found: a direct main push runs the full suite', async () => {
+  const f = fixture(); f.listed.workflow_runs = []; f.listed.total_count = 0;
+  assert.equal((await check(f)).reuse, 'none');
+  assert.deepEqual(f.calls, [listPath]);
 });
 
 for (const [name, mutate] of [
-  ['wrong repository in record', f => { f.record.repository = 'other/repository'; }],
-  ['wrong repository in API', f => { f.run.repository.full_name = 'other/repository'; }],
-  ['fork source repository', f => { f.run.head_repository.full_name = 'other/repository'; }],
-  ['wrong repository ID', f => { f.record.repository_id = 99; }],
-  ['wrong workflow path', f => { f.run.path = '.github/workflows/other.yml'; }],
-  ['wrong workflow ID', f => { f.run.workflow_id = 99; }],
-  ['wrong workflow lookup', f => { f.workflow.path = '.github/workflows/other.yml'; }],
-  ['failed run', f => { f.run.conclusion = 'failure'; }],
-  ['unfinished run', f => { f.run.status = 'in_progress'; }],
-  ['wrong run ID', f => { f.run.id = 999; }],
-  ['tree mismatch from API', f => { f.commit.tree.sha = 'd'.repeat(40); }],
-  ['source commit mismatch', f => { f.record.sha = 'd'.repeat(40); }],
-  ['stale run attempt', f => { f.record.attempt = 2; }],
-  ['merge group cannot mint a record', f => { f.run.event = 'merge_group'; }],
-  ['manual run cannot mint a record', f => { f.run.event = 'workflow_dispatch'; }],
-  ['non-main push cannot mint a record', f => { f.run.head_branch = 'work/other'; }],
-  ['skipped suite job', f => { f.jobs.jobs[4].conclusion = 'skipped'; }],
-  ['missing suite job', f => { f.jobs.jobs.splice(4, 1); f.jobs.total_count--; }],
-  ['missing Go shard', f => { f.jobs.jobs.pop(); f.jobs.total_count--; }],
+  ['found but failed', f => { f.run.conclusion = 'failure'; }],
+  ['found but cancelled', f => { f.run.conclusion = 'cancelled'; }],
+  ['found but still running', f => { f.run.status = 'in_progress'; }],
+  ['found but other workflow path', f => { f.run.path = '.github/workflows/other.yml'; }],
+  ['found but other workflow ID', f => { f.run.workflow_id = 99; }],
+  ['found but other workflow name', f => { f.run.name = 'Other CI'; }],
+  ['workflow lookup has other name', f => { f.workflow.name = 'Other CI'; }],
+  ['workflow lookup has other path', f => { f.workflow.path = '.github/workflows/other.yml'; }],
+  ['workflow lookup has invalid ID', f => { f.workflow.id = 0; }],
+  ['wrong repository', f => { f.run.repository.full_name = 'other/repo'; }],
+  ['fork repository', f => { f.run.head_repository.full_name = 'other/repo'; }],
+  ['missing repository ID', f => { delete f.run.repository.id; }],
+  ['wrong run ID', f => { f.run.id = 321; }],
+  ['wrong SHA despite discovery filter', f => { f.run.head_sha = 'b'.repeat(40); }],
+  ['same tree at another SHA', f => { f.run.head_sha = 'c'.repeat(40); f.run.tree = sha; }],
+  ['PR run', f => { f.run.event = 'pull_request'; }],
+  ['push run', f => { f.run.event = 'push'; }],
+  ['manual run', f => { f.run.event = 'workflow_dispatch'; }],
+  ['unsafe run attempt', f => { f.run.run_attempt = Number.MAX_SAFE_INTEGER + 1; }],
+  ['invalid run attempt', f => { f.run.run_attempt = 0; }],
+  ['found on partial rerun with retained old attempt', f => { f.run.run_attempt = 2; }],
+  ['job from a different attempt', f => { job(f, 'go').run_attempt = 2; }],
+  ['green aggregate but failed shard', f => { job(f, 'go-test (4)').conclusion = 'failure'; }],
+  ['green aggregate but cancelled web shard', f => { job(f, 'web-shard (4)').conclusion = 'cancelled'; }],
+  ['skipped required job', f => { job(f, 'release-check').conclusion = 'skipped'; }],
+  ['unfinished required job', f => { job(f, 'e2e').status = 'in_progress'; }],
+  ['missing Go shard', f => { f.jobs.jobs = f.jobs.jobs.filter(j => j.name !== 'go-test (7)'); f.jobs.total_count--; }],
+  ['missing web shard', f => { f.jobs.jobs = f.jobs.jobs.filter(j => j.name !== 'web-shard (12)'); f.jobs.total_count--; }],
+  ['duplicate suite job', f => { f.jobs.jobs.push({ ...job(f, 'go') }); f.jobs.total_count++; }],
+  ['unknown suite job', f => { f.jobs.jobs.push({ ...job(f, 'go'), name: 'unknown' }); f.jobs.total_count++; }],
   ['incomplete pagination', f => { f.jobs.total_count++; }],
   ['oversized job list', f => { f.jobs.total_count = 101; }],
-  ['invalid schema', f => { f.record.schema = 'other'; }],
-  ['unsafe run number', f => { f.record.run = Number.MAX_SAFE_INTEGER + 1; }],
-]) {
-  test(`forged record rejected: ${name}`, async () => {
-    const f = fixture(); mutate(f);
-    assert.equal((await check(f)).reuse, 'none');
-  });
-}
-
-test('a behind-main PR records and reuses the tested merge tree, not its head tree', async () => {
-  const f = fixture('pull_request');
-  assert.notEqual(f.commit.tree.sha, f.checkout.tree.sha);
-  assert.deepEqual(await verifyRun(repository, 123, f.api, f.mergeTree), f.record);
-  assert.equal((await check(f)).reuse, 'tree');
-  assert(f.calls.includes(`git/commits/${checkoutSHA}`));
-  assert(f.calls.includes('recompute clean merge'));
-  assert(!f.calls.includes(`git/commits/${sha}`));
-  // Any live PR read, including merge_commit_sha, throws in this fixture.
-  assert(!f.calls.some(path => path.startsWith('pulls/')));
-});
-
-test('equal head and merge trees still require the tested checkout and clean merge', async () => {
-  const f = fixture('pull_request');
-  f.commit.tree.sha = tree;
-  assert.equal((await check(f)).reuse, 'tree');
-  assert(f.calls.includes('recompute clean merge'));
-});
-
-test('verification never reads the live PR merge commit', async () => {
-  const f = fixture('pull_request');
-  const api = async path => {
-    assert(!path.startsWith('pulls/'), 'must never read live merge_commit_sha');
-    return f.api(path);
-  };
-  assert.equal((await check(f, { api })).reuse, 'tree');
-});
-
-test('a missing or conflicting recomputed merge fails closed', async () => {
-  const f = fixture('pull_request');
-  assert.equal((await check(f, { mergeTree: async () => { throw new Error('merge conflict or missing history'); } })).reuse, 'none');
-  assert.equal((await check(f, { mergeTree: async () => headTree })).reuse, 'none');
-});
-
-test('clean merge proof fetches only immutable snapshots with bounded Git commands', () => {
-  const calls = [];
-  const execute = (command, args, options) => {
-    calls.push({ command, args, options });
-    return args[0] === 'merge-tree' ? `${tree}\n` : '';
-  };
-  assert.equal(cleanMergeTree(base, sha, checkoutSHA, { execute }), tree);
-  assert.deepEqual(calls.map(call => [call.command, call.args]), [
-    ['git', ['fetch', '--no-tags', '--no-write-fetch-head', '--depth=256', 'origin', base, sha, checkoutSHA]],
-    ['git', ['merge-tree', '--write-tree', base, sha]],
-  ]);
-  assert(calls.every(call => call.options.timeout > 0 && call.options.timeout <= 5000 && call.options.maxBuffer === 65536));
-  assert.throws(() => cleanMergeTree(base, sha, checkoutSHA, { execute: () => { throw new Error('conflict'); } }), /conflict/);
-  assert.throws(() => cleanMergeTree(base, sha, checkoutSHA, { execute: () => 'not a clean tree' }), /not clean/);
-  assert.throws(() => cleanMergeTree(base, sha, checkoutSHA, { execute: () => assert.fail('expired proof must not fetch'), deadline: 0 }), /deadline/);
-});
-
-for (const [name, mutate] of [
-  ['missing PR', f => { f.run.pull_requests = []; }],
-  ['wrong PR head', f => { f.run.pull_requests[0].head.sha = 'd'.repeat(40); }],
-  ['foreign PR base', f => { f.run.pull_requests[0].base.repo.id = 99; }],
-  ['missing checkout snapshot', f => { f.jobs.jobs[0].steps = []; }],
-  ['skipped checkout snapshot', f => { f.jobs.jobs[0].steps[0].conclusion = 'skipped'; }],
-  ['duplicate checkout snapshot', f => { f.jobs.jobs[0].steps.push({ ...f.jobs.jobs[0].steps[0] }); }],
-  ['wrong checkout SHA', f => { f.checkout.sha = sha; }],
-  ['changed run base', f => { f.run.pull_requests[0].base.sha = headTree; }],
-  ['wrong checkout base', f => { f.checkout.parents[0].sha = headTree; }],
-  ['wrong checkout head', f => { f.checkout.parents[1].sha = headTree; }],
-  ['wrong checkout parents', f => { f.checkout.parents.pop(); }],
-  ['wrong recorded checkout', f => { f.record.checkout = sha; }],
-  ['wrong checkout tree', f => { f.checkout.tree.sha = headTree; }],
-]) test(`${name} falls back`, async () => {
-  const f = fixture('pull_request'); mutate(f);
+  ['missing jobs', f => { delete f.jobs.jobs; }],
+  ['skipped tests on green rerun', f => { job(f, 'go-test (1)').steps[0].conclusion = 'skipped'; }],
+  ['skipped browser execution', f => { job(f, 'web-shard (1)').steps[0].conclusion = 'skipped'; }],
+  ['missing migration execution', f => { job(f, 'migration-compat').steps = []; }],
+  ['duplicate execution step', f => { job(f, 'web-setup').steps.push({ ...job(f, 'web-setup').steps[0] }); }],
+  ['reused echo is not test evidence', f => { job(f, 'e2e').steps.push({ name: 'Reuse the verified merge-group run', conclusion: 'success' }); }],
+  ['failed optional job', f => { job(f, 'cache-prime').conclusion = 'failure'; }],
+  ['malformed discovery', f => { f.listed.workflow_runs = undefined; }],
+  ['oversized discovery', f => { f.listed.workflow_runs = Array(21).fill(f.listed.workflow_runs[0]); }],
+  ['unsafe candidate ID', f => { f.listed.workflow_runs[0].id = Number.MAX_SAFE_INTEGER + 1; }],
+  ['wrong listed SHA', f => { f.listed.workflow_runs[0].head_sha = 'b'.repeat(40); }],
+  ['wrong listed event', f => { f.listed.workflow_runs[0].event = 'push'; }],
+]) test(`${name} falls back to full CI`, async () => {
+  const f = fixture(); mutate(f);
   assert.equal((await check(f)).reuse, 'none');
 });
 
-test('kill switch and non-queue events perform no record or API reads', async () => {
-  for (const options of [{ killSwitch: 'off' }, { event: 'push' }, { event: 'pull_request' }, { event: 'workflow_dispatch' }]) {
-    const f = fixture();
-    assert.equal((await check(f, { ...options, readRecord: () => { assert.fail('must not read a record'); } })).reuse, 'none');
-    assert.equal(f.calls.length, 0);
+test('found on full rerun: latest fully executed attempt is eligible', async () => {
+  const f = fixture(2);
+  assert.equal((await check(f)).reuse, 'merge_group');
+  assert(f.calls.includes('actions/runs/123/attempts/2/jobs?per_page=100'));
+  assert(!f.calls.some(p => p.includes('/attempts/1/')));
+});
+
+test('partial rerun cannot use retained green job results', async () => {
+  const f = fixture(2);
+  f.jobs.jobs = [job(f, 'go')]; f.jobs.total_count = 1;
+  assert.equal((await check(f)).reuse, 'none');
+});
+
+test('skipped push-only cache job is allowed but no required job may skip', async () => {
+  const f = fixture();
+  assert.equal(job(f, 'cache-prime').conclusion, 'skipped');
+  assert.equal((await check(f)).reuse, 'merge_group');
+  for (const name of requiredJobs) {
+    const changed = fixture(); job(changed, name).conclusion = 'skipped';
+    assert.equal((await check(changed)).reuse, 'none', name);
   }
 });
 
-test('missing registry record and API failure fall back', async () => {
-  assert.equal((await check(fixture(), { readRecord: async () => { throw new Error('not found'); } })).reuse, 'none');
-  assert.equal((await check(fixture(), { api: async () => { throw new Error('unavailable'); } })).reuse, 'none');
+test('every heavy execution step must succeed, even with green job conclusions', async () => {
+  for (const name of requiredJobs.filter(n => executionSteps[n] || /^(go-test|web-shard) \(/.test(n))) {
+    const f = fixture(); job(f, name).steps[0].conclusion = 'skipped';
+    assert.equal((await check(f)).reuse, 'none', name);
+  }
 });
 
-test('registry uses isolated tree tag and round-trips the record', async () => {
-  const f = fixture();
-  let manifest;
-  const calls = [];
-  const request = async (url, options = {}) => {
-    calls.push({ url, options });
-    if (url.includes('/token?')) return { json: () => ({ token: 'fixture' }) };
-    if (url.endsWith('/blobs/uploads/')) return { headers: new Headers({ location: '/v2/inspr-at/paimos-ci-green/blobs/uploads/id?upload=fixture' }) };
-    if (options.method === 'PUT' && url.includes('/manifests/')) manifest = JSON.parse(options.body);
-    return { json: () => manifest };
-  };
-  const store = await registry(repository, 'fixture', 'fixture', request, true);
-  await store.publish(f.record);
-  assert.deepEqual(await store.read(tree), f.record);
-  assert(calls.some(call => call.url === `https://ghcr.io/v2/inspr-at/paimos-ci-green/manifests/tree-${tree}` && call.options.method === 'PUT'));
-  assert(calls[0].url.includes('pull%2Cpush'));
-  assert.equal(manifest.annotations['org.opencontainers.image.source'], `https://github.com/${repository}`);
-  const reader = await registry(repository, 'fixture', 'fixture', request);
-  await assert.rejects(reader.publish(f.record), /read-only/);
+test('kill switch, PR, queue, manual and non-main push do no API reads', async () => {
+  for (const options of [{ killSwitch: 'off' }, { event: 'pull_request' }, { event: 'merge_group' }, { event: 'workflow_dispatch' }, { ref: 'refs/heads/other' }]) {
+    const f = fixture();
+    assert.equal((await check(f, { ...options, api: () => assert.fail('must not read') })).reuse, 'none');
+    assert.deepEqual(f.calls, []);
+  }
 });
 
-test('registry rejects an upload redirect to a foreign origin', async () => {
-  const request = async url => url.includes('/token?') ? { json: () => ({ token: 'fixture' }) } : { headers: new Headers({ location: 'https://example.com/upload' }) };
-  const store = await registry(repository, 'fixture', 'fixture', request, true);
-  await assert.rejects(store.publish(fixture().record), /destination/);
+test('network failure and invalid SHA fail closed', async () => {
+  assert.equal((await check(fixture(), { api: async () => { throw new Error('offline'); } })).reuse, 'none');
+  const f = fixture(); assert.equal((await check(f, { sha: 'invalid' })).reuse, 'none'); assert.deepEqual(f.calls, []);
 });
 
-test('transport bounds response bytes before JSON and refuses redirects', async () => {
-  const calls = [];
-  const request = transport('fixture', 'fixture', new AbortController().signal, async (url, options) => {
-    calls.push(options);
-    return new Response('{}');
+test('invalid candidate does not hide a subsequent verified run', async () => {
+  const f = fixture(); f.listed.workflow_runs.unshift({ id: 999, head_sha: sha, event: 'merge_group' }); f.listed.total_count++;
+  assert.equal((await check(f)).run, 123);
+  assert(f.calls.includes('actions/runs/999'));
+});
+
+test('direct main entry point cannot reuse absent merge-group evidence', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
+  const output = join(dir, 'output'); let calls = 0;
+  const result = await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: repository, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture', GITHUB_OUTPUT: output }, async url => {
+    calls++; assert.equal(url, `https://api.github.com/repos/${repository}/${listPath}`);
+    return new Response(JSON.stringify({ total_count: 0, workflow_runs: [] }));
   });
+  assert.equal(calls, 1); assert.equal(result.reuse, 'none');
+  assert.equal(readFileSync(output, 'utf8'), 'reuse=none\nrun=\n');
+});
+
+test('disabled main entry point writes fallback outputs and an honest summary', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
+  const output = join(dir, 'output'); const summary = join(dir, 'summary');
+  assert.equal((await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', CI_TREE_REUSE: 'off', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary })).reuse, 'none');
+  assert.equal(readFileSync(output, 'utf8'), 'reuse=none\nrun=\n');
+  assert.match(readFileSync(summary, 'utf8'), /disabled/);
+});
+
+test('output write failure is not reported as success', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
+  await assert.rejects(main({ GITHUB_OUTPUT: dir }));
+});
+
+test('transport bounds responses and endpoints before JSON, forbids redirects', async () => {
+  const calls = [];
+  const request = transport('fixture', 'fixture', new AbortController().signal, async (_url, options) => { calls.push(options); return new Response('{}'); });
   assert.deepEqual((await request('https://api.github.com/repos/inspr-at/paimos')).json(), {});
   assert.equal(calls[0].redirect, 'error');
-  await assert.rejects(request('https://example.com'), /endpoint/);
+  for (const url of ['https://example.com', 'https://ghcr.io/v2/', 'http://api.github.com', 'https://user:password@api.github.com']) await assert.rejects(request(url), /endpoint/);
   const large = transport('fixture', 'fixture', undefined, async () => new Response('not JSON', { headers: { 'Content-Length': String(3 * 1024 * 1024) } }));
-  await assert.rejects(large('https://ghcr.io/v2/'), /too large/);
+  await assert.rejects(large('https://api.github.com'), /too large/);
   const chunked = transport('fixture', 'fixture', undefined, async () => new Response(Buffer.alloc(2 * 1024 * 1024 + 1)));
-  await assert.rejects(chunked('https://ghcr.io/v2/'), /too large/);
+  await assert.rejects(chunked('https://api.github.com'), /too large/);
+  const failed = transport('fixture', 'fixture', undefined, async () => new Response('{}', { status: 403 }));
+  await assert.rejects(failed('https://api.github.com'), /remote request failed/);
 });
 
-test('transport forwards cancellation without sleeps or timing thresholds', async () => {
+test('transport forwards cancellation with an injected signal, no timing thresholds', async () => {
   const controller = new AbortController(); controller.abort();
   const request = transport('fixture', 'fixture', controller.signal, async (_url, options) => { assert(options.signal.aborted); throw options.signal.reason; });
-  await assert.rejects(request('https://ghcr.io/v2/'));
-});
-
-test('publication writes both records and reports a partial write as failure', async () => {
-  const f = fixture();
-  const record = await verifyRun(repository, 123, f.api);
-  const calls = [];
-  const store = { publish: async value => { assert.deepEqual(value, record); calls.push('registry'); } };
-  const api = async (path, options) => { calls.push(path); const status = JSON.parse(options.body); assert.equal(status.description, `tree=${tree} run=123`); assert.equal(status.context, 'ci/tree-green'); };
-  assert.deepEqual(await publish(record, api, store), record);
-  assert.deepEqual(calls, ['registry', `statuses/${sha}`]);
-  await assert.rejects(publish(record, async () => { throw new Error('status write failed'); }, store), /status write failed/);
-  let statusWritten = false;
-  await assert.rejects(publish(record, async () => { statusWritten = true; }, { publish: async () => { throw new Error('registry write failed'); } }), /registry write failed/);
-  assert.equal(statusWritten, false);
+  await assert.rejects(request('https://api.github.com'));
 });

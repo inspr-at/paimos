@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,7 @@ import (
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
@@ -36,9 +38,31 @@ type Module struct {
 	// existing path; no protected route becomes public.
 	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
 
-	mu       sync.Mutex
+	mu        sync.Mutex
+	provider  *oidc.Provider
+	oauth     oauth2.Config
+	discovery *oidcDiscovery
+}
+
+type oidcDiscovery struct {
+	done     chan struct{}
 	provider *oidc.Provider
 	oauth    oauth2.Config
+	err      error
+}
+
+const oidcDiscoveryTimeout = 5 * time.Second
+
+// Discovery and JWKS are small documents. Enforce the byte bound before the
+// OIDC library's ReadAll, including for chunked responses with no length.
+type oidcBoundedTransport struct{ base http.RoundTripper }
+
+func (t oidcBoundedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(r)
+	if err == nil && response.Body != nil {
+		response.Body = http.MaxBytesReader(nil, response.Body, 1<<20)
+	}
+	return response, err
 }
 
 type credKind int
@@ -89,6 +113,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("POST /api/agent-keys/{id}/trim-proposals", m.handleProposeKeyTrim)
+	mux.HandleFunc("GET /api/key-trim-proposals", m.handleListKeyTrims)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/decision", m.handleDecideKeyTrim)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/restore", m.handleDecideKeyTrim)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -268,6 +296,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "agent-keys":
+		if len(parts) == 3 && parts[2] == "trim-proposals" && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
+	case "agents":
+		if len(parts) == 2 && parts[1] == "plan" && read {
+			return "agents.plan.read", true
+		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
 			return "questions.read", true
@@ -448,6 +484,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 2 {
+			if parts[1] == "refresh" {
+				return "models.refresh", true
+			}
+			if parts[1] == "reports" {
+				return "models.report", true
+			}
+		}
 		if read {
 			return "models.read", true
 		}
@@ -564,7 +608,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}
@@ -665,16 +709,53 @@ func parseBearer(h string) (prefix, secret string, ok bool) {
 }
 
 func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Config, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, oauth2.Config{}, err
+	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.provider != nil {
+		defer m.mu.Unlock()
 		return m.provider, m.oauth, nil
 	}
 	if m.cfg.OIDCIssuer == "" || m.cfg.OIDCClientID == "" || m.cfg.PublicURL == "" {
+		m.mu.Unlock()
 		return nil, oauth2.Config{}, errOIDCNotConfigured
 	}
-	p, err := oidc.NewProvider(ctx, m.cfg.OIDCIssuer)
+	if pending := m.discovery; pending != nil {
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, oauth2.Config{}, ctx.Err()
+		case <-pending.done:
+			return pending.provider, pending.oauth, pending.err
+		}
+	}
+	pending := &oidcDiscovery{done: make(chan struct{})}
+	m.discovery = pending
+	m.mu.Unlock()
+	// No network operation holds the sign-in mutex. Preserve an injected
+	// transport but bound both discovery's context and its HTTP client.
+	op, cancel := context.WithTimeout(ctx, oidcDiscoveryTimeout)
+	defer cancel()
+	httpClient := *http.DefaultClient
+	if supplied, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok && supplied != nil {
+		httpClient = *supplied
+	}
+	if httpClient.Timeout <= 0 || httpClient.Timeout > oidcDiscoveryTimeout {
+		httpClient.Timeout = oidcDiscoveryTimeout
+	}
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpClient.Transport = oidcBoundedTransport{base: transport}
+	p, err := oidc.NewProvider(oidc.ClientContext(op, &httpClient), m.cfg.OIDCIssuer)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer close(pending.done)
+	m.discovery = nil // failures remain retryable by the next request
 	if err != nil {
+		pending.err = err
 		return nil, oauth2.Config{}, err
 	}
 	ep := p.Endpoint()
@@ -688,6 +769,7 @@ func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Confi
 	}
 	m.provider = p
 	m.oauth = oc
+	pending.provider, pending.oauth = p, oc
 	return p, oc, nil
 }
 

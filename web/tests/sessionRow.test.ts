@@ -81,3 +81,13 @@ test('media and terminal use their execution label and never infer an AI vendor'
     assert.equal(exec.account, '')
   }
 })
+
+test('heartbeat model changes refresh the same session row over a stale launch model', () => {
+  const row = view({ harness: 'Claude', model: 'claude-sonnet', session: { harness: 'claude', model: 'claude-sonnet', reasoning_effort: 'low' } })
+  assert.equal(sessionExecution(row).modelLine, 'claude-sonnet · low')
+  const sessionID = row.session.id
+  row.session = { ...row.session, model: 'claude-opus', reasoning_effort: 'high' }
+  assert.equal(row.session.id, sessionID)
+  assert.equal(sessionExecution(row).modelLine, 'claude-opus · high')
+  assert.equal(sessionExecution(row).provider, 'anthropic')
+})
