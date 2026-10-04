@@ -114,8 +114,8 @@
     },
     {
       "file": "1230_work_leaf_aggregates.sql",
-      "sha256": "2349e3db8af89f92c92ca10caf38235f5916ed4a2f51cc43dfdb5b69d6b0d4f9",
-      "sourceCommit": "5ea61160e6d864b68c17e851a05d3daaee463490",
+      "sha256": "aa6927d47c330b84fc904634f59e1b1a0fc7c870d471bc7453677c882e451df8",
+      "sourceCommit": "5084691604ef79f513de6a9f142925f7ec82d5ee",
       "ticket": "AEON-651",
       "reason": "AEON-648 owner-accepted Q10-Q12 and Q17, with the lead's concept review recorded on that ticket, require bounded leaf aggregates, planned estimates and latest open-leaf ETA. The classifier flags CREATE OR REPLACE of aeon_node_eta_progress, aeon_node_eta and aeon_release_note_snapshot, plus ALTER POLICY admitting status_autopilot.undone. Both historical ETA signatures retain the optional depth argument; invoker tenant/project RLS, the existing public-note whitelist, immutable frozen snapshots and target/referenced-node visibility predicates stay intact. No stored spend, session or Decision Desk identity is rewritten. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it does not make the incompatible AEON-649 kind retirement safe for older binaries and grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed. AEON-648 integration preserves main\u2019s recurrence event domain in the replaced policy; all reference checks stay intact."
     },
