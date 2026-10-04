@@ -29,6 +29,7 @@ const firstFree = () => Math.max(0, shown.value.findIndex(option => !option.curr
 const active = ref(firstFree())
 watch(term, () => { active.value = shown.value.length ? firstFree() : 0 })
 function choose(index: number) {
+  active.value = index
   if (index === shown.value.length && newName.value) { emit('create', newName.value); return }
   const option = shown.value[index]
   if (!option || option.current || option.reason) return
@@ -57,12 +58,12 @@ const optionId = (index: number) => `${id}-option-${index}`
       <button
         v-for="(option, index) in shown" :id="optionId(index)" :key="option.group.id" type="button" role="option" class="option" tabindex="-1"
         :class="{ off: option.current || !!option.reason }" :aria-selected="active === index" :aria-disabled="option.current || !!option.reason ? 'true' : undefined"
+        :aria-description="option.reason"
         @click="choose(index)" @pointermove="active = index"
       >
         <GroupMarker :group="option.group" />
         <span class="text">
-          <span class="name"><template v-for="(part, i) in highlight(option.group.name, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span v-if="option.reason" class="reason">{{ option.reason }}</span>
+          <span v-clip-tip="option.group.name" class="name"><template v-for="(part, i) in highlight(option.group.name, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
         </span>
         <AppIcon v-if="option.group.kind === 'shared'" name="users" :size="13" class="shared" />
         <span v-if="option.current" class="current">Here now</span>
@@ -72,10 +73,11 @@ const optionId = (index: number) => `${id}-option-${index}`
         v-if="newName" :id="optionId(shown.length)" type="button" role="option" class="option create" tabindex="-1" :aria-selected="active === shown.length"
         @click="choose(shown.length)" @pointermove="active = shown.length"
       >
-        <AppIcon name="plus" :size="13" /><span class="text"><span class="name">Create group “{{ newName }}”</span></span>
+        <AppIcon name="plus" :size="13" /><span class="text"><span v-clip-tip="`Create group “${newName}”`" class="name">Create group “{{ newName }}”</span></span>
       </button>
       <p v-if="!count" class="note">{{ term.trim() ? 'A group name can be up to 60 characters.' : 'No groups yet.' }}</p>
     </div>
+    <p class="option-note" aria-live="polite">{{ shown[active]?.reason }}</p>
     <p class="fine"><kbd class="keycap">Enter</kbd> moves · type a new name to create a group</p>
   </FloatingPanel>
 </template>
@@ -84,14 +86,13 @@ const optionId = (index: number) => `${id}-option-${index}`
 .menu-title { padding: 6px 10px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-search { height: 34px; margin: 0 0 6px; font-size: 13.5px; }
 .options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 320px; overflow: auto; }
-.option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.option { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .option.off { color: var(--ink-2); cursor: default; }
 .text { flex: 1; display: grid; min-width: 0; }
 .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reason { font-size: 12px; color: var(--ink-3); white-space: normal; line-height: 1.35; padding-bottom: 4px; }
-.option:has(.reason) { align-items: flex-start; padding-top: 8px; }
-.option:has(.reason) > :deep(.marker) { margin-top: 4px; }
+.option-note { height: 4.05em; overflow: auto; margin: 4px 10px; font-size: 12px; color: var(--ink-3); line-height: 1.35; overflow-wrap: anywhere; }
+.shared, .count, .current, .option > svg { flex: none; }
 .shared { color: var(--ink-3); }
 .count { min-width: 2ch; font-size: 11.5px; color: var(--ink-3); text-align: right; }
 .current { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
@@ -100,4 +101,8 @@ const optionId = (index: number) => `${id}-option-${index}`
 .note { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 .fine { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
 @media (pointer: coarse), (max-width: 600px) { .fine { display: none; } .option { min-height: 44px; } .picker-search { height: 44px; font-size: 16px; } }
+@media (max-width: 720px) {
+  .option { height: 60px; }
+  .name { height: 2.8em; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+}
 </style>

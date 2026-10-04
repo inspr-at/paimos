@@ -833,14 +833,66 @@ This is a capability inventory, not a claim that a login is valid or quota is
 available; a missing observation stays missing. Older daemons without the
 inventory report unavailable rather than an empty successful discovery.
 
-Idle capture follows fresh harness readings and never interrupts a live managed
-run. The default interval is five minutes (`serve --capacity-interval`); failures
-never become a zero-percent reading. Existing Codex app-server readings and
-Claude in-run stream readings remain the source paths from AEON-297.
+Idle checks run at startup, every five minutes (`serve --capacity-interval`), on
+fact expiry/reset, reconnect and Check now. One capture owns the local slot at
+a time and never interrupts a live managed run. Operations have a ten-second
+deadline and bounded owned-process cleanup; unconfirmed cleanup retains the
+local dispatch fence. Measurement failures retry after 1, 2 and 4 minutes, then
+every 30 minutes; the retry deadline survives restart. Check now can request one
+capture before that deadline. Every completion is persisted before delivery.
+Lost automatic observations replay unchanged after restart while their binding
+and resource membership remain current, including after outages longer than 24
+hours. Replay preserves the original observation and reading times, so old room
+stays stale, unresolved hard stops remain recorded and newer facts win.
+A replay acknowledgement lets the next automatic refresh or Check now capture
+new evidence.
+Manual completions retain the 24-hour observation bound and keep their original
+generation, revision and check ID and are dropped when expired or invalidated.
+A restarted daemon sends a generation heartbeat with `measurement_only: true`
+before handling checks. Measurement reports and this heartbeat preserve the health probe's
+timestamp, availability, failure and legacy credit snapshot under the server's
+account write fence, so delayed observations cannot clear a newer health failure.
+Consent and binding are checked again after capture; the final server write enforces
+revocation. Unknown usage never introduces a start limit; identity mismatch
+remains a hard failure. Recovery execution belongs to admission, not this loop.
+
+Codex idle launch is disabled until release-owned qualification covers the exact
+executable, pinned Node, startup hooks, inherited configuration/tools and process
+termination. A successful fake protocol does not qualify a live executable.
+Qualified captures use only initialize → initialized → account/read →
+account/rateLimits/read, with identity matched before quota is read. Claude idle
+get_usage also remains disabled until qualified. Codex run events and Claude run
+events/statusline continue supplying readings; missing measurements stay unknown.
+Pi with an approved OpenRouter profile checks only /key. Its null cap leaves
+remaining credit unknown, and an unavailable measurement does not invalidate a
+locally configured key. No /credits request or management key is introduced;
+null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
+An explicit zero key cap stays exhausted even when `/key` omits remaining.
+In a supervised daemon the capacity scheduler alone owns `/key`; health polls
+and fresh launch qualification inspect the local profile and launcher without
+another provider request. They cannot bypass the persisted 1/2/4/30-minute
+measurement backoff. Standalone probes and captures share a bounded request owner.
+Legacy Pi credit probes also populate the durable key facts, so replacing the
+credit snapshot with a null cap cannot erase a previously confirmed stop.
+Readings with room expire after ten minutes; quota at 100%, zero key caps and
+vendor stops keep blocking until their own reset or newer same-window room
+evidence. Null checks retain the stop's original observation time and cannot
+reset its recovery wait or backoff. Provider-confirmed 402 stops require
+successful recovery inference, which package B owns. Check now has a persisted
+60-second gap and audits each new request; retries reuse the same check and
+decision 2B's one early recovery intent per wait.
+
+Wrong-account `identity_mismatch` and confirmed `authentication_failed` are
+distinct repairs and both block work. Only confirmed sign-out uses the legacy
+probe category `auth_failed`; a mismatched identity uses `unavailable` alongside
+the explicit readiness cause. Measurement `timeout`, `protocol` and
+`launch_failed` remain separate from sign-out. An older identity cause survives
+measurement errors, while a newer confirmed identity failure replaces it.
 
 | Harness | Private home binding | Idle fallback |
 | --- | --- | --- |
-| Codex | Registry `home` → `CODEX_HOME` | `account/read` identity check, then `account/rateLimits/read` |
+| Codex | Registry `home` → `CODEX_HOME` | Not available idle until exact executable/interpreter and startup/cleanup boundaries are qualified |
+| Pi (OpenRouter) | Approved local profile | Key cap from `/key`; total balance stays unknown |
 | Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
@@ -865,6 +917,64 @@ no production capability or user switch to guess the schema. Tests use a clearly
 synthetic response, not invented vendor fields. No real Grok billing probe or
 Cursor TUI/cookie extraction is used. Native Grok execution bindings and approval
 requirements remain unchanged.
+
+#### Daemon regression execution evidence (AEON-478, fix round 5)
+
+Executed on 2026-10-03 on the approved writable mbp2606 test runner, using
+`remote-test.sh`, its isolated Postgres database and uncached Go tests
+(`-count=1 -v`). The current implementation is
+`b5ce64725b2b3433100a44040441c4c66ad4cdc3`, which merges readiness parent
+`0c4c4b1584d29f88d5fb07e9bab632df638951b8`. All ten top-level `TestFix3` and
+`TestFix4` tests in `internal/agentaccounts` and `internal/agentd` passed.
+The following historical runs compiled and reached the specified assertions;
+runner, compilation and fixture failures were not counted as regressions.
+
+| Regression | Pre-fix implementation | Executed pre-fix failure | Current result |
+| --- | --- | --- | --- |
+| `TestFix3AutomaticHardStopSurvivesFailedDeliveryAndRestart` | `d3a52c4b6cdcf81a9c06909038d1840c8de55814` | `failed automatic hard-stop delivery was not durable` | PASS |
+| `TestFix3CapacityReplayPreservesConcurrentHealthFailure` | same | `measurement replay overwrote concurrent health failure`, for both `auth_failed` and `unavailable` | PASS, both cases |
+| `TestFix3PiHealthPollingCannotOverlapKeyCapture` | same | `health polling overlapped capture: 2 key requests` | PASS |
+| `TestFix3PiHealthPollingRespectsDurableCaptureBackoff` | same | `health poll bypassed persisted retry: 2 calls` | PASS |
+| `TestFix4AutomaticReplayAfterDayOutageAllowsFreshCheckNow` | `1cb669535c92b37b0214bb495bb497523781f7c2` | `aged automatic replay stalled, changed evidence or recaptured: api 400` | PASS |
+| `TestFix4AgedAutomaticFactsKeepFreshnessAndOrdering` | same | HTTP 400, `invalid readiness observation time`, for both 17% and 100% readings | PASS, both cases |
+| `TestFix3RestartFirstReportCarriesOldCheck` | `f867cb6cc24553eba5e4c2a2500799bc890aa415` with the parent's unchanged test file | HTTP 409 without `X-Aeon-Write-Committed` or `stale_binding`, failing `stale completion must report its committed heartbeat` | PASS |
+
+The first four test bodies are byte-for-byte identical between the historical
+run and the current run. The fix-4 test file is also unchanged between its two
+runs; `1cb66953` differs from reviewed `bd37420c` only in this test fixture, so
+its production implementation is the pre-fix implementation. The restart
+compatibility run replaced only `internal/agentaccounts/readiness_test.go` in
+the runner's disposable `f867cb6c` checkout with that file from `b5ce6472`.
+Historical-run adapters changed only the selected Git revision and that
+explicit test overlay; all runner presence, load, reservation and cleanup
+guards remained intact. No source checkout or branch was rewound.
+
+The current targeted command was
+`go test -count=1 -v ./internal/agentaccounts ./internal/agentd -run 'TestFix[34]'`.
+Historical runs selected `TestFix3` at `d3a52c4b`, `TestFix4` at `1cb66953`,
+and `TestFix3RestartFirstReportCarriesOldCheck` at `f867cb6c`; each exited 1
+for the assertion failures above. The current run exited 0. These are
+synthetic regression results, not qualification of live vendor executables.
+
+The merge preserves both protocols: an ordinary heartbeat can commit the new
+daemon generation while explicitly rejecting an old check completion; a
+measurement-only completion with an unestablished or different generation
+still rejects without changing generation or health. Decisions 1C and 2B,
+admission-owned recovery and the idle-launch qualification gates are unchanged.
+
+At the same implementation commit, a separate uncached remote run passed all
+seven affected Go packages: `internal/agentd`, `internal/agentaccounts`,
+`internal/agentsetup`, `internal/openrouter`, `internal/capacity`,
+`cmd/aeon-agentd` and `internal/reportercontract`. The guarded web runner passed
+the Go formatting check, `npm run build`, 652 Node tests and 688 Vitest tests
+across 55 files. Audit slice assignment and `git diff --check` also passed.
+The follow-up evidence commit changes only this documentation.
+
+Browser validation remains open: the approved remote launcher exited 3 before
+launching `usage-dashboard.spec.ts` and `capacity-learning.spec.ts`, because
+the OPS-247 bootstrap and launcher are pending. No Linux Chromium run is
+claimed. No guard was bypassed and no origin push or deployment was performed;
+the coordinator must run these specs on an approved browser lane or hosted CI.
 
 ## Outcome events (AEON-286)
 

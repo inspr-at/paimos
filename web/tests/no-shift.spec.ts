@@ -437,3 +437,22 @@ for (const width of [1440, 1024]) {
     })
   })
 }
+
+for (const width of [390, 1440]) {
+  test(`model estimate picker hints and selection hold every control at ${width}`, async ({ page }) => {
+    await mountShell(page, 'model-picker', width)
+    const picker = page.getByRole('dialog', { name: 'Fixture picker' })
+    const options = picker.getByRole('option')
+    await expect(options).toHaveCount(3)
+    const second = options.nth(1)
+    await expectStableControls({
+      controls: { search: picker.getByRole('searchbox'), group: picker.getByRole('listbox'), first: options.nth(0), clicked: second, last: options.nth(2) },
+      scrollAreas: { list: picker.getByRole('listbox') },
+      interactions: [
+        { name: 'history arrives', run: async () => { await page.evaluate(async () => { const path = '/tests/helpers/no-shift-shells.ts'; const shell = await import(/* @vite-ignore */ path); shell.setModelHistory(true) }); await expect(second).toContainText('typically ~2.4 h') } },
+        { name: 'select a model', run: async () => { await second.click(); await expect(second).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'uncalibrated history', run: async () => { await page.evaluate(async () => { const path = '/tests/helpers/no-shift-shells.ts'; const shell = await import(/* @vite-ignore */ path); shell.setModelHistory(false) }); await expect(second).not.toContainText('typically') } },
+      ],
+    })
+  })
+}

@@ -11,6 +11,8 @@ import (
 // Segments retain the multiplier at the observation boundary. Counters remain
 // vendor tokens; weighted estimates never replace billed vendor telemetry.
 type TierUsageSegment struct {
+	ModelTimeMS       *int64   `json:"model_time_ms,omitempty"`
+	SpeedFactor       *float64 `json:"speed_factor,omitempty"`
 	Tier              *string  `json:"tier"`
 	PriceMultiplier   *float64 `json:"price_multiplier"`
 	UsageMultiplier   *float64 `json:"usage_multiplier"`
@@ -32,7 +34,7 @@ func usageTierSegments(s Session, old SessionModelUsage, next *SessionModelUsage
 		one := 1.0
 		segment.PriceMultiplier = &one
 	} else if cap, ok := sessionTierReport(s, next.Model).Find(*tier); ok {
-		segment.PriceMultiplier, segment.UsageMultiplier = cap.PriceMultiplier, cap.UsageMultiplier
+		segment.PriceMultiplier, segment.UsageMultiplier, segment.SpeedFactor = cap.PriceMultiplier, cap.UsageMultiplier, cap.SpeedFactor
 	}
 	segments := append([]TierUsageSegment{}, old.TierSegments...)
 	if len(segments) == 0 && old.Model != "" {
@@ -41,13 +43,14 @@ func usageTierSegments(s Session, old SessionModelUsage, next *SessionModelUsage
 	}
 	index := -1
 	for i, v := range segments {
-		if sameUsageValue(v.Tier, segment.Tier) && sameUsageValue(v.PriceMultiplier, segment.PriceMultiplier) && sameUsageValue(v.UsageMultiplier, segment.UsageMultiplier) {
+		if sameUsageValue(v.Tier, segment.Tier) && sameUsageValue(v.PriceMultiplier, segment.PriceMultiplier) && sameUsageValue(v.UsageMultiplier, segment.UsageMultiplier) && sameUsageValue(v.SpeedFactor, segment.SpeedFactor) {
 			index = i
 			break
 		}
 	}
 	// A single unchanged segment can resolve previously unknown counters.
 	if len(segments) == 1 && index == 0 {
+		segments[0].ModelTimeMS = next.ModelTimeMS
 		segments[0].InputTokens, segments[0].OutputTokens, segments[0].CachedInputTokens = next.InputTokens, next.OutputTokens, next.CachedInputTokens
 	} else {
 		delta := func(before, after *int64) *int64 {
@@ -60,6 +63,7 @@ func usageTierSegments(s Session, old SessionModelUsage, next *SessionModelUsage
 			}
 			return &n
 		}
+		segment.ModelTimeMS = delta(old.ModelTimeMS, next.ModelTimeMS)
 		segment.InputTokens, segment.OutputTokens, segment.CachedInputTokens = delta(old.InputTokens, next.InputTokens), delta(old.OutputTokens, next.OutputTokens), delta(old.CachedInputTokens, next.CachedInputTokens)
 		if index < 0 {
 			if len(segments) >= 128 {
@@ -75,6 +79,7 @@ func usageTierSegments(s Session, old SessionModelUsage, next *SessionModelUsage
 				return &n
 			}
 			v := &segments[index]
+			v.ModelTimeMS = add(v.ModelTimeMS, segment.ModelTimeMS)
 			v.InputTokens, v.OutputTokens, v.CachedInputTokens = add(v.InputTokens, segment.InputTokens), add(v.OutputTokens, segment.OutputTokens), add(v.CachedInputTokens, segment.CachedInputTokens)
 		}
 	}

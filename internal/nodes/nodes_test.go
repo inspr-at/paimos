@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -88,6 +89,9 @@ func addPrincipal(t *testing.T, slug string) tenant.Principal {
 	}
 	var id string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		if err := modelprefs.SeedKinds(t.Context(), tx, tenantID); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1, 'person', $2, $3)

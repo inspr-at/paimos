@@ -37,6 +37,8 @@ const (
 	harnessAgentStatus
 	// harnessExplicitStatus is an explicitly selected non-credential JSON file.
 	harnessExplicitStatus
+	// Explicitly selected Codex app-server capture used for capacity reporting.
+	harnessCodexStream
 )
 
 var errHarnessFileDenied = errors.New("refusing a file outside the harness usage allowlist")
@@ -119,6 +121,8 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 		ok = base == "opencode.jsonl"
 	case harnessAgentStatus:
 		ok = base == ".agent-status.json"
+	case harnessCodexStream:
+		ok = strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".json")
 	case harnessExplicitStatus:
 		ok = strings.HasSuffix(base, ".json")
 	default:
