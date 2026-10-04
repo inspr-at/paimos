@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkNode } from '../src/lib/api'
+import type { ListItem, WorkNode } from '../src/lib/api'
 import { LiveNodeStore, mergeChanges, parseNodeChanges, type LiveView, type NodeChange } from '../src/lib/liveNodes'
 import { RowStore } from '../src/lib/rowStore'
 import {
@@ -278,6 +278,68 @@ describe('LiveNodeStore', () => {
     expect(fetchNode).not.toHaveBeenCalled()
   })
   afterEach(() => vi.useRealTimers())
+
+  it('refreshes parent spend from a stopped session late usage event without another heartbeat', async () => {
+    const parent = { ...node('parent', '2026-09-29T10:00:00Z'), kind_slug: 'work', children_count: 2,
+      project: { id: 'A', key: 'A', title: 'A' },
+      planning: { tokens: { spent: 100, sessions: 1, running: 0, unreported: 0 } },
+    } as ListItem
+    const fetchAggregate = vi.fn(async () => ({ ...parent, planning: { tokens: { ...parent.planning!.tokens, spent: 250 } } }))
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, fetchAggregate, rows })
+    const panel = view(['parent'])
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    rows.adopt(parent, rows.mark(), { show: true })
+    const release = rows.hold(() => ['parent'])
+    latest().emit('harness.stopped', { id: 41, type: 'harness.stopped', after: { ticket_node_id: 'uncached-leaf', project_id: 'A' } }, 41)
+    await vi.advanceTimersByTimeAsync(0)
+    fetchAggregate.mockClear()
+    panel.calls.length = 0
+    latest().emit('harness.usage_reported', {
+      id: 42, type: 'harness.usage_reported', node_id: 'A', after: { id: 'usage-row', session_id: 'stopped-session' },
+      node_changes: [{ id: 'uncached-leaf', project_id: 'A', change: 'updated', fields: ['estimate', 'planning'], revision: null }],
+    }, 42)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchAggregate).toHaveBeenCalledExactlyOnceWith('parent')
+    expect(panel.calls.find(call => call.id === 'parent')?.node).toMatchObject({
+      updated_at: parent.updated_at, planning: { tokens: { spent: 250, running: 0 } },
+    })
+    expect(fetchNode).not.toHaveBeenCalled()
+    release()
+  })
+
+  it('refreshes both held projects after an uncached descendant moves without a status change', async () => {
+    const parents = ['source', 'destination'].map(project => ({
+      ...node(project + '-parent', '2026-09-29T10:00:00Z'), kind_slug: 'work', children_count: 2,
+      project: { id: project, key: project, title: project }, estimate: { is_parent: true, hours: 10 },
+      eta: { finished: false, progress_pct: 60 },
+      planning: { tokens: { spent: 100, sessions: 1, running: 0, unreported: 0 } },
+    } as ListItem))
+    const fetchAggregate = vi.fn(async (id: string) => ({ ...parents.find(parent => parent.id === id)!,
+      estimate: { is_parent: true, hours: id.startsWith('source') ? 2 : 18 },
+      eta: { finished: false, progress_pct: id.startsWith('source') ? 20 : 80 },
+      planning: { tokens: { spent: id.startsWith('source') ? 0 : 200, sessions: 1, running: 0, unreported: 0 } },
+    } as ListItem))
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, fetchAggregate, rows })
+    const panel = view(parents.map(parent => parent.id))
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    for (const parent of parents) rows.adopt(parent, rows.mark(), { show: true })
+    const release = rows.hold(() => parents.map(parent => parent.id))
+    expect(rows.latest('uncached-leaf')).toBeUndefined()
+    latest().node(41, [{ id: 'uncached-leaf', project_id: 'destination', fields: ['parent_id', 'project_id'] }], 'node.project_moved')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchAggregate.mock.calls.map(([id]) => id).sort()).toEqual(['destination-parent', 'source-parent'])
+    for (const parent of parents) {
+      expect(panel.calls.find(call => call.id === parent.id)?.node).toMatchObject({
+        updated_at: parent.updated_at, state: parent.state,
+        estimate: { hours: parent.id.startsWith('source') ? 2 : 18 },
+        eta: { progress_pct: parent.id.startsWith('source') ? 20 : 80 },
+        planning: { tokens: { spent: parent.id.startsWith('source') ? 0 : 200 } },
+      })
+    }
+    release()
+  })
 
   it('refreshes a derived parent state at the same edit revision', async () => {
     const panel = view(['n1'])

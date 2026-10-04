@@ -24,7 +24,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 	for _, state := range []string{"done", "accepted", "delivered"} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits")
-			k := kindBySlug(t, p, "ticket")
+			k := kindBySlug(t, p, "work")
 			for _, key := range []string{"pill_en", "pill_de", "benefit_en", "benefit_de", "hide_from_release_notes"} {
 				if !strings.Contains(string(k.FieldSchema), key) {
 					t.Fatalf("seed missing %s", key)
@@ -88,7 +88,7 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 	for _, state := range []string{"done", "accepted", "delivered"} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits-bulk")
-			k := kindBySlug(t, p, "ticket")
+			k := kindBySlug(t, p, "work")
 			pk := kindBySlug(t, p, "project")
 			a := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"One"}`)
 			b := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"Two"}`)
@@ -142,7 +142,7 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 }
 func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
 	p := newPrincipal(t, "benefits-race")
-	k := kindBySlug(t, p, "ticket")
+	k := kindBySlug(t, p, "work")
 	n := mustNode(t, p, `{"kind_id":"`+k.ID+`","title":"Race","fields":`+benefitFields+`}`)
 	mux := http.NewServeMux()
 	New(appPool, nil).Mount(mux)

@@ -137,7 +137,7 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if err := tx.QueryRow(ctx, `SELECT slug FROM node_kinds WHERE id=$1::uuid`, current.KindID).Scan(&kind); err != nil {
 			return err
 		}
-		if kind != "epic" && kind != "ticket" && kind != "task" {
+		if kind != "work" && kind != "epic" && kind != "ticket" && kind != "task" {
 			return badRequest("only issues can move between projects")
 		}
 		var nested, feature bool

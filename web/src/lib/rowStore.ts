@@ -440,13 +440,14 @@ export class RowStore {
 
   // Aggregates depend on descendants that may not be loaded. Conservatively
   // invalidate visible parents in the affected project, including former leaves
-  // and both sides of a move; never guess an incomplete ancestry chain.
-  aggregateParents(projectIds: Set<string>, includeLeaves = false): ListItem[] {
+  // and both sides of a move; null means the source project is unknown.
+  // Never guess an incomplete ancestry chain.
+  aggregateParents(projectIds: Set<string> | null, includeLeaves = false): ListItem[] {
     const kept = new Set<string>()
     for (const ids of this.holders) for (const id of ids()) kept.add(id)
     return [...kept].flatMap(id => {
       const entry = this.entries.get(id), row = entry?.row
-      return row && !entry?.tomb && row.project && projectIds.has(row.project.id)
+      return row && !entry?.tomb && row.project && (projectIds === null || projectIds.has(row.project.id))
         && (row.estimate?.is_parent || row.children_count > 0 || includeLeaves && ['work', 'ticket', 'task', 'epic'].includes(row.kind_slug)) ? [row] : []
     })
   }

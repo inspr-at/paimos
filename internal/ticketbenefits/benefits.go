@@ -52,7 +52,7 @@ func Completed(state string) bool {
 // Transition checks only entering completion. Historical completed records stay
 // editable; reopening them subjects the next completion to today's requirements.
 func Transition(kind, before, after string, fields json.RawMessage) []string {
-	if kind != "ticket" || Completed(before) || !Completed(after) {
+	if kind != "work" && kind != "ticket" || Completed(before) || !Completed(after) {
 		return nil
 	}
 	return Issues(fields)
