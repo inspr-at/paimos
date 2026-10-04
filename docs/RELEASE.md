@@ -332,6 +332,23 @@ applies. The explicit no-push/no-deploy instruction and mbp2606 ban remain
 binding; the coordinator must publish the candidate, retain successful hosted
 results and affected shard timings, then repeat the consolidated gate.
 
+Fix-round-6 verification (AEON-677, review-ap30): successful read-only GitHub
+queries returned zero Actions runs for the current candidate
+`502b1d9aa9209a1dce173d4982c940fa991600cb` and earlier reviewed SHA
+`1044f3a208b6652dda99c3e71e3048559ea7168b`; the branch still returns HTTP 404
+and has no PR. All 70 Node checks passed sequentially with zero skips,
+including the seven filesystem-writing checks omitted during review. Both
+strict inventory checks passed; prior 88-pass macOS summary, current spec,
+log and report hashes were verified without rerunning browsers. Retained
+lookup results and logs: ignored `web/test-results/aeon-ci-sharding-fix6/`;
+`summary.json` SHA256: `3e90147f6e3a5400cc6a6509885347d0ec1e908f9ecb08daf5769103a3e759af`.
+The sole P2 remains unresolved. No behavior fix or regression test applies to
+this missing hosted evidence; no assertions, workflows or shard gates changed.
+The explicit no-push/no-deploy instruction and mbp2606 ban prevent publishing
+or offloading this candidate. The coordinator must publish it through the
+approved CI path, retain successful hosted Linux results for all three specs
+and measured affected shard durations, then repeat the consolidated gate.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
