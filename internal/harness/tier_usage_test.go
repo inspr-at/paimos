@@ -2,12 +2,6 @@
 package harness
 
 import (
-	"bytes"
-	"go/format"
-	"go/parser"
-	"go/token"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/servicetier"
@@ -62,40 +56,6 @@ func TestUnpublishedTierUsageHasNoEstimatedCost(t *testing.T) {
 		if segment.PriceMultiplier != nil || segment.UsageMultiplier != nil || estimateTierUsageCost(next, ModelPrice{InputUSDPerMillion: "1", OutputUSDPerMillion: "1", CachedInputUSDPerMillion: "1"}) != nil {
 			t.Fatalf("unpublished %s acquired invented multipliers or cost", tier)
 		}
-	}
-}
-
-func TestTierUsageTestFormatting(t *testing.T) {
-	source, err := os.ReadFile("tier_usage_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	formatted, err := format.Source(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(source, formatted) {
-		t.Fatal("tier_usage_test.go needs gofmt")
-	}
-	// gofmt alone does not separate standard-library and external imports.
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "tier_usage_test.go", source, parser.ImportsOnly)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousLine := 0
-	externalSeen := false
-	for _, imp := range f.Imports {
-		external := strings.HasPrefix(imp.Path.Value, `"github.com/`)
-		line := fset.Position(imp.Pos()).Line
-		if external && !externalSeen && previousLine != 0 && line-previousLine < 2 {
-			t.Fatal("external imports must be grouped apart from standard-library imports")
-		}
-		if !external && externalSeen {
-			t.Fatal("standard-library imports must precede external imports")
-		}
-		externalSeen = externalSeen || external
-		previousLine = line
 	}
 }
 

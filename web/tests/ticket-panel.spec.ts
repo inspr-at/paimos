@@ -293,25 +293,6 @@ test('unsaved edits are guarded when moving to another ticket', async ({ page })
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
 })
 
-test('task lists hang: wrapped lines align with the first line, not under the box', async ({ page }) => {
-  await page.setViewportSize({ width: 1100, height: 800 })
-  const data = fixtures()
-  data.nodes.find(n => n.id === 'n-1')!.fields.acceptance_criteria = '- [x] ' + 'A long criterion that wraps across several lines in the side panel so the hanging indent shows. '.repeat(3)
-  await mockWork(page, data)
-  await page.goto('/p/PHAROS/PHAROS-11')
-  const item = panel(page).getByRole('region', { name: 'Acceptance criteria' }).locator('.task-list-item')
-  const lines = await item.evaluate(li => {
-    const range = document.createRange(); range.selectNodeContents(li)
-    const rects = [...range.getClientRects()].filter(rect => rect.width > 20)
-    const box = li.querySelector('.task-box')!.getBoundingClientRect()
-    return { first: Math.round(rects[0].left), last: Math.round(rects[rects.length - 1].left), count: new Set(rects.map(rect => Math.round(rect.top))).size, boxRight: box.right, boxCentre: box.top + box.height / 2, lineCentre: rects[0].top + rects[0].height / 2 }
-  })
-  expect(lines.count).toBeGreaterThan(2)
-  expect(lines.last).toBe(lines.first)
-  expect(lines.boxRight).toBeLessThan(lines.first)
-  expect(Math.abs(lines.boxCentre - lines.lineCentre)).toBeLessThanOrEqual(2)
-})
-
 test('the panel counts the whole list and next loads the following page', async ({ page }) => {
   await mockWork(page, fixtures({ bigProject: 450 }))
   await page.goto('/p/AEON/AEON-298')

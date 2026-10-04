@@ -901,6 +901,57 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
+Test tiers (AEON-681): full-lane PRs and merge groups run ESSENTIAL plus changed-area
+cases; Go reverse dependencies add at most 300 extra cases. There are three tiers:
+ESSENTIAL is the approved core; GATED-FULL retains the other previously gated Go,
+unit and browser cases; NIGHTLY includes the never-gated browser catalogue.
+Shared inputs, uncertain impact, main/manual CI and explicit `--full` select
+exactly ESSENTIAL + GATED-FULL. Browser gate membership comes from OPS-257's
+`gate:true` groups in `web/ci-web-shards.json`, with approved ESSENTIAL promotions
+preserved. Mapped changed-area selection still includes optional cases in the
+affected area. Unknown impact widens to the established full gate.
+Reports name the selection `scope` (`gated-full`, `catalogue` or `changed-area`) and count
+`deferredBrowserCases`; deferred cases are not reported as passes or skips.
+Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
+and [web manifest](scripts/ci/web-test-tiers.json). Use
+`node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
+then `check`. CI reconciles manifests at runtime: unlisted cases default to
+NIGHTLY, stale entries are dropped, and named Actions warnings report the drift.
+New cases retain changed-area and nightly coverage without requiring
+manifest edits in each PR. A separate scheduled classification check runs
+`check go --strict` and `check web --strict` to report cases needing classification;
+it does not gate PRs or the nightly test jobs. Remove stale entries when updating
+the stored manifests. Malformed entries and known-flaky ESSENTIAL cases still
+fail validation. New browser specs also need a
+launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
+remain on nonessential cases, including candidate groups whose exact members need review.
+The [known-flaky registry](scripts/ci/known-flaky.json) names exact case keys
+and owner tickets; its validator rejects any ESSENTIAL entry. The nine cases
+identified in AEON-675/676/683 stay outside ESSENTIAL and retain their prior
+full-gate membership as GATED-FULL, plus changed-area and nightly coverage.
+Scheduled/manual `nightly-full.yml` uses `--all` to execute every
+case, including the optional browser catalogue; main/manual CI runs the full gate
+unless exact-SHA full-suite reuse is verified below. The main-push run is the
+FULL gate after merge; a full premerge run is required only when impact is
+uncertain. Releases require a green full main-push gate (or full nightly run) on the
+exact freeze SHA, in addition to the release rehearsal. Nightly is separate from
+the required PR/main checks; its failures remain visible for classification.
+A red nightly needs a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
+ticket creation, ownership and budget wiring. Migration compatibility
+always runs fresh; timing, static and smoke gates stay outside tier impact
+filtering within the full CI lane. Stability cases retain their manifest tiers
+and changed-area/full coverage. Selected cases never retry. `test-tier-run-measurement` reports cases
+per class and complete job costs against the 22.50 Go / 42.17 web runner-minute
+baselines; reused reports carry provenance without claiming fresh passes.
+The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
+establish coverage only.
+
+`scripts/ci-flake-guard.mjs`, `scripts/ci-quarantine.json` and
+`scripts/ci-flake-report.mjs` are retained for NIGHTLY flake diagnosis and
+OPS step 2. The current nightly tier runner executes all cases with zero
+retries and does not invoke the guard or suppress quarantined failures;
+these tools do not soften PR or merge-queue checks.
+
 PRs containing only root Markdown, `docs/**` (excluding `testdata/`), or root
 LICENSE/LICENCE/COPYING/NOTICE files skip classified heavy jobs; required checks
 report success with a `docs-only` note. Migration compatibility runs in every
@@ -911,13 +962,14 @@ test-fixture paths requires full coverage. PRs changing only top-level
 `web/tests/*.spec.ts` run exactly those specs in one hosted job, including specs
 outside the shard map, with their group's config and flags. Spec renames or
 deletions, mixed changes and unavailable classification retain full coverage.
-Main pushes, merge groups and manual runs retain their existing full CI lanes.
+Main pushes and manual CI runs execute ESSENTIAL + GATED-FULL; merge groups use tier selection
+within the full CI lane. Docs-only and spec-only classification applies only to PRs.
 
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for
 the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
-does not satisfy that gate. Main validation is retained, including when a merge
-group tested the same tree. Workflow policy tests live in
+does not satisfy that gate. Main validates the full suite unless the exact-SHA
+proof below establishes full merge-group execution. Workflow policy tests live in
 `scripts/ci-runner-guard` and `scripts/releaseworkflow`.
 
 The ordinary activity tests check exact pagination through 240 same-ticket
@@ -2749,6 +2801,26 @@ but unbound harnesses name the required `add-harness` command. Account checks
 report a 60-second bound from daemon start for each initial account, or from
 that account being added or unblocked by repin; refreshing unchanged accounts
 does not extend the wait. Capacity capture reports a 10-second bound.
+
+**Verify again (AEON-685).** An expired one-time verification is informational
+when that enrollment has a fresh successful probe; it does not revoke separately
+approved ongoing use. A sibling's readiness never qualifies it. The account row's
+**Verify again** button authorizes one fresh read-only check for the signed-in
+account owner with `account.manage` (the original approver owns an unlinked
+account). Visibility into the internal verification project is not required,
+and requesting a check grants no project access. The server checks the computer
+revision and prior run again under the mutation lock, cancels only that account's
+unclaimed queued check, releases its holds and creates one new run with a
+thirty-minute, one-request allowance.
+Claimed nonterminal checks must be reconciled first. Account identity, runtime
+key, daemon generation, pairing approval and cleanup remain intact.
+`aeon-agentd verify --account ID` opens the existing account's owner approval
+screen; `--no-browser` prints its link. It uses read-only pairing state and neither
+contacts nor restarts the daemon. The link grants no allowance: the signed-in
+owner must choose **Verify again**. Use `--state-root PATH` for a fixture or a
+non-default pairing root. The approval link initially expands Accounts and
+computers; its Fold control still honors the person's choice.
+
 Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification

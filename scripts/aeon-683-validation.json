@@ -3380,5 +3380,183 @@
       "tmp/aeon-683-fix5/evidence/header-aeon-683-phone-evidence-screenshots-shots/390-dark-comfortable-header.png"
     ],
     "remaining_coordinator_work": "Integrate the compatible own-branch correction through the owning AEON-646 release; run consolidated release QA/acceptance. No changes to owner refs/worktrees or tracker status. Remote/CI-equivalent Linux validation was unavailable under the explicit local-only/no-push/off-limits brief and is not claimed."
+  },
+  "fix7": {
+    "scope": "review-ap84.out reports no open findings and VERDICT ok. Fix7 addresses the explicit OPS addendum only: activity-history screenshot output portability. No application, Go, API, version or approved design change.",
+    "base_commit": "b705a11a33ca879be3e2539b6a6efc7d6e71ea68",
+    "source": {
+      "path": "web/tests/activity-history.spec.ts",
+      "sha256": "42a68398f70b7bceb86c30c2f64409a826875e557d472f245a94282bacdc327d"
+    },
+    "change": "Pass TestInfo into shoot and use outputPath for both screenshots. Assert that all eight named PNG artifacts exist in the test output directory and have PNG signatures; existing UI/filter/overflow assertions remain intact.",
+    "lane": "Local macOS arm64, supervised pinned Chromium headless shell; single affected spec, workers=1, retries=0. After run repeats each case twice to prove separate per-test artifact directories.",
+    "regression": {
+      "source_commit": "b705a11a33ca879be3e2539b6a6efc7d6e71ea68",
+      "source": "Exact original activity-history.spec.ts from git show; restored fixed source in finally. A Node preload denies only mkdirSync on the former hard-coded directory, simulating hosted EACCES without touching foreign paths. Both before and after use the identical guard.",
+      "expected_failure": "EACCES: legacy screenshot directory denied by regression fixture",
+      "before": {
+        "startTime": "2026-10-04T13:07:28.844Z",
+        "duration": 2152.922,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "after": {
+        "startTime": "2026-10-04T13:07:31.396Z",
+        "duration": 7578.861999999999,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "framework_errors": {
+        "before": [],
+        "after": []
+      }
+    },
+    "browser_cleanup": {
+      "before": {
+        "before": 0,
+        "peak": 4,
+        "after": 0,
+        "remaining_processes": 0,
+        "wall_ms": 2469,
+        "signal": null
+      },
+      "after": {
+        "before": 0,
+        "peak": 4,
+        "after": 0,
+        "remaining_processes": 0,
+        "wall_ms": 7885,
+        "signal": null
+      }
+    },
+    "artifacts": [
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/history__1600__dark.png",
+        "sha256": "9ed74ea9eb4fc2b19ce553cb9a19e6f7a6a05438ab082b28fa36506296aff108"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/history__1600__light.png",
+        "sha256": "55877bc3789db1d1f3f53fe459f6b0fa0ec9ed6eb7e3cf81736c5b5f2933e980"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/history__390__dark.png",
+        "sha256": "b279e60bd3e166f9b5d336363e6b3b5af5e063c0b19869f693aade573ab07b38"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/history__390__light.png",
+        "sha256": "d92598a71fcaaca18bcc020416ef43725e5a9d0fb120896ec53a555cd0662160"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/ticket__1600__dark.png",
+        "sha256": "2049deacafa1177165b7399d562d55fbae7720fc3c4ad9566cb245d50ac8400c"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/ticket__1600__light.png",
+        "sha256": "11772cfa5d7662d9940e5ecd377b091bcd726688a5ae9d223c58bf4f4a7ccc9b"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/ticket__390__dark.png",
+        "sha256": "43cfd1f2c5abae7c72f4ba8071b45c43d3db729ca46c0223e5c0dd85c90c1ccb"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark/ticket__390__light.png",
+        "sha256": "5484e9e208599a7911ab90eea7f702ee6ebb18cdd6386b357f0891e346215da1"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/history__1600__dark.png",
+        "sha256": "9ed74ea9eb4fc2b19ce553cb9a19e6f7a6a05438ab082b28fa36506296aff108"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/history__1600__light.png",
+        "sha256": "55877bc3789db1d1f3f53fe459f6b0fa0ec9ed6eb7e3cf81736c5b5f2933e980"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/history__390__dark.png",
+        "sha256": "b279e60bd3e166f9b5d336363e6b3b5af5e063c0b19869f693aade573ab07b38"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/history__390__light.png",
+        "sha256": "d92598a71fcaaca18bcc020416ef43725e5a9d0fb120896ec53a555cd0662160"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/ticket__1600__dark.png",
+        "sha256": "2049deacafa1177165b7399d562d55fbae7720fc3c4ad9566cb245d50ac8400c"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/ticket__1600__light.png",
+        "sha256": "11772cfa5d7662d9940e5ecd377b091bcd726688a5ae9d223c58bf4f4a7ccc9b"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/ticket__390__dark.png",
+        "sha256": "43cfd1f2c5abae7c72f4ba8071b45c43d3db729ca46c0223e5c0dd85c90c1ccb"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after-results/activity-history-history-s-36f83-390-and-1600-light-and-dark-repeat1/ticket__390__light.png",
+        "sha256": "5484e9e208599a7911ab90eea7f702ee6ebb18cdd6386b357f0891e346215da1"
+      }
+    ],
+    "raw_evidence": [
+      {
+        "path": "tmp/aeon-683-fix7/run-regression.py",
+        "sha256": "8acc8bdcf8bdc332f2d95e485083755ef677cb251a24cf880b4a31bce2436b62"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/deny-legacy-screenshots.mjs",
+        "sha256": "c0f11abde2a5ad085f341a99b980d28b25303f422e3f335e1d89d9e7780cfc43"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/before.json",
+        "sha256": "50b7eb2aae208c349d7fd3f7e2bc3c91c7385bdc5bdbca64468d6f8b3ae53e65"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/before.log",
+        "sha256": "dfe0ac2621dca58b7c0a13c02a6c76dc3af6c29d8b169b97098939c3c9dff545"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after.json",
+        "sha256": "ee7e4965d759f7862f6a07e7858d436bb018145691ef1157533c25a2043cc76d"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/after.log",
+        "sha256": "3d02db8e325a8327dab094db0a840392cc1da42b15fecbbec8f291d131627473"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/history-unit.log",
+        "sha256": "a3a3a2b4be9b638750ef3093d1fc55da0feb783c02a71fe864619207b043896c"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/remote-browser.log",
+        "sha256": "773e28199e77ad2bac9a833bff42ef9ee0e895acc3fd79d293ced00421a420e2"
+      },
+      {
+        "path": "tmp/aeon-683-fix7/base-ci.json",
+        "sha256": "a4f240b6442592dfe1663df22a93e3a95562cea4283b1dc9ea7ba7fb41124064"
+      }
+    ],
+    "unit_validation": {
+      "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/metadata-history.test.ts",
+      "passed": 1,
+      "failed": 0
+    },
+    "syntax_validation": {
+      "command": "node --experimental-strip-types --check web/tests/activity-history.spec.ts",
+      "exit_code": 0
+    },
+    "baseline_hosted_ci": {
+      "url": "https://github.com/inspr-at/paimos/actions/runs/37198094584",
+      "head_sha": "b705a11a33ca879be3e2539b6a6efc7d6e71ea68",
+      "conclusion": "success",
+      "coverage": "All seven Go shards, twelve web shards, e2e, Go static and web setup passed. Baseline evidence only; the local fix is not pushed and has no hosted run."
+    },
+    "remote_validation": {
+      "browser": "Approved launcher refused before SSH because remoteLaneReady=false (OPS-247 bootstrap pending). No gate bypass.",
+      "go": "No affected Go packages. The coordinator remote-test.sh invokes go test only and cannot execute web unit or browser specs.",
+      "linux": "Not run for this local fix; hosted baseline is recorded separately. No push was authorized."
+    },
+    "ownership": "Only activity-history spec and this existing validation artifact changed on work/aeon-683. PPM worker marker recorded; no status change, foreign-worktree edit, push, deploy or model CLI. Existing origin/main contains base HEAD; no merge conflict to resolve."
   }
 }

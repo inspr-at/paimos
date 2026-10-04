@@ -335,33 +335,7 @@ test('failed Ring/Size Save preserves both draft and saved theme, and can be ret
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
-test.describe('zoomed craft details', () => {
-  test.use({ deviceScaleFactor: 3 })
-  for (const theme of ['light', 'dark'] as const) test(`${theme}: each ring mode as drawn, at 30, 65 and 100%, at 20, 26 and 64 px`, async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: 'reduce' })
-    await open(page, `?theme=${theme}`)
-    const union = async (selector: string) => {
-      const boxes = await page.locator(selector).evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().toJSON() as DOMRect))
-      const x = Math.min(...boxes.map(b => b.x)), y = Math.min(...boxes.map(b => b.y))
-      return { x, y, width: Math.max(...boxes.map(b => b.right)) - x, height: Math.max(...boxes.map(b => b.bottom)) - y }
-    }
-    for (const ring of ['own', 'moving', 'still', 'off']) {
-      await page.screenshot({ path: resolve(shots, `aeon242-zoom-${theme}-${ring}.png`), clip: await union(`.cell[data-ring="${ring}"]`), fullPage: true })
-    }
-    await page.screenshot({ path: resolve(shots, `aeon242-zoom-${theme}-states.png`), clip: await union('.cell.live'), fullPage: true })
-  })
-})
-
 for (const mode of ['light', 'dark'] as const) {
-  test(`craft sheets: ${mode}, frozen motion and reduced motion`, async ({ page }) => {
-    for (const [motion, query] of [['no-preference', ''], ['reduce', '&ring=moving&size=100'], ['reduce', '&ring=off&size=30']] as const) {
-      await page.emulateMedia({ reducedMotion: motion })
-      await open(page, `?theme=${mode}${query}`)
-      await page.getByRole('button', { name: 'Send event' }).click()
-      await page.evaluate(() => { for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = animation.effect?.getTiming().iterations === 1 ? 180 : 700 } })
-      await page.screenshot({ path: resolve(shots, `aeon242-sheet-${mode}-${motion}${query.replace(/[&=]/g, '-')}.png`), fullPage: true })
-    }
-  })
   for (const width of [1280, 390]) test(`real surfaces: ${mode} ${width}px with a chosen ring and size`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: mode })
     const { theme } = await mockIndicator(page)

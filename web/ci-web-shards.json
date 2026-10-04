@@ -24,13 +24,13 @@
     "OPS: group remaining-ui is ungated (gate:false). These 164 specs were never part of the CI gate and have no measured timing; the gate keeps today's measured coverage so the merge queue gets faster, not wider. Run them with --all (ci:web:shard -- --all i/N); a follow-up ticket measures them and decides whether they gate.",
     "The old workflow discovers no full-suite step: it explicitly selects 48 UI specs (37 in web). The manifest covers all 213 UI specs once; 165 have no measured CI step duration.",
     "Remove the replaced browser invocations, including overlaps in footer/status/e2e jobs, when wiring the full UI shards. Keep their other checks and collect evidence from the shards. Otherwise those old jobs still duplicate manifest coverage.",
-    "Prior-revision release capture is a different product revision and must stay separate. Preserve git source restoration and -g release list screenshot there.",
     "Keep e2e/smoke.spec.ts and browser lifecycle probes in e2e; neither is part of the UI spec universe.",
     "Upload test-results/ci-web, screenshot directories under RUNNER_TEMP, and .agent-shots/planning + .agent-shots/queue from shards. Run --check --shards 12 and ci:web:shard:test in setup before browsers.",
     "Flake guard can request --last-failed (per-group last-run state) or --test-list /absolute/failures.txt (native Playwright test-list format). Empty groups succeed only during these failure-only selections.",
     "PLAYWRIGHT_JSON_OUTPUT_FILE enables per-group JSON reports plus one combined report at that path; --reporter=json is also accepted. Prior report bytes are invalidated before launch so startup failure/interruption cannot reuse green evidence.",
     "Shard assignment is based on file names and timing weights only; groups execute sequentially with their own original policies. Weights for the 165 newly covered specs are estimates; hosted measurement is needed before claiming the 5-minute target.",
-    "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback."
+    "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback.",
+    "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case."
   ],
   "configs": [
     {
@@ -93,30 +93,6 @@
       "kind": "browser-test",
       "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
       "listedTests": 25
-    },
-    {
-      "id": "web-3",
-      "job": "web",
-      "name": "Capture the round-6 release list for comparison",
-      "command": "# Render the immutable prior UI with the current screenshot fixture.\n# Restore the current sources even when capture fails.\ngit fetch --no-tags --depth=1 origin 900c24ebef0d6188f300e13b56d1e5f53b7ac54d\ntrap 'git show HEAD:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue; git show HEAD:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue' EXIT\ngit show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue\ngit show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue\nnpx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'",
-      "config": "playwright.ui.config.ts",
-      "project": null,
-      "flags": [
-        "--workers=1",
-        "-g",
-        "release list screenshot"
-      ],
-      "specs": [
-        "tests/release-codenames.spec.ts"
-      ],
-      "env": {
-        "RELEASE_LIST_SHOTS": "${{ runner.temp }}/aeon-release-list-shots",
-        "RELEASE_LIST_SHOT_LABEL": "before"
-      },
-      "measuredSeconds": 6.0,
-      "kind": "browser-test",
-      "revision": "900c24ebef0d6188f300e13b56d1e5f53b7ac54d",
-      "disposition": "Keep separate prior-revision evidence capture; not current-code suite coverage."
     },
     {
       "id": "web-4",
@@ -676,15 +652,15 @@
       "specs": [
         {
           "file": "tests/release-header.spec.ts",
-          "weightSeconds": 31.906077,
+          "weightSeconds": 29.35359084,
           "weightSource": "web-4",
-          "listedTests": 25
+          "listedTests": 23
         },
         {
           "file": "tests/release-codenames.spec.ts",
-          "weightSeconds": 31.906077,
+          "weightSeconds": 30.62983392,
           "weightSource": "web-4",
-          "listedTests": 25
+          "listedTests": 24
         },
         {
           "file": "tests/release-presentation.spec.ts",
@@ -700,9 +676,9 @@
         },
         {
           "file": "tests/releases.spec.ts",
-          "weightSeconds": 33.18232,
+          "weightSeconds": 28.077347692,
           "weightSource": "web-4",
-          "listedTests": 26
+          "listedTests": 22
         },
         {
           "file": "tests/header-menus.spec.ts",
@@ -884,9 +860,9 @@
         },
         {
           "file": "tests/ticket-panel.spec.ts",
-          "weightSeconds": 36.078431,
+          "weightSeconds": 34.509803565,
           "weightSource": "web-11",
-          "listedTests": 20
+          "listedTests": 22
         },
         {
           "file": "tests/ticket-workers.spec.ts",
@@ -1193,9 +1169,9 @@
         },
         {
           "file": "tests/settings.spec.ts",
-          "weightSeconds": 68.384615,
+          "weightSeconds": 32.564102381,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 21
+          "listedTests": 10
         },
         {
           "file": "tests/agent-activity.spec.ts",
@@ -1353,9 +1329,9 @@
         },
         {
           "file": "tests/agent-indicator.spec.ts",
-          "weightSeconds": 37.731707,
+          "weightSeconds": 33.292682647,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 17
+          "listedTests": 15
         },
         {
           "file": "tests/agent-pairing.spec.ts",
@@ -1389,9 +1365,9 @@
         },
         {
           "file": "tests/agent-rules-shots.spec.ts",
-          "weightSeconds": 142.04878,
+          "weightSeconds": 35.512195,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 64
+          "listedTests": 16
         },
         {
           "file": "tests/agent-rules-ticks.spec.ts",
@@ -1688,9 +1664,9 @@
         },
         {
           "file": "tests/indicator-controls.spec.ts",
-          "weightSeconds": 42.170732,
+          "weightSeconds": 33.292683158,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 19
+          "listedTests": 15
         },
         {
           "file": "tests/indicator-creative-gallery.spec.ts",
@@ -1699,16 +1675,10 @@
           "listedTests": 5
         },
         {
-          "file": "tests/indicator-fidelity.spec.ts",
-          "weightSeconds": 17.756098,
-          "weightSource": "unmeasured-test-rate",
-          "listedTests": 8
-        },
-        {
           "file": "tests/indicator-gallery.spec.ts",
-          "weightSeconds": 13.317073,
+          "weightSeconds": 11.097560833,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 6
+          "listedTests": 5
         },
         {
           "file": "tests/intake-extensions.spec.ts",
@@ -1772,9 +1742,9 @@
         },
         {
           "file": "tests/knowledge-shots.spec.ts",
-          "weightSeconds": 55.487805,
+          "weightSeconds": 33.292683,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 25
+          "listedTests": 15
         },
         {
           "file": "tests/list-columns.spec.ts",
@@ -1862,15 +1832,15 @@
         },
         {
           "file": "tests/polish-round-two.spec.ts",
-          "weightSeconds": 142.04878,
+          "weightSeconds": 4.439024375,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 64
+          "listedTests": 2
         },
         {
           "file": "tests/polish-round.spec.ts",
-          "weightSeconds": 142.04878,
+          "weightSeconds": 8.87804875,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 64
+          "listedTests": 4
         },
         {
           "file": "tests/portal-admin.spec.ts",
@@ -2062,12 +2032,6 @@
           "weightSeconds": 2.219512,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 1
-        },
-        {
-          "file": "tests/release-glyph-align.spec.ts",
-          "weightSeconds": 4.439024,
-          "weightSource": "unmeasured-test-rate",
-          "listedTests": 2
         },
         {
           "file": "tests/release-groups.spec.ts",
@@ -2308,12 +2272,6 @@
           "weightSeconds": 11.097561,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 5
-        },
-        {
-          "file": "tests/visual-audit.spec.ts",
-          "weightSeconds": 144.268293,
-          "weightSource": "unmeasured-test-rate",
-          "listedTests": 65
         },
         {
           "file": "tests/wide.spec.ts",

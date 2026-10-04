@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // IV1 / AEON-184. Coordinator: run with --workers=2 after merging variants.
-import { existsSync, mkdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
 import { mockIndicator } from './agent-indicator-fixtures'
@@ -180,13 +179,4 @@ test('IV1 renderers: event-only glints, paused states, quiet stacks and reduced 
   await expect(sheet.locator('.glint').first()).toHaveCSS('animation-name', /event-opacity/)
   await page.clock.fastForward(650)
   await expect(sheet.locator('.glint')).toHaveCount(0)
-})
-
-for (const theme of ['light', 'dark']) test(`IV1 craft sheet: ${theme}, three states at 26 and 64 px`, async ({ page }) => {
-  await page.setViewportSize({ width: 1024, height: 950 })
-  await page.goto(`/tests/indicator-harness.html?theme=${theme}`)
-  await expect(page.locator('.sheet .indicator')).toHaveCount(18)
-  const directory = new URL('../../.agent-shots/', import.meta.url)
-  mkdirSync(directory, { recursive: true })
-  await page.screenshot({ path: fileURLToPath(new URL(`iv1-verified-${theme}.png`, directory)), fullPage: true })
 })
