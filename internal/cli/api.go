@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -127,6 +128,13 @@ func (rt *runtime) api() (*client.Client, error) {
 	return c, nil
 }
 
+func (rt *runtime) requestCtx() context.Context {
+	if rt.requestContext != nil {
+		return rt.requestContext
+	}
+	return context.Background()
+}
+
 func (rt *runtime) do(method, path string, body, dest any) error {
 	return rt.doHeaders(method, path, body, dest, nil)
 }
@@ -136,7 +144,7 @@ func (rt *runtime) doCtx(ctx context.Context, method, path string, body, dest an
 }
 
 func (rt *runtime) doHeaders(method, path string, body, dest any, headers map[string]string) error {
-	return rt.doHeadersCtx(context.Background(), method, path, body, dest, headers)
+	return rt.doHeadersCtx(rt.requestCtx(), method, path, body, dest, headers)
 }
 
 func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
@@ -166,7 +174,7 @@ func (rt *runtime) ticketWebURL(key string) string {
 }
 
 func (rt *runtime) loadKinds() (kindTable, error) {
-	return rt.loadKindsCtx(context.Background())
+	return rt.loadKindsCtx(rt.requestCtx())
 }
 
 func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
@@ -190,7 +198,7 @@ func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
 }
 
 func (rt *runtime) kind(slug string) (apiKind, error) {
-	return rt.kindCtx(context.Background(), slug)
+	return rt.kindCtx(rt.requestCtx(), slug)
 }
 
 func (rt *runtime) kindCtx(ctx context.Context, slug string) (apiKind, error) {
@@ -214,7 +222,7 @@ func cloneValues(q url.Values) url.Values {
 }
 
 func (rt *runtime) walkNodes(q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
-	return rt.walkNodesCtx(context.Background(), q, stop)
+	return rt.walkNodesCtx(rt.requestCtx(), q, stop)
 }
 
 func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
@@ -243,6 +251,9 @@ func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(api
 		}
 		if body.NextCursor == nil || strings.TrimSpace(*body.NextCursor) == "" {
 			break
+		}
+		if page == 49 {
+			return nil, errors.New("node listing exceeds 10000 items; narrow the scope")
 		}
 		q.Set("cursor", *body.NextCursor)
 	}
@@ -283,7 +294,7 @@ func keyPrefix(key string) string {
 }
 
 func (rt *runtime) projectNode(ref string) (apiNode, error) {
-	return rt.projectNodeCtx(context.Background(), ref)
+	return rt.projectNodeCtx(rt.requestCtx(), ref)
 }
 
 func (rt *runtime) projectNodeCtx(ctx context.Context, ref string) (apiNode, error) {

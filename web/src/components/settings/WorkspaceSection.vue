@@ -6,6 +6,7 @@ import { brand } from '../../lib/brand'
 import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import WorkVocabularyCard from './WorkVocabularyCard.vue'
 import BrandCard from './BrandCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -68,6 +69,7 @@ async function saveInterval() {
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
     </SettingsCard>
+    <WorkVocabularyCard v-if="can('settings.manage')" />
     <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />

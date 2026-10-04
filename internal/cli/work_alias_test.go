@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -84,5 +85,22 @@ func TestWorkAliasNeverRemapsNonWorkKinds(t *testing.T) {
 	}
 	if _, ok := table.issueKind("retired-uuid"); ok {
 		t.Fatal("guessed a retired id")
+	}
+}
+
+func TestWorkMCPCancelAndListBounds(t *testing.T) {
+	rt := &runtime{}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := rt.toolIssueCreate(ctx, nil, issueCreateArgs{Project: "AEON", Title: "Cancelled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled create: %v", err)
+	}
+	for _, n := range []int{-1, 10001} {
+		if err := rt.listIssues("", "", "", "", "", n, 0); err == nil || !strings.Contains(err.Error(), "between 0 and 10000") {
+			t.Fatalf("limit %d: %v", n, err)
+		}
+		if err := rt.listIssues("", "", "", "", "", 1, n); err == nil || !strings.Contains(err.Error(), "between 0 and 10000") {
+			t.Fatalf("offset %d: %v", n, err)
+		}
 	}
 }

@@ -4124,7 +4124,7 @@ paths:
         - {name: shape, in: query, description: 'parent or leaf; supports ! exclusions', schema: {type: array, items: {type: string, enum: [parent, leaf, '!parent', '!leaf']}}}
         - {name: depth, in: query, description: 'Project-relative work levels; supports ! exclusions', schema: {type: array, items: {type: string}}}
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
-        - {name: kind, in: query, description: 'Repeatable or comma-separated kind slugs or IDs. epic, ticket and task also match work after migration', schema: {type: array, items: {type: string}}}
+        - {name: kind, in: query, description: 'Repeatable or comma-separated kind slugs or IDs. epic, ticket and task also match work after migration; a leading ! excludes the alias', schema: {type: array, items: {type: string}}}
         - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
         - {name: priority, in: query, description: Repeatable or comma-separated priorities or none; ! excludes, schema: {type: array, items: {type: string}}}
         - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none; ! excludes, schema: {type: array, items: {type: string}}}

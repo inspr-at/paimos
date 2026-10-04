@@ -172,6 +172,9 @@ func (rt *runtime) printIssueList(items []issueView, total int) error {
 }
 
 func (rt *runtime) listIssues(project, status, typ, priority, assignee string, limit, offset int) error {
+	if limit < 0 || limit > 10000 || offset < 0 || offset > 10000 {
+		return usagef("limit and offset must be between 0 and 10000")
+	}
 	if typ != "" && !issueKinds[typ] {
 		return usagef("unknown issue type %q", typ)
 	}

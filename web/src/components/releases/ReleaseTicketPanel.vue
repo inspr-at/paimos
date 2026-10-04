@@ -171,7 +171,7 @@ defineExpose({
       @close="requestClose" @expand="expand" @new-tab="newTab" @open-key="openKey" @trail-back="trailBack" @retry="resolve"
       @open-in-project="goToProject" @status="anchor => { statusAnchor = anchor }" @removed="emit('close')"
     />
-    <StatusMenu :project-id="projectId ?? undefined" v-if="statusAnchor && item" :anchor="statusAnchor" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
+    <StatusMenu :project-id="projectId ?? undefined" v-if="statusAnchor && item" :anchor="statusAnchor" :derived="item.status_derived" :children-count="item.work_children_count" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
   </div>
 </template>
 

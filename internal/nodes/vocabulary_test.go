@@ -2,11 +2,13 @@
 package nodes
 
 import (
+	"context"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestWorkName(t *testing.T) {
@@ -53,12 +55,13 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 	if decode[workVocabulary](t, status, body, 200).Revision != 0 {
 		t.Fatal("tenant vocabulary leaked")
 	}
-	for _, bad := range []string{in + ` {}`, strings.Replace(in, `"revision":0`, `"revision":1,"unexpected":1`, 1), strings.Repeat("x", 8193)} {
+	for _, bad := range []string{in + ` {}`, strings.Replace(in, `"revision":0`, `"revision":1,"unexpected":1`, 1), strings.Repeat("x", 8193), `{"levels":[]}`, `{"revision":1,"leaf":{"name":""},"levels":[]}`, `{"revision":1,"leaf":{"name":"","icon":""},"levels":[{}]}`} {
 		if status, _ = call(t, &p, "PUT", "/api/settings/work-vocabulary", bad); status != 400 {
 			t.Fatalf("invalid body %d", status)
 		}
 	}
-	root := workNodeTest(t, p, "", "open")
+	projectRoot := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Work project"}`, kindBySlug(t, p, "project").ID))
+	root := workNodeTest(t, p, projectRoot.ID, "open")
 	child := workNodeTest(t, p, root.ID, "open")
 	before := currentWorkTest(t, p, root.ID)
 	if before.IsLeaf || before.Depth != 1 || before.StatusDerived || before.LevelName != "Work item" {
@@ -80,6 +83,34 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 			t.Fatalf("%s: %s", tc.filter, body)
 		}
 	}
+
+	status, body = call(t, &p, "GET", "/api/nodes?within="+projectRoot.ID+"&facets=shape,depth", "")
+	facets := decode[nodePage](t, status, body, 200).Facets
+	if facets["shape"]["parent"] != 1 || facets["shape"]["leaf"] != 1 || facets["depth"]["2"] != 1 {
+		t.Fatalf("shape facets %+v", facets)
+	}
+	status, body = call(t, &p, "GET", "/api/tickets/graph?project_id="+projectRoot.ID, "")
+	graph := decode[TicketGraph](t, status, body, 200)
+	if len(graph.Nodes) != 2 || len(graph.Links) != 1 {
+		t.Fatalf("work graph %+v", graph)
+	}
+	for _, n := range graph.Nodes {
+		if n.WorkShape == nil || n.Type != "work" {
+			t.Fatalf("graph shape %+v", n)
+		}
+	}
+	status, body = call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"title":"Edited leaf"}`)
+	if got := decode[nodeJSON](t, status, body, 200); got.WorkShape == nil || got.Depth != 2 {
+		t.Fatalf("write shape %+v", got)
+	}
+	managerless := insertPerson(t, p.TenantID, "Reader")
+	if status, body = call(t, &managerless, "PUT", "/api/settings/work-vocabulary", strings.Replace(in, `"revision":0`, `"revision":1`, 1)); status != 403 || !strings.Contains(string(body), "permission denied") {
+		t.Fatalf("unprivileged write %d %s", status, body)
+	}
+	status, body = call(t, &p, "GET", "/api/nodes?kind=work,!ticket", "")
+	if len(decode[nodePage](t, status, body, 200).Items) != 0 {
+		t.Fatal("retired kind exclusion did not exclude its work alias")
+	}
 	// A non-work child does not alter shape or the name of a leaf.
 	k := kindBySlug(t, p, "project")
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Subproject","parent_id":%q}`, k.ID, child.ID))
@@ -89,6 +120,23 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 	}
 	if got := currentWorkTest(t, p, child.ID); !got.IsLeaf {
 		t.Fatalf("non-work child %+v", got.WorkShape)
+	}
+	// Hide the sole work child. The parent stays a parent, its count becomes zero,
+	// and subsequent reads still cannot see that child (the RLS override restores).
+	if _, err := appPool.Exec(t.Context(), `CREATE POLICY vocabulary_hidden ON nodes AS RESTRICTIVE USING(id<>'`+child.ID+`'::uuid OR aeon_visibility_system())`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := appPool.Exec(context.Background(), `DROP POLICY IF EXISTS vocabulary_hidden ON nodes`); err != nil {
+			t.Error(err)
+		}
+	})
+	if got := currentWorkTest(t, p, root.ID); got.IsLeaf || got.WorkChildrenCount != 0 || !got.StatusDerived {
+		t.Fatalf("hidden child changed canonical shape %+v", got.WorkShape)
+	}
+	status, body = call(t, &p, "GET", "/api/nodes?ids="+child.ID, "")
+	if len(decode[nodePage](t, status, body, 200).Items) != 0 {
+		t.Fatal("shape read left RLS widened")
 	}
 }
 func TestWorkShapeFilterBounds(t *testing.T) {

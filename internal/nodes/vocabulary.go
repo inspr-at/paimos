@@ -88,10 +88,20 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	var in workVocabulary
+	var input struct {
+		Revision *int64 `json:"revision"`
+		Leaf     *struct {
+			Name *string `json:"name"`
+			Icon *string `json:"icon"`
+		} `json:"leaf"`
+		Levels []struct {
+			Name *string `json:"name"`
+			Icon *string `json:"icon"`
+		} `json:"levels"`
+	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
+	if err := dec.Decode(&input); err != nil {
 		writeError(w, 400, "invalid vocabulary")
 		return
 	}
@@ -100,9 +110,17 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid vocabulary")
 		return
 	}
-	if in.Levels == nil {
-		writeError(w, 400, "levels must be an array")
+	if input.Revision == nil || input.Leaf == nil || input.Leaf.Name == nil || input.Leaf.Icon == nil || input.Levels == nil {
+		writeError(w, 400, "revision, leaf name/icon and levels are required")
 		return
+	}
+	in := workVocabulary{Revision: *input.Revision, Leaf: workLevel{Name: *input.Leaf.Name, Icon: *input.Leaf.Icon}, Levels: []workLevel{}}
+	for _, level := range input.Levels {
+		if level.Name == nil || level.Icon == nil {
+			writeError(w, 400, "level name and icon are required")
+			return
+		}
+		in.Levels = append(in.Levels, workLevel{Name: *level.Name, Icon: *level.Icon})
 	}
 	if err := in.validate(); err != nil {
 		writeErr(w, err)

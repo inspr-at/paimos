@@ -10,6 +10,7 @@ import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAge
 import { useLiveAgents } from '../../stores/liveAgents'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
+import { isWorkParent, workIcon, workLabel } from '../../lib/workVocabulary'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
@@ -316,16 +317,16 @@ function guideClass(i: number, depth: number, guides: boolean[], last: boolean) 
 }
 function childCount(entry: { row: ListItem; tree?: TreeMeta }) {
   if (entry.tree) return entry.tree.hasChildren && !entry.tree.stats && entry.row.kind_slug !== 'epic' ? entry.row.children_count : 0
-  return entry.row.kind_slug === 'epic' ? entry.row.children_count : 0
+  return isWorkParent(entry.row) ? entry.row.children_count : 0
 }
 
 // Drag a ticket onto an epic (or onto "No epic") to move it there.
 const dragId = ref<string | null>(null)
 const dropTarget = ref<string | null>(null)
 let dragged: ListItem | null = null
-function draggable(entry: { row: ListItem; tree?: TreeMeta }) { return !!props.canDrag && !!entry.tree && entry.row.kind_slug === 'ticket' && !entry.tree.dimmed }
+function draggable(entry: { row: ListItem; tree?: TreeMeta }) { return !!props.canDrag && !!entry.tree && ['work','ticket'].includes(entry.row.kind_slug) && !entry.tree.dimmed }
 function dragStart(event: DragEvent, row: ListItem) {
-  if (!props.canDrag || row.kind_slug !== 'ticket') return
+  if (!props.canDrag || !['work','ticket'].includes(row.kind_slug)) return
   dragged = row; dragId.value = row.id
   event.dataTransfer?.setData('text/plain', row.key)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
@@ -333,7 +334,7 @@ function dragStart(event: DragEvent, row: ListItem) {
 function dragEnd() { dragged = null; dragId.value = null; dropTarget.value = null }
 function validTarget(epic: ListItem | null) {
   if (!dragged) return false
-  return epic ? epic.id !== dragged.parent_id && epic.kind_slug === 'epic' : dragged.parent?.kind_slug === 'epic' || dragged.parent_id !== props.projectId
+  return epic ? epic.id !== dragged.parent_id && isWorkParent(epic) : dragged.parent?.kind_slug === 'epic' || dragged.parent_id !== props.projectId
 }
 function dragOver(event: DragEvent, epic: ListItem | null) {
   if (!validTarget(epic)) return
@@ -652,8 +653,8 @@ defineExpose({
             v-else :id="'repeat' in entry && entry.repeat ? undefined : `row-${entry.row.id}`" class="ticket-row"
             :class="{
               selected: !!selected?.has(entry.row.id),
-              cursor: cursorId === entry.row.id, open: openId === entry.row.id, epic: entry.row.kind_slug === 'epic',
-              'tree-row': !!entry.tree, dimmed: entry.tree?.dimmed, top: entry.tree && entry.tree.depth === 0 && entry.row.kind_slug === 'epic',
+              cursor: cursorId === entry.row.id, open: openId === entry.row.id, epic: isWorkParent(entry.row),
+              'tree-row': !!entry.tree, dimmed: entry.tree?.dimmed, top: entry.tree && entry.tree.depth === 0 && isWorkParent(entry.row),
               'drop-target': dropTarget === entry.row.id, dragging: dragId === entry.row.id,
               stale: !!liveLabels?.has(entry.row.id), 'live-flash': !!liveFlash?.has(entry.row.id),
             }"
@@ -665,8 +666,8 @@ defineExpose({
             @click="rowClick($event, entry.row)" @contextmenu="longPress($event, entry.row)"
             @pointerdown="pressBegin($event, entry.row)" @pointermove="pressMove" @pointerup="pressFinish(true)" @pointercancel="pressFinish(false)"
             @dragstart="dragStart($event, entry.row)" @dragend="dragEnd"
-            @dragover="entry.row.kind_slug === 'epic' && entry.tree ? dragOver($event, entry.row) : undefined"
-            @dragleave="dragLeave($event, entry.row.id)" @drop="entry.row.kind_slug === 'epic' && entry.tree ? drop($event, entry.row) : undefined"
+            @dragover="isWorkParent(entry.row) && entry.tree ? dragOver($event, entry.row) : undefined"
+            @dragleave="dragLeave($event, entry.row.id)" @drop="isWorkParent(entry.row) && entry.tree ? drop($event, entry.row) : undefined"
           >
             <td v-if="phone && selecting" class="c-check">
               <button
@@ -695,7 +696,7 @@ defineExpose({
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
                 </span>
-                <AppIcon :name="entry.row.kind_slug === 'epic' ? 'epic' : entry.row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="kindLabel(entry.row.kind_slug)" />
+                <AppIcon :name="workIcon(entry.row)" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="workLabel(entry.row)" />
                 <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
@@ -713,7 +714,7 @@ defineExpose({
                 </span>
               </div>
               <span class="row-actions">
-                <QueueAction :row="entry.row" :project-id="projectId" />
+                <QueueAction v-if="entry.row.is_leaf !== false" :row="entry.row" :project-id="projectId" />
                 <button type="button" class="icon-btn sm flat" :aria-label="`Open ${entry.row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', entry.row)"><AppIcon name="external" :size="13" /></button>
               </span>
             </td>

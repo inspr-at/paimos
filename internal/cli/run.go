@@ -53,6 +53,7 @@ func programName(argv0 string) string {
 }
 
 type runtime struct {
+	requestContext     context.Context
 	program            string
 	stdin              io.Reader
 	stdout             io.Writer

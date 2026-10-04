@@ -24,7 +24,7 @@ export function keyPrefix(routeKey: string | undefined): string | undefined {
 // A freshly created node in list-item shape, so lists and the panel can show it at once.
 export function asListItem(node: WorkNode, kind: Kind, parent: ListParent | null, project: ListItem['project']): ListItem {
   const priority = typeof node.fields.priority === 'string' ? node.fields.priority : null
-  return { ...node, kind_slug: kind.slug, kind_label: kind.label, priority, assignee: null, parent, children_count: 0, project }
+  return { ...node, kind_slug: kind.slug, kind_label: node.level_name || kind.label, priority, assignee: null, parent, children_count: node.work_children_count ?? 0, project }
 }
 
 export type SaveResult = 'ok' | 'conflict' | 'error'
@@ -61,10 +61,10 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
     // the epic a list groups by are known here, for this answer's revision
     // and parent only: a newer move that landed first keeps its own.
     rows.wrote(node, sent)
-    const epic = parent.kind_slug === 'epic' ? { epic: { id: parent.id, key: parent.key, title: parent.title } } : parent.kind_slug === 'project' ? { epic: null } : {}
+    const epic = ['work','epic'].includes(parent.kind_slug) ? { epic: { id: parent.id, key: parent.key, title: parent.title } } : parent.kind_slug === 'project' ? { epic: null } : {}
     rows.amend(item.id, node.updated_at, { parent, ...epic })
     after?.(item, fromParentId)
-    const where = parent.kind_slug === 'project' ? 'out of its epic' : `to ${parent.key} ${parent.title}`
+    const where = parent.kind_slug === 'project' ? 'to the project root' : `to ${parent.key} ${parent.title}`
     toast(`${item.key} moved ${where}`, from ? { action: { label: 'Undo', run: () => void guardedMove(item, from, after, rows) } } : {})
     return 'ok'
   } catch (e) {
@@ -234,7 +234,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   async function loadChildren(again = false) {
     const target = item.value
     if (!again) children.value = []
-    if (!target || (target.kind_slug !== 'epic' && !target.children_count)) return
+    if (!target || (target.is_leaf !== false && target.kind_slug !== 'epic' && !target.children_count)) return
     if (!again) childrenLoading.value = true
     try {
       for (;;) {
@@ -373,7 +373,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     const target = item.value
     if (!target || target.parent?.id === epic.id) return
     // A move that found the ticket gone told the store; the panel follows it.
-    if (await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }, context.onMoved, rows) === 'error') sync(target, null)
+    if (await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: target.kind_slug === 'work' ? 'work' : 'epic' }, context.onMoved, rows) === 'error') sync(target, null)
   }
 
   async function remove(): Promise<boolean> {
@@ -464,7 +464,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (!target || !title.trim()) return null
     try {
       const all = await kinds()
-      const kind = all.find(k => k.slug === (target.kind_slug === 'epic' ? 'ticket' : 'task'))
+      const kind = all.find(k => k.slug === 'work') ?? all.find(k => k.slug === (target.kind_slug === 'epic' ? 'ticket' : 'task'))
       if (!kind) throw new Error('this workspace has no such kind')
       const sent = rows.mark()
       const node = await createNode({ kind_id: kind.id, title: title.trim(), parent_id: target.id, state: 'new', key_prefix: keyPrefix(routeKey) })
@@ -499,7 +499,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     try {
       const preview = (await lookupNodes([id])).items.find(node => node.id === id)
       if (!preview || target.parent_id !== id) return
-      set({ id, key: preview.key, title: preview.title, kind_slug: target.kind_slug === 'task' ? 'ticket' : 'epic' })
+      set({ id, key: preview.key, title: preview.title, kind_slug: target.kind_slug === 'work' ? 'work' : target.kind_slug === 'task' ? 'ticket' : 'epic' })
     } catch { /* the chip keeps the former parent until the next load */ }
   }
   const liveView: LiveView = {

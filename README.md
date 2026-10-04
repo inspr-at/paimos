@@ -3184,13 +3184,12 @@ budget or deadline returns an explicit failure (node APIs: 503), never a partial
 aggregate. Larger lists should narrow their scope. RLS, exact-money permissions,
 historical spend and session identities are unchanged.
 
-
 Work vocabulary (AEON-655) is managed in Workspace settings, independently of appearance. A leaf always uses the leaf name (default Ticket); parents use their project-relative level (Epic, Story, then Level N). Only live work children make a parent; a project resets depth. Naming and the parent status explanation use the existing `work-parent-status` flag, whose production activation remains owned by AEON-429. Create a work item; nesting decides its name. Lead status scripts must write leaves only.
 
 | Surface | Before migration | After work-kind migration |
 | --- | --- | --- |
 | REST `kind_id` | Configured Epic/Ticket/Task UUID | Canonical Work UUID; retired UUIDs are rejected, never guessed |
-| REST list `kind=epic,ticket,task` | Requested old kinds | Each old slug also matches Work; use `shape=parent` / `shape=leaf` and `depth=N` for structure |
+| REST list `kind=epic,ticket,task` | Requested old kinds | Each old slug also matches Work (including exclusions); use `shape=parent` / `shape=leaf` and `depth=N` for structure |
 | REST `epic` projection/filter | Nearest Epic/subtree | Nearest Work ancestor/subtree; property name retained for compatibility |
 | REST node/list/tree/Graph | Existing fields retained | Additive `is_leaf`, `depth`, `level_name`, `level_icon`; non-work nodes omit shape fields |
 | CLI `issue --type work,epic,ticket,task` | Old types remain accepted | Old type names resolve to canonical Work for creation/listing; same-kind updates are no-ops |

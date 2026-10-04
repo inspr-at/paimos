@@ -182,7 +182,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     if (!blocks.has(id)) blocks.set(id, { ids: [], cursor: null, loading: false, error: '' })
     const block = blocks.get(id)!
     if (block.loading || (!more && block.ids.length)) return
-    await loadBlock(block, { parent_id: id, kind: ['ticket', 'task', 'epic'] }, more)
+    await loadBlock(block, { parent_id: id, kind: ['work', 'ticket', 'task', 'epic'] }, more)
   }
   async function loadRoots() {
     const root = projectId.value
@@ -193,12 +193,10 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     lazyNodes.clear(); blocks.clear(); order.clear()
     epicBlock.value = { ids: [], cursor: null, loading: true, error: '' }
     looseBlock.value = { ids: [], cursor: null, loading: true, error: '' }
-    await Promise.all([
-      loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }),
-      loadBlock(looseBlock, { parent_id: root, kind: ['ticket', 'task'] }),
-    ])
+    await loadBlock(epicBlock, { parent_id: root, kind: ['work', 'epic', 'ticket', 'task'] })
+    looseBlock.value.loading = false
     if (request !== generation) return
-    while (request === generation && epicBlock.value.cursor && !epicBlock.value.error) await loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }, true)
+    while (request === generation && epicBlock.value.cursor && !epicBlock.value.error) await loadBlock(epicBlock, { parent_id: root, kind: ['work', 'epic', 'ticket', 'task'] }, true)
     if (request !== generation) return
     // Reopen what was expanded before, level by level.
     let frontier = [...expanded.value].filter(id => lazyNodes.has(id))
@@ -210,7 +208,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     lazyRead.value = { kind: 'load', sent, behind: [...lazyNodes.values()].filter(row => rowStore.newer(row.id, row.updated_at)).map(row => row.id) }
   }
   watch([active, matchMode, projectId, sortParam], () => { generation++; if (active.value && !matchMode.value) void loadRoots() }, { immediate: true })
-  function loadMoreRoot() { if (looseBlock.value.cursor && !looseBlock.value.loading) void loadBlock(looseBlock, { parent_id: projectId.value, kind: ['ticket', 'task'] }, true) }
+  function loadMoreRoot() { if (looseBlock.value.cursor && !looseBlock.value.loading) void loadBlock(looseBlock, { parent_id: projectId.value, kind: ['work', 'ticket', 'task'], shape: ['leaf'] }, true) }
 
   // ---------- Epic progress ----------
   const statsQueue: string[] = []
@@ -219,7 +217,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     while (statsRunning < 4 && statsQueue.length) {
       const id = statsQueue.shift()!
       statsRunning++
-      listNodes({ within: id, kind: ['ticket', 'task'], facets: ['state'], limit: 1 })
+      listNodes({ within: id, kind: ['work', 'ticket', 'task'], shape: ['leaf'], facets: ['state'], limit: 1 })
         .then(page => stats.set(id, epicStats(page.facets?.state ?? {}, s => statusMeta(s).closed, s => ['done', 'delivered', 'accepted'].includes(statusMeta(s).key), s => statusMeta(s).key === 'cancelled')))
         .catch(() => stats.delete(id))
         .finally(() => { statsRunning--; pumpStats() })
@@ -243,12 +241,12 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       else top.push(row)
     }
     top.sort(comparePlaced)
-    return { epics: top.filter(row => row.kind_slug === 'epic').map(row => row.id), loose: top.filter(row => row.kind_slug !== 'epic' && row.kind_slug !== 'missing').map(row => row.id) }
+    return { epics: top.filter(row => row.kind_slug !== 'missing').map(row => row.id), loose: [] }
   })
   function isExpanded(id: string) { return autoExpand.value ? !autoCollapsed.value.has(id) : expanded.value.has(id) }
   function hasChildren(id: string) {
     if (matchMode.value) return (matchChildren.value.get(id)?.length ?? 0) > 0
-    return (lazyNodes.get(id)?.children_count ?? 0) > 0 || (blocks.get(id)?.ids.length ?? 0) > 0
+    return (lazyNodes.get(id)?.work_children_count ?? lazyNodes.get(id)?.children_count ?? 0) > 0 || (blocks.get(id)?.ids.length ?? 0) > 0
   }
   const entries = computed<OutlineEntry[]>(() => flattenOutline({
     rootId: projectId.value ?? '',
@@ -298,8 +296,8 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
         for (const row of items) lazyNodes.set(row.id, row)
         const byParent = childMap(items.map(row => live.layout(row)), comparePlaced)
         const roots = byParent.get(projectId.value ?? '') ?? []
-        epicBlock.value.ids = roots.filter(row => row.kind_slug === 'epic').map(row => row.id)
-        looseBlock.value.ids = roots.filter(row => row.kind_slug !== 'epic').map(row => row.id)
+        epicBlock.value.ids = roots.map(row => row.id)
+        looseBlock.value.ids = []
         for (const [id, block] of blocks) block.ids = (byParent.get(id) ?? []).map(row => row.id)
       }
     },
@@ -312,7 +310,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     // Read them afresh on relevant events; no project-lifetime cache of values.
     const ids = query.ids ?? []
     const context = ids.filter(id => ancestors.has(id) && !list.rows.value.some(row => row.id === id) && !page.items.some(row => row.id === id))
-    const extra = context.length ? await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: context, limit: LEVEL }) : null
+    const extra = context.length ? await listNodes({ within: projectId.value!, kind: ['work', 'epic', 'ticket', 'task'], ids: context, limit: LEVEL }) : null
     if (run === generation && !rowStore.gapSince(sent)) {
       for (const id of ids) if (!rowStore.touchedSince(id, sent)) matched.set(id, page.items.some(row => row.id === id))
       for (const item of page.items) if (!rowStore.touchedSince(item.id, sent)) matched.set(item.id, true)
@@ -337,7 +335,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       void resolveAncestors()
     }
     void refreshParentCounts()
-    for (const id of roots.value.epics) ensureStats(id, true)
+    for (const id of roots.value.epics) if (node(id)?.is_leaf === false || node(id)?.kind_slug === 'epic') ensureStats(id, true)
     options.applied?.()
   }
   async function refreshParentCounts() {
@@ -347,7 +345,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     for (let at = 0; at < ids.length; at += LEVEL) {
       const sent = rowStore.mark()
       try {
-        const page = await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: ids.slice(at, at + LEVEL), limit: LEVEL })
+        const page = await listNodes({ within: projectId.value!, kind: ['work', 'epic', 'ticket', 'task'], ids: ids.slice(at, at + LEVEL), limit: LEVEL })
         if (run !== generation || rowStore.gapSince(sent)) return
         for (const item of page.items) rowStore.adopt(item, sent)
       } catch { /* The next event or resync refreshes projections again. */ }
@@ -366,13 +364,12 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     resyncQueries: () => matchMode.value
       ? [liveQuery()]
       : [
-        { parent_id: projectId.value!, kind: ['epic'], limit: LEVEL },
-        { parent_id: projectId.value!, kind: ['ticket', 'task'], limit: LEVEL },
-        ...[...blocks.keys()].map(id => ({ parent_id: id, kind: ['epic', 'ticket', 'task'], limit: LEVEL })),
+        { parent_id: projectId.value!, kind: ['work', 'epic', 'ticket', 'task'], limit: LEVEL },
+        ...[...blocks.keys()].map(id => ({ parent_id: id, kind: ['work', 'epic', 'ticket', 'task'], limit: LEVEL })),
       ],
     reload: () => { reload(); if (matchMode.value) void list.load?.() },
   })
-  watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) ensureStats(id) }, { immediate: true })
+  watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) if (node(id)?.is_leaf === false || node(id)?.kind_slug === 'epic') ensureStats(id) }, { immediate: true })
   function liveQuery() { return apiParams(projectId.value!, filters.value, { limit: LEVEL }) }
   // Placement changes only when Show releases the held layout (or after an
   // explicit local move); resolve the new chain then, never underneath a row.
@@ -418,7 +415,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   function epicOf(id: string): string | null {
     let current = node(id)
     for (let i = 0; current && i < 8; i++) {
-      if (current.kind_slug === 'epic') return current.id
+      if (current.is_leaf === false || current.kind_slug === 'epic') return current.id
       current = current.parent_id ? node(current.parent_id) : undefined
     }
     return null
@@ -434,15 +431,17 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     order.delete(item.id); rememberOrder([row])
     lazyNodes.set(item.id, row)
     const parent = row.parent_id ?? ''
-    const block = parent === projectId.value ? (row.kind_slug === 'epic' ? epicBlock.value : looseBlock.value) : blocks.get(parent)
+    const block = parent === projectId.value ? epicBlock.value : blocks.get(parent)
     if (block && !block.ids.includes(item.id)) block.ids = [item.id, ...block.ids]
     if (lazyNodes.has(parent)) rowStore.child(parent, item.id, true)
     refreshStatsFor(item.id)
+    void refreshParentCounts()
   }
   function detach(item: ListItem, fromParent: string | null) {
     const parent = fromParent ?? ''
     for (const block of [epicBlock.value, looseBlock.value, blocks.get(parent)]) if (block) block.ids = block.ids.filter(id => id !== item.id)
     if (lazyNodes.has(parent)) rowStore.child(parent, item.id, false)
+    void refreshParentCounts()
   }
   function relocate(item: ListItem, fromParent: string | null, fromEpic: string | null) {
     if (fromEpic) ensureStats(fromEpic, true)

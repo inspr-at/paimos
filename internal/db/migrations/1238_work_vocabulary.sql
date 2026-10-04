@@ -34,13 +34,14 @@ BEGIN
  SELECT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.tenant_id=c.tenant_id AND k.id=c.kind_id
   WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=target AND c.deleted_at IS NULL AND k.slug IN ('work','epic','ticket','task')) INTO canonical_parent;
  enabled := aeon_work_status_enabled(project);
- WITH RECURSIVE ancestors(id,parent_id,slug,path) AS (
-  SELECT n.id,n.parent_id,k.slug,ARRAY[n.id] FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ -- UNION fences cycles with linear storage, without growing path arrays.
+ WITH RECURSIVE ancestors(id,parent_id,slug) AS (
+  SELECT n.id,n.parent_id,k.slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
   WHERE n.id=par AND n.deleted_at IS NULL
-  UNION ALL
-  SELECT n.id,n.parent_id,k.slug,a.path||n.id FROM ancestors a JOIN nodes n ON n.id=a.parent_id
+  UNION
+  SELECT n.id,n.parent_id,k.slug FROM ancestors a JOIN nodes n ON n.id=a.parent_id
   JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-  WHERE a.slug<>'project' AND n.deleted_at IS NULL AND NOT n.id=ANY(a.path)
+  WHERE a.slug<>'project' AND n.deleted_at IS NULL
  ), bounded AS MATERIALIZED (SELECT * FROM ancestors LIMIT 50001)
  SELECT CASE WHEN count(*)>50000 THEN -1 ELSE 1+count(*) FILTER(WHERE slug IN ('work','epic','ticket','task'))::int END INTO d FROM bounded;
  IF d<0 THEN RAISE EXCEPTION 'work shape budget exceeded' USING ERRCODE='54000'; END IF;

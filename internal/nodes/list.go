@@ -96,6 +96,7 @@ type sortKey struct {
 type listQuery struct {
 	KindID      *string   `json:"kind_id"`
 	Kinds       []string  `json:"kinds"`
+	KindsNot    []string  `json:"kinds_not,omitempty"`
 	Shapes      []string  `json:"shapes,omitempty"`
 	ShapesNot   []string  `json:"shapes_not,omitempty"`
 	Depths      []string  `json:"depths,omitempty"`
@@ -269,10 +270,10 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	if len(out.Depths)+len(out.DepthsNot) > 32 {
 		return out, badRequest("too many depths")
 	}
-	if out.Kinds, err = queryList(r, "kind"); err != nil {
+	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", nil); err != nil {
 		return out, err
 	}
-	for _, kind := range out.Kinds {
+	for _, kind := range append(append([]string{}, out.Kinds...), out.KindsNot...) {
 		if _, ok := parseUUID(kind); !ok && !slugOrID.MatchString(kind) {
 			return out, badRequest("invalid kind")
 		}
@@ -1062,6 +1063,11 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			value := `aeon_field_date(n.fields->>'` + dateFieldKeys[q.DateField] + `')`
 			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
 		}
+	}
+
+	if len(q.KindsNot) > 0 {
+		p := arg(q.KindsNot)
+		conditions += " AND NOT (k.slug=ANY(" + p + "::text[]) OR (k.slug='work' AND " + p + "::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY(" + p + "::text[]))"
 	}
 	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot) > 0 {
 		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`

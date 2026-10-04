@@ -184,7 +184,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (!within) return Promise.resolve()
     if (epicsFor === within && epicsLoad) return epicsLoad
     epicsFor = within
-    epicsLoad = listNodes({ within, kind: ['epic'], sort: 'key', limit: 500 })
+    epicsLoad = listNodes({ within, kind: ['work', 'epic'], shape: ['parent'], sort: 'key', limit: 500 })
       .then(page => { if (epicsFor === within) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
       .catch(() => { epicsLoad = null })
     return epicsLoad

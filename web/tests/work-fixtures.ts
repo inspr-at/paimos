@@ -18,6 +18,7 @@ const forward = (previous: string, at: number) => new Date(Math.max(at, Date.par
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
+  is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string; work_children_count?: number; status_derived?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
   fields: Record<string, unknown>; parent_id: string | null; project: string
@@ -162,6 +163,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
+    ...(node.is_leaf === undefined ? {} : { is_leaf: node.is_leaf, depth: node.depth, level_name: node.level_name, level_icon: node.level_icon, work_children_count: node.work_children_count, status_derived: node.status_derived }),
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
     kind_slug: node.kind_slug, kind_label: node.kind_slug[0].toUpperCase() + node.kind_slug.slice(1),
@@ -565,6 +567,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       // ids (AEON-326): only those nodes, every other filter still applied.
       const onlyIds = listParam(query, 'ids')
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+        .filter(n => passes(listParam(query, 'shape'), v => v === (n.is_leaf === false ? 'parent' : 'leaf')))
+        .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))

@@ -107,7 +107,7 @@ test('status order and grouping follow the workflow, epics collect their tickets
   const byId = new Map([epic, ticket, task, loose].map(r => [r.id, r]))
   assert.equal(epicOf(task, byId)?.id, 'e')
   const groups = groupRows([epic, ticket, task, loose], 'epic')
-  assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.id)]), [['e', ['t', 'k']], ['No epic', ['l']]])
+  assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.id)]), [['e', ['t', 'k']], ['No parent', ['l']]])
 })
 
 test('descending status order keeps an unknown spelling last, and pages agree', () => {

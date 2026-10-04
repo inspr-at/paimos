@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -41,7 +43,7 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "issue_create", Description: "Create a work item; nesting decides its name. epic, ticket and task are compatibility aliases on migrated workspaces."}, rt.toolIssueCreate)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "issue_update",
-		Description: "Update an issue. A type or kind is refused with kind_change_not_allowed; other updates arrive in R1.",
+		Description: "Update an issue. Same-kind work aliases are no-ops; a different kind is refused with kind_change_not_allowed. Other updates arrive in R1.",
 	}, rt.toolIssueUpdate)
 	addR1Tool(s, "issue_comment", "Comment on an issue.", issueCommentArgs{})
 	addR1Tool(s, "knowledge_list", "List knowledge entries.", knowledgeListArgs{})
@@ -182,11 +184,17 @@ func addR1Tool[In any](s *mcp.Server, name, description string, _ In) {
 
 // A request-local runtime keeps MCP calls from racing on shared output sinks.
 // These tools use the same authorization and compatibility paths as the CLI.
-func (rt *runtime) issueTool(run func(*runtime) error) (*mcp.CallToolResult, any, error) {
+func (rt *runtime) issueTool(ctx context.Context, run func(*runtime) error) (*mcp.CallToolResult, any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	copy := *rt
+	copy.requestContext = ctx
 	var out bytes.Buffer
 	copy.stdout = &out
-	copy.stderr = &out
+	copy.stderr = io.Discard
 	copy.jsonOut = true
 	if err := run(&copy); err != nil {
 		return nil, nil, err
@@ -194,19 +202,19 @@ func (rt *runtime) issueTool(run func(*runtime) error) (*mcp.CallToolResult, any
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.String()}}}, nil, nil
 }
 func (rt *runtime) toolIssueList(ctx context.Context, req *mcp.CallToolRequest, in issueListArgs) (*mcp.CallToolResult, any, error) {
-	return rt.issueTool(func(r *runtime) error {
+	return rt.issueTool(ctx, func(r *runtime) error {
 		return r.listIssues(in.Project, in.Status, in.Type, in.Priority, "", in.Limit, in.Offset)
 	})
 }
 func (rt *runtime) toolIssueGet(ctx context.Context, req *mcp.CallToolRequest, in issueRefArgs) (*mcp.CallToolResult, any, error) {
-	return rt.issueTool(func(r *runtime) error { return r.getIssue(in.Ref) })
+	return rt.issueTool(ctx, func(r *runtime) error { return r.getIssue(in.Ref) })
 }
 func (rt *runtime) toolIssueCreate(ctx context.Context, req *mcp.CallToolRequest, in issueCreateArgs) (*mcp.CallToolResult, any, error) {
 	tags := append([]string(nil), in.Tags...)
 	if in.Bug {
 		tags = append(tags, "bug")
 	}
-	return rt.issueTool(func(r *runtime) error {
+	return rt.issueTool(ctx, func(r *runtime) error {
 		return r.createIssue(issueInput{Project: in.Project, Title: in.Title, Type: in.Type, Status: in.Status, Parent: in.Parent, Description: in.Description, Tags: tags})
 	})
 }

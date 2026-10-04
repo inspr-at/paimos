@@ -51,7 +51,7 @@ export function flattenOutline(source: OutlineSource): OutlineEntry[] {
       const expanded = hasChildren && (source.expanded(id) || creatingHere)
       const block = expanded ? source.children(id) : null
       const loading = expanded && (!block || (block.loading && !block.ids.length))
-      out.push({ type: 'row', key: id, row, tree: { depth, guides, last, hasChildren, expanded, loading, dimmed: source.dimmed(id), stats: row.kind_slug === 'epic' ? source.stats(id) : null, parentId } })
+      out.push({ type: 'row', key: id, row, tree: { depth, guides, last, hasChildren, expanded, loading, dimmed: source.dimmed(id), stats: (row.is_leaf === false || row.kind_slug === 'epic') ? source.stats(id) : null, parentId } })
       if (!expanded) return
       const childGuides = depth === 0 ? [] : [...guides, !last]
       if (creatingHere) out.push({ type: 'create', key: `create-${id}`, depth: depth + 1, guides: childGuides, epic: { id, key: row.key, title: row.title } })

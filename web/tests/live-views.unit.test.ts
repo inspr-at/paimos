@@ -810,7 +810,7 @@ async function runOutline(seed: number): Promise<string[]> {
     const moving = [...data.values()].find(n => n.kind_slug === 'ticket' && outline.node(n.id))!
     const origin = moving.parent_id!, destination = origin === 'a' ? 'b' : 'a'
     gap(); await settle()
-    const heldCount = calls.find(c => !c.done && c.url.searchParams.get('kind') === 'epic' && c.url.searchParams.get('parent_id') === root)
+    const heldCount = calls.find(c => !c.done && c.url.searchParams.get('kind')?.split(',').includes('epic') && c.url.searchParams.get('parent_id') === root)
     if (!heldCount) fail('gap did not refresh loaded roots')
     else {
       process(heldCount)

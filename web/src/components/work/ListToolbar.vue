@@ -210,7 +210,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
-    <button v-if="!graph" type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button v-if="!graph" type="button" class="btn primary new-btn" aria-label="New work item" aria-keyshortcuts="n" data-tip="New work item · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>

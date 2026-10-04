@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta } from '../../lib/work'
+import { workIcon } from '../../lib/workVocabulary'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
@@ -50,7 +51,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
   <dl class="props" :class="layout">
     <div class="prop">
       <dt>Status</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" :data-tip="item.status_derived ? (item.work_children_count ? `Follows its ${item.work_children_count} children` : 'Follows its children') : undefined" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ item.status_derived ? (item.work_children_count ? `Follows its ${item.work_children_count} children` : 'Follows its children') : statusMeta(item.state).label }}<span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div v-if="bound.length" class="prop agents-prop">
       <dt>Agents</dt>
@@ -71,16 +72,16 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     </div>
     <div class="prop">
       <dt>Type</dt>
-      <dd><span class="prop-static"><AppIcon :name="item.kind_slug === 'epic' ? 'epic' : item.kind_slug === 'task' ? 'task' : 'ticket'" :size="13" :class="['kind', item.kind_slug]" />{{ kindLabel(item.kind_slug) }}</span></dd>
+      <dd><span class="prop-static"><AppIcon :name="workIcon(item)" :size="13" :class="['kind', item.kind_slug]" />{{ item.level_name || kindLabel(item.kind_slug) }}</span></dd>
     </div>
     <div v-if="item.kind_slug !== 'epic'" class="prop">
-      <dt>{{ epicParent && epicParent.kind_slug !== 'epic' ? 'Parent' : 'Epic' }}</dt>
+      <dt>Parent</dt>
       <dd class="epic-cell">
         <button v-if="epicParent" type="button" class="prop-btn epic-chip" :data-tip="`Open ${epicParent.key}\n${epicParent.title}`" :aria-label="`${epicParent.key} ${epicParent.title}. Open it`" @click="emit('openParent', epicParent.key)">
           <AppIcon :name="epicParent.kind_slug === 'epic' ? 'epic' : 'ticket'" :size="12" :class="['kind', epicParent.kind_slug]" /><span v-if="layout === 'column'" class="mono">{{ epicParent.key }}</span><span class="epic-title">{{ epicParent.title }}</span>
         </button>
-        <button v-else-if="editable" type="button" class="prop-btn ghost" aria-label="No epic. Choose an epic" @click="emit('epic', target($event))"><AppIcon name="epic" :size="12" class="faint" /><span class="unset">No epic</span></button>
-        <span v-else class="prop-static faint">No epic</span>
+        <button v-else-if="editable" type="button" class="prop-btn ghost" aria-label="No parent. Choose a parent" @click="emit('epic', target($event))"><AppIcon name="epic" :size="12" class="faint" /><span class="unset">No parent</span></button>
+        <span v-else class="prop-static faint">No parent</span>
       </dd>
     </div>
     <TicketEstimate :item="item" :editable="editable" :save="saveEstimate" />
