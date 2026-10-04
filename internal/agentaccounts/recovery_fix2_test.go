@@ -149,7 +149,7 @@ func TestBConcurrentQueuedClaimsPromoteOneRecovery(t *testing.T) {
 	now := base.Add(time.Hour)
 	bAt(t, &f, now, "g2")
 	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
-		return sql == `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`
+		return sql == `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`
 	})
 	mod := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
