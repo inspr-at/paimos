@@ -11,7 +11,8 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
-func TestMigratedWorkSessionsAndCostsRespectVisibility(t *testing.T) {
+func oldWorkDatabase(t *testing.T) *dbtest.DB {
+	t.Helper()
 	d, err := dbtest.NewUnmigrated(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +32,11 @@ func TestMigratedWorkSessionsAndCostsRespectVisibility(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("old schema: %v", err)
 	}
+	return d
+}
+
+func TestMigratedWorkSessionsAndCostsRespectVisibility(t *testing.T) {
+	d := oldWorkDatabase(t)
 	f := newWorkFixtureWithDB(t, d)
 	parent, leaf, hiddenProject, hiddenLeaf := uid(), uid(), uid(), uid()
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")

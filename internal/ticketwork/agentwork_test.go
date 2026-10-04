@@ -531,7 +531,7 @@ type workFixture struct {
 
 func newWorkFixture(t *testing.T) *workFixture {
 	t.Helper()
-	return newWorkFixtureWithDB(t, dbtest.Open(t))
+	return newWorkFixtureWithDB(t, oldWorkDatabase(t))
 }
 
 func newWorkFixtureWithDB(t *testing.T, d *dbtest.DB) *workFixture {

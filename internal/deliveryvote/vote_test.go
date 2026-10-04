@@ -330,7 +330,7 @@ type fix struct {
 
 func newFix(t *testing.T) *fix {
 	t.Helper()
-	return newFixWithDB(t, dbtest.Open(t))
+	return newFixWithDB(t, oldVoteDatabase(t))
 }
 
 func newFixWithDB(t *testing.T, d *dbtest.DB) *fix {

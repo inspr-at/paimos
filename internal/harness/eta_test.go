@@ -415,8 +415,8 @@ func TestLiveEtaWaitsOutAProjectMove(t *testing.T) {
 	target := uid()
 	f.addNode(t, target, "DST-1", "project", "", "Destination project")
 
-	// Hold the key counter after the move has acquired the tree and node locks.
-	// The heartbeat waits on the same tree fence before reading its target,
+	// Hold the key counter after the move has acquired tenant, tree and node locks.
+	// The heartbeat waits on the tenant fence before taking pairing/tree locks,
 	// so the resumed live ETA write has to see the committed project move.
 	blocker, err := f.db.Admin.Begin(context.Background())
 	if err != nil {
@@ -456,8 +456,23 @@ func TestLiveEtaWaitsOutAProjectMove(t *testing.T) {
 	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	if lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, mover, etaDone); lock != "advisory" {
-		t.Fatalf("live ETA did not wait on the move's tree fence: %q", lock)
+	if lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, mover, etaDone); lock != "transactionid" {
+		t.Fatalf("live ETA did not wait on the move's tenant fence: %q", lock)
+	}
+	var waiter int
+	var query string
+	if err := f.db.Admin.QueryRow(ctx, `SELECT pid,query FROM pg_stat_activity WHERE wait_event_type='Lock' AND $1::int=ANY(pg_blocking_pids(pid))`, mover).Scan(&waiter, &query); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "FROM tenants") || !strings.Contains(query, "FOR NO KEY UPDATE") {
+		t.Fatalf("heartbeat waited on a different resource: %s", query)
+	}
+	var earlyAdvisory bool
+	if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND granted)`, waiter).Scan(&earlyAdvisory); err != nil {
+		t.Fatal(err)
+	}
+	if earlyAdvisory {
+		t.Fatal("heartbeat acquired an advisory lock before the tenant fence")
 	}
 	if err = blocker.Commit(context.Background()); err != nil {
 		t.Fatal(err)

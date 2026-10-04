@@ -2278,6 +2278,11 @@
           "weightSeconds": 17.756098,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 8
+        },
+        {
+          "file": "tests/work-integration.spec.ts",
+          "weightSeconds": 70,
+          "weightSource": "estimate"
         }
       ]
     },
@@ -2466,28 +2471,6 @@
         {
           "file": "tests/work-vocabulary.spec.ts",
           "weightSeconds": 60
-        }
-      ]
-    },
-    {
-      "id": "work-integration",
-      "config": "playwright.ui.config.ts",
-      "project": null,
-      "flags": [
-        "--workers=1",
-        "--trace=retain-on-failure"
-      ],
-      "env": {},
-      "hostedOnly": true,
-      "gate": false,
-      "sourceSteps": [
-        "AEON-648 canonical work integration regressions; default new browser tier NIGHTLY"
-      ],
-      "specs": [
-        {
-          "file": "tests/work-integration.spec.ts",
-          "weightSeconds": 70,
-          "weightSource": "estimate"
         }
       ]
     }

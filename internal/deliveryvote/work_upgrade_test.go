@@ -11,7 +11,8 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
-func TestMigratedWorkRetainsDeliveryRatingsAndVisibility(t *testing.T) {
+func oldVoteDatabase(t *testing.T) *dbtest.DB {
+	t.Helper()
 	d, err := dbtest.NewUnmigrated(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +32,11 @@ func TestMigratedWorkRetainsDeliveryRatingsAndVisibility(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("old schema: %v", err)
 	}
+	return d
+}
+
+func TestMigratedWorkRetainsDeliveryRatingsAndVisibility(t *testing.T) {
+	d := oldVoteDatabase(t)
 	f := newFixWithDB(t, d)
 	project, parent, leaf, hiddenProject, hiddenLeaf := id(), id(), id(), id(), id()
 	f.node(t, project, "project", "VT1-1", "Visible", "")
