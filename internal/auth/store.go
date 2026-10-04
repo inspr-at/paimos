@@ -422,7 +422,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 	}
 	var p tenant.Principal
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		var principalID, gotTenant string
+		var principalID, gotTenant, keyID string
 		var creatorID *string
 		var scopes pgtype.FlatArray[string]
 		err := tx.QueryRow(ctx, `
@@ -438,8 +438,8 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			    WHERE p.id = k.principal_id AND p.kind = 'agent' AND p.status='active'
 			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
 			  )
-			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text
-		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID)
+			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text, k.id::text
+		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID)
 		if err != nil {
 			return err
 		}
@@ -451,6 +451,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
 		p.Scopes = []string(scopes)
+		p.KeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}
