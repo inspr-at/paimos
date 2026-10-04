@@ -263,17 +263,31 @@ failure. The layout fix passed six variants × 20 locally; hosted execution of
 the integrated revision must still be verified by the coordinator. Inspect drift
 without browsers using `npm --prefix web run ci:web:shard -- --check --strict`.
 
-**AEON-676 hosted acceptance is open:** the 2026-10-04 final-round read-only
+**AEON-676 hosted acceptance is open:** the earlier 2026-10-04 read-only
 GitHub check found no commit `42537130c7488f43f6899f1377cd6bbbc964bd33`
 (HTTP 422), no `work/aeon-676` ref (HTTP 404), no PR and zero Actions runs
-for that SHA. The worker is forbidden to push; local checks do not close this
-gate. The coordinator must publish the integrated branch and run `CI` on that
-branch (PR or branch dispatch, keeping mbp2606 off limits). Retain the run URL,
-checked-out SHA, logs/reports showing `clip-tip`, `aeon-632b-clip`, `key-trim`
-and `model-prefs` actually executed without skips, and successful `web-setup`,
-all 12 `web-shard` jobs and the required `web` aggregate. A later revision must
-retain these fixes and identify its exact SHA; selection-only output or a run
-on an unrelated revision does not establish hosted acceptance.
+for that SHA. The FIX6 check now confirms that the coordinator published
+`2e8c089c3e863fd8d2e2a05cae0ddef41dbdce66` on
+[PR #257](https://github.com/inspr-at/paimos/pull/257). Its
+[CI run 37176759250](https://github.com/inspr-at/paimos/actions/runs/37176759250)
+(attempt 1, `pull_request`, that exact head SHA) has cancelled `web-setup`
+and `web-shard` jobs and a queued `web` aggregate at observation time. The
+setup annotation says a higher-priority request for `ci-pull_request-257`
+superseded it; no successful setup or 12-shard execution establishes acceptance.
+The worker's read-only snapshot is `tmp/aeon-676/fix6/hosted-evidence.json`.
+Post-merge local checks pass: hosted wiring 2/2, shard integration 19/19 and
+signal/failure guard 49/49, all without skips; strict coverage remains 53 gated
+and 164 ungated specs across 12 shards. No behavior or assertion was changed.
+
+The worker is forbidden to push; local checks do not close this gate. The
+coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
+keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
+showing `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs` actually
+executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
+and the required `web` aggregate. A later revision must retain these fixes
+and identify its exact SHA; selection-only output or a run on an unrelated
+revision does not establish hosted acceptance. FIX6 completes only the worker's
+verification and handoff; review-cg27's hosted finding remains open.
 
 A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
 reruns exactly one test in its original config group.
