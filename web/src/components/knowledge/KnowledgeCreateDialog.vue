@@ -37,7 +37,7 @@ const dirty = computed(() => !!title.value.trim())
 
 async function open(initial?: KnowledgeType) {
   opener = document.activeElement as HTMLElement
-  type.value = initial ?? 'runbook'
+  type.value = initial && initial !== 'decision' ? initial : 'runbook'
   title.value = ''; slug.value = ''; slugEdited.value = false; touched.value = false; error.value = ''; conflict.value = null; busy.value = false
   dialog.value?.showModal()
   await nextTick(); titleInput.value?.focus()
@@ -92,7 +92,7 @@ defineExpose({ open })
       <fieldset class="kinds-set">
         <legend class="f-label">Kind</legend>
         <div class="kinds">
-          <label v-for="meta in TYPES" :key="meta.type" class="kind" :class="{ on: type === meta.type }">
+          <label v-for="meta in TYPES.filter(meta => meta.type !== 'decision')" :key="meta.type" class="kind" :class="{ on: type === meta.type }">
             <input v-model="type" class="sr-only" type="radio" name="k-new-kind" :value="meta.type" />
             <span class="kind-icon"><AppIcon :name="meta.icon" :size="15" /></span>
             <strong class="kind-label">{{ meta.label }}</strong>

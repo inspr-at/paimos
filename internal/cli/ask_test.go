@@ -124,6 +124,26 @@ func TestAskOptionAndContextBounds(t *testing.T) {
 	}
 }
 
+func TestQuestionStatusExplainsFailedEffectsAndPendingDoctrine(t *testing.T) {
+	out := &bytes.Buffer{}
+	rt := &runtime{stdout: out}
+	q := questions.Question{ID: "question", Answer: &questions.Answer{Outcome: "doctrine"}, Pending: []questions.Pending{{Kind: "outcome", State: "delivered", EffectRef: "draft-reference", DoctrineState: "pending"}}}
+	if err := rt.printQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "draft saved; waiting for a person") || strings.Contains(out.String(), "outcome: delivered") {
+		t.Fatalf("misleading doctrine result: %s", out)
+	}
+	out.Reset()
+	q.Pending = []questions.Pending{{Kind: "outcome", State: "failed", ErrorCode: "ticket_revision_conflict", ErrorMessage: "Review the changed ticket before deciding again."}}
+	if err := rt.printQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "failed: ticket_revision_conflict") || !strings.Contains(out.String(), "Review the changed ticket") {
+		t.Fatalf("missing failure explanation: %s", out)
+	}
+}
+
 func TestAskDisplaysReuseProvenance(t *testing.T) {
 	var out bytes.Buffer
 	rt := &runtime{stdout: &out}

@@ -67,6 +67,7 @@ type runtime struct {
 	version            bool
 	kinds              *kindTable
 	messagingDeliverer localDeliverer
+	personClient       *client.Client
 }
 
 func (rt *runtime) execute(args []string) error {
@@ -121,8 +122,12 @@ func (rt *runtime) printJSON(v any) error {
 	return enc.Encode(v)
 }
 
-func (rt *runtime) fail(err error, secret string) error {
-	exit := &exitError{code: 1, msg: redact(err.Error(), secret)}
+func (rt *runtime) fail(err error, secrets ...string) error {
+	message := err.Error()
+	for _, secret := range secrets {
+		message = redact(message, secret)
+	}
+	exit := &exitError{code: 1, msg: message}
 	var status *client.StatusError
 	if errors.As(err, &status) {
 		exit.apiStatus = status.Status

@@ -58,6 +58,12 @@
       "reason": "Existing AEON-580 migration bytes are unchanged. The classifier flags the validated CHECK and separately added foreign key on agent_keys, plus CREATE OR REPLACE of aeon_guard_approval. Existing keys retain false/NULL/0 defaults. The approval guard preserves valid person decisions and agent self-proposals, fails closed on missing or expired authority, and permits another agent to decide only with the exact transaction-bound marked key and connected pairing. Self-approval remains refused; server permission, signer and step-up fences remain required. This exact-byte exception requires coordinator review before merge/release; workers only measure draft CI. It does not make the SQL expand-safe, grant rollout acceptance or skip previous-binary migration compatibility."
     },
     {
+      "file": "1117_desk_delivery.sql",
+      "sha256": "4eac5b9c842ae660571c645c99018e682dd7089b998b82def80415412838faac",
+      "ticket": "AEON-564",
+      "reason": "Relax immediate sent_event_id NOT NULL checks on inbox_messages and inbox_compat_messages only within a transaction so message rows can be reserved before the tenant event counter. Deferred constraint triggers still reject any surviving row without a sent event at commit. Previous-binary writers continue supplying non-null event IDs at INSERT, so their writes remain valid and readers never see committed null event references during the rollout window. No columns, rows, foreign keys or RLS policies are removed. DROP NOT NULL, the dynamic trigger function and CREATE CONSTRAINT TRIGGER are outside the conservative expand-safe allowlist; retaining immediate NOT NULL would break the existing reservation path. This exact-byte exception requires coordinator review before merge/release and does not skip previous-binary compatibility probes in CI."
+    },
+    {
       "file": "1122_recurrence_event_visibility.sql",
       "sha256": "bcb1f9237f97973511b4f0c70da9fb48f1814b8e75c8de29ad9f816f5414a3a9",
       "ticket": "AEON-573",

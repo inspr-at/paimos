@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -56,9 +57,10 @@ type Handover struct {
 }
 
 type Continuation struct {
-	SucceedsID string   `json:"succeeds_session_id"`
-	Handover   Handover `json:"handover"`
-	Brief      string   `json:"brief"`
+	DeskAnswers []deskdelivery.Answer `json:"desk_answers,omitempty"`
+	SucceedsID  string                `json:"succeeds_session_id"`
+	Handover    Handover              `json:"handover"`
+	Brief       string                `json:"brief"`
 }
 
 type pauseRequest struct {
@@ -461,7 +463,7 @@ type resumeResult struct {
 }
 
 func resumeRecipe(s Session) resumeResult {
-	c := Continuation{SucceedsID: s.ID, Handover: *s.Pause.Handover, Brief: handoverBrief(*s.Pause.Handover)}
+	c := Continuation{SucceedsID: s.ID, Handover: *s.Pause.Handover, Brief: handoverBrief(*s.Pause.Handover) + deskdelivery.Brief(s.DeskAnswers), DeskAnswers: s.DeskAnswers}
 	out := resumeResult{Session: s, Continuation: c, Registration: map[string]any{
 		"succeeds_session_id": s.ID, "agent_principal_id": s.AgentPrincipalID, "harness": s.Harness, "host": s.Host, "management_mode": s.Management, "role": s.Role, "parent_harness_session_id": s.ParentID, "ticket_node_id": s.TicketNodeID, "work_shape": s.WorkShape, "advertised_capabilities": s.Capabilities,
 		"display_label": s.DisplayLabel, "model": s.Model, "reasoning_effort": s.ReasoningEffort, "account_label": s.AccountLabel, "harness_version": s.HarnessVersion, "worktree": s.Worktree, "branch": s.Branch, "brief": "Continuation of " + s.ID,
@@ -816,14 +818,14 @@ func inheritPauseRegistration(ctx context.Context, tx pgx.Tx, projectID string, 
 }
 
 func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next Session) (Session, error) {
-	c := Continuation{SucceedsID: old.ID, Handover: *old.Pause.Handover, Brief: handoverBrief(*old.Pause.Handover)}
+	c := Continuation{SucceedsID: old.ID, Handover: *old.Pause.Handover, Brief: handoverBrief(*old.Pause.Handover) + deskdelivery.Brief(old.DeskAnswers), DeskAnswers: old.DeskAnswers}
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return next, err
 	}
 	// Registration already resolved the retained owner before validating native
 	// context ownership. Completing resume must not change that identity later.
-	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw)))
+	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,desk_answers=coalesce($2::jsonb->'desk_answers','[]'::jsonb),revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw)))
 	if err != nil {
 		return next, err
 	}

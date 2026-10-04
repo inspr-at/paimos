@@ -2440,6 +2440,28 @@
           "listedTests": 9
         }
       ]
+    },
+    {
+      "id": "decision-knowledge",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-564 Decision Knowledge history and presentation regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/knowledge.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        }
+      ]
     }
   ],
   "sourceRevision": "068611ab87b80319ed1f0843bbad79ca897b7dcb",

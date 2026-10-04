@@ -67,11 +67,12 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("api %d", e.Status)
 }
 
-// Client calls one Aeon instance with an agent API key.
+// Client calls one Aeon instance with an agent key or an explicit person session.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	BaseURL      string
+	Token        string
+	SessionToken string
+	HTTP         *http.Client
 	// ConfirmStepUp receives only a challenge ID. Nil fails closed on 428.
 	ConfirmStepUp func(context.Context, string) (string, error)
 }
@@ -83,6 +84,15 @@ func New(baseURL, token string) *Client {
 		Token:   token,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewSession authenticates as a signed-in person, never as a bearer agent.
+func NewSession(baseURL, sessionToken string) *Client {
+	c := New(baseURL, "")
+	c.SessionToken = sessionToken
+	// A person cookie must never follow a redirect to another destination.
+	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }
 
 // Me calls GET /api/me.
@@ -128,7 +138,9 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
+	if c.SessionToken != "" {
+		req.AddCookie(&http.Cookie{Name: "aeon_session", Value: c.SessionToken})
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	for name, value := range headers {

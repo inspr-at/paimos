@@ -103,6 +103,9 @@ func (t kindTable) slug(id string) string {
 }
 
 func (rt *runtime) api() (*client.Client, error) {
+	if rt.personClient != nil {
+		return rt.personClient, nil
+	}
 	inst, err := rt.resolve()
 	if err != nil {
 		return nil, err
@@ -133,7 +136,7 @@ func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, 
 		return err
 	}
 	if err := c.DoWithHeaders(ctx, method, path, body, dest, headers); err != nil {
-		return rt.fail(err, c.Token)
+		return rt.fail(err, c.SessionToken, c.Token)
 	}
 	return nil
 }

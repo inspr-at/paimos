@@ -23,6 +23,7 @@ export const graphRadius = (node: GraphNode) => 8 * Math.sqrt(node.degree + 1)
 export const graphTypeTokens: Record<GraphNode['type'], string> = {
   runbook: '--kind-runbook', guideline: '--kind-guideline', memory: '--kind-memory',
   'external-system': '--kind-external-system', 'related-project': '--kind-related-project', ticket: '--kind-ticket',
+  decision: '--kind-decision',
 }
 export interface GraphPalette { background: string; ink: string; muted: string; dark: boolean; colors: Record<string, string>; font: string; label: string; line: string }
 export function graphPalette(): GraphPalette {

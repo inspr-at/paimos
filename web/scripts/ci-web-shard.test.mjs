@@ -334,6 +334,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const real = loadManifest()
   assert.equal(real.groups.find(g => g.id === 'remaining-ui').gate, false)
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
+  assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
 })

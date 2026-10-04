@@ -37,7 +37,7 @@ import (
 // The coordinator mounts this module and runs NewRoutineDispatcher per tenant
 // for server-owned grok_bot_routine webhook delivery; neither constructor
 // starts a background worker implicitly.
-func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
+func NewMessaging(pool *pgxpool.Pool, key []byte, options ...func(*messaging)) (httpapi.Module, error) {
 	if len(key) != 32 {
 		return nil, errors.New("messaging requires a 32-byte encryption key")
 	}
@@ -49,7 +49,11 @@ func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
 	if err != nil {
 		return nil, errors.New("messaging encryption unavailable")
 	}
-	return &messaging{base: newModule(pool), aead: aead}, nil
+	m := &messaging{base: newModule(pool), aead: aead}
+	for _, option := range options {
+		option(m)
+	}
+	return m, nil
 }
 
 // MessagingPlugin supplies a sealed registration for plugins.Builtin's extra
@@ -63,8 +67,9 @@ func MessagingPlugin() (plugins.Plugin, error) {
 }
 
 type messaging struct {
-	base *module
-	aead cipher.AEAD
+	heldReply HeldReplyBridge
+	base      *module
+	aead      cipher.AEAD
 	// databaseClock replaces clock_timestamp() for lease decisions. Production
 	// leaves it nil. Tests set it to simulate an API host ahead of or behind
 	// the database.

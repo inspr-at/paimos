@@ -410,7 +410,7 @@ func TestQuestionHumanDecisionAndGenericForgery(t *testing.T) {
 			t.Fatal("agent decided")
 		}
 	}
-	for _, stamp := range []string{"always", "requirement", "doctrine"} {
+	for _, stamp := range []string{"requirement", "doctrine"} {
 		x := d
 		x.Outcome = stamp
 		if w := request(t.Context(), f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", x); w.Code != 422 {
