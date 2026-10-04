@@ -159,6 +159,71 @@ func TestExistingTicketMoveConfirmationAndProjectBoundary(t *testing.T) {
 	}
 }
 
+func TestTicketOptionsHistoricalParentCanJoinNextRelease(t *testing.T) {
+	f := ticketSetup(t)
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.release)
+		return err
+	})
+	path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+	frozen := f.request(f.person, http.MethodGet, path, "")
+	if frozen.Code != 200 || !strings.Contains(frozen.Body.String(), f.feature) || !strings.Contains(frozen.Body.String(), `"frozen":true`) {
+		t.Fatalf("missing historical snapshot: %d %s", frozen.Code, frozen.Body.String())
+	}
+	var historical string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT to_jsonb(j)::text FROM journey_tickets j WHERE ticket_node_id=$1`, f.feature).Scan(&historical)
+	})
+	leaf := f.existing("work", f.feature, "New backlog leaf", "open")
+	if row := f.readMembership(leaf)[0]; row.ReleaseID != nil {
+		t.Fatalf("new leaf must begin in backlog: %+v", row)
+	}
+	var next string
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Next release' FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, f.person.TenantID, f.project).Scan(&next); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,2)`, f.person.TenantID, next, f.project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET current_release_node_id=$2 WHERE project_node_id=$1`, f.project, next)
+		return err
+	})
+	options := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+next+"/ticket-options", "")
+	var found optionsResult
+	if options.Code != 200 || json.Unmarshal(options.Body.Bytes(), &found) != nil {
+		t.Fatalf("options %d %s", options.Code, options.Body.String())
+	}
+	var parent *ticketOption
+	for i := range found.Tickets {
+		if found.Tickets[i].NodeID == f.feature {
+			parent = &found.Tickets[i]
+		}
+	}
+	if parent == nil || !parent.IsParent || parent.Availability != "addable" || parent.ReleaseID != nil || parent.ReleaseTitle != nil {
+		t.Fatalf("historical parent must be selectable from its current backlog leaves: %+v", parent)
+	}
+	raw, _ := json.Marshal(membershipInput{Revision: found.Revision, IDs: []string{f.feature}})
+	result := membershipOK(t, f.request(f.person, http.MethodPost, "/api/projects/"+f.project+"/releases/"+next+"/membership", string(raw)))
+	if len(result.LeafIDs) != 1 || result.LeafIDs[0] != leaf || len(result.Walker.Tickets) != 1 || !result.Walker.Tickets[0].Included {
+		t.Fatalf("parent did not place exactly its current leaf: %+v", result)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var after string
+		if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(j)::text FROM journey_tickets j WHERE ticket_node_id=$1`, f.feature).Scan(&after); err != nil {
+			return err
+		}
+		if after != historical {
+			t.Fatal("placing the current leaves changed historical membership")
+		}
+		return nil
+	})
+	if after := f.request(f.person, http.MethodGet, path, ""); after.Code != 200 || after.Body.String() != frozen.Body.String() {
+		t.Fatal("placing the current leaves changed the frozen snapshot")
+	}
+}
+
 func TestPlanRemovalEmitsUndoableMembershipAndFreshScope(t *testing.T) {
 	f := ticketSetup(t)
 	id := f.existing("ticket", f.project, "Backlog ticket", "open")
