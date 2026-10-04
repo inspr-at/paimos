@@ -36,6 +36,10 @@ func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
 			return err
 		}
+		// This fixture represents a published legacy portal, not a new pilot.
+		if _, err := tx.Exec(t.Context(), `UPDATE portal_products SET published=true, participation_policy='legacy' WHERE tenant_id=$1::uuid`, p.TenantID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO portal_pace(tenant_id, project_node_id) VALUES ($1::uuid, $2::uuid)`, p.TenantID, project.ID)
 		return err
 	})

@@ -13,15 +13,25 @@ test('AEON-676 regressions reach the required hosted web gate through the commit
     assert.ok(match, `Missing CI job ${id}`)
     return match[1]
   }
+  // Other dependencies may grow; these gates must remain required.
+  const requireDependencies = (id, required) => {
+    const needs = /^    needs: (?:\[([^\]\n]*)\]|([a-z][a-z-]*))$/m.exec(job(id))
+    assert.ok(needs, `${id} must declare its dependencies`)
+    const dependencies = (needs[1] ?? needs[2]).split(',').map(name => name.trim())
+    for (const name of required) {
+      assert.ok(dependencies.includes(name), `${id} must require ${name}`)
+    }
+  }
   assert.match(job('web'), /if: always\(\)/)
-  assert.match(job('web'), /needs: \[web-setup, web-shard\]/)
-  assert.match(job('web'), /test "\$\{WEB_SETUP\}" = success/)
-  assert.match(job('web'), /test "\$\{WEB_SHARD\}" = success/)
+  requireDependencies('web', ['web-setup', 'web-shard'])
+  assert.match(job('web'), /test "\$WEB_SETUP" = success/)
+  assert.match(job('web'), /test "\$WEB_SHARD" = success/)
   assert.match(job('web-setup'), /npm run test:unit/)
   const shard = job('web-shard')
-  assert.match(shard, /needs: web-setup/)
+  requireDependencies('web-shard', ['web-setup'])
   assert.match(shard, /runs-on: ubuntu-latest/)
-  assert.match(shard, /npm --prefix web run ci:web:shard -- \$\{\{ matrix.shard \}\}\/12/)
+  assert.match(shard, /^          total=12$/m)
+  assert.match(shard, /npm --prefix web run ci:web:shard -- "\$\{\{ matrix.shard \}\}\/\$total"/)
   assert.match(shard, /exit "\$code"/)
   assert.doesNotMatch(shard, /continue-on-error:\s*true/)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).scripts

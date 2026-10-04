@@ -15,6 +15,7 @@ import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import { DOCK_MEDIA, isKnowledgeType, parseEntryParam } from './lib/knowledge'
 import { projectSection } from './components/work/projectNavigation'
+import { PEEK_QUERY } from './lib/ticketPeek'
 
 // Child records of the project page carry only the address; ProjectView renders
 // what they name, so they need a component that draws nothing.
@@ -102,6 +103,9 @@ export const router = createRouter({
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/from-classic/:rest(.*)*', component: () => import('./views/FromClassicView.vue'), meta: { title: 'Finding your page' } },
     { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },
+    { path: '/portal/:tenantSlug/products/:productSlug/releases', component: () => import('./public/PublicReleasesView.vue'), props: true, meta: { title: 'Releases', bare: true, public: true } },
+    { path: '/portal/:tenantSlug/products/:productSlug/roadmap', component: () => import('./public/PublicRoadmapView.vue'), props: true, meta: { title: "What's coming", bare: true, public: true } },
+    { path: '/portal/:tenantSlug/products/:productSlug', component: () => import('./public/PublicPortalView.vue'), props: true, meta: { title: 'Product portal', bare: true, public: true } },
     { path: '/portal/:tenantSlug/releases', component: () => import('./public/PublicReleasesView.vue'), props: true, meta: { title: 'Releases', bare: true, public: true } },
     { path: '/portal/:tenantSlug/roadmap', component: () => import('./public/PublicRoadmapView.vue'), props: true, meta: { title: "What's coming", bare: true, public: true } },
     { path: '/portal/:tenantSlug', component: () => import('./public/PublicPortalView.vue'), props: true, meta: { title: 'Product portal', bare: true, public: true } },
@@ -142,6 +146,7 @@ router.beforeEach(async (to, from) => {
   // including across reload, expand/collapse and links inside the side panel.
   if (to.params.projectKey) {
     const query = { ...to.query }
+    if (to.params.ticketKey) delete query[PEEK_QUERY]
     let section = projectSection(to)
     let path = to.path
     if (!to.meta.projectSection) {

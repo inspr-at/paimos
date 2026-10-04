@@ -45,7 +45,8 @@
     "views": "saved views",
     "events": "history",
     "search": "search",
-    "ownership": "ownership"
+    "ownership": "ownership",
+    "chat": "agent conversations"
   },
   "actions": {
     "ask": "ask",
@@ -58,7 +59,9 @@
     "decide": "Decide on",
     "log": "Log",
     "run": "Run",
-    "create": "Create"
+    "create": "Create",
+    "bind": "bind",
+    "receive": "receive"
   },
   "special": {
     "agents.plan.read": "See their agent start plan",
