@@ -368,6 +368,23 @@ why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
 commands are read-only; role-only `model resolve build` retains its existing
 advisory response.
 
+In the web app, open **Model preferences** from the Agents gear or a project's
+agents popover. The **Why this model?** planning cell opens its kind of work.
+Choose Automatic, follow new versions or pin a version at Default, You or
+Project. Kinds can be added or removed at Default and Project; system kinds stay.
+Row locks have a Set by menu and an Option/Alt-click shortcut. A looser provider
+choice below a lock is allowed with a warning. Retired versions are hidden;
+review qualification and provider evidence explain disabled picker choices.
+Save progress, failures and refreshed conflicts appear beside the pinned footer
+actions, in a reserved two-line slot that wraps and scrolls for longer messages.
+Opening reset confirmation clears stale feedback and announces the reset scope.
+Keyboard resets return focus to the row’s model chip; removing a kind returns
+focus to Everything else. Adding a kind retains focus during save and returns
+focus to Add a kind of work afterward.
+
+Model-cell hovers retain the planned and measured details and show the
+**Why this model?** action. These buttons do not add sequential tab stops to the list.
+
 The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
 `/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
 Use a level's returned `revision` for edits and the DELETE `revision` query
@@ -1157,7 +1174,7 @@ Successful authorization records a tenant-isolated timestamp per authenticating 
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
-`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
+`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes `whoami`, `ask`, `ask_status`, issue list/get/create/update/comment, knowledge list/get/create/update, and search over stdio. Work tools reuse the CLI application operations and scoped HTTP APIs; updates preserve revision checks and kind changes remain person-only. JSON field writes preserve exact numeric tokens. Node walks fail explicitly if a cursor repeats or remains after fifty pages. Project-scoped issue search resolves ancestor membership and continues search pages up to the requested limit within the server’s ranked window of 200 matches. An ancestor returning not-found excludes that path from the visible descendant set; other lookup errors and traversal limits still fail the search. Onboarding `--check` compares the complete rendered bundle, options and managed header, normalizing only its generation timestamp.
 
 Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
 
@@ -2076,6 +2093,17 @@ menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
+
+Clipped names using the shared clip-tip reveal their full text on mouse hover
+or keyboard focus. On touch, tapping performs the row or link's action; holding
+for 500 ms reveals the text without selecting or navigating. Moving more than
+8 px, scrolling or cancelling the pointer before that threshold cancels the
+hold. A clipped-name hold takes precedence over phone row selection; a hold
+elsewhere on the row can still start selection. The next tap keeps its normal action.
+The revealed text remains until an outside tap or Escape. Phone list and
+picker names use two lines; picker rows retain their fixed height.
+Project links also bind each pointer gesture to its starting record and name;
+a record change before release cancels navigation.
 
 Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
 4096 pixels per side, with a square crop up to 2048 pixels. Attachment images

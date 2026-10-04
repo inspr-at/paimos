@@ -35,3 +35,8 @@ func For(harness, platform, arch string) Capability {
 		return Capability{false, "unavailable", "This harness has no qualified verification adapter."}
 	}
 }
+
+// Harnesses is the supported enrollment set shared by device validation and approval.
+func Harnesses() []string {
+	return []string{"claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"}
+}

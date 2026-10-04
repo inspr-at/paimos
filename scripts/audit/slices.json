@@ -186,6 +186,7 @@
         "internal/version/**",
         "internal/perf/**",
         "scripts/**",
+        "web/scripts/**",
         ".github/**",
         "api/**",
         "deploy/**",

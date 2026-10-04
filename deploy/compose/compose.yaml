@@ -19,7 +19,15 @@ services:
       - ./initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # TCP stays closed until the first-run init scripts have completed.
-      test: [CMD, pg_isready, -h, "127.0.0.1", -U, postgres, -d, aeon]
+      # Connection acceptance alone does not prove the database/extension exists.
+      # The local socket uses the image's local auth; no password is printed.
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -h 127.0.0.1 -U postgres -d aeon -t 2 >/dev/null &&
+          vector="$$(psql -X -U postgres -d aeon -At -v ON_ERROR_STOP=1
+          -c "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")" &&
+          [ "$$vector" = t ]
       interval: 2s
       timeout: 3s
       retries: 45
@@ -59,7 +67,7 @@ services:
         bind:
           create_host_path: false
     healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/api/health"]
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/api/ready"]
       interval: 5s
       timeout: 3s
       start_period: 90s
