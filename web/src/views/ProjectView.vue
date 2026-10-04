@@ -1982,7 +1982,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-page[class*="header-"] .head-flex { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
 .project-page[class*="header-"] .head-main { display: contents; }
 .project-page[class*="header-"] .title-line { max-width: 34vw; }
-.project-page[class*="header-"] .title-line h1 { font-size: 22px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.project-page[class*="header-"] .title-line h1 { font-size: 22px; white-space: normal; }
 .project-page[class*="header-"] .description { margin: 0; max-width: none; min-width: 0; }
 .project-page[class*="header-"] .description-block { min-width: 0; }
 .project-page[class*="header-"] .activity { white-space: nowrap; }
