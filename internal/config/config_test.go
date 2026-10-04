@@ -9,6 +9,44 @@ import (
 	"testing"
 )
 
+func TestReviewWebhookSecretFile(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "webhook-fixture")
+	for _, tc := range []struct {
+		name, raw string
+		mode      os.FileMode
+		valid     bool
+	}{
+		{"valid", strings.Repeat("x", 32) + "\n", 0600, true},
+		{"short", "fixture", 0600, false},
+		{"oversized", strings.Repeat("x", 4097), 0600, false},
+		{"readable", strings.Repeat("x", 32), 0644, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(file, []byte(tc.raw), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(file, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			_, err := reviewWebhookSecret(file)
+			if (err == nil) != tc.valid {
+				t.Fatal("unexpected host key validation result")
+			}
+		})
+	}
+	link := filepath.Join(dir, "symlink")
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewWebhookSecret(link); err == nil {
+		t.Fatal("symlink accepted")
+	}
+}
+
 func TestDoctrineBinaryAllowlist(t *testing.T) {
 	hash := strings.Repeat("a", 64)
 	good := `{"assets/logo.png":"` + hash + `"}`

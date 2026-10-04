@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/lanedispatch"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -362,7 +363,23 @@ func (f *fixture) runner(t *testing.T) (tenant.Principal, string) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,'lane-race','codex','daemon-race',$2,'Race account',1,clock_timestamp(),true,'generation-race') RETURNING id::text`, agent.TenantID, agent.ID).Scan(&account); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',1000000)`, agent.TenantID, account)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',1000000)`, agent.TenantID, account); err != nil {
+			return err
+		}
+		// Ownership races must not depend on the wall clock or the person's
+		// default work week. Match the account fixtures used by queue tests.
+		schedule := capacity.DefaultSchedule()
+		for i := range schedule.Week {
+			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		schedule.Reserve = capacity.ReserveOff
+		schedule.Override = "sprint"
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=$1 RETURNING tenant_id,id)
+ INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a`, account, f.owner.ID, raw)
 		return err
 	})
 	dbtest.BindRole(t, f.d, agent.TenantID, agent.ID, "member")

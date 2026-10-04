@@ -320,7 +320,10 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          if ! [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo 'Invalid platform image digest' >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/image-digests"
           printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/image-digests/$ARCH.txt"
           {
@@ -416,7 +419,10 @@ jobs:
             --metadata-file "$RUNNER_TEMP/image-index-metadata.json" "${sources[@]}"
           echo "pushed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           digest="$(jq -er '."containerimage.descriptor".digest' "$RUNNER_TEMP/image-index-metadata.json")"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          if ! [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo 'Invalid multi-arch image digest' >&2
+            exit 1
+          fi
           docker buildx imagetools inspect --raw "ghcr.io/inspr-at/aeon@$digest" > "$RUNNER_TEMP/published-index.json"
           node scripts/release-image-index.mjs verify "$RUNNER_TEMP/published-index.json"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"

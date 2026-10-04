@@ -6,17 +6,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 type capacityTestAPI struct {
@@ -101,6 +105,7 @@ func TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI(t *testing.T) {
 	}
 	a := NewCodexAdapter(fakeVendorPath(t, "codex_capacity"), map[string]string{"key": home})
 	a.SetExpectedEmails(map[string]string{"key": "agent@example.test"})
+	qualifyCodexFixture(t, a)
 	got := a.CaptureCapacity(t.Context(), "key")
 	if len(got) != 1 || got[0].Source != "agentd" || got[0].UsedPercent != 31 || got[0].WindowKind != "weekly" {
 		t.Fatal(got)
@@ -109,6 +114,142 @@ func TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI(t *testing.T) {
 	if got := a.CaptureCapacity(t.Context(), "key"); len(got) != 0 {
 		t.Fatal("mismatched identity reported quota")
 	}
+}
+
+// An npm launcher needs the enrolled interpreter even when quota capture runs
+// without a prompt. The fake interpreter has no dependency on host Node.
+type idleCapacityTestAPI struct{ *capacityTestAPI }
+
+func (*idleCapacityTestAPI) Queued(context.Context) ([]Run, error) { return nil, nil }
+
+func TestIdleCodexCaptureUsesPinnedInterpreter(t *testing.T) {
+	home := privateHome(t)
+	bin := privateHome(t)
+	node := filepath.Join(bin, "node")
+	vendor := fakeVendorPath(t, "codex_capacity")
+	nodeRaw := []byte("#!/bin/sh\nexec " + strconv.Quote(vendor) + " \"$@\"\n")
+	if err := os.WriteFile(node, nodeRaw, 0700); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(privateHome(t), "codex")
+	launcherRaw := []byte("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 1.0.0; exit; fi\nif [ \"$1\" = login ]; then echo 'Logged in using ChatGPT'; exit; fi\nexec node \"$@\"\n")
+	if err := os.WriteFile(launcher, launcherRaw, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewCodexAdapter(launcher, map[string]string{"local": home})
+	a.Nodes = map[string]harnesslaunch.Node{"local": {Path: node, Version: "1.0.0"}}
+	a.SetExpectedEmails(map[string]string{"local": "agent@example.test"})
+	// Qualify only this synthetic fixture; production idle capture stays gated.
+	a.idleUsage = &codexIdleCapability{binaryPath: launcher, binarySHA256: sha256Hex(launcherRaw), nodePath: node, nodeSHA256: sha256Hex(nodeRaw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true}
+	s, api, _ := testSupervisor(t)
+	reporter := &idleCapacityTestAPI{&capacityTestAPI{API: api}}
+	s.api, s.adapters[Codex] = reporter, a
+	if err := s.PollOnce(t.Context()); err != nil || !s.probedAccounts["account"] {
+		t.Fatal("enrolled account must first pass its probe", err)
+	}
+	now := time.Now().UTC()
+	s.captureIdleCapacity(t.Context(), now)
+	if len(reporter.got) != 1 || reporter.account != "account" || reporter.got[0].UsedPercent != 31 || reporter.got[0].Source != "agentd" {
+		t.Fatal("probed npm Codex account did not publish its first idle reading", reporter.got)
+	}
+	s.captureIdleCapacity(t.Context(), now.Add(4*time.Minute))
+	if len(reporter.got) != 1 {
+		t.Fatal("captured before five-minute interval")
+	}
+	s.captureIdleCapacity(t.Context(), now.Add(5*time.Minute+time.Second))
+	if len(reporter.got) != 2 {
+		t.Fatal("next five-minute capture missing")
+	}
+}
+
+type capacityBlockedInput struct {
+	p       *wireProcess
+	entered chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (w *capacityBlockedInput) Write(raw []byte) (int, error) {
+	var frame struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		return 0, err
+	}
+	if frame.Method == "initialize" {
+		w.p.mu.Lock()
+		response := w.p.pending[string(frame.ID)]
+		w.p.mu.Unlock()
+		response <- json.RawMessage(`{"result":{}}`)
+		return len(raw), nil
+	}
+	if frame.Method != "initialized" {
+		return 0, fmt.Errorf("unexpected capture method %q", frame.Method)
+	}
+	close(w.entered)
+	<-w.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (w *capacityBlockedInput) Close() error {
+	w.once.Do(func() { close(w.closed) })
+	return nil
+}
+
+func TestCodexCaptureCapacityBlockedNotificationUsesCaptureDeadline(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewCodexAdapter("", map[string]string{"key": home})
+	a.SetExpectedEmails(map[string]string{"key": "agent@example.test"})
+	synctest.Test(t, func(t *testing.T) {
+		// The parent supplies a short capture deadline. Virtual time advances
+		// only when every goroutine is blocked; no wall-clock wait is involved.
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		input := &capacityBlockedInput{entered: make(chan struct{}), closed: make(chan struct{})}
+		defer input.Close() // Also releases the writer when the regression fails.
+		p := &wireProcess{cmd: &exec.Cmd{}, stdin: input, pending: make(map[string]chan json.RawMessage), readDone: make(chan struct{}), waitDone: make(chan struct{})}
+		input.p = p
+		close(p.readDone)
+		close(p.waitDone)
+		done := make(chan []capacity.Reading, 1)
+		go func() {
+			done <- a.captureCapacity(ctx, "key", func(string) (*wireProcess, error) { return p, nil })
+		}()
+		// This barrier proves initialize succeeded and the initialized write
+		// reached the blocked transport before the deadline is advanced.
+		<-input.entered
+		synctest.Wait()
+		if ctx.Err() != nil {
+			t.Fatal("capture deadline expired before the blocked notification")
+		}
+		select {
+		case <-done:
+			t.Fatal("capture returned while its notification write was blocked")
+		default:
+		}
+		<-ctx.Done()
+		synctest.Wait()
+		select {
+		case got := <-done:
+			if len(got) != 0 || ctx.Err() != context.DeadlineExceeded {
+				t.Fatal("expired capture reported quota", got, ctx.Err())
+			}
+		default:
+			t.Fatal("blocked notification ignored the capture deadline and retained the operation cap")
+		}
+		select {
+		case <-input.closed:
+		default:
+			t.Fatal("capture returned without closing its expired transport")
+		}
+	})
 }
 
 func TestManagedCodexCapacityAtStartAndEnd(t *testing.T) {

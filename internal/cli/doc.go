@@ -25,7 +25,10 @@
 // Owner exit and SIGTERM mark that session stopped. A failed owner check at
 // start exits non-zero and does not leave a new session starting. A closed
 // generation explains itself and does not resume. A Claude transcript path
-// posts cumulative usage to the existing session usage route.
+// posts cumulative usage to the existing session usage route. Start model/effort
+// flags are initial values; bounded reads of the session Claude transcript or
+// Codex rollout/app-server capture report changes on the same generation.
+// Missing or malformed records preserve the last accepted identity.
 // CP3 adds relation add, project create/show/update and resource reads, tag
 // catalog commands, attachment upload/list/get/rm, declarative apply, schema,
 // doctor, and authenticated curl. External-stage request/pull/report/result
