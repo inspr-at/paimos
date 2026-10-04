@@ -317,6 +317,21 @@ the approved CI path, record the three specs' hosted run/job evidence, and
 repeat the consolidated review. Assertions, shard gates, weights, exclusions
 and workflows remain unchanged; the acceptance gate remains open.
 
+Fix-round-5 verification (AEON-677, review-cg25): exact reviewed candidate
+`1044f3a208b6652dda99c3e71e3048559ea7168b` has zero GitHub Actions runs,
+no remote branch (HTTP 404) and no PR. All 70 local Node checks passed with
+zero skips, including the filesystem-writing checks blocked in the review;
+both strict inventory checks passed. The prior 88-pass macOS summary and
+current spec/report hashes were verified without rerunning browsers. Retained
+evidence: ignored `web/test-results/aeon-ci-sharding-fix5/summary.json`, SHA256
+`9c4eb09d2a7b451f6a2dfa104543a14d34edc0bd7b7c8a560cace246a1b21d14`.
+The OPS-257 parent is already an ancestor, so no parent merge was needed.
+The sole P2 remains unresolved: these checks establish neither hosted Linux
+stability nor actual shard timings. No behavior fix or new regression test
+applies. The explicit no-push/no-deploy instruction and mbp2606 ban remain
+binding; the coordinator must publish the candidate, retain successful hosted
+results and affected shard timings, then repeat the consolidated gate.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
