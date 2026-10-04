@@ -3231,7 +3231,9 @@ expanded JSON in Postgres before transfer to the application. Confirmation
 bodies are limited to 1 KiB with a 10-second HTTP read deadline. Shared work-order,
 harness, run, hours and review endpoints, queue writes and brand settings buffer
 their existing bounded request bodies before transaction admission, with the
-same 10-second HTTP read deadline. The live-row limit is
+same 10-second HTTP read deadline. Event-position buffering preserves that
+connection deadline on harness and run GET routes without flushing responses
+before their position is known. The live-row limit is
 checked again against the final tree before commit, so crossing creates,
 restores and kind conversions roll back atomically. Direct work writes outside
 `db.InTenant` fail closed when the flag is enabled. These bounds and tenant-wide read serialization require
