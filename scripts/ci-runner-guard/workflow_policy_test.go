@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -179,7 +180,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "cross-family", "gate/cross-family"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
 		for _, identity := range []string{id, strings.ToUpper(id)} {
 			add("reserved-id/"+identity, "extra.yaml", "reserved to ci.yml", func(w map[string]any) {
 				w["jobs"] = map[string]any{identity: map[string]any{"runs-on": "ubuntu-latest"}}
@@ -287,7 +288,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("non-pr-shared-group", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
 		mapping(w["concurrency"])["group"] = "ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}"
 	})
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-shard", "e2e-run", "release-check-run", "migration-compat", "release-list-comparison"} {
 		for _, rename := range []bool{false, true} {
 			add(fmt.Sprintf("missing-or-renamed/%s/%t", id, rename), "ci.yml", "is missing", func(w map[string]any) {
 				jobs := mapping(w["jobs"])
@@ -297,7 +298,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 				delete(jobs, id)
 			})
 		}
-		if id == "runner-route" || id == "go-test" {
+		if id == "runner-route" {
 			continue
 		}
 		for _, condition := range []any{false, "success()", nil} {
@@ -310,6 +311,9 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("missing-go-dependency", "ci.yml", "go must gate every", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
 	add("missing-web-dependency", "ci.yml", "web must gate setup and every UI shard", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
+	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
+		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
+	})
 	add("collapsed-shards", "ci.yml", "routed shard count", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["go-test"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
@@ -410,5 +414,109 @@ func TestWorkflowPolicyAllowsReviewedWorkflowsAndFilteredPRs(t *testing.T) {
 				t.Fatalf("reviewed directory and filtered PR rejected: %v %v", problems, err)
 			}
 		})
+	}
+}
+
+// Execute the actual YAML gate commands. A fabricated green/skipped fixture
+// must not conceal a failed, cancelled or unexpectedly omitted dependency.
+func TestCIClassifiedAggregateResults(t *testing.T) {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	jobs := mapping(workflow["jobs"])
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"go", "web", "release-check", "e2e"} {
+		steps := mapping(jobs[id])["steps"].([]any)
+		step := mapping(steps[len(steps)-1])
+		run, ok := step["run"].(string)
+		if !ok {
+			t.Fatalf("%s has no executable gate", id)
+		}
+		for _, lane := range []string{"docs-only", "spec-only", "full"} {
+			t.Run(id+"/"+lane, func(t *testing.T) {
+				values := map[string]string{"CI_LANE": lane, "CI_PLAN": "success"}
+				for name := range mapping(step["env"]) {
+					if name == "CI_LANE" || name == "CI_PLAN" {
+						continue
+					}
+					values[name] = "skipped"
+					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_SHARD") {
+						values[name] = "success"
+					}
+				}
+				execute := func(changed, result string) error {
+					t.Helper()
+					cmd := exec.Command("bash", "-c", run)
+					cmd.Dir = root
+					cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+					for name, value := range values {
+						if name == changed {
+							value = result
+						}
+						cmd.Env = append(cmd.Env, name+"="+value)
+					}
+					return cmd.Run()
+				}
+				if err := execute("", ""); err != nil {
+					t.Fatalf("legitimate %s gate rejected: %v", lane, err)
+				}
+				for name, expected := range values {
+					if name == "CI_LANE" {
+						continue
+					}
+					wrong := "success"
+					if expected == "success" {
+						wrong = "skipped"
+					}
+					for _, result := range []string{"failure", "cancelled", wrong} {
+						if err := execute(name, result); err == nil {
+							t.Fatalf("gate accepted %s=%s (expected %s)", name, result, expected)
+						}
+					}
+				}
+				if err := execute("CI_LANE", "unknown"); err == nil {
+					t.Fatal("unknown classification accepted")
+				}
+			})
+		}
+	}
+}
+
+func TestCIClassifiedWebShardMatrix(t *testing.T) {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	jobs := mapping(workflow["jobs"])
+	shard := mapping(jobs["web-shard"])
+	expression := mapping(mapping(shard["strategy"])["matrix"])["shard"].(string)
+	expression = strings.TrimPrefix(expression, "${{ fromJSON(")
+	expression = strings.TrimSuffix(expression, ") }}")
+	for _, lane := range []string{"full", "spec-only"} {
+		got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.ci-plan.outputs.lane": lane})
+		want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
+		if lane == "spec-only" {
+			want = "[1]"
+		}
+		if got != want {
+			t.Fatalf("%s matrix = %s, want %s", lane, got, want)
+		}
+	}
+	// Full history is needed only for the lightweight PR classifier; retain
+	// the existing previous-release checkout used by migration compatibility.
+	planSteps := mapping(jobs["ci-plan"])["steps"].([]any)
+	checkout := mapping(mapping(planSteps[0])["with"])
+	if checkout["fetch-depth"] != "${{ github.event_name == 'pull_request' && '0' || '1' }}" || checkout["persist-credentials"] != false {
+		t.Fatal("classifier checkout must keep PR-only history and no persisted credentials")
+	}
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+		steps := mapping(jobs[id])["steps"].([]any)
+		if depth := mapping(mapping(steps[0])["with"])["fetch-depth"]; depth != nil {
+			t.Fatalf("%s heavy checkout must retain shallow history; got %v", id, depth)
+		}
 	}
 }

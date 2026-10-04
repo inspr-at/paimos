@@ -45,6 +45,8 @@ var reservedCIJobs = map[string]bool{
 	"go": true, "web": true, "release-check": true, "e2e": true,
 	"cross-family": true, "gate/cross-family": true,
 	"go-test": true, "go-static": true, "go-timing": true, "runner-route": true,
+	"ci-plan": true, "web-setup": true, "web-shard": true,
+	"release-check-run": true, "e2e-run": true,
 }
 
 var matrixRunner = regexp.MustCompile(`^\$\{\{\s*matrix\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}$`)
@@ -369,16 +371,28 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
-	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
+	for _, id := range []string{"ci-plan", "go-test", "go-static", "go-timing", "runner-route", "web-setup", "web-shard", "release-check-run", "e2e-run", "migration-compat", "release-list-comparison"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
-		if id == "go-static" || id == "go-timing" {
+		condition := "needs.ci-plan.outputs.lane == 'full'"
+		switch id {
+		case "runner-route", "ci-plan":
 			if _, exists := job["if"]; exists {
 				return fmt.Errorf("required CI job %q must run without an if condition", id)
 			}
+			continue
+		case "web-setup", "web-shard":
+			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
 		}
+		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") {
+			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
+		}
+	}
+	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
+	if webMatrix != `${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
+		return fmt.Errorf("web shard matrix must retain 12 full rows and one changed-spec row")
 	}
 	for _, context := range []string{"go", "web", "release-check", "e2e"} {
 		job := mapping(jobs[context])
@@ -392,7 +406,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if context == "web" {
@@ -400,11 +414,11 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"web-setup", "web-shard"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-shard"}) {
 				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
 			}
-		} else if _, exists := job["if"]; exists {
-			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
+		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run"}) {
+			return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
 		}
 	}
 	return nil

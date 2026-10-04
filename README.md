@@ -591,6 +591,14 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
+PRs containing only Markdown, `docs/**`, or root LICENSE/LICENCE/COPYING/NOTICE
+files skip heavy jobs; required checks report success with a `docs-only` note.
+The allowlist lives in `scripts/ci-pr-plan.mjs`. PRs changing only top-level
+`web/tests/*.spec.ts` run exactly those specs in one hosted job, including specs
+outside the shard map, with their group's config and flags. Spec renames or
+deletions, mixed changes and unavailable classification retain full coverage.
+Main pushes, merge groups and manual runs retain their existing full CI lanes.
+
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for
 the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
