@@ -2,35 +2,24 @@
 package nodes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 func enableWorkStatusTest(t *testing.T, p tenant.Principal) {
 	t.Helper()
-	if _, err := appPool.Exec(t.Context(), `DO $$ BEGIN IF to_regclass('public.features') IS NULL THEN
- CREATE TABLE features(tenant_id uuid NOT NULL REFERENCES tenants(id),key text NOT NULL,project_id uuid,enabled boolean,
- revision bigint NOT NULL DEFAULT 1,updated_at timestamptz NOT NULL DEFAULT now(),UNIQUE NULLS NOT DISTINCT(tenant_id,key,project_id),FOREIGN KEY(tenant_id,project_id) REFERENCES nodes(tenant_id,id));
- ALTER TABLE features ENABLE ROW LEVEL SECURITY; ALTER TABLE features FORCE ROW LEVEL SECURITY;
- CREATE POLICY fixture_features_tenant ON features USING(tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
- END IF;END $$`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO features(tenant_id,key,enabled) VALUES($1,'work-parent-status',true)`, p.TenantID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	dbtest.EnableWorkParentStatus(t, testDB, p.TenantID)
 }
 func workNodeTest(t *testing.T, p tenant.Principal, parent string, state string) nodeJSON {
 	t.Helper()
@@ -55,11 +44,6 @@ func lastDerivedTest(t *testing.T, p tenant.Principal, nodeID string) (int64, in
 		t.Fatal(err)
 	}
 	return id, cause
-}
-func causalModuleTest() http.Handler {
-	mux := http.NewServeMux()
-	events.New(appPool, events.WithUndoHandlers(UndoHandlers()), events.WithCausalUndoHandlers(CausalUndoHandlers())).Mount(mux)
-	return mux
 }
 func causalCallTest(t *testing.T, p tenant.Principal, method string, id int64, body string) (int, []byte) {
 	t.Helper()
@@ -208,5 +192,173 @@ func TestWorkParentStatusDeleteCausalUndo(t *testing.T) {
 	}
 	if currentWorkTest(t, p, child.ID).State != "in_progress" || currentWorkTest(t, p, parent.ID).State != "in_progress" {
 		t.Fatal("restore did not derive")
+	}
+}
+
+func TestWorkParentStatusMoveAndCreateCausalUndo(t *testing.T) {
+	p := newPrincipal(t, "work-move-undo")
+	project := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Project"}`)
+	source := workNodeTest(t, p, project.ID, "open")
+	target := workNodeTest(t, p, project.ID, "open")
+	_ = workNodeTest(t, p, source.ID, "open")
+	_ = workNodeTest(t, p, target.ID, "open")
+	child := workNodeTest(t, p, source.ID, "open")
+	enableWorkStatusTest(t, p)
+	patchWorkTest(t, p, child.ID, "in_progress")
+	status, raw := call(t, &p, "POST", "/api/nodes/"+child.ID+"/move", fmt.Sprintf(`{"parent_id":%q}`, target.ID))
+	if status != 200 {
+		t.Fatalf("move %d %s", status, raw)
+	}
+	if currentWorkTest(t, p, source.ID).State != "open" || currentWorkTest(t, p, target.ID).State != "in_progress" {
+		t.Fatal("move missed ancestor chain")
+	}
+	id, cause := lastDerivedTest(t, p, target.ID)
+	status, raw = causalCallTest(t, p, "GET", id, "")
+	if status != 200 {
+		t.Fatalf("move preview %d %s", status, raw)
+	}
+	status, raw = causalCallTest(t, p, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+	if status != 201 {
+		t.Fatalf("move undo %d %s", status, raw)
+	}
+	if currentWorkTest(t, p, source.ID).State != "in_progress" || currentWorkTest(t, p, target.ID).State != "open" {
+		t.Fatal("move undo missed ancestor chain")
+	}
+	created := workNodeTest(t, p, target.ID, "in_progress")
+	id, cause = lastDerivedTest(t, p, target.ID)
+	status, raw = causalCallTest(t, p, "GET", id, "")
+	if status != 200 {
+		t.Fatalf("create preview %d %s", status, raw)
+	}
+	status, raw = causalCallTest(t, p, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+	if status != 201 {
+		t.Fatalf("create undo %d %s", status, raw)
+	}
+	if currentWorkTest(t, p, target.ID).State != "open" {
+		t.Fatal("create undo did not derive")
+	}
+	if status, raw = call(t, &p, "GET", "/api/nodes/"+created.ID, ""); status != 404 {
+		t.Fatalf("created child remains %d %s", status, raw)
+	}
+}
+
+func TestWorkParentStatusHiddenCauseAndPermissionRevocation(t *testing.T) {
+	p := newPrincipal(t, "work-hidden-undo")
+	root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Project"}`)
+	parent := workNodeTest(t, p, root.ID, "open")
+	child := workNodeTest(t, p, parent.ID, "open")
+	visibleChild := workNodeTest(t, p, parent.ID, "open")
+	enableWorkStatusTest(t, p)
+	patchWorkTest(t, p, child.ID, "in_progress")
+	id, cause := lastDerivedTest(t, p, parent.ID)
+	status, raw := causalCallTest(t, p, "GET", id, "")
+	if status != 200 {
+		t.Fatalf("preview %d %s", status, raw)
+	}
+	// Restrict to a project role so event visibility follows node visibility.
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, p.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+ SELECT $2,$1,id,'project',$3 FROM roles WHERE tenant_id=$2 AND key='admin'`, p.ID, p.TenantID, root.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appPool.Exec(t.Context(), `CREATE POLICY work_test_hidden ON nodes AS RESTRICTIVE USING(id<>'`+child.ID+`'::uuid OR aeon_visibility_system())`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := appPool.Exec(context.Background(), `DROP POLICY IF EXISTS work_test_hidden ON nodes`); err != nil {
+			t.Error(err)
+		}
+	})
+	if status, raw = call(t, &p, "GET", "/api/nodes/"+child.ID, ""); status != 404 {
+		t.Fatalf("child visibility %d %s", status, raw)
+	}
+	patchWorkTest(t, p, visibleChild.ID, "done")
+	if currentWorkTest(t, p, parent.ID).State != "in_progress" {
+		t.Fatal("parent lost canonical hidden-child result")
+	}
+	status, raw = callAs(t, events.New(appPool), &p, "GET", "/api/events", "")
+	if status != 200 {
+		t.Fatalf("history %d %s", status, raw)
+	}
+	var history struct {
+		Items []events.Event `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &history); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range history.Items {
+		if e.ID == id {
+			found = true
+			if e.Derivation == nil || e.Derivation.CauseEventID != nil || len(e.Derivation.AffectedNodes) != 1 || e.Derivation.AffectedNodes[0] != parent.ID {
+				t.Fatalf("unsafe derivation %+v", e.Derivation)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("visible parent event missing")
+	}
+	status, raw = causalCallTest(t, p, "GET", id, "")
+	if status != 404 {
+		t.Fatalf("hidden preview %d %s", status, raw)
+	}
+	status, raw = causalCallTest(t, p, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+	if status != 404 {
+		t.Fatalf("hidden undo %d %s", status, raw)
+	}
+	if _, err := appPool.Exec(t.Context(), `DROP POLICY work_test_hidden ON nodes`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'causal_reader','Causal reader')`, p.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,permission FROM roles, unnest(ARRAY['nodes.read','events.read','events.undo','events.undo_other']) permission WHERE tenant_id=$1 AND key='causal_reader'`, p.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='causal_reader') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, raw = causalCallTest(t, p, "POST", id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+	if status != 403 {
+		t.Fatalf("revoked write %d %s", status, raw)
+	}
+}
+
+func TestWorkParentStatusReusesAutopilotActivity(t *testing.T) {
+	p := newPrincipal(t, "work-parent-activity")
+	parent := workNodeTest(t, p, "", "open")
+	child := workNodeTest(t, p, parent.ID, "open")
+	enableWorkStatusTest(t, p)
+	patchWorkTest(t, p, child.ID, "in_progress")
+	id, _ := lastDerivedTest(t, p, parent.ID)
+	status, raw := callAs(t, activity.New(appPool), &p, "GET", "/api/nodes/"+parent.ID+"/activity", "")
+	if status != 200 {
+		t.Fatalf("activity %d %s", status, raw)
+	}
+	var history activity.Page
+	if err := json.Unmarshal(raw, &history); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range history.Items {
+		if c := item.AutomaticChange; c != nil && c.EventID == id {
+			found = true
+			if c.Rule != "work_parent" || c.From != "open" || c.To != "in_progress" || c.Reason == "" || !c.RequiresPreview || c.Undoable || !item.Author.Automatic || item.Author.Job != statusautopilot.Job {
+				t.Fatalf("derived audit %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("derived status missing from autopilot Activity")
 	}
 }

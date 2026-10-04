@@ -83,6 +83,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
 	}
 	for i, s := range scopes {
 		out[i].ChangedSince = !s.matches
+		out[i].RequiresPreview = out[i].Rule == "work_parent"
 		if !s.matches || out[i].Undone {
 			continue
 		}

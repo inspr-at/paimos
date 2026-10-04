@@ -290,3 +290,28 @@ kind substitution, so person edits still conflict. Existing classic journey
 ticket membership semantics use retained provenance, including stored import
 events during relation backfill; broader parent/leaf release placement belongs
 to AEON-652. No permanent tables or columns are added for DSAR classification.
+
+## AEON-650 reservation and activation
+
+**1225** is the engine migration in AEON-650's coordinator-reserved **1225–1229**
+range. The coordinator must append `1225 AEON-650 (work parent status engine)`
+to its shared ledger; the worker does not author outside its worktree. Slots
+1226–1229 remain unused. No permanent user-data tables or columns are added.
+
+The engine defaults OFF with no AEON-429 table/override and honors tenant ON,
+project OFF, and null inheritance using the exact AEON-429 storage contract.
+Register `work-parent-status` in that package's catalog and provision System
+before activation, in a committed transaction while the flag is OFF. It refuses
+missing actors rather than acquiring a principal-link lock after an event
+counter. Every flagged work write must enter `db.InTenant`; grouped operations
+use `db.InTransaction`. SQL guards cover imports, requirements, quick-create,
+bulk, move, delete, restore, Undo and category updates. Changed children schedule
+both ancestor chains; final derivation reads locked canonical rows and emits at
+most one transition per parent. Retention has a separate audit event.
+
+The migration does not backfill statuses or enable flags. Initial reconciliation
+is caused by child changes or state-category configuration changes. Before any
+rollout, the coordinator validates the AEON-429 integration and whole chain,
+including the parent UI, under AEON-649's maintenance/verified-backup gate. See
+the root README for the API contract, explicit bounds and read-serialization
+tradeoff. This worker neither pushes nor deploys.

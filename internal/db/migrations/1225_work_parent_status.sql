@@ -68,8 +68,12 @@ BEGIN
  PERFORM n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
   WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND k.slug='work'
   ORDER BY n.id FOR NO KEY UPDATE OF n;
- -- Resolve the actor now, before any writer takes another resource lock.
+ -- Activation provisions System while the flag is still off. Never create a
+ -- principal (principal-link lock 532) after a writer's event-counter lock.
  PERFORM pg_advisory_xact_lock(hashtextextended('aeon-system-actor:'||current_setting('aeon.tenant_id'),0));
+ PERFORM id FROM principals WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+  AND kind='agent' AND name='System' AND roles @> ARRAY['system'] FOR KEY SHARE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'provision System before enabling work-parent-status' USING ERRCODE='55000'; END IF;
  IF to_regclass('pg_temp.aeon_work_changes') IS NULL THEN
   CREATE TEMP TABLE aeon_work_changes(tenant_id uuid NOT NULL,id uuid NOT NULL,before jsonb,after jsonb,
     PRIMARY KEY(tenant_id,id)) ON COMMIT DROP;
@@ -108,14 +112,18 @@ BEGIN
     WHERE c.tenant_id=NEW.tenant_id AND c.parent_id=NEW.id AND c.deleted_at IS NULL AND k.slug='work') THEN
   RAISE EXCEPTION 'parent status follows its children' USING ERRCODE='P0001';
  END IF;
- IF TG_OP='UPDATE' AND ROW(NEW.title,NEW.body,NEW.state,NEW.fields,NEW.parent_id,NEW.deleted_at,NEW.kind_id,NEW.human_check)
-  IS DISTINCT FROM ROW(OLD.title,OLD.body,OLD.state,OLD.fields,OLD.parent_id,OLD.deleted_at,OLD.kind_id,OLD.human_check) THEN
+ IF TG_OP='UPDATE' AND ROW(NEW.title,NEW.body,NEW.state,NEW.fields,NEW.parent_id,NEW.project_id,NEW.deleted_at,NEW.kind_id,NEW.human_check)
+  IS DISTINCT FROM ROW(OLD.title,OLD.body,OLD.state,OLD.fields,OLD.parent_id,OLD.project_id,OLD.deleted_at,OLD.kind_id,OLD.human_check) THEN
   NEW.updated_at := greatest(clock_timestamp(),NEW.updated_at,OLD.updated_at+interval '1 microsecond');
  END IF;
- a := jsonb_build_object('id',NEW.id,'parent_id',NEW.parent_id,'state',NEW.state,'deleted_at',NEW.deleted_at,'updated_at',NEW.updated_at);
- IF TG_OP='UPDATE' THEN b := jsonb_build_object('id',OLD.id,'parent_id',OLD.parent_id,'state',OLD.state,'deleted_at',OLD.deleted_at,'updated_at',OLD.updated_at); END IF;
+ a := jsonb_build_object('id',NEW.id,'parent_id',NEW.parent_id,'project_id',NEW.project_id,'state',NEW.state,'deleted_at',NEW.deleted_at,'updated_at',NEW.updated_at);
+ IF TG_OP='UPDATE' THEN b := jsonb_build_object('id',OLD.id,'parent_id',OLD.parent_id,'project_id',OLD.project_id,'state',OLD.state,'deleted_at',OLD.deleted_at,'updated_at',OLD.updated_at); END IF;
  IF TG_OP='INSERT' OR NEW.state IS DISTINCT FROM OLD.state OR NEW.parent_id IS DISTINCT FROM OLD.parent_id
-   OR NEW.deleted_at IS DISTINCT FROM OLD.deleted_at OR NEW.kind_id IS DISTINCT FROM OLD.kind_id THEN
+   OR NEW.project_id IS DISTINCT FROM OLD.project_id OR NEW.deleted_at IS DISTINCT FROM OLD.deleted_at OR NEW.kind_id IS DISTINCT FROM OLD.kind_id THEN
+  IF NOT EXISTS(SELECT 1 FROM pg_temp.aeon_work_changes WHERE tenant_id=NEW.tenant_id AND id=NEW.id)
+   AND (SELECT count(*) FROM pg_temp.aeon_work_changes WHERE tenant_id=NEW.tenant_id)>=1000 THEN
+   RAISE EXCEPTION 'work status change scope exceeds 1000 nodes' USING ERRCODE='54000';
+  END IF;
   INSERT INTO pg_temp.aeon_work_changes VALUES(NEW.tenant_id,NEW.id,b,a)
     ON CONFLICT(tenant_id,id) DO UPDATE SET after=EXCLUDED.after;
  END IF;
@@ -159,7 +167,7 @@ CREATE FUNCTION aeon_work_status_flush() RETURNS void LANGUAGE plpgsql AS $$
 DECLARE prior_visible text := current_setting('aeon.visible_projects',true);
  prior_system text := current_setting('aeon.system',true); target_tenant uuid := current_setting('aeon.tenant_id')::uuid;
  r record; cats text[]; target_state text; reason text; before_snap jsonb; after_snap jsonb; actor uuid;
- cause_id bigint; change_count integer; max_depth integer;
+ cause_id bigint; cause_ids jsonb; change_count integer; max_depth integer;
 BEGIN
  IF current_setting('aeon.work_status_entered',true) IS DISTINCT FROM target_tenant::text THEN RETURN; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_temp.aeon_work_changes WHERE tenant_id=target_tenant)
@@ -181,7 +189,8 @@ BEGIN
  ) SELECT target_tenant,id,depth FROM tree;
  SELECT coalesce(max(depth),0) INTO max_depth FROM pg_temp.aeon_work_order WHERE tenant_id=target_tenant;
  IF max_depth>1000 THEN RAISE EXCEPTION 'work status depth exceeds 1000' USING ERRCODE='54000'; END IF;
- actor := aeon_authz_system_actor(target_tenant);
+ SELECT id INTO actor FROM principals WHERE tenant_id=target_tenant AND kind='agent'
+  AND name='System' AND roles @> ARRAY['system'];
  IF (SELECT count(*) FROM pg_temp.aeon_work_changes WHERE tenant_id=target_tenant)>1000 THEN RAISE EXCEPTION 'work status change scope exceeds 1000 nodes' USING ERRCODE='54000'; END IF;
  DELETE FROM pg_temp.aeon_work_affected WHERE tenant_id=target_tenant;
  INSERT INTO pg_temp.aeon_work_affected
@@ -203,6 +212,14 @@ BEGIN
     OR EXISTS(SELECT 1 FROM pg_temp.aeon_work_settings s WHERE s.tenant_id=target_tenant))
   ORDER BY o.depth DESC,n.id LOOP
   IF NOT aeon_work_status_enabled(r.project_id) THEN CONTINUE; END IF;
+  WITH matched AS (
+   SELECT c.id,c.type FROM pg_temp.aeon_work_causes c
+    JOIN events e ON e.tenant_id=c.tenant_id AND e.id=c.id
+    WHERE c.tenant_id=target_tenant AND EXISTS(SELECT 1 FROM pg_temp.aeon_work_affected a
+     WHERE a.tenant_id=target_tenant AND a.id=r.id AND (a.trigger_id=c.node_id OR a.trigger_id=ANY(e.node_refs)))
+  ) SELECT count(*),min(id),coalesce(jsonb_agg(id ORDER BY id),'[]'::jsonb) INTO change_count,cause_id,cause_ids FROM matched
+   WHERE type='node.bulk_changed' OR NOT EXISTS(SELECT 1 FROM matched WHERE type='node.bulk_changed');
+  IF change_count<>1 THEN cause_id:=NULL; END IF;
   SELECT array_agg(category) FILTER(WHERE category<>'archived') INTO cats FROM (
    SELECT aeon_work_status_category(c.state,k.field_schema) category FROM nodes c
    JOIN node_kinds k ON k.tenant_id=c.tenant_id AND k.id=c.kind_id
@@ -212,10 +229,14 @@ BEGIN
   IF cats IS NULL THEN
    IF EXISTS(SELECT 1 FROM pg_temp.aeon_work_changes c WHERE c.tenant_id=target_tenant
       AND c.before->>'parent_id'=r.id::text AND (c.after->>'parent_id' IS DISTINCT FROM c.before->>'parent_id'
-        OR c.after->>'deleted_at' IS DISTINCT FROM c.before->>'deleted_at')) THEN
+        OR c.after->>'deleted_at' IS DISTINCT FROM c.before->>'deleted_at'
+        OR c.after->>'state' IS DISTINCT FROM c.before->>'state'))
+     OR (EXISTS(SELECT 1 FROM pg_temp.aeon_work_settings WHERE tenant_id=target_tenant)
+       AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.id=c.kind_id AND k.tenant_id=c.tenant_id
+        WHERE c.tenant_id=target_tenant AND c.parent_id=r.id AND c.deleted_at IS NULL AND k.slug='work')) THEN
     INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,metadata)
     VALUES(target_tenant,actor,r.id,'status_autopilot.retained',jsonb_build_object('id',r.id,'state',r.state),
-      jsonb_build_object('rule','work_parent','rule_version',1,'reason','No remaining work children; the last derived status is retained.','affected_nodes',jsonb_build_array(r.id)));
+      jsonb_build_object('job','status-autopilot','rule','work_parent','rule_version',1,'reason','No remaining active work children; the last derived status is retained.','cause_event_id',cause_id,'cause_event_ids',cause_ids,'affected_nodes',jsonb_build_array(r.id),'coalesced',true));
    END IF;
    CONTINUE;
   END IF;
@@ -234,17 +255,10 @@ BEGIN
   UPDATE nodes SET state=target_state WHERE tenant_id=target_tenant AND id=r.id;
   SELECT jsonb_build_object('id',id,'state',state,'updated_at',updated_at) INTO after_snap
     FROM nodes WHERE tenant_id=target_tenant AND id=r.id;
-  SELECT count(*),min(c.id) INTO change_count,cause_id FROM pg_temp.aeon_work_causes c
-    JOIN events e ON e.tenant_id=c.tenant_id AND e.id=c.id
-    WHERE c.tenant_id=target_tenant
-     AND (c.type='node.bulk_changed' OR NOT EXISTS(SELECT 1 FROM pg_temp.aeon_work_causes bulk_c WHERE bulk_c.tenant_id=target_tenant AND bulk_c.type='node.bulk_changed'))
-     AND EXISTS(SELECT 1 FROM pg_temp.aeon_work_affected a
-     WHERE a.tenant_id=target_tenant AND a.id=r.id AND (a.trigger_id=c.node_id OR a.trigger_id=ANY(e.node_refs)));
-  IF change_count<>1 THEN cause_id:=NULL; END IF;
   INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after,metadata)
   VALUES(target_tenant,actor,r.id,'status_autopilot.derived',before_snap,after_snap,
    jsonb_build_object('job','status-autopilot','rule','work_parent','rule_version',1,'reason',reason,
-    'cause_event_id',cause_id,'affected_nodes',jsonb_build_array(r.id),'coalesced',true));
+    'cause_event_id',cause_id,'cause_event_ids',cause_ids,'affected_nodes',jsonb_build_array(r.id),'coalesced',true));
  END LOOP;
  DELETE FROM pg_temp.aeon_work_changes WHERE tenant_id=target_tenant;
  DELETE FROM pg_temp.aeon_work_causes WHERE tenant_id=target_tenant;

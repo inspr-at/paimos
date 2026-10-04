@@ -134,6 +134,13 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 			}
 			overrides := map[string]Override{}
 			for _, c := range candidates {
+				parent, err := db.WorkStatusParentTx(ctx, tx, c.Node.ID)
+				if err != nil {
+					return err
+				}
+				if parent {
+					continue
+				}
 				effective := s
 				if c.Node.ProjectID != nil {
 					id := *c.Node.ProjectID

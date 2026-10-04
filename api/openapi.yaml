@@ -4809,10 +4809,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [event_id, cause_event_id, affected_nodes, message]
+                required: [event_id, cause_event_id, change_type, affected_nodes, message]
                 properties:
                   event_id: {type: integer}
                   cause_event_id: {type: integer}
+                  change_type: {type: string, description: The visible triggering event type to reverse.}
                   affected_nodes:
                     type: array
                     maxItems: 200

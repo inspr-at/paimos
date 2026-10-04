@@ -180,8 +180,11 @@ func loadCandidate(ctx context.Context, tx pgx.Tx, id string, now time.Time) (ca
 
 func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision) error {
 	parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
-	if err != nil || parent {
+	if err != nil {
 		return err
+	}
+	if parent {
+		return events.ErrConflict
 	}
 
 	var seen bool
@@ -300,6 +303,13 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 		return events.Change{}, events.ErrForbidden
 	}
 	if !c.Node.Updated.Equal(after.Updated) || c.Node.State != after.State {
+		return events.Change{}, events.ErrConflict
+	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, before.ID)
+	if err != nil {
+		return events.Change{}, err
+	}
+	if parent {
 		return events.Change{}, events.ErrConflict
 	}
 	marks, err := json.Marshal(before.Marks)

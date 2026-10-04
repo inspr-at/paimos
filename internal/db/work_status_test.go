@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -56,6 +57,7 @@ func (f *statusFixture) node(key, parent, state string) {
 }
 func (f *statusFixture) enable() {
 	f.t.Helper()
+	f.exec(`SELECT aeon_authz_system_actor($1)`, f.tid)
 	f.exec(`INSERT INTO features(tenant_id,key,enabled) VALUES($1,'work-parent-status',true) ON CONFLICT(tenant_id,key,project_id) DO UPDATE SET enabled=true`, f.tid)
 }
 func (f *statusFixture) state(key string) string {
@@ -216,5 +218,142 @@ func TestWorkStatusTenantVisibilityRestored(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWorkStatusConcurrentWritersUseCommittedTree(t *testing.T) {
+	f := newStatusFixture(t)
+	f.node("WK-1", "PRJ-1", "open")
+	f.node("WK-2", "WK-1", "open")
+	f.node("WK-3", "WK-1", "open")
+	f.enable()
+	ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 15*time.Second)
+	defer cancel()
+	locked := make(chan uint32, 1)
+	release := make(chan struct{})
+	first := make(chan error, 1)
+	second := make(chan error, 1)
+	go func() {
+		first <- db.InTenant(ctx, f.d.App, f.tid, func(tx pgx.Tx) error {
+			var pid uint32
+			if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE nodes SET state='done' WHERE key='WK-2'`); err != nil {
+				return err
+			}
+			locked <- pid
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	var blocker uint32
+	select {
+	case blocker = <-locked:
+	case err := <-first:
+		t.Fatalf("first writer: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	go func() {
+		second <- db.InTenant(ctx, f.d.App, f.tid, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE nodes SET state='cancelled' WHERE key='WK-3'`)
+			return err
+		})
+	}()
+	// Observe the actual database wait, not just a goroutine starting or elapsed
+	// time. Only then release the first writer and inspect the committed result.
+	for {
+		select {
+		case err := <-second:
+			t.Fatalf("second writer escaped barrier: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
+		var waiting bool
+		if err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE NOT granted AND $1::int=ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		runtime.Gosched()
+	}
+	close(release)
+	for _, ch := range []<-chan error{first, second} {
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	f.check("WK-1", "done")
+	var transitions int
+	if err := f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='status_autopilot.derived'`).Scan(&transitions)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if transitions != 1 {
+		t.Fatalf("real transitions %d, want 1", transitions)
+	}
+}
+
+func TestWorkStatusDeepAndWideBoundedCascade(t *testing.T) {
+	f := newStatusFixture(t)
+	parent := "PRJ-1"
+	for i := 1; i <= 64; i++ {
+		key := fmt.Sprintf("WK-%d", i)
+		f.node(key, parent, "open")
+		parent = key
+	}
+	f.exec(`INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id)
+  SELECT $1,k.id,'WK-'||(1000+s), 'Leaf','open',p.id FROM node_kinds k,nodes p,generate_series(1,300) s WHERE k.slug='work' AND p.key='WK-64'`, f.tid)
+	f.enable()
+	f.exec(`UPDATE nodes SET state='done' WHERE key LIKE 'WK-1___'`)
+	f.check("WK-1", "done")
+	f.check("WK-64", "done")
+	var count int
+	if err := f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='status_autopilot.derived'`).Scan(&count)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 64 {
+		t.Fatalf("cascade transitions %d, want 64", count)
+	}
+}
+
+func TestWorkStatusRejectsOversizedChangesAtomically(t *testing.T) {
+	f := newStatusFixture(t)
+	f.node("WK-1", "PRJ-1", "open")
+	f.exec(`INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id)
+ SELECT $1,k.id,'WK-'||(1000+s),'Leaf','open',p.id FROM node_kinds k,nodes p,generate_series(1,1001) s WHERE k.slug='work' AND p.key='WK-1'`, f.tid)
+	f.enable()
+	err := f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done' WHERE parent_id=(SELECT id FROM nodes WHERE key='WK-1')`)
+		return err
+	})
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "54000" || pg.Message != "work status change scope exceeds 1000 nodes" {
+		t.Fatalf("wrong bound refusal %v", err)
+	}
+	f.check("WK-1", "open")
+	var changed int
+	if err := f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE state='done'`).Scan(&changed)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if changed != 0 {
+		t.Fatalf("partial oversized write %d", changed)
 	}
 }

@@ -363,7 +363,11 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 			item.Type = "change"
 			item.Changes = []FieldChange{{Field: "kind", From: &from, To: &to}}
 			items = append(items, item)
-		case "status_autopilot.changed", "status_autopilot.skipped", "status_autopilot.derived", "status_autopilot.retained":
+		case "status_autopilot.retained":
+			item.Type = "change"
+			item.Changes = []FieldChange{}
+			items = append(items, item)
+		case "status_autopilot.changed", "status_autopilot.skipped", "status_autopilot.derived":
 			item.Type = "change"
 			item.Changes = diff(nativeFields(e.before, people), nativeFields(e.after, people))
 			items = append(items, item)

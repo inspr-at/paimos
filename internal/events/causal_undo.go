@@ -28,6 +28,7 @@ type causalPreview struct {
 	CauseEventID int64        `json:"cause_event_id"`
 	Nodes        []causalNode `json:"affected_nodes"`
 	Message      string       `json:"message"`
+	ChangeType   string       `json:"change_type"`
 }
 
 // causalChange reads both events under caller RLS. Never raise visibility for
@@ -70,7 +71,7 @@ func (m *module) causalChange(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		return Event{}, nil, out, ErrConflict
 	}
 	before, after := causalSnapshots(e)
-	out = causalPreview{EventID: parent.ID, CauseEventID: e.ID, Nodes: []causalNode{}}
+	out = causalPreview{EventID: parent.ID, CauseEventID: e.ID, ChangeType: e.Type, Nodes: []causalNode{}}
 	for _, c := range changes {
 		var key, state, slug string
 		var rev time.Time
@@ -105,6 +106,14 @@ func (m *module) causalChange(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		out.Nodes = append(out.Nodes, causalNode{ID: c.ID, Key: key, From: state, To: target})
 	}
 	out.Message = fmt.Sprintf("Revert the change to %s.", out.Nodes[0].Key)
+	switch e.Type {
+	case "node.created", "import.node_created":
+		out.Message = fmt.Sprintf("Remove the work child %s.", out.Nodes[0].Key)
+	case "node.deleted":
+		out.Message = fmt.Sprintf("Restore the work child %s.", out.Nodes[0].Key)
+	case "node.moved", "node.project_moved":
+		out.Message = fmt.Sprintf("Move %s back to its previous parent.", out.Nodes[0].Key)
+	}
 	if len(out.Nodes) > 1 {
 		out.Message = fmt.Sprintf("Revert the change to %d work children.", len(out.Nodes))
 	}

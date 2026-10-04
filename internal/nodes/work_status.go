@@ -3,6 +3,7 @@ package nodes
 
 import (
 	"context"
+
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/jackc/pgx/v5"
 )

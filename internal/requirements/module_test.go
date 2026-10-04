@@ -651,3 +651,31 @@ func TestDigestHoldsContentStableUntilCommit(t *testing.T) {
 		return err
 	})
 }
+
+func TestWorkParentStatusRequirementGeneration(t *testing.T) {
+	f := setup(t)
+	dbtest.EnableWorkParentStatus(t, f.db, f.person.TenantID)
+	accepted := f.add("functional", "Accepted work")
+	f.suggestions(accepted, true)
+	items := f.agreement(f.approve())
+	if len(items) != 1 || len(items[0].TicketIDs) != 2 {
+		t.Fatalf("generation %+v", items)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='status_autopilot.derived'`).Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			t.Fatalf("unchanged initial parent emitted transitions %d", count)
+		}
+		var state string
+		if err := tx.QueryRow(t.Context(), `SELECT state FROM nodes WHERE id=(SELECT parent_id FROM nodes WHERE id=$1)`, items[0].TicketIDs[0]).Scan(&state); err != nil {
+			return err
+		}
+		if state != "open" {
+			t.Fatalf("generated parent state %s", state)
+		}
+		return nil
+	})
+}

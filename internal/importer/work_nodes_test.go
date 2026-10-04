@@ -213,3 +213,49 @@ func TestWorkNodesImporterReplaysMigrationWithoutMaskingPersonEdits(t *testing.T
 		t.Fatal("person edit overwritten")
 	}
 }
+
+func TestWorkParentStatusImporterReplayAndChildChange(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	tid, err := tenantbootstrap.Create(ctx, d.App, "parent-import", "Parent import")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbtest.EnableWorkParentStatus(t, d, tid)
+	snap := Snapshot{SourceID: "parent-source", Details: map[int64]Details{}, Projects: []Project{{Record: Record{"id": 1, "key": "WI", "name": "Work", "status": "open"}, Issues: []Record{
+		{"id": 11, "project_id": 1, "issue_key": "WI-11", "type": "epic", "title": "Parent", "status": "open"},
+		{"id": 12, "project_id": 1, "issue_key": "WI-12", "type": "ticket", "title": "Child", "status": "done", "parent_id": 11},
+	}}}}
+	writer := PostgresWriter{Pool: d.App}
+	if _, err = writer.Write(ctx, snap, "parent-import"); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want string) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+			var state string
+			err := tx.QueryRow(ctx, `SELECT state FROM nodes WHERE key='WI-11'`).Scan(&state)
+			if err == nil && state != want {
+				t.Fatalf("imported parent %s want %s", state, want)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("done")
+	replay, err := writer.Write(ctx, snap, "parent-import")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range replay.Conflicts {
+		if c.Reason != "parent_status_derived" {
+			t.Fatalf("derived status appears as person edit %+v", replay)
+		}
+	}
+	snap.Projects[0].Issues[1]["status"] = "in_progress"
+	if _, err = writer.Write(ctx, snap, "parent-import"); err != nil {
+		t.Fatal(err)
+	}
+	check("in_progress")
+}

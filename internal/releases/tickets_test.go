@@ -89,7 +89,7 @@ func ticketSetup(t *testing.T) *ticketFixture {
 		if _, err = tx.Exec(ctx, `INSERT INTO journey_requirements(tenant_id,requirement_node_id,project_node_id,kind,revision) VALUES($1,$2,$3,'functional',1)`, f.person.TenantID, req, f.project); err != nil {
 			return err
 		}
-		if f.feature, err = node("epic", f.project); err != nil {
+		if f.feature, err = node("work", f.project); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO journey_features(tenant_id,feature_node_id,project_node_id,requirement_node_id) VALUES($1,$2,$3,$4)`, f.person.TenantID, f.feature, f.project, req)
@@ -292,14 +292,14 @@ func TestCreateReleaseTicketParentAndSchemaRules(t *testing.T) {
 	f := ticketSetup(t)
 	baseline := f.counts()
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds='{}' WHERE slug='epic'`)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds='{}' WHERE slug='work'`)
 		return err
 	})
 	if w := f.call(f.person, f.body(1, "parent", true, f.feature)); w.Code != 409 {
 		t.Fatalf("parent rule %d %s", w.Code, w.Body.String())
 	}
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema='{"type":"object","required":["priority"]}' WHERE slug='ticket'`)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema='{"type":"object","required":["priority"]}' WHERE slug='work'`)
 		return err
 	})
 	if w := f.call(f.person, f.body(1, "schema", true, "")); w.Code != 409 {
@@ -308,4 +308,33 @@ func TestCreateReleaseTicketParentAndSchemaRules(t *testing.T) {
 	if f.counts() != baseline {
 		t.Fatal("validation failure changed state")
 	}
+}
+
+func TestWorkParentStatusReleaseQuickCreate(t *testing.T) {
+	f := ticketSetup(t)
+	dbtest.EnableWorkParentStatus(t, f.db, f.person.TenantID)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done' WHERE id=$1`, f.feature)
+		return err
+	})
+	result := ticketPlan(t, f.call(f.person, f.body(1, "work-child", true, f.feature)))
+	if len(result.Tickets) != 1 {
+		t.Fatalf("created tickets %+v", result.Tickets)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var state, slug string
+		if err := tx.QueryRow(t.Context(), `SELECT state FROM nodes WHERE id=$1`, f.feature).Scan(&state); err != nil {
+			return err
+		}
+		if state != "open" {
+			t.Fatalf("quick-create parent state %s", state)
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=$1`, result.Tickets[0].NodeID).Scan(&slug); err != nil {
+			return err
+		}
+		if slug != "work" {
+			t.Fatalf("kind %s", slug)
+		}
+		return nil
+	})
 }
