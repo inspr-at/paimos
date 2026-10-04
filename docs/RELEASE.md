@@ -301,6 +301,22 @@ hosted results for all three specs and affected shard durations at the reviewed
 SHA, resolve any actual failures, and repeat the consolidated gate. This local
 handoff does not establish hosted stability, the five-minute target or approval.
 
+Fix-round-4 verification (AEON-677, 2026-10-04 UTC): a fresh GitHub API
+lookup for the exact reviewed candidate
+`4327edd93d04074228d2fb2e06fc159b135d5b7c` returned `total_count: 0`.
+The branch `work/aeon-ci-sharding` has no remote ref (HTTP 404) and no PR
+(open or closed). All 19 shard, 11 queue-measurement and 40 flake-guard Node
+checks passed locally, sequentially; strict default and `--all` inventory
+checks also passed. The prior macOS summary, report and current spec hashes
+were verified, preserving the 88-test result above. These checks do not close
+review-cg21's P2: successful hosted Linux execution at the reviewed SHA is
+still missing. Under the explicit no-push instruction and the mbp2606 access
+ban, this worker made an evidence-only handoff. No behavior fix or new
+regression test was needed. The coordinator must publish the candidate through
+the approved CI path, record the three specs' hosted run/job evidence, and
+repeat the consolidated review. Assertions, shard gates, weights, exclusions
+and workflows remain unchanged; the acceptance gate remains open.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
