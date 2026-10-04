@@ -37,6 +37,15 @@ var ProjectFilteredRoutes = map[string]bool{
 	"POST /api/phone-approvals/{kind}/{requestId}/options":          true,
 	"POST /api/phone-approvals/{kind}/{requestId}/decision":         true,
 
+	"GET /api/themes":                      true,
+	"GET /api/themes/{themeId}":            true,
+	"GET /api/me/theme":                    true,
+	"POST /api/themes":                     true,
+	"PATCH /api/themes/{themeId}":          true,
+	"DELETE /api/themes/{themeId}":         true,
+	"POST /api/themes/{themeId}/duplicate": true,
+	"PUT /api/me/theme":                    true,
+
 	"GET /api/recurrences":                        true,
 	"GET /api/decision-desk":                      true,
 	"GET /api/journey/next-actions":               true,

@@ -48,27 +48,28 @@ func TestScopeWithinKey(t *testing.T) {
 }
 
 type fixture struct {
-	db       *dbtest.DB
-	mux      *http.ServeMux
-	tenantA  string
-	tenantB  string
-	personA  tenant.Principal
-	personB  tenant.Principal
-	agentA   tenant.Principal
-	agentB   tenant.Principal
-	wide     string
-	exact    string
-	narrow   string
-	once     string
-	claimant string
-	empty    string
-	revoked  string
-	tokenB   string
-	nodeA    string
-	deleted  string
-	nodeB    string
-	runA     string
-	runB     string
+	db         *dbtest.DB
+	mux        *http.ServeMux
+	tenantA    string
+	tenantB    string
+	personA    tenant.Principal
+	personB    tenant.Principal
+	agentA     tenant.Principal
+	agentB     tenant.Principal
+	wide       string
+	exact      string
+	narrow     string
+	once       string
+	claimant   string
+	empty      string
+	revoked    string
+	tokenB     string
+	nodeA      string
+	deleted    string
+	nodeB      string
+	runA       string
+	runB       string
+	eventStart int64
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -117,6 +118,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.runA = insertRun(t, f.db.Admin, f.tenantA, order, f.agentA.ID)
 	f.runB = insertRun(t, f.db.Admin, f.tenantA, order, f.agentB.ID)
+	if err := f.db.Admin.QueryRow(ctx, `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, f.tenantA).Scan(&f.eventStart); err != nil {
+		t.Fatal(err)
+	}
 	f.mux = http.NewServeMux()
 	New(f.db.App).Mount(f.mux)
 	return f
@@ -250,7 +254,7 @@ func decodeApproval(t *testing.T, w *httptest.ResponseRecorder) Approval {
 func (f *fixture) eventTypes(t *testing.T) []string {
 	t.Helper()
 	rows, err := f.db.Admin.Query(t.Context(), `
-		SELECT type FROM events WHERE tenant_id = $1::uuid ORDER BY id`, f.tenantA)
+		SELECT type FROM events WHERE tenant_id = $1::uuid AND id>$2 ORDER BY id`, f.tenantA, f.eventStart)
 	if err != nil {
 		t.Fatal(err)
 	}
