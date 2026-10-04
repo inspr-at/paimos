@@ -585,5 +585,83 @@
     "approvedDesignConflicts": [],
     "noOriginPushOrDeploy": true,
     "reviewOwnership": "Consolidated review remains with coordinator; no model CLI or package review run."
+  },
+  "fixRound5": {
+    "baseCommit": "af01d0f370322a11f55d76c5303fc339d12ef604",
+    "implementationCommit": "04e1bb30b28679720bb7e885443c0e040502834d",
+    "validatedSourceCommit": "a5c0c0c1aba9f56c87428ea9334b932008bb3143",
+    "mergedMainCommit": "7b8ebe30434be96b42eb351ca7c286e6393dca4d",
+    "hostedFailure": {
+      "runId": 37199246139,
+      "job": "web-setup",
+      "file": "web/scripts/aeon-676-ci.test.mjs",
+      "reason": "The existing full-nightly coverage assertion required --full after the approved three-tier design moved complete catalogue execution to --all. The other native selector and shard tests passed in that run; missing web-unit measurements were a downstream result of the setup failure."
+    },
+    "repair": "Keep the approved ESSENTIAL/GATED-FULL/NIGHTLY design and existing workflows. Require the exact --all shard invocation in nightly-web-shard itself, hosted execution, and failure propagation. No runtime or product behavior changed; no test skipped or coverage requirement loosened.",
+    "baselineRegression": {
+      "commit": "af01d0f370322a11f55d76c5303fc339d12ef604",
+      "file": "web/scripts/aeon-676-ci.test.mjs",
+      "exitCode": 1,
+      "reason": "Reproduced the hosted AssertionError requiring cli.mjs run web --full --shard before edits.",
+      "environment": "Empty inherited environment, temporary HOME, PATH=/usr/bin:/bin, absolute Node executable."
+    },
+    "validation": {
+      "webRegression": {
+        "file": "web/scripts/aeon-676-ci.test.mjs",
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "environment": "Empty inherited environment, temporary HOME, PATH=/usr/bin:/bin, absolute Node executable. Passed both before and after merging main."
+      },
+      "negativeMutations": [
+        {
+          "mutation": "gated-only",
+          "exitCode": 1,
+          "expectedAssertionFailure": true
+        },
+        {
+          "mutation": "implicit-selection",
+          "exitCode": 1,
+          "expectedAssertionFailure": true
+        },
+        {
+          "mutation": "comment-only",
+          "exitCode": 1,
+          "expectedAssertionFailure": true
+        }
+      ],
+      "mutationMethod": "Copied the test and only its required workflow/manifest inputs into isolated fixtures; ran the hosted/nightly contract test alone. Each downgraded nightly command failed the intended assertion. Product/workflow sources were never mutated.",
+      "shardManifest": {
+        "command": "node web/scripts/ci-web-shard.mjs --check",
+        "exitCode": 0,
+        "gatedSpecs": 54,
+        "ungatedSpecs": 166,
+        "shards": 12
+      },
+      "remoteGo": {
+        "runner": "coordinator remote-test.sh",
+        "sourceCommit": "a5c0c0c1aba9f56c87428ea9334b932008bb3143",
+        "exitCode": 0,
+        "packages": [
+          "./scripts/test-tier-go",
+          "./scripts/ci-go-shards",
+          "./scripts/releaseworkflow",
+          "./scripts/ci-runner-guard"
+        ],
+        "result": "All four packages passed; approved runner completed its temporary ref/worktree cleanup."
+      },
+      "browser": {
+        "command": "scripts/playwright-remote.mjs tests/clip-tip.spec.ts tests/aeon-632b-clip.spec.ts tests/key-trim.spec.ts tests/model-prefs.spec.ts",
+        "exitCode": 3,
+        "started": false,
+        "reason": "OPS-247 bootstrap and approved launcher pending; launcher refused before SSH or installation. No browser test bodies were edited in this repair."
+      },
+      "preservation": "Three-tier manifests, selection code, CI/nightly workflows and quarantine policy unchanged from af01d0f3. Main changes imported through a clean merge without manual edits.",
+      "diffWhitespace": "passed"
+    },
+    "pending": "Hosted full web-setup (including all web unit tests and native collection) and Linux Chromium need a coordinator CI run on the final branch SHA. No fresh hosted success is claimed and no broad local fallback was run.",
+    "approvedDesignConflicts": [],
+    "noOriginPushOrDeploy": true,
+    "reviewOwnership": "Coordinator owns consolidated QA; no model CLI, package review or ticket status change."
   }
 }
