@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { policyJSON, policyRequest } from './policyEditor.ts'
+import type { PolicyLadder, PolicyRole, PolicyStep } from './policies.ts'
+export type ModelRoute = Omit<PolicyStep, 'profile'>
+export interface EditableLadder extends PolicyLadder { routes: ModelRoute[]; edit_token: string | null; can_edit: boolean; order_mode?: 'saved' | 'builtin' }
+export type Selector = { mode: 'auto' } | { mode: 'pinned'; profile_id: string } | { mode: 'latest'; family: string; line: string; effort: string; harness?: string }
+export type PreferenceLevelName = 'default' | 'person' | 'project'
+export interface PreferenceRow { kind_id: string; normal: Selector; complex: Selector; locked: boolean }
+export interface PreferenceScalars { residency: 'any' | 'eu' | 'local' | null; residency_locked: boolean; prefs_locked: boolean }
+export interface PreferenceLevel extends PreferenceScalars { revision: number; rows: PreferenceRow[] }
+export interface PreferenceChoice { profile: PolicyStep['profile']; line: string; model_version: string; retired: boolean; review_ladder: boolean; review_reason: string; residency_routes: number }
+export interface EffectiveCell { selector: Selector; label: string; today_version: string; unavailable_reason?: string }
+export interface PreferenceViewRow { kind_id: string; set_by: string; locked_by: string; changed_here: boolean; reset_to: string; warnings: string[]; normal: EffectiveCell; complex: EffectiveCell }
+export interface PreferenceView {
+  choices: PreferenceChoice[]; choices_truncated: boolean; resolution_truncated: boolean; changes: number
+  residency: { value: string; set_by: string; locked_by?: string; loosened_lock: boolean; qualifying_routes: number }
+  rows: PreferenceViewRow[]
+}
+export interface PreferenceDocument {
+  person_id: string | null; levels: Record<PreferenceLevelName, PreferenceLevel | null>; views: Record<PreferenceLevelName, PreferenceView | null>
+  kinds: { id: string; slug: string; label: string; hint: string; system?: string; project_id?: string }[]
+  can: Record<string, boolean>; residency_lock_mode: 'warn'
+}
+export type PreferenceMutation = { unit: 'row'; kind_id: string; value: PreferenceRow | null } | { unit: 'scalars'; value: PreferenceScalars }
+export interface PreferenceSnapshot { document: PreferenceDocument; level: PreferenceLevelName; project: string; running_outside?: string[] }
+const encode = encodeURIComponent
+const strongToken = (token: unknown): token is string => typeof token === 'string' && /^"[a-f0-9]{64}"$/.test(token)
+export function validateLadder(data: EditableLadder, role: PolicyRole) {
+  if (data.role !== role || !Array.isArray(data.routes) || data.routes.length > 50 || !Array.isArray(data.steps) || data.steps.length !== data.routes.length || typeof data.can_edit !== 'boolean' || typeof data.truncated !== 'boolean' || typeof data.setup !== 'boolean' || (!data.truncated && !strongToken(data.edit_token))) throw new Error('Invalid ladder snapshot')
+  for (const route of data.routes) if (route.role !== role || !route.profile_id || !Number.isInteger(route.priority) || !['available', 'unavailable', 'conserved', 'budget_limited'].includes(route.state)) throw new Error('Invalid ladder route')
+  return data
+}
+export async function readLadder(role: PolicyRole, signal: AbortSignal): Promise<EditableLadder> {
+  const response = await policyRequest(`/models/routes?role=${encode(role)}`, { signal })
+  return validateLadder(await policyJSON(response), role)
+}
+export async function writeLadder(before: EditableLadder, routes: ModelRoute[], undo: boolean, signal: AbortSignal): Promise<EditableLadder> {
+  if (!before.setup || before.truncated || !before.can_edit || !strongToken(before.edit_token) || routes.length > 50 || routes.some(row => row.role !== before.role)) throw new Error('A complete editable order is required')
+  const response = await policyRequest(`/models/routes?role=${encode(before.role)}${undo ? '&expiry_policy=clear' : ''}`, {
+    method: 'PUT', signal, headers: { 'Content-Type': 'application/json', 'If-Match': before.edit_token }, body: JSON.stringify(routes),
+  })
+  const actual: ModelRoute[] = await policyJSON(response), token = response.headers.get('ETag')
+  if (!strongToken(token) || !Array.isArray(actual) || actual.length > 50 || actual.some(row => row.role !== before.role)) throw new Error('Invalid save confirmation')
+  // Profile display metadata is refreshed afterwards; stored routes/token are
+  // adopted immediately from the confirmed response, including expiry clearing.
+  return { ...before, routes: actual, edit_token: token, steps: actual.map(route => ({ ...route, profile: before.steps.find(row => row.profile_id === route.profile_id)?.profile ?? { id: route.profile_id, slug: route.profile_id, model: route.profile_id, family: '', harness: '', effort: '', tier: '', enabled: true } })) }
+}
+export function validatePreferences(data: PreferenceDocument) {
+  if (typeof data.person_id !== 'string' || !Array.isArray(data.kinds) || data.kinds.length > 256 || data.residency_lock_mode !== 'warn' || !data.can || !data.views || !data.levels) throw new Error('Invalid preference snapshot')
+  for (const name of ['default', 'person', 'project'] as const) {
+    const level = data.levels[name], view = data.views[name]
+    if (name === 'project' && level === null && view === null) continue
+    if (!level || !view || !Number.isSafeInteger(level.revision) || level.revision < 0 || !Array.isArray(level.rows) || level.rows.length > 256 || !Array.isArray(view.rows) || view.rows.length > 256 || !Array.isArray(view.choices) || view.choices.length > 256) throw new Error('Invalid preference level')
+  }
+  return data
+}
+export async function readPreferences(level: PreferenceLevelName, project: string, signal: AbortSignal): Promise<PreferenceSnapshot> {
+  const context = level === 'project' ? project : ''
+  if (level === 'project' && !context) throw new Error('Choose a visible project first')
+  const response = await policyRequest(`/model-preferences${context ? `?project_id=${encode(context)}` : ''}`, { signal })
+  const document = validatePreferences(await policyJSON(response))
+  if (!document.levels[level] || !document.views[level]) throw new Error('The selected level was not returned')
+  return { document, level, project: context }
+}
+/** Deliberately closed request set: no level DELETE and no rows on level PUT. */
+export function preferenceRequest(before: PreferenceSnapshot, mutation: PreferenceMutation) {
+  const level = before.document.levels[before.level]
+  if (!level || !before.document.person_id || !before.document.can[`edit_${before.level}`]) throw new Error('This preference level is not editable')
+  const base = `/model-preferences/levels/${encode(before.level)}`
+  const suffix = before.project ? `?project_id=${encode(before.project)}` : ''
+  const headers = { 'Content-Type': 'application/json', 'If-Prefs-Person': before.document.person_id }
+  if (mutation.unit === 'scalars') {
+    if ('rows' in mutation.value || !Object.hasOwn(mutation.value, 'residency') || !Object.hasOwn(mutation.value, 'residency_locked') || !Object.hasOwn(mutation.value, 'prefs_locked')) throw new Error('Only the three scalar fields may be saved at level scope')
+    return { path: base + suffix, init: { method: 'PUT', headers, body: JSON.stringify({ revision: level.revision, residency: mutation.value.residency, residency_locked: mutation.value.residency_locked, prefs_locked: mutation.value.prefs_locked }) } }
+  }
+  if (mutation.unit !== 'row' || !mutation.kind_id || (mutation.value && mutation.value.kind_id !== mutation.kind_id)) throw new Error('A captured work-kind row is required')
+  return { path: `${base}/rows/${encode(mutation.kind_id)}${suffix}`, init: {
+    method: mutation.value === null ? 'DELETE' : 'PUT', headers,
+    body: JSON.stringify(mutation.value === null ? { revision: level.revision } : { revision: level.revision, normal: mutation.value.normal, complex: mutation.value.complex, locked: mutation.value.locked }),
+  } }
+}
+export async function writePreferences(before: PreferenceSnapshot, mutation: PreferenceMutation, _undo: boolean, signal: AbortSignal): Promise<PreferenceSnapshot> {
+  const request = preferenceRequest(before, mutation)
+  const response = await policyRequest(request.path, { ...request.init, signal })
+  const result = await policyJSON(response)
+  if (result.person_id !== before.document.person_id || !result.level || !Number.isSafeInteger(result.revision) || result.level.revision !== result.revision || result.revision <= before.document.levels[before.level]!.revision || !Array.isArray(result.level.rows) || result.level.rows.length > 256 || !Array.isArray(result.running_outside)) throw new Error('Invalid preference confirmation')
+  return { ...before, document: { ...before.document, levels: { ...before.document.levels, [before.level]: result.level } }, running_outside: result.running_outside }
+}
+export function compensatePreferences(before: PreferenceSnapshot, desired: PreferenceMutation): PreferenceMutation {
+  const level = before.document.levels[before.level]!
+  if (desired.unit === 'row') return { unit: 'row', kind_id: desired.kind_id, value: structuredClone(level.rows.find(row => row.kind_id === desired.kind_id) ?? null) }
+  return { unit: 'scalars', value: preferenceScalars(level) }
+}
+export function preferenceScalars(level: PreferenceScalars): PreferenceScalars { return { residency: level.residency, residency_locked: level.residency_locked, prefs_locked: level.prefs_locked } }
+export function selectorFor(choice: PreferenceChoice, mode: 'pinned' | 'latest'): Selector {
+  return mode === 'pinned' ? { mode, profile_id: choice.profile.id } : { mode, family: choice.profile.family, line: choice.line, effort: choice.profile.effort, harness: choice.profile.harness }
+}
+export function choiceDisabled(choice: PreferenceChoice, kind: string) {
+  return choice.retired || !choice.profile.enabled || choice.residency_routes === 0 || kind === 'security' || (kind === 'review' && !!choice.review_reason)
+}

@@ -25,6 +25,7 @@ export interface PolicyStep {
 }
 export interface PolicyLadder {
   role: PolicyRole; steps: PolicyStep[]; setup: boolean; truncated: boolean
+  routes?: Omit<PolicyStep, 'profile'>[]; edit_token?: string | null; can_edit?: boolean
   dispatch_family_order: string[]; review_floors: string[]
 }
 export const truncatedLadder = () => `Showing the first 50 steps; the rest are applied by ${brand.value.short_name} but not listed here.`
@@ -38,8 +39,8 @@ export const ELSEWHERE_RULES: readonly ElsewhereRule[] = [
   { title: 'Working dial', text: 'The working dial is managed on the Agents screen.', owner: 'Agents', status: 'Advisory', to: '/agents', permissions: ['harness.read'] },
   { title: 'Agent rules', text: 'Prose guides agents. It does not authorize a write. Doctrine stays in git.', owner: 'Agent rules', status: 'Advisory', to: '/settings/agent-rules', permissions: ['rules.read'] },
   { title: 'Parallel limit and accounts', text: 'Account admission checks the account’s parallel limit.', owner: 'Accounts', status: 'Enforced', to: '/settings/accounts', permissions: ['account.read'] },
-  { title: 'Model preferences', text: 'Model choices respect the highest applicable cell lock. Residency preferences are advisory when a narrower value is looser.', owner: 'Model preferences · no editor yet', status: 'Enforced' },
-  { title: 'Review ladder editing', text: 'Model registry owns the configured steps. There is no ladder editor screen yet.', owner: 'Model registry', status: 'Enforced' },
+  { title: 'Model preferences', text: 'Model choices respect the highest applicable cell lock. Residency preferences are advisory when a narrower value is looser.', owner: 'Model preferences', status: 'Enforced' },
+  { title: 'Review ladder editing', text: 'Model registry owns the configured steps. Change one complete role order on the first tab.', owner: 'Model registry', status: 'Enforced' },
   { title: 'Fix rounds and lane pause', text: 'Lane coordination owns fix rounds and budgets; this page carries no copied limits.', owner: 'Lane coordination · no editor yet', status: 'Advisory' },
   { title: 'Question decisions', text: 'The decision handler requires a person session without an Authorization header. Bearer keys are refused earlier by the middleware.', owner: 'Questions', status: 'Enforced' },
   { title: 'Publishing agent rules', text: 'Publishing and restoring require a person, in the handler and the transaction helper. Bearer keys are refused by the middleware.', owner: 'Agent rules', status: 'Enforced' },
