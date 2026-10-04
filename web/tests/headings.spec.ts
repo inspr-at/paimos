@@ -279,11 +279,19 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await scene(page, width, theme)
     const data = fixtures()
     data.views.push(mockView({ id: 'heading-view', name: 'Saved heading view' }))
-    const projectDescription = width === 390 ? description : 'ProjektbeschreibungMitAußergewöhnlichLangemZusammenhängendemBezeichner'
+    const projectDescription = width === 390 ? description : 'ProjektbeschreibungMitLangemBezeichner'
     Object.assign(data.projects[0]!, { title: longTitle, description: projectDescription })
     await mockWork(page, data)
     await page.goto('/p/PHAROS/tickets')
-    await fullText(page.locator('#project-title'), longTitle)
+    // AEON-639's compact title keeps two lines and exposes the full identity.
+    const title = page.locator('#project-title')
+    await expect(title).toHaveAttribute('data-tip', longTitle)
+    await page.keyboard.press('Tab')
+    await title.focus()
+    await fittingTip(page.locator('.tooltip'), longTitle)
+    await title.blur()
+    // The wide reading layout gives this clipping fixture its original room.
+    if (width !== 390) await page.getByRole('radio', { name: 'Comfortable project header', exact: true }).click()
     const desc = page.locator('#project-description')
     await expect(desc).toHaveText(projectDescription)
     if (width === 390) {

@@ -1268,6 +1268,27 @@
       ]
     },
     {
+      "id": "project-header",
+      "gate": true,
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/project-header.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        }
+      ],
+      "env": {}
+    },
+    {
       "id": "remaining-ui",
       "gate": false,
       "config": "playwright.ui.config.ts",
