@@ -487,7 +487,11 @@ func requestResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session
 	return resumeRecipe(s), nil
 }
 
-func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	// Registration and adoption still acquire resource locks after requestResume.
+	// Flush both predecessor and successor snapshots after all those writes.
+	r, flush := deferControlEvents(r, tx)
+	defer flush(&err)
 	var in resumeRequest
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err

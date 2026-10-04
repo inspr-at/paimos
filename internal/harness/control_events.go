@@ -26,6 +26,9 @@ type controlEventBatch struct{ events []controlEvent }
 // tenant event counter only after every record write has finished. An error
 // discards the batch; flushing still belongs to the same mutation transaction.
 func deferControlEvents(r *http.Request, tx pgx.Tx) (*http.Request, func(*error)) {
+	if _, nested := r.Context().Value(controlEventKey{}).(*controlEventBatch); nested {
+		return r, func(*error) {}
+	}
 	batch := &controlEventBatch{}
 	r = r.WithContext(context.WithValue(r.Context(), controlEventKey{}, batch))
 	return r, func(result *error) {

@@ -13,7 +13,8 @@ import (
 
 // PrepareWorkHandover requests cooperative AEON-479 handovers. The caller holds
 // the work tree fence and appends the returned event flush LAST in its write.
-// No process signal, lease release or fabricated stopped_at is permitted here.
+// Calling again retries expired delivery and reuses active controls. No process
+// signal, lease release or fabricated stopped_at is permitted here.
 func PrepareWorkHandover(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []string, action string) (func() error, error) {
 	if p.Kind != tenant.Person || len(nodes) > 100 {
 		return nil, workorders.Fail(403, "person required for work handover")
@@ -41,9 +42,11 @@ func PrepareWorkHandover(ctx context.Context, tx pgx.Tx, p tenant.Principal, nod
 	if len(sessions) > 20 {
 		return nil, workorders.Fail(400, "handover scope exceeds 20 sessions")
 	}
-	batch := &controlEventBatch{}
-	ctx = context.WithValue(ctx, controlEventKey{}, batch)
+	batches := make([]*controlEventBatch, 0, len(sessions))
 	for _, s := range sessions {
+		batch := &controlEventBatch{}
+		batches = append(batches, batch)
+		sessionCtx := context.WithValue(ctx, controlEventKey{}, batch)
 		if s.Pause != nil && (s.Pause.StopRequested || (s.Pause.State == "requested" || s.Pause.State == "planned") && !workHandover(s.Pause)) {
 			return nil, workorders.Fail(409, "session already has a different stop request")
 		}
@@ -60,14 +63,16 @@ func PrepareWorkHandover(ctx context.Context, tx pgx.Tx, p tenant.Principal, nod
 		if !cooperativePause(s) {
 			return nil, workorders.Fail(409, "running session cannot receive a graceful handover")
 		}
-		if _, e = requestPause(ctx, tx, p, s, pauseRequest{Level: "wrap_up", Reason: "work_lifecycle:" + action, Note: "Finish or roll back the current step, commit WIP, write a handover and mark this session stopped. Work waits for confirmed stop.", DeadlineMinutes: 60}); e != nil {
+		if _, e = requestPause(sessionCtx, tx, p, s, pauseRequest{Level: "wrap_up", Reason: "work_lifecycle:" + action, Note: "Finish or roll back the current step, commit WIP, write a handover and mark this session stopped. Work waits for confirmed stop.", DeadlineMinutes: 10}); e != nil {
 			return nil, e
 		}
 	}
 	return func() error {
-		for _, e := range batch.events {
-			if err := workorders.Record(ctx, tx, e.principal, e.project, "harness."+e.kind, e.before, e.after); err != nil {
-				return err
+		for _, batch := range batches {
+			for _, e := range batch.events {
+				if err := workorders.Record(ctx, tx, e.principal, e.project, "harness."+e.kind, e.before, e.after); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -80,7 +85,12 @@ func workHandover(p *Pause) bool { return p != nil && strings.HasPrefix(p.Reason
 // than guessing that silence or a lost heartbeat proves process exit.
 func RequireHandoverDelivery(ctx context.Context, tx pgx.Tx, ids []string) error {
 	var missing bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s
+ WHERE NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason) AND s.stopped_at IS NOT NULL
+ AND (s.ticket_node_id=ANY($1::uuid[]) OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=ANY($1::uuid[]))
+ OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=ANY($1::uuid[]))
+ OR s.run_id IN(SELECT r.id FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE r.queue_node_id=ANY($1::uuid[]) OR o.parent_id=ANY($1::uuid[]))))
+ OR EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
  WHERE (r.queue_node_id=ANY($1::uuid[]) OR o.parent_id=ANY($1::uuid[])) AND r.status IN ('starting','running','waiting')
  AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE s.run_id=r.id AND s.stopped_at IS NULL))
  OR EXISTS(SELECT 1 FROM work_orders w JOIN nodes o ON o.id=w.node_id WHERE o.parent_id=ANY($1::uuid[]) AND o.deleted_at IS NULL AND w.status='running'

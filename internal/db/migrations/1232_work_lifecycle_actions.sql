@@ -92,3 +92,54 @@ EXCEPTION WHEN OTHERS THEN
  PERFORM set_config('aeon.visible_projects',coalesce(v,''),true),set_config('aeon.system',coalesce(s,''),true); RAISE;
 END;
 $$;
+
+-- Fence the ORIGINAL binding too. Detaching/rebinding is not proof of stop.
+-- No generation identifiers or historical bindings are rewritten or copied.
+CREATE FUNCTION aeon_work_binding_targets(p_ticket uuid,p_order uuid,p_run uuid)
+RETURNS uuid[] LANGUAGE plpgsql AS $$
+DECLARE answer uuid[]; v text:=current_setting('aeon.visible_projects',true); s text:=current_setting('aeon.system',true);
+BEGIN
+ PERFORM set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true);
+ SELECT coalesce(array_agg(DISTINCT target) FILTER(WHERE target IS NOT NULL),ARRAY[]::uuid[]) INTO answer
+ FROM (
+  SELECT p_ticket AS target
+  UNION ALL SELECT p_order
+  UNION ALL SELECT n.parent_id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id
+   WHERE n.id IN(p_ticket,p_order) AND k.slug='work_order'
+  UNION ALL SELECT r.queue_node_id FROM agent_runs r WHERE r.id=p_run
+  UNION ALL SELECT n.parent_id FROM agent_runs r JOIN nodes n ON n.id=r.work_order_id WHERE r.id=p_run
+ ) bindings;
+ PERFORM set_config('aeon.visible_projects',coalesce(v,''),true),set_config('aeon.system',coalesce(s,''),true);
+ RETURN answer;
+EXCEPTION WHEN OTHERS THEN
+ PERFORM set_config('aeon.visible_projects',coalesce(v,''),true),set_config('aeon.system',coalesce(s,''),true); RAISE;
+END;
+$$;
+CREATE FUNCTION aeon_guard_pending_work_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE targets uuid[]; target uuid;
+BEGIN
+ IF TG_TABLE_NAME='harness_sessions' THEN
+  IF NEW.ticket_node_id IS NOT DISTINCT FROM OLD.ticket_node_id
+   AND NEW.work_order_id IS NOT DISTINCT FROM OLD.work_order_id
+   AND NEW.run_id IS NOT DISTINCT FROM OLD.run_id THEN RETURN NEW; END IF;
+  IF aeon_work_session_stopped(OLD.stopped_at,OLD.stop_reason) THEN RETURN NEW; END IF;
+  targets:=aeon_work_binding_targets(OLD.ticket_node_id,OLD.work_order_id,OLD.run_id);
+ ELSE
+  IF NEW.queue_node_id IS NOT DISTINCT FROM OLD.queue_node_id
+   AND NEW.work_order_id IS NOT DISTINCT FROM OLD.work_order_id THEN RETURN NEW; END IF;
+  targets:=aeon_work_binding_targets(OLD.queue_node_id,OLD.work_order_id,OLD.id);
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0));
+ FOREACH target IN ARRAY targets LOOP
+  IF aeon_work_pending(target) IS NOT NULL THEN
+   RAISE EXCEPTION 'confirm the original generation stopped before changing its work binding'
+    USING ERRCODE='23514',CONSTRAINT='work_handover_pending';
+  END IF;
+ END LOOP;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER harness_pending_work_binding BEFORE UPDATE OF ticket_node_id,work_order_id,run_id
+ ON harness_sessions FOR EACH ROW EXECUTE FUNCTION aeon_guard_pending_work_binding();
+CREATE TRIGGER runs_pending_work_binding BEFORE UPDATE OF queue_node_id,work_order_id
+ ON agent_runs FOR EACH ROW EXECUTE FUNCTION aeon_guard_pending_work_binding();

@@ -122,14 +122,17 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 	}
 }
 
-// Only admission/binding needs the tree fence. Heartbeats, telemetry and reads
-// keep their existing pairing-only path and remain usable while the tree is busy.
+// Admission/binding and generation recovery take the tree fence before any
+// resource rows. A heartbeat can revive a generation, and resume can register
+// its successor; both must use this protocol with the status rollout disabled.
 func workBindingMutation(r *http.Request) bool {
 	switch r.Pattern {
 	case "POST /api/work-orders", "PATCH /api/work-orders/{workOrderId}",
 		"POST /api/work-orders/{workOrderId}/runs", "POST /api/runs/{runId}/claim",
 		"POST /api/projects/{projectId}/harness-sessions",
-		"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding":
+		"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/resume":
 		return true
 	}
 	return false

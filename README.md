@@ -26,7 +26,14 @@ as a confirmed stop. The saved action continues after closing the sheet or
 restarting the server, with the original person's current permissions checked
 inside every write. A changed split target requires abandoning the saved request
 and reviewing a fresh preview; abandoning keeps earlier completed writes and
-handover requests intact.
+handover requests intact. Heartbeat loss, lost process ownership and administrative
+removal keep the stop fence; they require recovery or an explicit process-stop
+report. Bindings of an unconfirmed generation cannot detach or move away while
+its work action is pending. The same generation may revive and finish handover.
+Cooperative wrap-up delivery expires after ten minutes. **Check handover** and
+the background worker retry expired delivery under the original person's current
+authority, with an audit trail, while retaining the fence. Retries never escalate
+to force stop and reuse any still-active delivery.
 
 The additive API is `GET/POST /api/nodes/{id}/work-lifecycle`,
 `POST /api/nodes/{id}/work-lifecycle/{action}/continue`, and

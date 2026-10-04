@@ -82,7 +82,7 @@ paths:
       security: [{session: []}]
       responses:
         '200':
-          description: Waiting or completed; repeat requests cannot create children or cancel a leaf twice
+          description: Waiting or completed; expired cooperative handovers are retried without force or releasing the stop fence. Repeat requests cannot create children or cancel a leaf twice
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WorkLifecycleAction'}

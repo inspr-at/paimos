@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -107,6 +108,14 @@ func (m *Module) sweepWorkLifecycleTenant(ctx context.Context, tenantID string) 
 				if _, err = tx.Exec(ctx, `SELECT set_config('aeon.work_lifecycle_action',$1,true)`, a.ID); err != nil {
 					return err
 				}
+				ids := make([]string, 0, len(a.targets))
+				for _, target := range a.targets {
+					ids = append(ids, target.ID)
+				}
+				handoverFlush, err := harness.PrepareWorkHandover(ctx, tx, p, ids, a.ID)
+				if err != nil {
+					return err
+				}
 				batch := &deferredWorkEvents{}
 				worker := *m
 				worker.events = batch
@@ -118,6 +127,9 @@ func (m *Module) sweepWorkLifecycleTenant(ctx context.Context, tenantID string) 
 					if err = m.events.WriteEvent(ctx, tx, event); err != nil {
 						return err
 					}
+				}
+				if err = handoverFlush(); err != nil {
+					return err
 				}
 				if before != len(a.Result) || a.State == "completed" {
 					event := "work.lifecycle_waiting"

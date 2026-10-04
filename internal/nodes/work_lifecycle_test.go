@@ -12,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -382,5 +383,282 @@ func TestWorkLifecycleCancelSettlesOrderWithAudit(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Real sweeper state, not a fabricated process exit, must retain the work fence.
+func loseLifecycleSession(t *testing.T, p tenant.Principal, sid string) {
+	t.Helper()
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2000-01-01',heartbeat_at='2000-01-01' WHERE id=$1`, sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := harness.SweepLostContact(t.Context(), appPool, p.TenantID)
+	if err != nil || n != 1 {
+		t.Fatalf("lost-contact sweep=%d: %v", n, err)
+	}
+}
+
+func TestWorkLifecycleLostContactRetainsStopFence(t *testing.T) {
+	for _, kind := range []string{"split", "cancel"} {
+		t.Run(kind, func(t *testing.T) {
+			p := newPrincipal(t, "lost-contact-work")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			sid := lifecycleSession(t, p, project.ID, leaf.ID, false)
+			var children []splitChild
+			if kind == "split" {
+				children = []splitChild{{Title: "After stop"}}
+			}
+			request, status, raw := lifecycleRequest(t, p, leaf.ID, kind, children)
+			if a := decode[workAction](t, status, raw, 200); a.State != "waiting" {
+				t.Fatal("did not wait for worker")
+			}
+			loseLifecycleSession(t, p, sid)
+			if !lifecyclePreview(t, p, leaf.ID).Busy {
+				t.Fatal("heartbeat loss cleared busy fence")
+			}
+			status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+			if a := decode[workAction](t, status, raw, 200); a.State != "waiting" || a.WaitingCount != 1 || len(a.Result) != 0 {
+				t.Fatalf("unconfirmed stop completed work: %s", raw)
+			}
+			m := &Module{pool: appPool, events: SQLWriter{}}
+			if err := m.sweepWorkLifecycleTenant(t.Context(), p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			var state string
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT state FROM work_lifecycle_actions WHERE id=$1`, request).Scan(&state)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if state != "waiting" {
+				t.Fatal("background completion accepted heartbeat loss")
+			}
+			stopLifecycleSession(t, p, sid)
+			status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+			if a := decode[workAction](t, status, raw, 200); a.State != "completed" || len(a.Result) != 1 {
+				t.Fatalf("confirmed stop did not release fence: %s", raw)
+			}
+		})
+	}
+}
+
+func TestWorkLifecycleLostContactBlocksOrdinaryWrites(t *testing.T) {
+	p := newPrincipal(t, "lost-contact-guards")
+	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+	leaf := workNodeTest(t, p, project.ID, "open")
+	sid := lifecycleSession(t, p, project.ID, leaf.ID, false)
+	loseLifecycleSession(t, p, sid)
+	status, raw := call(t, &p, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Child","parent_id":%q}`, leaf.KindID, leaf.ID))
+	if status != 409 || !containsBytes(raw, "busy_work_leaf") {
+		t.Fatalf("unconfirmed worker gained children: %d %s", status, raw)
+	}
+	status, raw = call(t, &p, "PATCH", "/api/nodes/"+leaf.ID, `{"state":"cancelled"}`)
+	if status != 409 || !containsBytes(raw, "busy_work_leaf") {
+		t.Fatalf("unconfirmed worker cancelled: %d %s", status, raw)
+	}
+	_, status, raw = lifecycleRequest(t, p, leaf.ID, "split", []splitChild{{Title: "Child"}})
+	if status != 409 || !containsBytes(raw, "live session") {
+		t.Fatalf("lost contact must expose recovery requirement: %d %s", status, raw)
+	}
+}
+
+func TestWorkLifecyclePendingFencesOriginalBindings(t *testing.T) {
+	for _, kind := range []string{"split", "cancel"} {
+		for _, lost := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/lost=%t", kind, lost), func(t *testing.T) {
+				p := newPrincipal(t, "pending-rebinding")
+				project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+				leaf := workNodeTest(t, p, project.ID, "open")
+				other := workNodeTest(t, p, project.ID, "open")
+				sid := lifecycleSession(t, p, project.ID, leaf.ID, false)
+				var children []splitChild
+				if kind == "split" {
+					children = []splitChild{{Title: "After stop"}}
+				}
+				_, status, raw := lifecycleRequest(t, p, leaf.ID, kind, children)
+				if a := decode[workAction](t, status, raw, 200); a.State != "waiting" {
+					t.Fatal("missing handover")
+				}
+				if lost {
+					loseLifecycleSession(t, p, sid)
+				}
+				for _, target := range []any{nil, other.ID} {
+					err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+						if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+							return err
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET ticket_node_id=$2,work_shape=CASE WHEN $2::uuid IS NULL THEN 'unknown' ELSE 'ship' END WHERE id=$1`, sid, target)
+						return err
+					})
+					var pg *pgconn.PgError
+					if !errors.As(err, &pg) || pg.ConstraintName != "work_handover_pending" {
+						t.Fatalf("original binding escaped handover: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestWorkLifecycleExpiredHandoverRetriesDelivery(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(fmt.Sprint(background), func(t *testing.T) {
+			p := newPrincipal(t, "expired-handover")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			sid := lifecycleSession(t, p, project.ID, leaf.ID, false)
+			sessionIDs := []string{sid}
+			if background {
+				// Exercise the full 20-generation handover scope; expiry and
+				// renewal events must remain bounded without a 64-event cliff.
+				for range 19 {
+					sessionIDs = append(sessionIDs, lifecycleSession(t, p, project.ID, leaf.ID, false))
+				}
+			}
+			request, status, raw := lifecycleRequest(t, p, leaf.ID, "split", []splitChild{{Title: "After retry"}})
+			if a := decode[workAction](t, status, raw, 200); a.State != "waiting" {
+				t.Fatal("missing waiting action")
+			}
+			var oldControl string
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT pause_record->>'control_id' FROM harness_sessions WHERE id=$1`, sid).Scan(&oldControl); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET pause_record=jsonb_set(pause_record,'{deadline_at}','"2000-01-01T00:00:00Z"'::jsonb) WHERE id=ANY($1::uuid[])`, sessionIDs)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// The production deadline sweeper expires the original cooperative request.
+			n, err := harness.SweepLostContact(t.Context(), appPool, p.TenantID)
+			if err != nil || n != 0 {
+				t.Fatalf("deadline sweep=%d: %v", n, err)
+			}
+			if background {
+				m := &Module{pool: appPool, events: SQLWriter{}}
+				if err := m.sweepWorkLifecycleTenant(t.Context(), p.TenantID); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+				if a := decode[workAction](t, status, raw, 200); a.State != "waiting" {
+					t.Fatal("retry fabricated a stop")
+				}
+			}
+			var control, state, reason string
+			var active, signals int
+			var stopped bool
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT pause_record->>'control_id',pause_record->>'state',pause_record->>'reason',stopped_at IS NOT NULL FROM harness_sessions WHERE id=$1`, sid).Scan(&control, &state, &reason, &stopped); err != nil {
+					return err
+				}
+				return tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE state IN ('pending','claimed') AND request_payload->>'pause'='true'),count(*) FILTER(WHERE kind='interrupt' OR request_payload->>'stop_now'='true') FROM harness_controls WHERE session_id=ANY($1::uuid[])`, sessionIDs).Scan(&active, &signals)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if control == oldControl || state != "requested" || reason != "work_lifecycle:"+request || active != len(sessionIDs) || signals != 0 || stopped {
+				t.Fatalf("retry stranded or escalated handover: control=%s state=%s active=%d signals=%d stopped=%t", control, state, active, signals, stopped)
+			}
+			// Retry replay preserves the same pending delivery.
+			status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+			if a := decode[workAction](t, status, raw, 200); a.State != "waiting" {
+				t.Fatal("retry replay completed")
+			}
+			var replayControl string
+			var requestedEvents int
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT pause_record->>'control_id' FROM harness_sessions WHERE id=$1`, sid).Scan(&replayControl); err != nil {
+					return err
+				}
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.pause_requested' AND after->>'id'=$1`, sid).Scan(&requestedEvents)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if replayControl != control || requestedEvents != 2 {
+				t.Fatalf("retry replay duplicated delivery: control=%s events=%d", replayControl, requestedEvents)
+			}
+			for _, session := range sessionIDs {
+				stopLifecycleSession(t, p, session)
+			}
+			status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+			if a := decode[workAction](t, status, raw, 200); a.State != "completed" || len(a.Result) != 1 {
+				t.Fatalf("retry did not finish after confirmed stop: %s", raw)
+			}
+		})
+	}
+}
+
+func TestWorkLifecyclePendingFencesOrderAndRunBindings(t *testing.T) {
+	for _, kind := range []string{"split", "cancel"} {
+		t.Run(kind, func(t *testing.T) {
+			p := newPrincipal(t, "pending-order-bindings")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			other := workNodeTest(t, p, project.ID, "open")
+			// The source is reachable only via work_order_id/run_id, not ticket_node_id.
+			sid := lifecycleSession(t, p, project.ID, other.ID, false)
+			var sourceOrder, destinationOrder, run, agent string
+			err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+					return err
+				}
+				for _, binding := range []struct {
+					parent string
+					save   *string
+				}{{leaf.ID, &sourceOrder}, {other.ID, &destinationOrder}} {
+					o, err := workorders.Create(t.Context(), tx, p, workorders.CreateInput{Title: "Bound order", Parent: &binding.parent, Criteria: []string{"Done"}})
+					if err != nil {
+						return err
+					}
+					*binding.save = o.NodeID
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT agent_principal_id::text FROM harness_sessions WHERE id=$1`, sid).Scan(&agent); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,queue_node_id,agent_principal_id,status,queue_by_principal_id,queue_at,queue_security_review_required) VALUES($1,$2,$3,$4,'running',$5,clock_timestamp(),false) RETURNING id::text`, p.TenantID, sourceOrder, leaf.ID, agent, p.ID).Scan(&run); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET ticket_node_id=NULL,work_shape='unknown',work_order_id=$2,run_id=$3 WHERE id=$1`, sid, sourceOrder, run)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var children []splitChild
+			if kind == "split" {
+				children = []splitChild{{Title: "After stop"}}
+			}
+			_, status, raw := lifecycleRequest(t, p, leaf.ID, kind, children)
+			if a := decode[workAction](t, status, raw, 200); a.State != "waiting" {
+				t.Fatal("bound run was not fenced")
+			}
+			// Preserve original run and order placement even for terminal run writes.
+			checks := []struct {
+				sql  string
+				args []any
+			}{
+				{`UPDATE harness_sessions SET work_order_id=NULL,run_id=NULL WHERE id=$1`, []any{sid}},
+				{`UPDATE harness_sessions SET work_order_id=$2,run_id=NULL WHERE id=$1`, []any{sid, destinationOrder}},
+				{`UPDATE agent_runs SET queue_node_id=$2,work_order_id=$3 WHERE id=$1`, []any{run, other.ID, destinationOrder}},
+				{`UPDATE agent_runs SET queue_node_id=NULL,queue_by_principal_id=NULL,queue_at=NULL,queue_security_review_required=NULL,work_order_id=$2,status='completed' WHERE id=$1`, []any{run, destinationOrder}},
+			}
+			for _, check := range checks {
+				err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), check.sql, check.args...)
+					return err
+				})
+				var pg *pgconn.PgError
+				if !errors.As(err, &pg) || pg.ConstraintName != "work_handover_pending" {
+					t.Fatalf("bound generation escaped original order/run: %v", err)
+				}
+			}
+		})
 	}
 }

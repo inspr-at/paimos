@@ -289,6 +289,18 @@ func (m *Module) handleWorkLifecycle(w http.ResponseWriter, r *http.Request) {
 				out = a
 				return m.record(ctx, tx, p.ID, &id, "work.lifecycle_abandoned", nil, a)
 			}
+			if !fresh {
+				// A continuation renews expired cooperative delivery. The shared
+				// busy predicate still waits for every original confirmed stop.
+				ids := make([]string, 0, len(a.targets))
+				for _, target := range a.targets {
+					ids = append(ids, target.ID)
+				}
+				handoverFlush, err = harness.PrepareWorkHandover(ctx, tx, p, ids, a.ID)
+				if err != nil {
+					return err
+				}
+			}
 			if _, err = tx.Exec(ctx, `SELECT set_config('aeon.work_lifecycle_action',$1,true)`, a.ID); err != nil {
 				return err
 			}
@@ -416,7 +428,7 @@ func (m *Module) finishWorkAction(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		// An order marked running can be settled only after every real run reports
 		// terminal and every bound generation reports stopped. Heartbeat loss alone
 		// is not process exit and aeon_work_busy deliberately keeps that fence.
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.ticket_node_id=$1 OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.run_id IN(SELECT id FROM agent_runs WHERE queue_node_id=$1 OR work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1))) AND s.stopped_at IS NULL)
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.ticket_node_id=$1 OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.run_id IN(SELECT id FROM agent_runs WHERE queue_node_id=$1 OR work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1))) AND NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason))
    OR EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE (r.queue_node_id=$1 OR o.parent_id=$1) AND r.status IN ('queued','starting','running','waiting'))`, target.ID).Scan(&busy); err != nil {
 			return err
 		}

@@ -643,7 +643,9 @@ type registration struct {
 	WorkerLease      string   `json:"worker_lease"`
 }
 
-func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, flush := deferControlEvents(r, tx)
+	defer flush(&err)
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
 	if p.Kind == tenant.Agent {
@@ -1181,7 +1183,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	return s, record(ctx, tx, p, s, "bound", before, s)
 }
-func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, flush := deferControlEvents(r, tx)
+	defer flush(&err)
 	var in struct {
 		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport

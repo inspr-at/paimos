@@ -19,6 +19,16 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- Silence, lost ownership and administrative removal cannot prove process exit.
+-- Unknown reasons fail closed. All work guards share this explicit predicate.
+CREATE FUNCTION aeon_work_session_stopped(p_stopped timestamptz,p_reason text)
+RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+ SELECT p_stopped IS NOT NULL AND coalesce(p_reason IN
+  ('stopped','completed','process_exited','process_failed','force_stopped',
+   'token_budget_exhausted','turn_budget_exhausted','paused',
+   'attach confirmed exited by kernel process check'),false);
+$$;
+
 CREATE FUNCTION aeon_work_busy(p_node uuid) RETURNS boolean LANGUAGE plpgsql AS $$
 DECLARE answer boolean; v text := current_setting('aeon.visible_projects',true); s text := current_setting('aeon.system',true);
 BEGIN
@@ -26,7 +36,7 @@ BEGIN
  SELECT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.ticket_node_id=p_node
    OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=p_node)
    OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=p_node)
-   OR s.run_id IN(SELECT r.id FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE r.queue_node_id=p_node OR o.parent_id=p_node)) AND s.stopped_at IS NULL)
+   OR s.run_id IN(SELECT r.id FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE r.queue_node_id=p_node OR o.parent_id=p_node)) AND NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason))
   OR EXISTS(SELECT 1 FROM agent_runs r LEFT JOIN nodes o ON o.id=r.work_order_id
    WHERE (r.queue_node_id=p_node OR o.parent_id=p_node) AND r.status IN ('queued','starting','running','waiting'))
   OR EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.id=w.node_id WHERE n.parent_id=p_node AND n.deleted_at IS NULL AND w.status='running') INTO answer;
@@ -47,14 +57,18 @@ END;
 $$;
 
 CREATE FUNCTION aeon_guard_work_binding() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE target uuid; targets uuid[] := ARRAY[]::uuid[];
+DECLARE target uuid; targets uuid[] := ARRAY[]::uuid[]; reviving boolean:=false;
 BEGIN
  -- The endpoint holds pairing -> tree -> tenant before any resource rows.
- -- SQL writers use the same tree advisory key; old/stopped bindings stay put.
+ -- SQL writers use the same tree advisory key. Same-generation revival and
+ -- progress keep the existing binding, even during a pending handover.
  IF TG_TABLE_NAME='harness_sessions' THEN
-  IF NEW.stopped_at IS NOT NULL THEN RETURN NEW; END IF;
+  IF aeon_work_session_stopped(NEW.stopped_at,NEW.stop_reason) THEN RETURN NEW; END IF;
   IF TG_OP='UPDATE' AND NEW.ticket_node_id IS NOT DISTINCT FROM OLD.ticket_node_id
-   AND NEW.work_order_id IS NOT DISTINCT FROM OLD.work_order_id AND NEW.run_id IS NOT DISTINCT FROM OLD.run_id AND OLD.stopped_at IS NULL THEN RETURN NEW; END IF;
+   AND NEW.work_order_id IS NOT DISTINCT FROM OLD.work_order_id AND NEW.run_id IS NOT DISTINCT FROM OLD.run_id AND NOT aeon_work_session_stopped(OLD.stopped_at,OLD.stop_reason) THEN
+   IF OLD.stopped_at IS NOT NULL AND NEW.stopped_at IS NULL THEN reviving:=true;
+   ELSE RETURN NEW; END IF;
+  END IF;
   targets:=array_append(targets,NEW.ticket_node_id);
   IF NEW.work_order_id IS NOT NULL THEN SELECT array_append(targets,parent_id) INTO targets FROM nodes WHERE id=NEW.work_order_id; END IF;
   IF NEW.run_id IS NOT NULL THEN
@@ -86,7 +100,13 @@ BEGIN
  IF EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=target AND k.slug='work_order') THEN
   SELECT parent_id INTO target FROM nodes WHERE id=target;
  END IF;
- PERFORM aeon_require_work_leaf(target);
+ IF reviving THEN
+  -- Recovery may finish this generation's pending handover, but never admit
+  -- work on a historical parent that was split before this guard existed.
+  IF EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=target AND k.slug='work') AND NOT aeon_work_leaf(target) THEN
+   RAISE EXCEPTION 'agents work on leaves only' USING ERRCODE='23514',CONSTRAINT='work_leaf_required';
+  END IF;
+ ELSE PERFORM aeon_require_work_leaf(target); END IF;
  END LOOP;
  RETURN NEW;
 END;
