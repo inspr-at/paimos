@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { tierEvidenceRefresh, type AgentEventIdentity } from '../lib/tierEvidenceLive'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, myPermissions } from '../lib/authz'
@@ -26,9 +27,11 @@ import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
+import QuotaWarnings from '../components/agents/QuotaWarnings.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 import AttachPending from '../components/agents/AttachPending.vue'
 
@@ -48,6 +51,16 @@ watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   await nextTick()
   cursor.value = id
   focusRow(id)
+}, { immediate: true })
+// Provider-change notices link to the affected run's session or queued row.
+watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => agents.runs], async ([id, loaded]) => {
+  if (!loaded || typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return
+  const linked = agents.sessions.find(s => s.run_id === id)
+  if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
+  await nextTick()
+  if (route.query.run !== id) return
+  const queued = document.getElementById(`run-${id}`)
+  if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
@@ -273,20 +286,25 @@ let stop: (() => void) | undefined
 const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
-let tierCatchUp = false
-function changed(event?: string) {
-  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
+const evidenceRefresh = tierEvidenceRefresh(() => selected.value?.session, session => {
+  void serviceTiers.load(session).catch(error => { serviceTiers.errors[session.id] = error instanceof Error ? error.message : 'Tier evidence unavailable.' })
+}, () => document.visibilityState !== 'hidden')
+function evidenceVisible() { if (document.visibilityState !== 'hidden') evidenceRefresh.notify() }
+function changed(event?: string, identity?: AgentEventIdentity) {
+  evidenceRefresh.notify(event, identity)
+  // Confirmation polling already tracks its own exact pending sessions.
+  if (!event) serviceTiers.reconcile()
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
   debounce = setTimeout(() => {
     debounce = undefined
-    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
     void agents.loadAll()
   }, 400)
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
   stopTierWatch = serviceTiers.watchPage()
+  document.addEventListener('visibilitychange', evidenceVisible)
   void agents.loadAll()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
@@ -295,6 +313,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
+  evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
@@ -321,6 +340,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <template v-else>Connecting…</template>
           </span>
         </p>
+        <button type="button" class="icon-btn sm flat" aria-label="Model preferences" data-tip="Which models do which work" @click="openModelPrefs()"><AppIcon name="gear" :size="16" /></button>
         <RouterLink class="context-link" to="/decision-desk">Decision Desk</RouterLink>
         <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
@@ -360,6 +380,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
+        <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
         <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny

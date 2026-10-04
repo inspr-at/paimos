@@ -50,8 +50,19 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
     }
     if (path === '/api/decision-desk') {
       const params = new URL(request.url()).searchParams, state = params.get('state'), offset = Number(params.get('offset') || 0)
-      const selected = questions.filter(question => !state || question.state === state)
-      return route.fulfill({ status: control.failQuestions ? 403 : 200, json: control.failQuestions ? { error: 'Forbidden' } : { items: selected.slice(offset, offset + 100), has_more: selected.length > offset + 100 } })
+      let selected = questions.filter(question => !state || question.state === state)
+      const key = (question: Question) => [question.answer?.created_at ?? question.updated_at, question.id] as const
+      if (params.get('order') === 'desc') {
+        selected.sort((a, b) => key(b)[0].localeCompare(key(a)[0]) || key(b)[1].localeCompare(key(a)[1]))
+        if (params.get('cursor')) {
+          const [at, id] = JSON.parse(Buffer.from(params.get('cursor')!, 'base64url').toString()) as [string, string]
+          selected = selected.filter(question => key(question)[0] < at || (key(question)[0] === at && question.id < id))
+        }
+      }
+      const items = selected.slice(offset, offset + 100), has_more = selected.length > offset + 100
+      const last = items.at(-1)
+      return route.fulfill({ status: control.failQuestions ? 403 : 200, json: control.failQuestions ? { error: 'Forbidden' } : { items, has_more,
+        ...(params.get('order') === 'desc' && has_more && last ? { next_cursor: Buffer.from(JSON.stringify(key(last))).toString('base64url') } : {}) } })
     }
     if (options.tier && path === '/api/harness-sessions') return route.fulfill({ json: { items: [{ id: 'tier-session', project_id: 'p-aeon', agent_principal_id: 'agent-1', ticket_node_id: 'n-a1', harness: 'codex', host: 'test', phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: '2026-10-02T08:00:00Z', management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'service_tier_v1'], process_ownership: ownership, revision: 1, row_version: 1, project: { id: 'p-aeon', key: 'AEON', title: 'Paimos Aeon' } }], next_cursor: null } })
     if (options.tier && path.endsWith('/tier')) return route.fulfill({ json: tier })
@@ -80,6 +91,7 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
       return route.fulfill({ json: question })
     }
     if (path === '/api/outcomes') return route.fulfill({ json: { outcomes: [{ id: 'outcome-ci', kind: 'ci_result', ticket_key: 'AEON-1', rules_version: null, release_title: null, recorded_at: '2026-10-02T08:00:00Z', payload: { result: 'pass', name: 'Tenant isolation', repo: 'inspr-at/paimos', number: 181 } }] } })
+    if (path === '/api/key-trim-proposals' && method === 'GET') return route.fulfill({ json: { items: [], has_more: false } })
     if (path === '/api/approvals') return route.fulfill({ json: [approval] })
     if (path.startsWith('/api/approvals/') && method === 'POST') { const body = request.postDataJSON(); calls.push({ path, body }); return route.fulfill({ status: control.denyWrite ? 409 : 200, json: control.denyWrite ? { error: 'Approval expired.' } : { ...approval, decision: body.decision } }) }
     if (path === '/api/rules/doctrine/inbox') return route.fulfill({ json: { items: [rule], pending: 1 } })

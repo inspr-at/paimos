@@ -314,6 +314,7 @@ watch(bulkBar, bar => {
   bulkHeight.value = 0
   const element = bar?.$el.querySelector('.bulk-bar') as HTMLElement | undefined
   if (!element) return
+  bulkHeight.value = element.offsetHeight
   bulkResize = new ResizeObserver(() => { bulkHeight.value = element.offsetHeight })
   bulkResize.observe(element)
 }, { flush: 'post' })
@@ -1715,6 +1716,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        :density="density" :columns="toolbarColumns" :header-graph="headerGraph"
+        @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
+        @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
@@ -1790,9 +1794,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
-.list-view.selecting { padding-bottom: 76px; }
+.list-view.selecting { padding-bottom: calc(var(--live-obstacle-h, 0px) + 20px + env(safe-area-inset-bottom)); }
 @media (max-width: 720px) {
-  .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); }
   /* The fixed chip never moves rows when it arrives; the last row can scroll
      above both it and the measured selection sheet. Desktop stays in the header. */
   .list-view.has-live-updates { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }

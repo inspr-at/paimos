@@ -130,6 +130,7 @@
   --light-wash: rgba(255, 255, 255, 0.9);
   --aqua-wash: rgba(199, 239, 236, 0.6);
   --gold-wash: rgba(232, 192, 122, 0.12);
+  --level-default: #8a9a9b; --level-person: #0e6f6c; --level-project: #d69b31;
   color-scheme: light;
 }
 
@@ -174,6 +175,7 @@
   --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
   --focus-ring: 0 0 0 2px rgba(164, 229, 223, 0.75), 0 0 16px rgba(164, 229, 223, 0.35);
   --button-ink: #102327; --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+  --level-default: #8fa5a4; --level-person: #a4e5df; --level-project: #e2b45a;
   color-scheme: dark;
 }
 
@@ -219,6 +221,7 @@
     --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
     --focus-ring: 0 0 0 2px rgba(164, 229, 223, 0.75), 0 0 16px rgba(164, 229, 223, 0.35);
     --button-ink: #102327; --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+    --level-default: #8fa5a4; --level-person: #a4e5df; --level-project: #e2b45a;
     color-scheme: dark;
   }
 }

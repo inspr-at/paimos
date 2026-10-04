@@ -36,7 +36,7 @@ func makeRegistry() []Permission {
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"questions", "ask read decide"}, {"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
-		{"model_prefs", "manage"}, {"models", "read manage resolve"}, {"plugins", "read manage invoke"},
+		{"model_prefs", "manage"}, {"models", "read manage resolve report refresh"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
 		{"events", "read undo undo_other"}, {"search", "read"}, {"outcome", "read write"},
 		{"hours", "read write approve"}, {"quotes", "read write issue accept delete manage portal_read portal_accept"},
