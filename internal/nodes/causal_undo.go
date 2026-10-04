@@ -97,6 +97,13 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if err := authorizeWorkRestore(p, current, before); err != nil {
 		return events.Change{}, err
 	}
+	issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, before.State, fields)
+	if err != nil {
+		return events.Change{}, err
+	}
+	if len(issues) > 0 {
+		return events.Change{}, events.ErrConflict
+	}
 	restored, err := scanNode(tx.QueryRow(ctx, `UPDATE nodes SET title=$2,body=$3,fields=$4::jsonb,state=$5,human_check=$6,deleted_at=$7,
  updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1::uuid RETURNING `+nodeReturning,
 		current.ID, before.Title, before.Body, fields, before.State, before.HumanCheck, before.DeletedAt))

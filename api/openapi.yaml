@@ -5020,7 +5020,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A work item or legacy ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -5128,7 +5128,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a work item or legacy ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
+                          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -5243,7 +5243,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A work item or legacy ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -5265,6 +5265,39 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /nodes/{nodeId}/benefit-generation:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: getParentBenefitGeneration
+      security: *auth
+      description: Parent-only asynchronous bilingual benefit status. Done never waits for generation. Leaf completion gates and published note snapshots are unchanged.
+      responses:
+        '200': {description: Current generation status, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/benefit-generation/retry:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: retryParentBenefitGeneration
+      security: *auth
+      description: Person-only retry requiring nodes.write in the current project. Request bodies are limited to 4 KiB with a five-second read deadline before decoding or mutation locks. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_generation, expected_revision]
+              properties:
+                expected_generation: {type: string, format: uuid}
+                expected_revision: {type: string, format: date-time}
+      responses:
+        '202': {description: Queued, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/attachments:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
@@ -5682,7 +5715,7 @@ paths:
       - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
     get:
       operationId: previewCausalUndo
-      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision and mutation permissions as Undo without committing writes. Reversing roadmap publication, a human-check completion or its person provenance requires a person, including for imported child changes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
+      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision, mutation permissions and bilingual benefit completion requirements as Undo without committing writes, including tenant-defined Done categories. Reversing roadmap publication, a human-check completion or its person provenance requires a person, including for imported child changes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
       security: *auth
       responses:
         '200':
@@ -11951,6 +11984,16 @@ components:
         at: {type: string, format: date-time}
         changed_since: {type: boolean}
         applicable: {type: boolean, description: 'Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.'}
+    ParentBenefitGeneration:
+      type: object
+      required: [is_parent, status, generation, revision, generated]
+      properties:
+        is_parent: {type: boolean}
+        status: {type: string, enum: [none, queued, running, failed, generated, edited, cancelled]}
+        generation: {type: string, description: Opaque attempt identity; empty when no attempt exists.}
+        revision: {type: string, format: date-time}
+        generated: {type: boolean, description: Current text was generated; becomes false after a human edits a benefit field.}
+        error: {type: string, description: Safe actionable failure message; never raw provider output.}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
@@ -11965,6 +12008,7 @@ components:
           required: [crm_note_rewrite, embeddings]
           properties:
             crm_note_rewrite: {type: boolean, default: false, description: Also requires the business_crm plugin and tools.invoke grant; generation creates a draft for human review.}
+            parent_benefits: {type: boolean, default: false, description: Summarises completed parents from their leaves in English and German behind work-parent-status. Never delays Done or edits published snapshots.}
             embeddings: {type: boolean, default: false, description: Allows background node indexing and semantic search queries for this workspace.}
     WorkspaceModelProvider:
       allOf:
@@ -18381,7 +18425,7 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a work item or legacy ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
         children:
           type: array
           description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.

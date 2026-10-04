@@ -124,6 +124,14 @@ export interface Kind {
   id: string; slug: string; label: string; short_prefix: string; icon: string
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
+export interface ParentBenefitGeneration {
+  is_parent: boolean
+  status: 'none' | 'queued' | 'running' | 'failed' | 'generated' | 'edited' | 'cancelled'
+  generation: string
+  revision: string
+  generated: boolean
+  error?: string
+}
 export interface WorkNode {
   recurrence?: NodeRecurrence
   queue_stale?: boolean

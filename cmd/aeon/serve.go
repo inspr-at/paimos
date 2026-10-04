@@ -66,6 +66,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
+	"github.com/inspr-at/paimos/internal/parentbenefits"
 	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
@@ -173,6 +174,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	// In-app models are workspace opt-ins. There is no global vendor fallback.
 	workspaceModels := modelprovider.New(pool, authCfg.SessionKey)
+	parentBenefits := parentbenefits.New(pool, workspaceModels.ParentBenefits)
 	workspaceNotes := crm.WorkspaceNotes{Provider: workspaceModels}
 	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, func() (plugins.Plugin, error) { return crm.PluginWithNoteGenerator(workspaceNotes) }, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin, host.Plugin}
 	journalStore, err := journal.NewStore(pool)
@@ -256,6 +258,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("public quotes: %w", err)
 	}
 	go embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(ctx)
+	go parentBenefits.Run(ctx)
 	go runConfirmationJobs(ctx, pool, confirmationMod, pdfConcurrency)
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()
@@ -371,6 +374,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			tenantbrand.New(pool),
 			features.New(pool),
 			workspaceModels,
+			parentBenefits,
 			relations.New(pool),
 			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(themes.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),

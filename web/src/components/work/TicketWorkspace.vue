@@ -249,7 +249,7 @@ function focusBenefit(key: string) {
 function refreshBenefitNotice() {
   const target = item.value
   if (!benefitNotice.value || !target) return
-  if (!needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields: draft }, draft.state)) {
+  if (!needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields: draft }, draft.state)) {
     benefitNotice.value = ''
     benefitInvalidKey.value = ''
     return
@@ -304,7 +304,7 @@ async function saveEdit() {
   setField('notes', draft.notes, base.notes)
   setField('priority', draft.priority, base.priority)
   setField('assignee', draft.assignee, base.assignee)
-  if (target.kind_slug === 'ticket') {
+  if (['ticket', 'work'].includes(target.kind_slug)) {
     for (const key of benefitTextKeys) setField(key, draft[key], base[key])
     if (draft.hide_from_release_notes !== base.hide_from_release_notes) changed.hide_from_release_notes = draft.hide_from_release_notes
   }
@@ -313,7 +313,7 @@ async function saveEdit() {
   const fields: Record<string, unknown> = { ...(ticket.base()?.fields ?? target.fields) }
   for (const [key, value] of Object.entries(changed)) { if (value === undefined) delete fields[key]; else fields[key] = value }
   // The benefit editor is already on this form. Point at the first incomplete field.
-  if (needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields }, draft.state)) {
+  if (needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields }, draft.state)) {
     const gap = firstBenefitGap(fields)
     benefitNotice.value = gap?.line ?? 'A 2–4 word pill and a benefit, in both languages, are required.'
     benefitInvalidKey.value = gap?.key ?? 'pill_en'
@@ -677,7 +677,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
+        <TicketBenefits v-if="['ticket', 'work'].includes(item.kind_slug)" class="edit-benefits" :fields="draft" :parent="item.estimate?.is_parent" editing :disabled="saving" :done="completedTicketState(item.state, rowStore.kindSchema(item.kind_id))" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
         <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
@@ -730,7 +730,7 @@ defineExpose({
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
             </div>
-            <TicketBenefits v-if="item.kind_slug === 'ticket'" class="ws-benefits" :fields="item.fields" :done="completedTicketState(item.state)" :editable="editable" @edit="startEdit('benefit')" />
+            <TicketBenefits v-if="['ticket', 'work'].includes(item.kind_slug)" class="ws-benefits" :fields="item.fields" :parent="item.estimate?.is_parent" :node-id="item.id" @generated="ticket.refresh()" :done="completedTicketState(item.state, rowStore.kindSchema(item.kind_id))" :editable="editable" @edit="startEdit('benefit')" />
           </div>
 
           <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />

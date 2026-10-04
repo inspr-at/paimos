@@ -418,7 +418,11 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			if plan.state != nil {
 				state = *plan.state
 			}
-			if issues := ticketbenefits.Transition(target.kindSlug, current.State, state, fields); len(issues) > 0 {
+			issues, err := benefitTransition(ctx, tx, current.KindID, target.kindSlug, current.State, state, fields)
+			if err != nil {
+				return err
+			}
+			if len(issues) > 0 {
 				result.Skipped = append(result.Skipped, bulkSkip{
 					ID: current.ID, Key: current.Key,
 					Reason: "before done: " + strings.Join(issues, "; "),
@@ -651,7 +655,11 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			return events.Change{}, events.ErrConflict
 		}
 		old := before.Items[i]
-		if len(ticketbenefits.Transition(kinds[now.ID], now.State, old.State, old.Fields)) > 0 {
+		issues, err := benefitTransition(ctx, tx, now.KindID, kinds[now.ID], now.State, old.State, old.Fields)
+		if err != nil {
+			return events.Change{}, err
+		}
+		if len(issues) > 0 {
 			return events.Change{}, events.ErrConflict
 		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {

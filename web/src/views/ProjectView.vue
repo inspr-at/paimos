@@ -944,7 +944,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
     if (!kind) throw new Error('this workspace has no such type')
     let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
-    if (needsBenefitPrompt({ kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
+    if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
       const text = await askDoneGate({ key: 'New ticket', title: draft.title, state: draft.state, fields })
       if (!text) return false
       fields = completionFields(fields, text)
@@ -1643,6 +1643,7 @@ onMounted(() => {
   scrollRoot.value = document.getElementById('main')
   void projects.load()
   document.addEventListener('pointerdown', dismissDescription)
+  void kinds().catch(() => { /* The server completion gate remains authoritative. */ })
   window.addEventListener('keydown', keydown)
   window.addEventListener('beforeunload', beforeUnload)
   phoneQuery.addEventListener('change', onPhone)

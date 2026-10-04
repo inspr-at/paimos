@@ -2,6 +2,7 @@
 package nodes
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,10 +22,11 @@ import (
 const benefitFields = `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`
 
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
-	for _, state := range []string{"done", "accepted", "delivered"} {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits")
 			k := kindBySlug(t, p, "work")
+			setBenefitStateCatalog(t, p.TenantID, k.ID)
 			for _, key := range []string{"pill_en", "pill_de", "benefit_en", "benefit_de", "hide_from_release_notes"} {
 				if !strings.Contains(string(k.FieldSchema), key) {
 					t.Fatalf("seed missing %s", key)
@@ -63,7 +65,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 			// Already-completed imports/history are not retroactively blocked or translated.
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{},"title":"Historical edit"}`)
 			decode[nodeJSON](t, code, raw, 200)
-			for _, after := range []string{"done", "accepted", "delivered"} {
+			for _, after := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 				code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"title":"Completed historical edit"}`, after))
 				historical := decode[nodeJSON](t, code, raw, 200)
 				if historical.State != after || historical.Title != "Completed historical edit" || string(historical.Fields) != "{}" {
@@ -85,10 +87,11 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 	}
 }
 func TestTicketBenefitsBulkAndUndo(t *testing.T) {
-	for _, state := range []string{"done", "accepted", "delivered"} {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", "CUSTOM--COMPLETE"} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits-bulk")
 			k := kindBySlug(t, p, "work")
+			setBenefitStateCatalog(t, p.TenantID, k.ID)
 			pk := kindBySlug(t, p, "project")
 			a := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"One"}`)
 			b := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"Two"}`)
@@ -140,6 +143,59 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkBenefitsCausalUndoRejectsIncompleteCompletion(t *testing.T) {
+	for _, state := range []string{"done", "custom-complete"} {
+		for _, fields := range []string{`{}`, `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit."}`} {
+			for _, method := range []string{"GET", "POST"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", state, fields, method), func(t *testing.T) {
+					p := newPrincipal(t, "benefits-causal-undo")
+					k := kindBySlug(t, p, "work")
+					setBenefitStateCatalog(t, p.TenantID, k.ID)
+					parent := workNodeTest(t, p, "", "open")
+					enableWorkStatusTest(t, p)
+					child := workNodeTest(t, p, parent.ID, state)
+					// Historical completed leaves remain editable without benefits.
+					code, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, fmt.Sprintf(`{"fields":%s}`, fields))
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					// The current leaf has valid benefits; Undo must validate the
+					// historical fields it would restore, rather than these fields.
+					code, raw = call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"state":"open","fields":`+benefitFields+`}`)
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					id, cause := lastDerivedTest(t, p, parent.ID)
+					if currentWorkTest(t, p, parent.ID).State != "open" || currentWorkTest(t, p, child.ID).State != "open" {
+						t.Fatal("fixture did not reopen the leaf and derive its parent")
+					}
+					// Capture complete rows (including benefit jobs and revisions)
+					// plus the audit log, so a rejection cannot partially mutate them.
+					snapshot := func() (json.RawMessage, json.RawMessage) {
+						t.Helper()
+						var nodes, audit json.RawMessage
+						if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+							if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n WHERE id=ANY($1::uuid[])`, []string{parent.ID, child.ID}).Scan(&nodes); err != nil {
+								return err
+							}
+							return tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e`).Scan(&audit)
+						}); err != nil {
+							t.Fatal(err)
+						}
+						return nodes, audit
+					}
+					beforeNodes, beforeAudit := snapshot()
+					code, raw = causalCallTest(t, p, method, id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+					if code != http.StatusConflict || !strings.Contains(string(raw), `"code":"conflict"`) || !strings.Contains(string(raw), events.ErrConflict.Error()) {
+						t.Errorf("incomplete completion must reject causal Undo: %d %s", code, raw)
+					}
+					afterNodes, afterAudit := snapshot()
+					if !sameJSON(beforeNodes, afterNodes) || !sameJSON(beforeAudit, afterAudit) {
+						t.Error("rejected causal Undo changed the leaf, parent, benefit job, revision or audit log")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
 	p := newPrincipal(t, "benefits-race")
 	k := kindBySlug(t, p, "work")
@@ -171,5 +227,128 @@ func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
 	}
 	if counts[200] != 1 || counts[412] != 1 {
 		t.Fatal(counts)
+	}
+}
+
+// The same catalog drives parent derivation and successful leaf completion.
+func setBenefitStateCatalog(t *testing.T, tenantID, kindID string) {
+	t.Helper()
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}', '[{"state":"custom-complete","category":"done"},{"state":"done","category":"done"}]') WHERE id=$1`, kindID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBenefitCompletionCategoryOverridesLiteralNames(t *testing.T) {
+	p := newPrincipal(t, "benefit-overrides")
+	k := kindBySlug(t, p, "work")
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}','[{"state":"done","category":"open"},{"state":"ready","category":"done"}]') WHERE id=$1`, k.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A configured Open category on a literal completion name is not completion.
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Open category","state":"done"}`, k.ID))
+	code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"ready"}`)
+	if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) {
+		t.Fatalf("category override bypassed leaf gate: %d %s", code, raw)
+	}
+}
+
+func TestTicketBenefitsCausalUndoCompletion(t *testing.T) {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, complete := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/benefits=%t", state, method, complete), func(t *testing.T) {
+					p := newPrincipal(t, "causal-benefits")
+					k := kindBySlug(t, p, "work")
+					setBenefitStateCatalog(t, p.TenantID, k.ID)
+					parent := workNodeTest(t, p, "", "open")
+					child := workNodeTest(t, p, parent.ID, "open")
+					parentState := "done"
+					if state == "accepted" || state == "delivered" {
+						parentState = state
+					}
+					fields := "{}"
+					if complete {
+						fields = benefitFields
+					}
+					// Seed historical completion before enabling derivation. Reopening
+					// and both Undo routes then use the actual HTTP write path.
+					if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+						if _, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2,fields=$3::jsonb WHERE id=$1`, child.ID, state, fields); err != nil {
+							return err
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, parent.ID, parentState)
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+					enableWorkStatusTest(t, p)
+					if currentWorkTest(t, p, parent.ID).State != parentState {
+						t.Fatal("historical fixture lost its completed parent state")
+					}
+					// The restored snapshot, rather than the fields currently on
+					// screen, must decide whether re-entering Done is allowed.
+					reopenedFields := benefitFields
+					if complete {
+						reopenedFields = "{}"
+					}
+					code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+child.ID, fmt.Sprintf(`{"state":"open","fields":%s}`, reopenedFields))
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					id, cause := lastDerivedTest(t, p, parent.ID)
+					beforeChild := currentWorkTest(t, p, child.ID)
+					beforeParent := currentWorkTest(t, p, parent.ID)
+					countEvents := func() int {
+						t.Helper()
+						var count int
+						if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+							return tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&count)
+						}); err != nil {
+							t.Fatal(err)
+						}
+						return count
+					}
+					beforeEvents := countEvents()
+					code, raw = causalCallTest(t, p, method, id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+					want := http.StatusConflict
+					if complete {
+						want = http.StatusOK
+						if method == http.MethodPost {
+							want = http.StatusCreated
+						}
+					}
+					if code != want || !complete && !strings.Contains(string(raw), `"code":"conflict"`) {
+						t.Fatalf("causal completion gate: %d want %d: %s", code, want, raw)
+					}
+					if !complete || method == http.MethodGet {
+						for _, before := range []nodeJSON{beforeChild, beforeParent} {
+							after := currentWorkTest(t, p, before.ID)
+							if after.State != before.State || !after.UpdatedAt.Equal(before.UpdatedAt) || !reflectJSONEqual(after.Fields, before.Fields) {
+								t.Fatal("refused Undo or preview changed child/parent", after)
+							}
+						}
+						if countEvents() != beforeEvents {
+							t.Fatal("refused Undo or preview appended events")
+						}
+					} else {
+						restored := currentWorkTest(t, p, child.ID)
+						var restoredFields, expectedFields map[string]any
+						if err := json.Unmarshal(restored.Fields, &restoredFields); err != nil {
+							t.Fatal(err)
+						}
+						if err := json.Unmarshal([]byte(fields), &expectedFields); err != nil {
+							t.Fatal(err)
+						}
+						if restored.State != state || !reflectJSONEqual(restoredFields, expectedFields) || currentWorkTest(t, p, parent.ID).State != parentState || countEvents() <= beforeEvents {
+							t.Fatal("valid causal completion did not restore child and derive parent", restored)
+						}
+					}
+				})
+			}
+		}
 	}
 }

@@ -35,7 +35,7 @@ type NodeChange struct {
 var nodeChangeTypes = map[string]bool{
 	"status_autopilot.derived": true, "import.node_updated": true, "import.node_created": true,
 	"status_autopilot.changed": true, "status_autopilot.undone": true, "import.parent_changed": true,
-	"node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
+	"node.benefits_generated": true, "node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
 	"node.project_moved": true, "node.deleted": true, "node.bulk_changed": true,
 }
 

@@ -303,7 +303,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if err != nil {
 			return err
 		}
-		if issues := ticketbenefits.Transition(kind.Slug, "", state, fields); len(issues) > 0 {
+		issues, err := benefitTransition(ctx, tx, kindID, kind.Slug, "", state, fields)
+		if err != nil {
+			return err
+		}
+		if len(issues) > 0 {
 			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
 		if parentID != nil {
@@ -545,14 +549,12 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		if _, fieldsChanged := raw["fields"]; fieldsChanged || checkChanged {
 			sets = append(sets, "fields = "+add(string(nextFields))+"::jsonb")
 		}
-		if ticketbenefits.Completed(nextState) && !ticketbenefits.Completed(current.State) {
-			kind, _, err := loadKind(ctx, tx, current.KindID)
-			if err != nil {
-				return err
-			}
-			if issues := ticketbenefits.Transition(kind.Slug, current.State, nextState, nextFields); len(issues) > 0 {
-				return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
-			}
+		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, nextFields)
+		if err != nil {
+			return err
+		}
+		if len(issues) > 0 {
+			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
 		if _, hasState := raw["state"]; hasState && workqueue.Terminal(nextState) {
 			if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {

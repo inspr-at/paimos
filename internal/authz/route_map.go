@@ -62,6 +62,8 @@ var RoutePermissions = map[string]string{
 	"POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue": "nodes.write",
 	"DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}":        "nodes.write",
 
+	"GET /api/nodes/{nodeId}/benefit-generation":         "nodes.read",
+	"POST /api/nodes/{nodeId}/benefit-generation/retry":  "nodes.write",
 	"POST /api/agent-keys/{id}/trim-proposals":           "approvals.request",
 	"GET /api/key-trim-proposals":                        "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",
