@@ -221,7 +221,11 @@ export class RowStore {
     // A newer hint need not prevent progress on the one this read already covers.
     const floor = projectionFloor ?? entry.projectionFloor
     const predatesHint = !rewound && sent < (entry.projectionChangedAt ?? 0) && !(position !== undefined && floor !== undefined && position >= floor)
-    if (full && order === 0 && (olderProjection || predatesHint)) return this.visible(entry) ? entry.row : null
+    // Derived state can change at the same edit revision. Node reads have no
+    // projection position, so judge them by request order against every read
+    // that confirmed latest; they must also cover the newest derived hint.
+    const olderRead = full ? olderProjection : sent < entry.readAt
+    if (order === 0 && (olderRead || predatesHint)) return this.visible(entry) ? entry.row : null
     // Older than a revision the store already knows (an event, a write): dropped.
     // The first copy of a node is kept even so; the view reads it again.
     const behind = !!entry.latest && compareRevision(revision, entry.revision) < 0

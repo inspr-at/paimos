@@ -478,6 +478,53 @@ describe('RowStore: any delivery order ends at the server\'s state', () => {
 })
 
 describe('derived parent status', () => {
+  for (const populatedBy of ['node', 'list'] as const) {
+    for (const refreshedBy of ['node', 'list'] as const) {
+      for (const hint of [false, true]) {
+        it(`keeps the fresh ${refreshedBy} status when an older node response lands in a ${populatedBy} cache${hint ? ' after a derived hint' : ''}`, () => {
+          const rows = new RowStore()
+          const initial = rows.mark()
+          const row = populatedBy === 'node'
+            ? rows.adoptNode(node('n1', 1, { state: 'open' }), initial, { show: true })!
+            : rows.adopt(item('n1', 1, { state: 'open' }), initial, { show: true })!
+          // Both requests start after the hint. Only response order, rather
+          // than a pre-hint check, can reject the outstanding old snapshot.
+          if (hint) rows.note({ id: 'n1', type: 'status_autopilot.derived', eventId: 41, change: 'updated', fields: ['state'], revision: at(1) })
+          const older = rows.mark(), fresh = rows.mark()
+          if (refreshedBy === 'node') rows.adoptNode(node('n1', 1, { state: 'done' }), fresh, { show: true })
+          else rows.adopt(item('n1', 1, { state: 'done' }), fresh, { show: true })
+          expect(rows.latest('n1')?.state).toBe('done')
+          expect(row.state).toBe('done')
+          expect(rows.adoptNode(node('n1', 1, { state: 'open' }), older, { show: true })).toBe(row)
+          expect(rows.latest('n1')?.state).toBe('done')
+          expect(row.state).toBe('done')
+          expect(rows.revision('n1')).toBe(at(1))
+          expect(rows.waiting('n1')).toBe(false)
+          expect(rows.current('n1')).toBe(true)
+        })
+      }
+    }
+  }
+
+  for (const populatedBy of ['node', 'list'] as const) {
+    it(`rejects a pre-hint node snapshot in a ${populatedBy} cache before the derived refresh arrives`, () => {
+      const rows = new RowStore()
+      const initial = rows.mark()
+      const row = populatedBy === 'node'
+        ? rows.adoptNode(node('n1', 1, { state: 'open' }), initial, { show: true })!
+        : rows.adopt(item('n1', 1, { state: 'open' }), initial, { show: true })!
+      const older = rows.mark()
+      rows.note({ id: 'n1', type: 'status_autopilot.derived', eventId: 41, change: 'updated', fields: ['state'], revision: at(1) })
+      rows.adoptNode(node('n1', 1, { state: 'blocked' }), older, { show: true })
+      expect(rows.latest('n1')?.state).toBe('open')
+      expect(row.state).toBe('open')
+      rows.adoptNode(node('n1', 1, { state: 'done' }), rows.mark(), { show: true })
+      expect(rows.latest('n1')?.state).toBe('done')
+      expect(row.state).toBe('done')
+      expect(rows.revision('n1')).toBe(at(1))
+    })
+  }
+
   it('updates a full cached row without changing the edit revision or opening a conflict', () => {
     const rows = new RowStore()
     const row = rows.adopt(item('n1', 1, { state: 'open' }), rows.mark(), { show: true })!

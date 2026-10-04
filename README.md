@@ -3104,6 +3104,9 @@ project visibility only inside the SQL functions, restoring it on every return;
 normal authorization remains in each writer's final transaction. Derived parent
 updates preserve `updated_at`, so they do not invalidate an unrelated title/body
 edit. Live views consume `status_autopilot.derived` at that unchanged revision.
+At that revision, the row store rejects node responses sent before a newer
+accepted read or derived hint, keeping late snapshots from reverting status;
+list snapshots retain their server-position ordering.
 
 Rollout remains OFF until AEON-429's `features` table and service merge. Its
 catalog must register `work-parent-status` (label: “Parents follow their work”),
