@@ -290,7 +290,7 @@ describe('expired account verification', () => {
     view.enrollments[0].verification_state = 'expired'
     view.enrollments[0].verification_expired_ready = true
     const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
-    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'ready', text: 'Ready', hint: 'Verification expired; the live account probe is ready.' })
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'ready', text: 'Ready', tip: 'Verification expired; the live account probe is ready.' })
     expect(readySummary(cards)?.text).toBe('2 of 2 ready')
     expect(view.enrollments[0].verification_state).toBe('expired')
   })

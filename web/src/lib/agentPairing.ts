@@ -96,6 +96,7 @@ export interface PairingEnrollment {
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
   verification_expired_ready?: boolean
+  can_verify?: boolean
   verification_reason?: string
   verification_error?: string | null
   /** Drained only after the computer acknowledges cleanup. Revoke does not infer it. */
@@ -920,7 +921,7 @@ function setupProgress(view: PairingView): PairingProgress {
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) {
     const reason = view.enrollments.find(item => item.verification_error)?.verification_error
-    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'No automatic retry or allowance refill was performed.', renewsAuthority: false }
+    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
     return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
@@ -1832,6 +1833,7 @@ function enrollments(value: unknown): PairingEnrollment[] {
       state: oneOf(record.state, COMPUTER_STATES, 'enrollment.state'),
       local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'enrollment.local_cleanup'),
       verification_run_id: optionalUuid(record.verification_run_id, 'verification_run_id'),
+      ...(typeof record.can_verify === 'boolean' ? { can_verify: record.can_verify } : {}),
       ...(typeof record.verification_expired_ready === 'boolean' ? { verification_expired_ready: record.verification_expired_ready } : {}),
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),

@@ -2368,6 +2368,22 @@ but unbound harnesses name the required `add-harness` command. Account checks
 report a 60-second bound from daemon start for each initial account, or from
 that account being added or unblocked by repin; refreshing unchanged accounts
 does not extend the wait. Capacity capture reports a 10-second bound.
+**Verify again (AEON-685).** An expired one-time verification is informational
+when that enrollment has a fresh successful probe; it does not revoke separately
+approved ongoing use. A sibling's readiness never qualifies it. The account row's
+**Verify again** button authorizes one fresh read-only check for the signed-in
+account owner with `account.manage` (the original approver owns an unlinked
+account). The server checks the computer revision and prior run again under the
+mutation lock, cancels only that account's unclaimed queued check, releases its
+holds and creates one new run with a thirty-minute, one-request allowance.
+Claimed nonterminal checks must be reconciled first. Account identity, runtime
+key, daemon generation, pairing approval and cleanup remain intact.
+`aeon-agentd verify --account ID` opens the existing account's owner approval
+screen; `--no-browser` prints its link. It uses read-only pairing state and neither
+contacts nor restarts the daemon. The link grants no allowance: the signed-in
+owner must choose **Verify again**. Use `--state-root PATH` for a fixture or a
+non-default pairing root.
+
 Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification

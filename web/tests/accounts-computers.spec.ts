@@ -10,6 +10,8 @@ import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
+import { expectStableControls } from './helpers/stable'
+import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 test.use({ timezoneId: TZ })
@@ -289,3 +291,50 @@ test('Touch ID pairing readiness and upgrade guidance keep the computer control 
   expect(after!.height).toBe(before!.height)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
+
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`AEON-685: owner verification stays put at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1100 })
+    const { capacity, data } = await setup(page)
+    const c = capacity.computers[0] as unknown as PairingView
+    const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+    e.can_verify = true
+    e.verification_state = 'expired'
+    e.verification_expired_ready = true
+    c.verification_capabilities = { claude: { supported: true, policy: 'read_only', reason: '' } }
+    c.revision = 1
+    c.harness_statuses = { claude: 'ready' }
+    c.harness_details = { claude: { state: 'ready' } }
+    e.label = 'Markus Barta – langfristige Überprüfung des persönlichen Agentenkontos'
+    data.accounts.find(a => a.id === ACCOUNTS.claude)!.label = e.label
+    let attempts = 0
+    await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', async route => {
+      expect(route.request().postDataJSON()).toEqual({ expected_revision: 1, expected_verification_run_id: e.verification_run_id })
+      attempts++
+      if (attempts === 1) return route.fulfill({ status: 403, json: { code: 'forbidden' } })
+      e.verification_run_id = 'b0000000-0000-4000-8000-000000000685'
+      e.verification_state = 'queued'
+      e.verification_expired_ready = false
+      return route.fulfill({ json: { account_id: e.account_id, run_id: e.verification_run_id, expires_at: '2026-10-01T13:00:00Z' } })
+    })
+    await page.addInitScript(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    const row = panel(page).locator(`[data-account="${ACCOUNTS.claude}"]`)
+    const button = row.getByRole('button', { name: 'Verify again', exact: true })
+    const more = row.getByRole('button', { name: /^More for/ })
+    await expect(button).toBeVisible()
+    await expect(row.getByText('Ready', { exact: true })).toBeVisible()
+    await expectStableControls({
+      controls: { verify: button, more, clickedRow: row }, scrollAreas: { panel: panel(page) },
+      interactions: [
+        { name: 'denied verification', run: async () => { await button.click(); await expect(page.getByText('Only the account owner may verify it again.', { exact: true })).toBeVisible(); await expect(row.getByText('Ready', { exact: true })).toBeVisible() } },
+        { name: 'queued verification', run: async () => { await button.click(); await expect(row.getByText('Verification queued', { exact: true })).toBeVisible() } },
+      ],
+    })
+    expect(attempts).toBe(2)
+    mkdirSync('test-results/aeon-685', { recursive: true })
+    await panel(page).screenshot({ path: `test-results/aeon-685/accounts-${width}-${theme}.png`, animations: 'disabled' })
+  })
+}
