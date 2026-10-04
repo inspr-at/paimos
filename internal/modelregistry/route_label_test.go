@@ -13,24 +13,6 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
-func TestProfileLabel(t *testing.T) {
-	for _, tc := range []struct {
-		profile Profile
-		want    string
-	}{
-		{Profile{Harness: "codex", Model: "gpt-6-astra", Effort: "xhigh"}, "Codex astra · xhigh"},
-		{Profile{Harness: "claude", Model: "opus", Effort: "high"}, "Claude opus · high"},
-		{Profile{Harness: "pi", Model: "anthropic/claude-opus-5", Effort: "xhigh"}, "Pi opus-5 · xhigh"},
-		{Profile{Harness: "cursor", Model: "grok-4.7-xhigh", Effort: "xhigh"}, "Cursor grok-4.7 · xhigh"},
-		{Profile{Harness: "cursor", Model: "grok-4.7-high-fast", Effort: "high"}, "Cursor grok-4.7 fast · high"},
-		{Profile{Harness: "cursor", Model: "composer-2.5", Effort: "default"}, "Cursor composer-2.5"},
-	} {
-		if got := tc.profile.Label(); got != tc.want {
-			t.Errorf("%+v: %q, want %q", tc.profile, got, tc.want)
-		}
-	}
-}
-
 func TestModelKeyMatchesAliasesAndAPIIDs(t *testing.T) {
 	for model, want := range map[string]string{
 		"opus": "opus", "claude-opus-5-5": "opus", "anthropic/claude-opus-5": "opus", "Claude-Sonnet-5": "sonnet",

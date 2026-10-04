@@ -75,7 +75,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 	}
 	deadline := time.Now().Add(time.Duration(waitMS) * time.Millisecond)
 	for len(page.Items) == 0 && time.Now().Before(deadline) {
-		waitErr := waitTenantNotify(ctx, conn, p.TenantID, deadline)
+		waitErr := m.waitNotify(ctx, conn, p.TenantID, deadline)
 		if ctx.Err() != nil {
 			return
 		}
