@@ -54,6 +54,7 @@
         "internal/tenant/**",
         "internal/tenantbootstrap/**",
         "internal/profile/**",
+        "internal/themes/**",
         "internal/imagework/**",
         "internal/attachwatch/**",
         "internal/linkvault/**",

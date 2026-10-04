@@ -451,8 +451,8 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
 		p.Scopes = []string(scopes)
-		p.AuthKeyID = keyID
 		p.KeyID = keyID
+		p.AuthKeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}

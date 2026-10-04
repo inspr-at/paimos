@@ -337,6 +337,19 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 			}
 		})
 	}
+	t.Run("reported availability does not upgrade a legacy pairing", func(t *testing.T) {
+		f, key, in := watchFixture(t)
+		registerCapability(t, f, key, &in, attachwatch.LocalAuthAvailable)
+		in.Snapshot.Platform = "darwin"
+		v := requestWatch(t, f, key, in)
+		if v.ConsentMode != attachwatch.ConsentAeon {
+			t.Fatalf("legacy pairing selected unpinned consent %s", v.ConsentMode)
+		}
+		if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentAeon || got.ConsentSaved || got.Computers[0].PairingUpgraded {
+			t.Fatalf("legacy pairing settings %+v", got)
+		}
+		finishAeonWatch(t, f, key, &in, v)
+	})
 	for _, platform := range []string{"linux", ""} {
 		t.Run("platform "+platform, func(t *testing.T) {
 			f, key, in, _ := upgradedWatchFixture(t)

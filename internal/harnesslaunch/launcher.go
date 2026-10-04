@@ -5,6 +5,7 @@ package harnesslaunch
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -25,23 +26,34 @@ type Node struct {
 
 // NeedsNode inspects only the bounded entrypoint header. Unknown env launchers
 // must not silently select an unpinned interpreter from the service PATH.
-func NeedsNode(path string) (bool, error) {
+func NeedsNode(path string) (_ bool, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("inspect harness launcher %s: %w", path, resultErr)
+		}
+	}()
 	physical, err := filepath.EvalSymlinks(path)
-	if err != nil || !filepath.IsAbs(path) || physical != path {
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", ErrStart, err)
+	}
+	if !filepath.IsAbs(path) || physical != path {
 		return false, ErrStart
 	}
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", ErrStart, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
 		return false, ErrStart
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return false, ErrStart
+		return false, fmt.Errorf("%w: %w", ErrStart, err)
 	}
 	defer f.Close()
 	raw, err := io.ReadAll(io.LimitReader(f, 256))
 	if err != nil {
-		return false, ErrStart
+		return false, fmt.Errorf("%w: %w", ErrStart, err)
 	}
 	line, _, _ := strings.Cut(string(raw), "\n")
 	if !strings.HasPrefix(line, "#!") {
@@ -76,20 +88,34 @@ func Environment(base []string, nodePath string) []string {
 
 // Validate refuses an env-node launcher without its physical interpreter pin.
 // Setup additionally checks ownership, writable ancestors and workspace scope.
-func Validate(path, nodePath string) error {
+func Validate(path, nodePath string) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("validate harness launcher %s with Node pin %s: %w", path, nodePath, resultErr)
+		}
+	}()
 	needed, err := NeedsNode(path)
-	if err != nil || needed && nodePath == "" {
+	if err != nil {
+		return err
+	}
+	if needed && nodePath == "" {
 		return ErrStart
 	}
 	if nodePath == "" {
 		return nil
 	}
 	physical, err := filepath.EvalSymlinks(nodePath)
-	if err != nil || !filepath.IsAbs(nodePath) || physical != nodePath || filepath.Base(nodePath) != "node" {
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrStart, err)
+	}
+	if !filepath.IsAbs(nodePath) || physical != nodePath || filepath.Base(nodePath) != "node" {
 		return ErrStart
 	}
 	info, err := os.Stat(nodePath)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 {
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrStart, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 {
 		return ErrStart
 	}
 	return nil

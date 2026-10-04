@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
@@ -42,7 +43,10 @@ type registry struct {
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		// serve logs its failure before returning, including startup failures.
+		if len(os.Args) < 2 || os.Args[1] != "serve" {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		os.Exit(1)
 	}
 }
@@ -79,7 +83,12 @@ func privateFile(path string, maximum int64) ([]byte, error) {
 	return agentsetup.ReadPrivateFile(path, maximum)
 }
 
-func serve(args []string) error {
+func serve(args []string) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			slog.Error("agentd serve failed", "error", resultErr)
+		}
+	}()
 	f := flag.NewFlagSet("serve", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath, geminiPath, openCodePath string
@@ -150,7 +159,7 @@ func serve(args []string) error {
 	}
 	rawKey, err := privateFile(keyFile, 4096)
 	if err != nil {
-		return err
+		return fmt.Errorf("read agent key file %s: %w", keyFile, err)
 	}
 	key := strings.TrimSpace(string(rawKey))
 	if !strings.HasPrefix(key, "aeon_") || strings.ContainsAny(key, " \t\r\n") {
@@ -166,13 +175,13 @@ func serve(args []string) error {
 	stateStore.Close()
 	rawAccounts, err := privateFile(accountsPath, 64<<10)
 	if err != nil {
-		return err
+		return fmt.Errorf("read account registry %s: %w", accountsPath, err)
 	}
 	var reg registry
 	decoder := json.NewDecoder(strings.NewReader(string(rawAccounts)))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&reg) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return errors.New("account registry invalid")
+		return fmt.Errorf("account registry %s: invalid JSON or schema", accountsPath)
 	}
 	codexHomes, piHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}
 	codexEmails := map[string]string{}

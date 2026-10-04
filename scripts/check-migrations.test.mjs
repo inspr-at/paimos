@@ -308,7 +308,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1117_desk_delivery.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1117_desk_delivery.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -395,7 +395,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1117_desk_delivery.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1117_desk_delivery.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 

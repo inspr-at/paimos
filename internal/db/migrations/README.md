@@ -212,19 +212,6 @@ index with the first-line `aeon:no-transaction` marker. The runner accepts exact
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
 
-AEON-563's `1118_desk_matching.sql` adds an expression index over exact Q&A
-fingerprints and nullable per-asker source decision/revision pointers. Existing
-question/answer shapes and immutable human revisions remain available to older
-binaries. Question writes lock tenant, tree, authenticated key, question and
-decision before appending the event; access, key scopes and active decision state
-are checked inside that transaction. Matching preserves every membership's
-original input, ticket, session and reserved reply root. Reuse increments the
-source count once per membership and adds only inbox/comment effects due now;
-ask callers identify their new membership by its original request ID.
-P3 must use each pending effect's deadline rather than the source answer's human
-grace deadline. Corrections retain the original per-asker reuse pointers. Active
-Always publication and post-dispatch corrections remain P4/P3 responsibilities.
-
 AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
 replacing unpublished migration 1136. The current shared ledger assigns
 1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
@@ -252,3 +239,16 @@ unknown; it never synthesizes a quota figure. A newer measured observation
 replaces it, while delayed readings remain blocked across reset transitions.
 Classify this table as personal quota telemetry, located by
 `(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
+
+AEON-563's `1118_desk_matching.sql` adds an expression index over exact Q&A
+fingerprints and nullable per-asker source decision/revision pointers. Existing
+question/answer shapes and immutable human revisions remain available to older
+binaries. Question writes lock tenant, tree, authenticated key, question and
+decision before appending the event; access, key scopes and active decision state
+are checked inside that transaction. Matching preserves every membership's
+original input, ticket, session and reserved reply root. Reuse increments the
+source count once per membership and adds only inbox/comment effects due now;
+ask callers identify their new membership by its original request ID.
+P3 must use each pending effect's deadline rather than the source answer's human
+grace deadline. Corrections retain the original per-asker reuse pointers. Active
+Always publication and post-dispatch corrections remain P4/P3 responsibilities.
