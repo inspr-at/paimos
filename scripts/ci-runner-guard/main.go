@@ -371,18 +371,27 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
-	for _, id := range []string{"ci-plan", "go-test", "go-static", "go-timing", "runner-route", "web-setup", "web-shard", "release-check-run", "e2e-run", "migration-compat", "release-list-comparison"} {
+	for _, id := range []string{"runner-route", "ci-plan", "migration-compat"} {
+		job := mapping(jobs[id])
+		if job == nil {
+			return fmt.Errorf("required CI job %q is missing", id)
+		}
+		if _, exists := job["if"]; exists {
+			return fmt.Errorf("required CI job %q must run without an if condition", id)
+		}
+		if id == "migration-compat" {
+			if _, exists := job["needs"]; exists {
+				return fmt.Errorf("migration-compat must run independently of classification")
+			}
+		}
+	}
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run", "release-list-comparison"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
 		condition := "needs.ci-plan.outputs.lane == 'full'"
 		switch id {
-		case "runner-route", "ci-plan":
-			if _, exists := job["if"]; exists {
-				return fmt.Errorf("required CI job %q must run without an if condition", id)
-			}
-			continue
 		case "web-setup", "web-shard":
 			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
 		}

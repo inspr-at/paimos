@@ -591,9 +591,13 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
-PRs containing only Markdown, `docs/**`, or root LICENSE/LICENCE/COPYING/NOTICE
-files skip heavy jobs; required checks report success with a `docs-only` note.
-The allowlist lives in `scripts/ci-pr-plan.mjs`. PRs changing only top-level
+PRs containing only root Markdown, `docs/**` (excluding `testdata/`), or root
+LICENSE/LICENCE/COPYING/NOTICE files skip classified heavy jobs; required checks
+report success with a `docs-only` note. Migration compatibility runs in every
+lane, independently of classification. The allowlist lives in
+`scripts/ci-pr-plan.mjs`; CI executes the PR base commit's copy, and an unavailable
+base classifier retains full validation. Markdown under implementation and
+test-fixture paths requires full coverage. PRs changing only top-level
 `web/tests/*.spec.ts` run exactly those specs in one hosted job, including specs
 outside the shard map, with their group's config and flags. Spec renames or
 deletions, mixed changes and unavailable classification retain full coverage.

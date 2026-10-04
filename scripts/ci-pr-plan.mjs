@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 const limit = 2 * 1024 * 1024;
 const full = reason => ({ lane: 'full', specs: [], reason });
 // The documentation allowlist lives here, including root licence notices.
-export const docsPaths = [/\.md$/i, /^docs\//, /^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:\.(?:txt|md|rst))?$/i];
+export const docsPaths = [/^[^/]+\.md$/i, /^docs\//, /^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:\.(?:txt|md|rst))?$/i];
 
 export function validatePath(file) {
   if (typeof file !== 'string' || !file || file.length > 4096 || file.startsWith('/') ||
@@ -19,7 +19,7 @@ export function classifyPaths(files, deleted = []) {
   if (!files.length || files.length > 10000) return full('empty or oversized diff');
   files.forEach(validatePath);
   deleted.forEach(validatePath);
-  if (files.every(file => docsPaths.some(pattern => pattern.test(file)))) {
+  if (files.every(file => !file.split('/').includes('testdata') && docsPaths.some(pattern => pattern.test(file)))) {
     return { lane: 'docs-only', specs: [], reason: 'documentation allowlist' };
   }
   // A rename includes its removed source with --no-renames. Removals require full validation.

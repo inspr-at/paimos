@@ -40,7 +40,23 @@ jobs:
           node-version: "24"
       - name: Classify local PR diff
         id: plan
-        run: node scripts/ci-pr-plan.mjs
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          full_plan() {
+            printf 'lane=full\nspecs=[]\n' >> "$GITHUB_OUTPUT"
+            echo 'CI: full; trusted classification unavailable or not a PR' >> "$GITHUB_STEP_SUMMARY"
+          }
+          # Never execute the candidate's classifier. A first-time adoption
+          # without a base copy also retains full validation.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             [[ "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             git show "$PR_BASE_SHA:scripts/ci-pr-plan.mjs" > "$RUNNER_TEMP/ci-pr-plan.mjs"; then
+            node "$RUNNER_TEMP/ci-pr-plan.mjs" || full_plan
+          else
+            full_plan
+          fi
 
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml
@@ -649,10 +665,8 @@ jobs:
           fi
           npm run e2e --prefix web
 
-  # AEON-415: previous-release compatibility uses hosted Linux for full validation.
+  # AEON-415: previous-release compatibility is unconditional in every lane.
   migration-compat:
-    needs: ci-plan
-    if: needs.ci-plan.outputs.lane == 'full'
     permissions:
       contents: read
       packages: read

@@ -298,13 +298,17 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 				delete(jobs, id)
 			})
 		}
-		if id == "runner-route" {
+		if id == "runner-route" || id == "ci-plan" || id == "migration-compat" {
+			for _, condition := range []any{false, "success()", nil, "needs.ci-plan.outputs.lane == 'full'"} {
+				add(fmt.Sprintf("conditional/%s/%v", id, condition), "ci.yml", "must run without an if condition", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["if"] = condition })
+			}
 			continue
 		}
 		for _, condition := range []any{false, "success()", nil} {
 			add(fmt.Sprintf("conditional/%s/%v", id, condition), "ci.yml", "must", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["if"] = condition })
 		}
 	}
+	add("migration-classification-dependency", "ci.yml", "migration-compat must run independently", func(w map[string]any) { mapping(mapping(w["jobs"])["migration-compat"])["needs"] = "ci-plan" })
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		add("renamed-check-context/"+id, "ci.yml", "renamed to", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["name"] = "other" })
 	}
@@ -519,4 +523,48 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 			t.Fatalf("%s heavy checkout must retain shallow history; got %v", id, depth)
 		}
 	}
+}
+
+func TestCIMigrationCompatibilityIndependentOfClassification(t *testing.T) {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	job := mapping(mapping(workflow["jobs"])["migration-compat"])
+	if job == nil {
+		t.Fatal("migration compatibility job is missing")
+	}
+	for _, key := range []string{"if", "needs"} {
+		if _, exists := job[key]; exists {
+			t.Fatalf("migration compatibility must run independently of classification; found %s", key)
+		}
+	}
+}
+
+func TestCIPlanUsesTrustedBaseClassifier(t *testing.T) {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	steps := mapping(mapping(workflow["jobs"])["ci-plan"])["steps"].([]any)
+	for _, value := range steps {
+		step := mapping(value)
+		if step["id"] != "plan" {
+			continue
+		}
+		if mapping(step["env"])["PR_BASE_SHA"] != "${{ github.event.pull_request.base.sha }}" {
+			t.Fatal("classifier must bind its trusted source to the PR base commit")
+		}
+		run, _ := step["run"].(string)
+		for _, required := range []string{`git show "$PR_BASE_SHA:scripts/ci-pr-plan.mjs"`, `node "$RUNNER_TEMP/ci-pr-plan.mjs"`} {
+			if !strings.Contains(run, required) {
+				t.Fatalf("classifier must load and execute the base copy: missing %s", required)
+			}
+		}
+		if strings.Contains(run, "node scripts/ci-pr-plan.mjs") {
+			t.Fatal("classifier must never execute the PR checkout's script")
+		}
+		return
+	}
+	t.Fatal("classifier step is missing")
 }
