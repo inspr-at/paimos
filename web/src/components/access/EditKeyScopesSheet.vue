@@ -126,7 +126,7 @@ onMounted(load)
             </span></div>
             <label v-for="scope in group.items" :key="scope.key" class="scope-row">
               <input type="checkbox" :checked="selected.has(scope.key)" :disabled="!grantable.has(scope.key) && !mayExtend(scope.key) && !selected.has(scope.key)" @change="toggle(scope.key)" />
-              <ScopeDetails :scope="scope"><span v-if="!grantable.has(scope.key)" class="detail">{{ unavailableReason(scope.key) }}</span></ScopeDetails>
+              <ScopeDetails :scope="scope"><span v-if="!grantable.has(scope.key)" class="detail" :title="unavailableReason(scope.key)">{{ unavailableReason(scope.key) }}</span></ScopeDetails>
             </label>
           </div>
           <p v-if="!groups.length" class="note">{{ term ? 'No matching scopes.' : 'No scopes are available for this key.' }}</p>
@@ -168,7 +168,7 @@ onMounted(load)
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
-.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding: 7px 0; align-items: start; }
+.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); min-width: 0; gap: 8px; padding: 7px 0; align-items: start; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }

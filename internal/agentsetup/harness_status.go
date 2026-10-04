@@ -45,6 +45,7 @@ func HarnessFailureReason(err error) string {
 //	harness_failed       the approved launcher failed to start
 //	cli_unavailable      Claude's approved CLI executable changed or is missing
 //	profile_permissions  the pi profile directory is not private
+//	pairing_sync_failed  pairing reconciliation or runtime refresh prevented polling
 //
 // The pin_* codes come from the static check before launch; dependency_invalid
 // is the runtime failure of the same dependencies. For Claude the pins are the
@@ -73,7 +74,7 @@ const (
 )
 
 // HarnessReasons lists the known reason codes in the order documented above.
-var HarnessReasons = []string{"repin_pending", "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe, "login_required", "starting", "harness_failed", "cli_unavailable", "profile_permissions", "binding_missing", "probe_pending", "probe_timeout", "probe_failed", "capacity_capture", "capacity_timeout"}
+var HarnessReasons = []string{"repin_pending", "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe, "login_required", "starting", "harness_failed", "cli_unavailable", "profile_permissions", "binding_missing", "probe_pending", "probe_timeout", "probe_failed", "capacity_capture", "capacity_timeout", PairingSyncFailed}
 
 // HarnessFix is the one fix form for blocked_accounts and harness_details: a
 // kind and the exact CLI line. Commands are derived from the harness and reason

@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -185,7 +187,12 @@ type capacityChecksState struct {
 }
 
 func (s *Supervisor) capacityChecksName() string { return "aeon-agentd-" + s.daemonID + ".checks.json" }
-func (s *Supervisor) loadCapacityChecks() error {
+func (s *Supervisor) loadCapacityChecks() (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("load capacity checks %s: %w", filepath.Join(s.state.Path(), s.capacityChecksName()), resultErr)
+		}
+	}()
 	s.capacityChecks = map[string]capacityCheckState{}
 	s.capacityCheckHeartbeat = map[string]bool{}
 	s.capacityCheckConnected = map[string]bool{}
