@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -46,111 +48,95 @@ const fullQueueFallback = "needs.tree-reuse.outputs.reuse != 'merge_group'"
 const verifiedQueueReuse = "needs.tree-reuse.outputs.reuse == 'merge_group'"
 
 func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
-	w := treeWorkflow(t, "ci.yml")
-	jobs := treeMap(w["jobs"])
-	expected := []string{"tree-reuse", "cache-prime", "tier-plan", "tier-measurements", "runner-route", "go-test", "go-static", "go-timing", "go", "web-setup", "web-shard", "release-list-comparison", "web", "release-check", "e2e", "migration-compat"}
-	if len(jobs) != len(expected) {
-		t.Fatalf("job inventory changed: %d", len(jobs))
-	}
-	for _, id := range expected {
-		if jobs[id] == nil {
-			t.Fatalf("missing %s", id)
-		}
-	}
-	for _, id := range []string{"go", "web", "release-check", "e2e", "migration-compat"} {
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		j := treeMap(jobs[id])
-		if j["name"] != nil && j["name"] != id {
-			t.Fatalf("required check %s renamed", id)
+		if j["if"] != "always()" || j["name"] != nil && j["name"] != id {
+			t.Fatalf("required check %s must retain its identity and always report", id)
+		}
+		for _, need := range []string{"ci-plan", "tree-reuse", "cache-prime"} {
+			if !containsNeed(j["needs"], need) {
+				t.Fatalf("%s must gate %s", id, need)
+			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-list-comparison", "release-check", "e2e"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-list-comparison", "release-check-run", "e2e-run"} {
 		j := treeMap(jobs[id])
-		if j["if"] != nil {
-			t.Fatalf("%s could skip after proof failure", id)
+		condition, _ := j["if"].(string)
+		if !strings.Contains(condition, "always()") || !strings.Contains(condition, "needs.ci-plan.result == 'success'") || !strings.Contains(condition, fullQueueFallback) || !containsNeed(j["needs"], "tree-reuse") {
+			t.Fatalf("%s must skip the whole job only for a classified exemption or verified reuse, with full fallback after a skipped proof", id)
 		}
-		first := treeMap(reuseSteps(j)[0])
-		if first["if"] != verifiedQueueReuse || !strings.Contains(first["run"].(string), "reused merge_group run $SOURCE_RUN") || treeMap(first["env"])["SOURCE_RUN"] != "${{ needs.tree-reuse.outputs.run }}" {
-			t.Fatalf("%s must report verified source run", id)
-		}
-		for _, value := range reuseSteps(j)[1:] {
-			condition, _ := treeMap(value)["if"].(string)
-			if !strings.Contains(condition, fullQueueFallback) || strings.Contains(condition, verifiedQueueReuse) {
-				t.Fatalf("%s missing full fallback: %s", id, condition)
+		for _, v := range reuseSteps(j) {
+			step := treeMap(v)
+			if step["name"] == "Reuse the verified merge-group run" || strings.Contains(fmt.Sprint(step["if"]), "tree-reuse") {
+				t.Fatalf("%s must gate reuse at job level, not allocate runners for reuse steps", id)
 			}
 		}
 		for _, service := range treeMap(j["services"]) {
-			if treeMap(service)["image"] != "${{ "+fullQueueFallback+" && 'pgvector/pgvector:pg18' || '' }}" {
-				t.Fatalf("%s starts database on reuse", id)
+			if treeMap(service)["image"] != "pgvector/pgvector:pg18" {
+				t.Fatalf("%s full fallback lost its database", id)
 			}
 		}
 	}
-	if treeMap(jobs["go-test"])["needs"] == nil || !reflect.DeepEqual(treeMap(jobs["web-shard"])["needs"], []any{"web-setup", "tier-plan", "tree-reuse"}) {
-		t.Fatal("shard prerequisites lost")
-	}
-	matrix := treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])
-	if expression, ok := matrix["shard"].(string); !ok || !strings.Contains(expression, "needs.tier-plan.outputs.mode == 'essential' && '[1, 2]'") || !strings.HasSuffix(expression, "|| '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}") {
-		t.Fatal("OPS-257 shard layout changed")
-	}
-	for id, expectedNeeds := range map[string][]any{"go": {"go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}, "web": {"web-setup", "web-shard", "tree-reuse", "cache-prime"}} {
-		j := treeMap(jobs[id])
-		if j["if"] != "always()" || !reflect.DeepEqual(j["needs"], expectedNeeds) {
-			t.Fatalf("%s must gate tests and cache priming", id)
-		}
-	}
 	migration := treeMap(jobs["migration-compat"])
-	if migration["if"] != nil || migration["needs"] != nil {
-		t.Fatal("AEON-415 migration lane must be independent and unconditional")
+	if migration == nil || migration["if"] != nil || migration["needs"] != nil {
+		t.Fatal("AEON-415 migration lane must remain independent and unconditional")
 	}
 	for _, v := range reuseSteps(migration) {
 		if treeMap(v)["if"] != nil {
-			t.Fatal("AEON-415 migration steps must be unconditional")
+			t.Fatal("AEON-415 migration steps must remain unconditional")
 		}
 	}
 }
 
+func containsNeed(value any, name string) bool {
+	if value == name {
+		return true
+	}
+	for _, need := range anySlice(value) {
+		if need == name {
+			return true
+		}
+	}
+	return false
+}
+func anySlice(value any) []any { a, _ := value.([]any); return a }
+
 func TestQueueProofFailureCannotSkipRequiredJobs(t *testing.T) {
-	w := treeWorkflow(t, "ci.yml")
-	jobs := treeMap(w["jobs"])
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	proof := treeMap(jobs["tree-reuse"])
-	if proof["continue-on-error"] != true || proof["if"] != nil {
-		t.Fatal("proof failure must leave full fallback eligible")
+	if proof["continue-on-error"] != true || proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" {
+		t.Fatal("proof must be push-only and fail back to full CI")
 	}
 	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
-		t.Fatal("checkout/proof budget must be bounded at 5–10 minutes")
+		t.Fatal("proof must have a bounded checkout/proof budget")
 	}
 	if !reflect.DeepEqual(treeMap(proof["permissions"]), map[string]any{"contents": "read", "actions": "read"}) {
-		t.Fatal("proof token must only read contents and actions")
+		t.Fatal("proof token must be read-only")
 	}
 	if proof["runs-on"] != "ubuntu-latest" || treeMap(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" || treeMap(proof["outputs"])["run"] != "${{ steps.proof.outputs.run }}" {
-		t.Fatal("proof must bind hosted read-only step outputs")
+		t.Fatal("proof must bind hosted step outputs")
 	}
 	step := reuseStep(t, proof, "Verify the exact merge-group SHA")
 	if treeMap(step["env"])["CI_TREE_REUSE"] != "${{ vars.CI_TREE_REUSE }}" || step["run"] != "node scripts/ci-tree-reuse.mjs" {
-		t.Fatal("proof must invoke the kill-switch aware verifier")
+		t.Fatal("proof must invoke kill-switch aware verifier")
 	}
 	if _, err := os.Stat(filepath.Join(root(t), ".github/workflows/ci-tree-record.yml")); !os.IsNotExist(err) {
-		t.Fatal("tree publisher must be removed with secondary scope")
+		t.Fatal("obsolete tree publisher must remain absent")
 	}
 }
 
 func TestDirectPushCannotSkipWithoutQueueProof(t *testing.T) {
-	// Exercise the actual main entry point with a bounded empty API response.
-	// Then inspect every workflow condition that can avoid heavy work.
 	cmd := exec.Command("node", "--test", "--test-name-pattern=direct main entry point", "scripts/ci-tree-reuse.test.mjs")
 	cmd.Dir = root(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("direct push proof: %v\n%s", err, out)
 	}
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check", "e2e"} {
-		if treeMap(jobs[id])["if"] != nil {
-			t.Fatalf("direct push may skip %s", id)
-		}
-		for _, v := range reuseSteps(treeMap(jobs[id]))[1:] {
-			condition, _ := treeMap(v)["if"].(string)
-			if !strings.Contains(condition, fullQueueFallback) {
-				t.Fatalf("direct push fallback missing in %s", id)
-			}
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+		condition, _ := treeMap(jobs[id])["if"].(string)
+		if !strings.Contains(condition, fullQueueFallback) || !strings.Contains(condition, "always()") {
+			t.Fatalf("%s must run full work after absent proof", id)
 		}
 	}
 }
@@ -225,151 +211,243 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 
 func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
-	for _, id := range []string{"go", "web"} {
-		j := treeMap(jobs[id])
-		s := treeMap(reuseSteps(j)[0])
-		command := s["run"].(string)
-		for _, fixture := range []struct {
-			reuse, cache, test string
-			ok                 bool
-		}{{"merge_group", "success", "success", true}, {"merge_group", "failure", "success", false}, {"merge_group", "skipped", "success", false}, {"none", "skipped", "success", true}, {"none", "skipped", "failure", false}, {"merge_group", "success", "skipped", false}} {
-			cmd := exec.Command("bash", "-c", command)
-			cmd.Env = append(os.Environ(), "REUSE="+fixture.reuse, "SOURCE_RUN=123", "CACHE_PRIME="+fixture.cache, "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-			for key := range treeMap(s["env"]) {
-				if key != "REUSE" && key != "SOURCE_RUN" && key != "CACHE_PRIME" {
-					cmd.Env = append(cmd.Env, key+"="+fixture.test)
-				}
+	for _, id := range []string{"go", "web", "release-check", "e2e"} {
+		steps := reuseSteps(treeMap(jobs[id]))
+		s := treeMap(steps[len(steps)-1])
+		values := map[string]string{"REUSE": "merge_group", "REUSE_PROOF": "success", "SOURCE_RUN": "123", "CACHE_PRIME": "success", "CI_PLAN": "success", "CI_LANE": "full", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main"}
+		if treeMap(s["env"])["TIER_PLAN"] != nil {
+			values["TIER_PLAN"] = "success"
+		}
+		for key := range treeMap(s["env"]) {
+			if _, exists := values[key]; !exists {
+				values[key] = "skipped"
 			}
-			if out, err := cmd.CombinedOutput(); (err == nil) != fixture.ok {
-				t.Fatalf("%s %+v: %v\n%s", id, fixture, err, out)
+		}
+		execute := func(changed, result string) error {
+			cmd := exec.Command("bash", "-c", s["run"].(string))
+			cmd.Dir = root(t)
+			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			for key, value := range values {
+				if key == changed {
+					value = result
+				}
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("%w: %s", err, out)
+			}
+			return nil
+		}
+		if err := execute("", ""); err != nil {
+			t.Fatalf("%s rejects verified reuse: %v", id, err)
+		}
+		for key, expected := range values {
+			if key == "REUSE" {
+				continue
+			} // no reuse falls back to the classified gate, covered separately
+			wrong := "success"
+			if expected == "success" {
+				wrong = "skipped"
+			}
+			for _, value := range []string{"failure", "cancelled", "", wrong} {
+				if value == expected {
+					continue
+				}
+				if err := execute(key, value); err == nil {
+					t.Fatalf("%s accepts invalid reuse %s=%q", id, key, value)
+				}
 			}
 		}
 	}
 }
 
+// Derive the actual merge-group job names from the workflow, rather than
+// keeping a second hardcoded list that can drift together with the verifier.
+func mergeGroupInventory(t *testing.T, w map[string]any) []string {
+	t.Helper()
+	var names []string
+	for id, value := range treeMap(w["jobs"]) {
+		j := treeMap(value)
+		if id == "tree-reuse" || id == "cache-prime" {
+			if !strings.Contains(fmt.Sprint(j["if"]), "github.event_name == 'push'") {
+				t.Fatalf("%s must remain push-only", id)
+			}
+			continue
+		}
+		name := id
+		if n, ok := j["name"].(string); ok {
+			name = n
+		}
+		if uses, ok := j["uses"].(string); ok {
+			body, err := os.ReadFile(filepath.Join(root(t), uses))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var child map[string]any
+			if err := yaml.Unmarshal(body, &child); err != nil {
+				t.Fatal(err)
+			}
+			for childID, v := range treeMap(child["jobs"]) {
+				childName := childID
+				if n, ok := treeMap(v)["name"].(string); ok {
+					childName = n
+				}
+				names = append(names, name+" / "+childName)
+			}
+			continue
+		}
+		matrix := treeMap(treeMap(j["strategy"])["matrix"])
+		if len(matrix) == 0 {
+			names = append(names, name)
+			continue
+		}
+		if len(matrix) != 1 || matrix["shard"] == nil {
+			t.Fatalf("unreviewed matrix for %s", id)
+		}
+		var shards []int
+		// Both matrices choose the final literal array for merge_group:
+		// hosted seven Go shards and the full twelve web shards.
+		if expr, ok := matrix["shard"].(string); ok {
+			arrays := regexp.MustCompile(`'\[([0-9, ]+)\]'`).FindAllStringSubmatch(expr, -1)
+			if len(arrays) == 0 {
+				t.Fatalf("unknown matrix expression for %s", id)
+			}
+			if err := json.Unmarshal([]byte("["+arrays[len(arrays)-1][1]+"]"), &shards); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			for _, n := range anySlice(matrix["shard"]) {
+				shards = append(shards, n.(int))
+			}
+		}
+		for _, n := range shards {
+			names = append(names, fmt.Sprintf("%s (%d)", name, n))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
-	cmd := exec.Command("node", "--input-type=module", "-e", `import {requiredJobs} from './scripts/ci-tree-reuse.mjs'; console.log(JSON.stringify(requiredJobs))`)
+	if _, err := os.Stat(filepath.Join(root(t), "scripts/ci-tree-reuse.mjs")); err != nil {
+		t.Fatalf("reuse verifier missing from the integrated workflow: %v", err)
+	}
+	cmd := exec.Command("node", "--input-type=module", "-e", `import {requiredJobs,executionSteps} from './scripts/ci-tree-reuse.mjs'; console.log(JSON.stringify({requiredJobs,executionSteps}))`)
 	cmd.Dir = root(t)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
-	if err := json.Unmarshal(out, &names); err != nil {
+	var proof struct {
+		RequiredJobs   []string
+		ExecutionSteps map[string]string
+	}
+	if err := json.Unmarshal(out, &proof); err != nil {
 		t.Fatal(err)
 	}
-	expected := []string{"tree-reuse", "tier-plan", "tier-measurements", "runner-route / route", "go", "go-static", "go-timing", "web", "web-setup", "release-list-comparison", "release-check", "e2e", "migration-compat"}
-	for n := 1; n <= 7; n++ {
-		expected = append(expected, fmt.Sprintf("go-test (%d)", n))
+	w := treeWorkflow(t, "ci.yml")
+	expected := mergeGroupInventory(t, w)
+	sort.Strings(proof.RequiredJobs)
+	if !reflect.DeepEqual(proof.RequiredJobs, expected) {
+		t.Fatalf("verifier jobs differ from actual merge-group workflow/matrices: got %v want %v", proof.RequiredJobs, expected)
 	}
-	for n := 1; n <= 12; n++ {
-		expected = append(expected, fmt.Sprintf("web-shard (%d)", n))
+	jobs := treeMap(w["jobs"])
+	for id, name := range proof.ExecutionSteps {
+		reuseStep(t, treeMap(jobs[id]), name)
 	}
-	if len(names) != len(expected) {
-		t.Fatalf("verifier coverage: %v", names)
-	}
-	for _, name := range expected {
-		found := false
-		for _, actual := range names {
-			if name == actual {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("verifier lacks %s", name)
+	for _, id := range []string{"ci-plan", "go-static", "go-timing", "web-setup", "release-check-run", "e2e-run", "migration-compat"} {
+		if proof.ExecutionSteps[id] == "" {
+			t.Fatalf("verifier lacks execution evidence for %s", id)
 		}
 	}
-	cmd = exec.Command("node", "--test", "scripts/ci-tree-reuse.test.mjs")
-	cmd.Dir = root(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("queue reuse fixtures: %v\n%s", err, out)
+	reuseStep(t, treeMap(jobs["go-test"]), "Test this shard (essential plus changed area, or full on main)")
+	reuseStep(t, treeMap(jobs["web-shard"]), "Run selected UI cases without retries")
+	// A new job or matrix row must invalidate the proof inventory.
+	jobs["new-required-job"] = map[string]any{"runs-on": "ubuntu-latest"}
+	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
+		t.Fatal("new workflow job escaped drift check")
+	}
+	delete(jobs, "new-required-job")
+	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
+	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
+		t.Fatal("new matrix row escaped drift check")
 	}
 }
 
 func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
-	// An immutable small digest fixture keeps this regression active in shallow
-	// CI checkouts. Only proof dependencies/guards and the new fixture step are
-	// normalized away; test commands, services, caches and original conditions
-	// must still equal main's reviewed OPS-257/AEON-585 configuration.
+	// Pin the accepted c72eb506 classification/full-execution configuration.
+	// Keep that historical fixture and the original AEON-681 tier fixture.
+	// Only six tier-adapted execution jobs use the additive merge-main pins;
+	// lane classification, unaffected jobs and unconditional migrations stay pinned.
 	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-main-before-reuse.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var baseline struct {
-		Source string            `json:"source_main_sha"`
+		Source string            `json:"source_ci_sha"`
 		Hashes map[string]string `json:"sha256"`
 	}
 	if err := json.Unmarshal(body, &baseline); err != nil {
 		t.Fatal(err)
 	}
-	if len(baseline.Source) != 40 || len(baseline.Hashes) != 11 {
-		t.Fatal("incomplete main fixture")
+	if len(baseline.Source) != 40 || len(baseline.Hashes) != 12 {
+		t.Fatal("incomplete accepted-CI fixture")
 	}
 	w := treeWorkflow(t, "ci.yml")
 	jobs := treeMap(w["jobs"])
-	// Tier selection intentionally changes five execution jobs. Pin those to
-	// AEON-681's normalized tier implementation; keep the original reviewed hashes
-	// for every unaffected job, including migration compatibility.
+	guard := regexp.MustCompile(`^always\(\) && needs.ci-plan.result == 'success' && (?:needs.tier-plan.result == 'success' && )?\((.*?)\) && needs.tree-reuse.outputs.reuse != 'merge_group'(?: && needs.(?:runner-route|web-setup).result == 'success')?$`)
 	tierBody, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-tiers-before-reuse.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var tierBaseline struct {
-		Source string            `json:"source_main_sha"`
-		Hashes map[string]string `json:"sha256"`
+		MergeMain struct {
+			Source string            `json:"source_main_sha"`
+			Hashes map[string]string `json:"sha256"`
+		} `json:"mergeMain"`
 	}
 	if err := json.Unmarshal(tierBody, &tierBaseline); err != nil {
 		t.Fatal(err)
 	}
-	if len(tierBaseline.Hashes) != 5 || len(tierBaseline.Source) != 40 {
-		t.Fatal("incomplete tier fixture")
+	if len(tierBaseline.MergeMain.Source) != 40 || len(tierBaseline.MergeMain.Hashes) != 6 {
+		t.Fatal("incomplete merge-main tier fixture")
 	}
 	for id, expected := range baseline.Hashes {
-		source := baseline.Source
-		if tierHash, changed := tierBaseline.Hashes[id]; changed {
+		if tierHash, changed := tierBaseline.MergeMain.Hashes[id]; changed {
 			expected = tierHash
-			source = tierBaseline.Source
 		}
 		value := w["concurrency"]
 		if id != "concurrency" {
 			j := treeMap(jobs[id])
 			value = j
-			switch id {
-			case "go-test":
-				j["needs"] = []any{"runner-route", "tier-plan"}
-			case "web-shard":
-				j["needs"] = []any{"web-setup", "tier-plan"}
-			case "web-setup":
-				j["needs"] = "tier-plan"
-			case "release-list-comparison":
-				j["needs"] = "web-setup"
-			default:
-				delete(j, "needs")
-			}
-			for _, service := range treeMap(j["services"]) {
-				treeMap(service)["image"] = "pgvector/pgvector:pg18"
-			}
-			var steps []any
-			for _, v := range reuseSteps(j) {
-				s := treeMap(v)
-				if s["name"] == "Reuse the verified merge-group run" || s["name"] == "Exact-SHA reuse provenance and workflow regressions" {
-					continue
+			if condition, ok := j["if"].(string); ok && strings.Contains(condition, "tree-reuse") {
+				match := guard.FindStringSubmatch(condition)
+				if len(match) != 2 {
+					t.Fatalf("unexpected reuse guard in %s", id)
 				}
-				if condition, ok := s["if"].(string); ok {
-					if condition == fullQueueFallback {
-						delete(s, "if")
-					} else {
-						suffix := ") && " + fullQueueFallback
-						if !strings.HasPrefix(condition, "(") || !strings.HasSuffix(condition, suffix) {
-							t.Fatalf("unexpected fallback condition in %s: %s", id, condition)
-						}
-						s["if"] = strings.TrimSuffix(strings.TrimPrefix(condition, "("), suffix)
+				j["if"] = match[1]
+				var needs []any
+				for _, need := range anySlice(j["needs"]) {
+					if need != "tree-reuse" {
+						needs = append(needs, need)
 					}
 				}
-				steps = append(steps, s)
+				if len(needs) == 1 {
+					j["needs"] = needs[0]
+				} else {
+					j["needs"] = needs
+				}
 			}
-			if _, exists := j["steps"]; exists {
-				j["steps"] = steps
+			for _, v := range reuseSteps(j) {
+				s := treeMap(v)
+				if s["name"] == "PR classification and exact-SHA reuse regressions" {
+					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs" {
+						t.Fatal("unreviewed verifier regression command")
+					}
+					s["name"] = "PR classification regressions"
+					s["run"] = "node --test scripts/ci-pr-plan.test.mjs"
+				}
 			}
 		}
 		var encoded bytes.Buffer
@@ -379,7 +457,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			t.Fatal(err)
 		}
 		if actual := fmt.Sprintf("%x", sha256.Sum256(encoded.Bytes())); actual != expected {
-			t.Fatalf("%s full fallback differs from main %s: %s", id, source, actual)
+			t.Fatalf("%s full fallback differs from accepted CI %s: %s", id, baseline.Source, actual)
 		}
 	}
 }

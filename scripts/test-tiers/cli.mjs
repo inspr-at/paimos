@@ -179,7 +179,7 @@ export async function main(args) {
     validate(manifest,inventory.tests) // stale entries require an explicit edit
     saveManifest(manifestFile(kind),manifest);return 0
   }
-  if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env)
+  if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
   const selection=plan(kind,options)
   console.log(JSON.stringify({kind,full:selection.full,reason:selection.reason,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)

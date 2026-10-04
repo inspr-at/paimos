@@ -12,11 +12,12 @@ const listPath = `actions/workflows/ci.yml/runs?event=merge_group&status=success
 function fixture(attempt = 1) {
   const run = { id: 123, name: 'CI', repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: attempt, event: 'merge_group', head_sha: sha };
   const workflow = { id: 20, name: 'CI', path: workflowPath };
-  const jobs = { total_count: requiredJobs.length + 1, jobs: requiredJobs.map(name => {
+  const jobs = { total_count: requiredJobs.length + 2, jobs: requiredJobs.map(name => {
     const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
     return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...((name==='web-setup'||/^(go-test|web-shard) \(/.test(name))?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
+  jobs.jobs.push({ name: 'tree-reuse', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   const listed = { total_count: 1, workflow_runs: [{ id: 123, head_sha: sha, event: 'merge_group' }] };
   const calls = [];
   const api = async path => {

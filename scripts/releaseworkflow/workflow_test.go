@@ -548,7 +548,11 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 	}
 	// CI has scalar and list needs; only parse the steps used by this check.
 	var ci struct {
-		Jobs map[string]struct{ Steps []step }
+		Jobs map[string]struct {
+			Steps []step
+			If    string
+			Needs any
+		}
 	}
 	data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/ci.yml"))
 	if err != nil {
@@ -558,10 +562,15 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := false
-	for _, s := range ci.Jobs["release-check"].Steps {
+	for _, s := range ci.Jobs["release-check-run"].Steps {
 		found = found || strings.Contains(s.Run, "node --test scripts/release-pin-pr.test.mjs")
 	}
 	if !found {
-		t.Fatal("pin regression tests must run in ordinary draft PR CI")
+		t.Fatal("pin regression tests must run in full draft PR CI")
+	}
+	worker, gate := ci.Jobs["release-check-run"], ci.Jobs["release-check"]
+	if worker.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || gate.If != "always()" ||
+		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime"}) {
+		t.Fatal("pin regressions must retain classified validation and the required aggregate")
 	}
 }
