@@ -30,8 +30,10 @@ clears the private rows while keeping the existing selector and detail link in
 place; a person without the source permission sees only its permission sentence.
 
 People with `models.read` and `models.manage` can edit one complete role order,
-using its quoted `If-Match` token. Truncated snapshots remain read-only. The
-current base retains managed review's built-in family fallback, so the ordinary
+using its quoted `If-Match` token. Truncated snapshots remain read-only.
+Add, move and remove operations renumber the draft in displayed order, including
+orders with gaps in their stored priorities. The current base retains managed
+review's built-in family fallback, so the ordinary
 review editor explicitly labels its command-line ordering effect. Saved-order
 managed dispatch activation belongs to the separate 633g integration.
 
@@ -40,6 +42,8 @@ source GET/write permissions. Project-only management also needs workspace
 model visibility to use this screen. Each mutation carries the GET's canonical
 `If-Prefs-Person` and the addressed level revision. Row edits preserve both
 complexity buckets and the row lock; Reset affects only that selected row.
+Row DELETE sends the captured revision in the query string, alongside project
+context where needed; Undo of a newly added row uses the same conditional DELETE.
 Provider and section-lock writes send only the three scalar fields, never
 `rows`; neither Save nor Undo issues whole-level DELETE. Archived and sibling
 work-kind settings therefore remain stored by these UI operations.

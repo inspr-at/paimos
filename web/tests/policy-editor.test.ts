@@ -70,6 +70,20 @@ test('absent-scope scalar compensation uses null/false/false level PUT',()=>{
  const before=prefs();before.document.levels.person={revision:0,residency:null,residency_locked:false,prefs_locked:false,rows:[]}
  const req=preferenceRequest(before,compensatePreferences(before,{unit:'scalars',value:{residency:'eu',residency_locked:false,prefs_locked:false}}));assert.equal(req.init.method,'PUT');assert.deepEqual(JSON.parse(req.init.body),{revision:0,residency:null,residency_locked:false,prefs_locked:false})
 })
+for(const name of ['default','person','project'] as const)test(`row Reset and new-row Undo send query revisions at ${name} scope`,()=>{
+ const before=prefs(name)
+ if(name==='project')before.project='project /?&='
+ const kind='kind /?&=',created:PreferenceMutation={unit:'row',kind_id:kind,value:{kind_id:kind,normal:auto,complex:auto,locked:false}}
+ for(const mutation of [{unit:'row',kind_id:kind,value:null} as PreferenceMutation,compensatePreferences(before,created)]){
+  const req=preferenceRequest(before,mutation),url=new URL(req.path,'https://fixture.invalid')
+  assert.equal(req.init.method,'DELETE')
+  assert.equal(url.pathname,`/model-preferences/levels/${name}/rows/${encodeURIComponent(kind)}`)
+  assert.deepEqual(url.searchParams.getAll('revision'),['7'])
+  assert.equal(req.init.body,undefined)
+  assert.equal(url.searchParams.get('project_id'),name==='project'?before.project:null)
+  assert.equal(req.init.headers['If-Prefs-Person'],'canonical-person')
+ }
+})
 test('retired-kind compensation has the specific honest refusal',()=>assert.equal(policyError(new PolicyFailure(422,'unknown_kind','unknown_kind'),true),'This work kind is no longer available; the change could not be restored.'))
 test('HTTP success alone cannot confirm wrong identity/revision',async()=>{
  const original=globalThis.fetch

@@ -86,9 +86,10 @@ export function preferenceRequest(before: PreferenceSnapshot, mutation: Preferen
     return { path: base + suffix, init: { method: 'PUT', headers, body: JSON.stringify({ revision: level.revision, residency: mutation.value.residency, residency_locked: mutation.value.residency_locked, prefs_locked: mutation.value.prefs_locked }) } }
   }
   if (mutation.unit !== 'row' || !mutation.kind_id || (mutation.value && mutation.value.kind_id !== mutation.kind_id)) throw new Error('A captured work-kind row is required')
+  if (mutation.value === null) return { path: `${base}/rows/${encode(mutation.kind_id)}${suffix}${suffix ? '&' : '?'}revision=${level.revision}`, init: { method: 'DELETE', headers } }
   return { path: `${base}/rows/${encode(mutation.kind_id)}${suffix}`, init: {
-    method: mutation.value === null ? 'DELETE' : 'PUT', headers,
-    body: JSON.stringify(mutation.value === null ? { revision: level.revision } : { revision: level.revision, normal: mutation.value.normal, complex: mutation.value.complex, locked: mutation.value.locked }),
+    method: 'PUT', headers,
+    body: JSON.stringify({ revision: level.revision, normal: mutation.value.normal, complex: mutation.value.complex, locked: mutation.value.locked }),
   } }
 }
 export async function writePreferences(before: PreferenceSnapshot, mutation: PreferenceMutation, _undo: boolean, signal: AbortSignal): Promise<PreferenceSnapshot> {

@@ -29,9 +29,10 @@ function refreshViews(doc:PreferenceDocument) {
 export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') {
  const base=await mockPolicies(page,theme)
  base.data.grants.push('models.manage','model_prefs.manage','nodes.read')
- const state={document:preferenceDocument(),ladders:new Map<PolicyRole,EditableLadder>(),writes:[] as {path:string;method:string;body:Record<string,unknown>|ModelRoute[];headers:Record<string,string>}[],refusal:null as null|{status:number;code:string},failReads:false,malformed:false,unknown:false}
+ const catalog=policyLadder('build',3).steps.map(s=>s.profile)
+ const state={document:preferenceDocument(),ladders:new Map<PolicyRole,EditableLadder>(),writes:[] as {path:string;method:string;body:Record<string,unknown>|ModelRoute[]|null;headers:Record<string,string>}[],refusal:null as null|{status:number;code:string},failReads:false,malformed:false,unknown:false}
  let next:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>}|null=null
- await page.route('**/api/models',route=>route.fulfill({json:policyLadder('build').steps.map(s=>s.profile)}))
+ await page.route('**/api/models',route=>route.fulfill({json:catalog}))
  await page.route(/\/api\/models\/routes(\?|$)/,async route=>{
   const req=route.request(),url=new URL(req.url()),role=url.searchParams.get('role') as PolicyRole
   if(!state.ladders.has(role)){const ladder=policyLadder(role) as EditableLadder;ladder.edit_token=token(ladder.routes);state.ladders.set(role,ladder)}
@@ -41,8 +42,9 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
   const held=next;next=null;held?.started.release();if(held)await held.until.promise
   if(state.refusal)return route.fulfill({status:state.refusal.status,json:{code:state.refusal.code,error:state.refusal.code}})
   if(req.headers()['if-match']!==ladder.edit_token)return route.fulfill({status:409,json:{code:'stale_revision',error:'stale_revision'}})
-  const actual=desired.map(row=>url.searchParams.get('expiry_policy')==='clear'&&row.valid_until&&Date.parse(row.valid_until)<=Date.now()?{...row,state:'available',reason:'',valid_until:null}:row)
-  ladder.routes=actual;ladder.edit_token=token(actual);ladder.steps=actual.map(row=>({...row,profile:policyLadder(role).steps.find(item=>item.profile_id===row.profile_id)!.profile}))
+  if(new Set(desired.map(row=>row.priority)).size!==desired.length)return route.fulfill({status:400,json:{error:'duplicate priority for role'}})
+  const actual=desired.map(row=>url.searchParams.get('expiry_policy')==='clear'&&row.valid_until&&Date.parse(row.valid_until)<=Date.now()?{...row,state:'available',reason:'',valid_until:null}:row).sort((a,b)=>a.priority-b.priority||a.profile_id.localeCompare(b.profile_id))
+  ladder.routes=actual;ladder.edit_token=token(actual);ladder.steps=actual.map(row=>({...row,profile:catalog.find(item=>item.id===row.profile_id)!}))
   return route.fulfill({json:actual,headers:{ETag:ladder.edit_token!}})
  })
  await page.route(/\/api\/model-preferences(\/|\?|$)/,async route=>{
@@ -56,7 +58,10 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
   if(state.refusal)return route.fulfill({status:state.refusal.status,json:{code:state.refusal.code,error:state.refusal.code}})
   if(req.headers()['if-prefs-person']!==state.document.person_id)return route.fulfill({status:409,json:{code:'preference_person_changed',error:'preference_person_changed'}})
   const name=url.pathname.split('/')[4] as PreferenceLevelName,value=state.document.levels[name]!,id=url.pathname.split('/')[6]
-  if(body.revision!==value.revision)return route.fulfill({status:409,json:{code:'stale_revision',error:'stale_revision'}})
+  // DELETE follows requestedRevision in preferences_http.go: the body is ignored.
+  const revisions=url.searchParams.getAll('revision'),revision=req.method()==='DELETE'?revisions.length===1&&revisions[0]!.length<=19&&/^[+]?[0-9]+$/.test(revisions[0]!)?Number(revisions[0]):null:body?.revision
+  if(!Number.isSafeInteger(revision)||revision<0)return route.fulfill({status:400,json:{code:'revision_required',error:'revision_required'}})
+  if(revision!==value.revision)return route.fulfill({status:409,json:{code:'stale_revision',error:'stale_revision'}})
   if(id&&!state.document.kinds.some(kind=>kind.id===id))return route.fulfill({status:422,json:{code:'unknown_kind',error:'unknown_kind'}})
   if(id){value.rows=value.rows.filter(row=>row.kind_id!==id);if(req.method()==='PUT')value.rows.push({kind_id:id,normal:body.normal,complex:body.complex,locked:body.locked})}
   else{if(req.method()!=='PUT'||'rows' in body)throw new Error('Unsafe whole-level preference mutation');Object.assign(value,{residency:body.residency,residency_locked:body.residency_locked,prefs_locked:body.prefs_locked})}

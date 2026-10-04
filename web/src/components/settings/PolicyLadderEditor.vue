@@ -54,7 +54,7 @@ function update(field: 'state' | 'reason' | 'valid_until', value: string) {
 function add(event: Event) {
   const select = event.target as HTMLSelectElement, id = select.value; select.value = ''
   if (!id || !draft.value || busy.value || draft.value.length >= 50 || draft.value.some(row => row.profile_id === id)) return
-  draft.value = [...draft.value, { role: props.role, profile_id: id, priority: draft.value.length + 1, state: 'available', reason: '', valid_until: null }]; selected.value = draft.value.length - 1
+  draft.value = [...draft.value, { role: props.role, profile_id: id, priority: draft.value.length + 1, state: 'available' as const, reason: '', valid_until: null }].map((row, index) => ({ ...row, priority: index + 1 })); selected.value = draft.value.length - 1
 }
 function remove() {
   if (!draft.value || busy.value) return
