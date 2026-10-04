@@ -1,0 +1,236 @@
+{
+  "ticket": "AEON-683",
+  "round": "fix4",
+  "review": "review-cg47",
+  "baseline_revision": "6f1b6864c710d7447d2fb359b3db461af7b440f5",
+  "recorded_at": "2026-10-04T09:20:56.298626+00:00",
+  "worker_session": "2c9513b1-6b11-45d5-9afb-94dafddeaaf9",
+  "scope": "Local verification and owning-header correction proposal. No product behavior changes, assertion weakening, push, deployment, foreign-worktree edits, other-model calls or tracker status changes.",
+  "acceptance": "incomplete: both review P2 findings remain open",
+  "new_behavior_changes": false,
+  "local_checks": [
+    {
+      "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/queue-filter.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "command": "node --experimental-strip-types --test --test-concurrency=1 web/tests/work-queue.test.ts",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "command": "cd web && ./node_modules/.bin/vitest run tests/work-queue-store.unit.test.ts --maxWorkers=1",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "command": "cd web && ./node_modules/.bin/vitest run tests/agents-working.unit.test.ts --maxWorkers=1",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "command": "cd web && npm run build",
+      "exit_code": 0,
+      "result": "vue-tsc and production Vite build passed; existing large-chunk advisory retained"
+    }
+  ],
+  "browser_attempts": [
+    {
+      "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+      "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+      "spec": "views-filters.spec.ts",
+      "phase": "after",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "views-filters.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+        "--repeat-each=20",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix4/evidence/0c7d02ca-views-filters-after-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:20:10.519040+00:00",
+      "finished_at": "2026-10-04T09:20:10.619419+00:00",
+      "log_sha256": "ca6d740314ba7ab48a2e748360053ea1603abd16029ea74ebfd8729704b5e67f",
+      "log_path": "tmp/aeon-683-fix4/evidence/0c7d02ca-views-filters-after.log",
+      "result": "not executed: supervisor refused another live host browser suite",
+      "passed": 0,
+      "browser_started": false
+    },
+    {
+      "product_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+      "spec_revision": "0c7d02ca0864eacae9667dda6e06417d1de93d42",
+      "spec": "views-filters.spec.ts",
+      "phase": "before",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "views-filters.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+        "--repeat-each=1",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix4/evidence/0c7d02ca-views-filters-before-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:19:58.269132+00:00",
+      "finished_at": "2026-10-04T09:19:58.327375+00:00",
+      "log_sha256": "ca6d740314ba7ab48a2e748360053ea1603abd16029ea74ebfd8729704b5e67f",
+      "log_path": "tmp/aeon-683-fix4/evidence/0c7d02ca-views-filters-before.log",
+      "result": "not executed: supervisor refused another live host browser suite",
+      "passed": 0,
+      "browser_started": false
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "7718e84ea03b23ddc857251363af1fd488897028",
+      "spec": "status-help.spec.ts",
+      "phase": "after",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "status-help.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "human-check filter is linked",
+        "--repeat-each=20",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix4/evidence/6a27bb1b-status-help-after-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:19:30.920404+00:00",
+      "finished_at": "2026-10-04T09:19:30.980113+00:00",
+      "log_sha256": "20a4ba15511b150ad170520777d92e97ac46b26db0da6270dd0375fc93c61c5d",
+      "log_path": "tmp/aeon-683-fix4/evidence/6a27bb1b-status-help-after.log",
+      "result": "not executed: supervisor refused another live host browser suite",
+      "passed": 0,
+      "browser_started": false
+    },
+    {
+      "product_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec_revision": "6a27bb1b7e4fd7e9da965013242eaf0b5b0f656c",
+      "spec": "status-help.spec.ts",
+      "phase": "before",
+      "command": [
+        "node",
+        "scripts/playwright-safe.mjs",
+        "-c",
+        "playwright.ui.config.ts",
+        "status-help.spec.ts",
+        "--workers=1",
+        "--retries=0",
+        "--grep",
+        "human-check filter is linked",
+        "--repeat-each=1",
+        "--reporter=line,json",
+        "--output=/Users/markus/Code/aeon-worktrees/aeon-683/tmp/aeon-683-fix4/evidence/6a27bb1b-status-help-before-artifacts"
+      ],
+      "exit_code": 1,
+      "started_at": "2026-10-04T09:19:30.823140+00:00",
+      "finished_at": "2026-10-04T09:19:30.886447+00:00",
+      "log_sha256": "20a4ba15511b150ad170520777d92e97ac46b26db0da6270dd0375fc93c61c5d",
+      "log_path": "tmp/aeon-683-fix4/evidence/6a27bb1b-status-help-before.log",
+      "result": "not executed: supervisor refused another live host browser suite",
+      "passed": 0,
+      "browser_started": false
+    }
+  ],
+  "phone_queue": {
+    "owner_ticket": "AEON-646",
+    "owner_ref": "work/aeon-646-hide",
+    "owner_revision": "e8ec19dcc96c423bb4997194f96f0f0fbbf1a91b",
+    "owner_source_sha256": "9d7e18f5394739856446b90e8307edd9b745a7ecf46d13f690a51f693dfb425c",
+    "hidden_on_owner_ref": true,
+    "integrated_fix_validated": false,
+    "proposal_path": "tmp/aeon-683-fix4/owner-phone-queue.patch",
+    "proposal_sha256": "a75bdeec5c42aad5dc19b07224d5cda098cdc309584a74ac853bddb1e3caca90",
+    "proposal_recorded": "AEON-683 PPM comment with full unified diff; no owner source edited",
+    "required": "Owner correction must preserve accepted header decisions and pass the existing phone queue assertion, light/dark, density/folding, overflow and control geometry, followed by 20 repetitions on integrated product.",
+    "prior_evidence": "scripts/aeon-683-validation.json retains historical 20/20 phone failures; successful historical reports still match their committed digests."
+  },
+  "remaining_validation": [
+    {
+      "product_revision": "6a27bb1b",
+      "spec": "status-help.spec.ts",
+      "selection": "human-check filter is linked",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "0c7d02ca",
+      "spec": "views-filters.spec.ts",
+      "selection": "an excluded value|Shift F opens|custom date range|saving a view:|column set belongs",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "0c7d02ca",
+      "spec": "work-queue.spec.ts",
+      "selection": "keyboard and drag moves",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "0c7d02ca",
+      "spec": "status-help.spec.ts",
+      "selection": "human-check filter is linked",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "99981148",
+      "spec": "no-shift.spec.ts",
+      "selection": "Agents working dial and selectors",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    },
+    {
+      "product_revision": "99981148",
+      "spec": "accounts-computers.spec.ts",
+      "selection": "Agents at once saves|stored ceiling arrives",
+      "before_repeats": 1,
+      "after_repeats": 20,
+      "reason": "safe runner refused the live host lock twice; a briefly unreserved lane was acquired by another worker before launch"
+    }
+  ],
+  "remote_acceptance": {
+    "status": "unavailable under current authorization",
+    "reason": "Fix4 explicitly says local tests only and mbp2606 off limits; user forbids push/deploy. Coordinator remote-test.sh pushes a temporary remote ref and executes Go only; no affected Go packages. Browser remote launcher remains fail-closed pending OPS-247. No CI-equivalent Linux Chromium image is installed locally; docker image inventory inspected read-only.",
+    "go_packages_affected": []
+  },
+  "concurrent_worktree_changes": {
+    "paths": [
+      "web/tests/accounts-computers.spec.ts",
+      "web/tests/work-queue.spec.ts",
+      "scripts/aeon-683-phone-queue.patch"
+    ],
+    "handling": "Changes appeared after clean initial orientation, were not authored by this session, and are preserved/excluded from this session commit. Earlier fix3 worker marker overlaps this session; no attribution or validation of its changes is claimed.",
+    "account_head_sha256": "4d0bf87a3a9954ce9a95d382f93d211ce51fac227ff887ba77683ac269eddcc8",
+    "account_working_sha256": "b3fc6e7dfd982e3360a1da98a7089c72aa4060dff83cb8288db0eea901e4a41b"
+  },
+  "prior_refusal_log_note": "Initial replay attempts reused the ignored fix2 helper and replaced only prior refused status-help logs/run metadata. They did not replace any successful JSON report or successful replay log. Later attempts use separate fix4 evidence paths. Original refusal digests are historical and no longer match those reused log paths.",
+  "completion_meaning": "pct 100 means this worker handed off local evidence and exits; ticket acceptance and review remain incomplete."
+}
