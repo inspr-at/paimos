@@ -10,15 +10,16 @@ test.use({ timezoneId: 'Europe/Vienna' })
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const first = id(1), later = id(2), frozen = id(3), cut = id(4), short = id(5), abandoned = id(6), internalFrozen = id(7), building = id(8)
 const long = 'Langfristige Verbesserungen für nachvollziehbare und gemeinsame Releaseplanung'
-const make = (release_id: string, title: string, state: ReleaseRecord['state'] = 'planned', visibility: ReleaseRecord['visibility'] = 'internal'): ReleaseRecord => ({ release_id, project_id: 'p-pharos', title, display_name: title, body: 'Plan changes in the open.', state, visibility, revision: 1, rank: release_id.slice(-3) + 'V', entry_closes_at: null, rollup: { units: 2, completed: 1, open_hours: 1 }, build_summary: { budget_outlook: 'unknown' } })
+const make = (release_id: string, title: string, state: ReleaseRecord['state'] = 'planned', visibility: ReleaseRecord['visibility'] = 'internal'): ReleaseRecord => ({ release_id, project_id: 'p-pharos', title, display_name: title, body: 'Plan changes in the open.', state, visibility, revision: 1, rank: release_id.slice(-3) + 'V', entry_closes_at: null, occupied_rows: 2, rollup: { units: 2, completed: 1, open_hours: 1 }, build_summary: { budget_outlook: 'unknown' } })
 const defaults = { budget_agent_hours: 10, max_agents: 3, largest_ticket_hours: 4, window: { timezone: 'Europe/Vienna', slots: [{ days: [1,2,3,4,5], from: '20:00', to: '02:00' }] } }
-async function setup(page: Page, options: { width?: number; theme?: string; agent?: boolean; deploy?: boolean; failBatch?: number; failState?: boolean; incomplete?: boolean; failRead?: boolean; staleDetail?: boolean; product?: boolean; missingNotes?: boolean } = {}) {
+async function setup(page: Page, options: { width?: number; theme?: string; agent?: boolean; deploy?: boolean; failBatch?: number; failState?: boolean; incomplete?: boolean; failRead?: boolean; staleDetail?: boolean; product?: boolean; missingNotes?: boolean; emptyDefaults?: boolean } = {}) {
   await page.setViewportSize({ width: options.width ?? 1440, height: 1000 })
   const data = fixtures(); data.preferences.theme = { choice: options.theme ?? 'light' }; data.preferences['header-graph'] = { enabled: false }
   await mockWork(page, data, { principalKind: options.agent ? 'agent' : 'person' })
   const errors = watchErrors(page), writes: { path: string; body: Record<string, any> }[] = []
   const releases = [make(first, long), make(later, 'Silver Signal'), make(frozen, 'Copper Crown', 'frozen', 'published'), { ...make(cut, 'Amber Atlas', 'frozen', 'published'), version_scheme: 'legacy', version: '2.3.0', cut_at: '2026-10-04T12:00:00Z' }, make(short, 'Audit', 'planned'), make(abandoned, 'Abandoned documentation pass', 'abandoned')]
   releases.push(make(internalFrozen, 'Documentation pass', 'frozen'), make(building, 'Research pass', 'building'))
+  const projectDefaults = options.emptyDefaults ? {} : defaults
   const candidates: (PlanningItem & { source: 'unplaced' | 'later'; index: number; placed?: boolean })[] = Array.from({ length: 203 }, (_, i) => ({ item_id: id(1000 + i), key: `PHAROS-${1000+i}`, project_id: 'p-pharos', release_id: i < 120 ? undefined : later, rank: i < 120 ? undefined : `${i}V`, revision: i < 120 ? 0 : 2, node_revision: '2026-10-04T12:00:00Z', title: `${long} · ${i+1}`, kind: 'ticket', state: 'done', created_at: '2026-10-04T12:00:00Z', estimated_hours: 1, expedite: false, due_on: null, source: i < 120 ? 'unplaced' : 'later', index: i }))
   await page.route('**/api/me/permissions**', route => {
     const project = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
@@ -38,7 +39,7 @@ async function setup(page: Page, options: { width?: number; theme?: string; agen
         const selected = candidates.filter(row => body.items.some((it: { id: string }) => it.id === row.item_id))
         expect(selected).toHaveLength(body.items.length); expect(selected.length).toBeLessThanOrEqual(100)
         for (const row of selected) row.placed = true
-        target.revision++; target.rollup.units += selected.length; target.rollup.completed += selected.length
+        target.revision++; target.occupied_rows! += selected.length; target.rollup.units += selected.length; target.rollup.completed += selected.length
         return route.fulfill({ json: { items: selected.map(row => ({ item_id: row.item_id, project_id: row.project_id, release_id: target.release_id, revision: row.revision+1, rank: 'ZV', expedite: false, due_on: null })), release_revision: target.revision, release_revisions: { [target.release_id]: target.revision }, undo_event_id: 700 + batch } })
       }
       const target = releases.find(row => row.release_id === path.split('/').at(request.method() === 'PATCH' ? -1 : -2))
@@ -55,7 +56,7 @@ async function setup(page: Page, options: { width?: number; theme?: string; agen
       const omitted = candidates.filter(row => !row.placed)
       return route.fulfill({ json: { ...target, undo_event_id: null, recovery: { completed_unplaced: omitted.filter(row => row.source === 'unplaced').length, completed_later: omitted.filter(row => row.source === 'later').length, incomplete: false } } })
     }
-    if (path.endsWith('/delivery')) return route.fulfill({ json: { project_id: 'p-pharos', mode: 'releases', revision: 1, product_project: options.product === true, build_defaults: defaults } })
+    if (path.endsWith('/delivery')) return route.fulfill({ json: { project_id: 'p-pharos', mode: 'releases', revision: 1, product_project: options.product === true, build_defaults: projectDefaults, version_scheme: options.product ? 'inspr-calver-3' : 'legacy' } })
     if (path.endsWith('/overview')) return route.fulfill({ json: { active: releases.filter(row => ['planned','building','frozen'].includes(row.state)), released: { items: releases.filter(row => row.state === 'released') }, abandoned: 1, backlog: { ranked: 0, tail: 0 }, counts_incomplete: false } })
     if (path.endsWith('/releases')) return route.fulfill({ json: { items: releases.filter(row => query.get('state') === 'abandoned' ? row.state === 'abandoned' : row.state !== 'abandoned') } })
     if (path.endsWith('/note-snapshot')) return route.fulfill({ json: options.missingNotes ? { source: 'unavailable', gaps: ['Membership was never captured.'], items: [] } : { schema: 'aeon.release-note-snapshot.v1', project_node_id: 'p-pharos', release_node_id: path.split('/').at(-2), frozen: false, tickets: [{ key: 'PHAROS-51', fields: { pill_en: 'Clear context', benefit_en: 'Plans keep the work visible.' } }, { key: 'PHAROS-52', fields: { hide_from_release_notes: true, pill_en: 'Hidden pill', benefit_en: 'Hidden benefit' } }] } })
@@ -68,7 +69,7 @@ async function setup(page: Page, options: { width?: number; theme?: string; agen
       return route.fulfill({ json: { items: pageRows, count: rows.length, incomplete: !!options.incomplete, next_cursor: next } })
     }
     const target = releases.find(row => row.release_id === path.split('/').at(-1))
-    if (target) return route.fulfill({ json: { ...target, revision: target.revision + Number(!!options.staleDetail), build_settings: {}, resolved_build_settings: defaults, setting_sources: {} } })
+    if (target) return route.fulfill({ json: { ...target, revision: target.revision + Number(!!options.staleDetail), build_settings: {}, resolved_build_settings: projectDefaults, setting_sources: {} } })
     return route.fallback()
   })
   await page.goto('/p/pharos?section=releases')
@@ -115,7 +116,7 @@ for (const width of [390,1024,1440]) for (const theme of ['light','dark']) test(
   for (const axis of ['x','y','width','height'] as const) expect(Math.abs(nextBox![axis] - actionBox![axis])).toBeLessThanOrEqual(.5)
   await dialog.getByRole('button', { name: /^Cancel/ }).click()
   dialog = await choose(page, 'Cut', frozen)
-  await expectStableControls({ controls: { scheme: dialog.getByLabel('Version scheme', { exact: true }), version: dialog.getByLabel('Reserved version', { exact: true }), confirm: dialog.getByRole('button', { name: /^Cut / }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), choices: dialog.getByRole('group', { name: 'Cut version', exact: true }), ...(width === 390 ? { frame: dialog } : {}) }, scrollAreas: { body: dialog.locator('.sheet-body'), dialog }, interactions: [{ name: 'legacy', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('legacy') }, { name: 'calendar v1', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calendar-v1') }, { name: 'calendar v2', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calendar-v2') }] })
+  await expectStableControls({ controls: { scheme: dialog.getByLabel('Version scheme', { exact: true }), version: dialog.getByLabel('Reserved version', { exact: true }), confirm: dialog.getByRole('button', { name: /^Cut / }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), choices: dialog.getByRole('group', { name: 'Cut version', exact: true }), ...(width === 390 ? { frame: dialog } : {}) }, scrollAreas: { body: dialog.locator('.sheet-body'), dialog }, interactions: [{ name: 'legacy', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('legacy') }, { name: 'calendar v1', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calendar-v1') }, { name: 'calendar v2', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calendar-v2') }, { name: 'calendar v3', run: () => dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calver-3') }] })
   await shot(page, 'cut', width, theme); await dialog.getByRole('button', { name: /^Cancel/ }).click()
   dialog = await choose(page, 'Publish', cut); await shot(page, 'publish', width, theme); await dialog.getByRole('button', { name: /^Cancel/ }).click()
   for (const [action, rid, file] of [['Close',internalFrozen,'close'], ['Unfreeze',internalFrozen,'unfreeze'], ['Mark building',first,'mark-building'], ['Return to planned',building,'return-planned']] as const) {
@@ -240,4 +241,38 @@ test('settings save preserves an unchanged precise deadline and sends explicit o
   await expect(dialog).not.toBeVisible()
   expect(world.writes[0]?.body.entry_closes_at).toBeUndefined()
   expect(world.writes[0]?.body.build_settings).toEqual({ budget_agent_hours: 5, window: { timezone: 'Europe/Vienna', slots: [{ days: [1,2,3,4,5], from: '21:00', to: '02:00' }] } })
+})
+
+
+test('Cut defaults to the authoritative product scheme and exposes Calendar v3', async ({ page }) => {
+  const world = await setup(page, { product: true })
+  const dialog = await choose(page, 'Cut', frozen)
+  await expect(dialog.getByLabel('Version scheme', { exact: true })).toHaveValue('inspr-calver-3')
+  await dialog.getByLabel('Reserved version', { exact: true }).fill('261004130000.0.0')
+  await dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calendar-v2')
+  await dialog.getByRole('button', { name: /^Cut / }).click()
+  await expect(dialog.getByText('Use the product’s current version scheme for this reservation.', { exact: true })).toBeVisible()
+  expect(world.writes).toEqual([])
+  await dialog.getByLabel('Version scheme', { exact: true }).selectOption('inspr-calver-3')
+  await dialog.getByRole('button', { name: /^Cut / }).click()
+  await expect(dialog).not.toBeVisible()
+  expect(world.writes[0]?.body.version_scheme).toBe('inspr-calver-3')
+})
+
+test('write-only settings accept absent agent and ticket defaults while keeping missing-budget protection', async ({ page }) => {
+  const world = await setup(page, { deploy: false, emptyDefaults: true })
+  let dialog = await choose(page, 'Settings…')
+  await expectStableControls({ controls: { save: dialog.getByRole('button', { name: /^Save / }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), agents: dialog.getByLabel('Most agents at once', { exact: true }), ticket: dialog.getByLabel('Largest ticket', { exact: true }), group: dialog.getByRole('group', { name: 'Release settings', exact: true }) }, scrollAreas: { body: dialog.locator('.sheet-body'), dialog }, interactions: [
+    { name: 'introduce agent cap', run: async () => { await dialog.getByLabel('Override Most agents at once', { exact: true }).check(); await dialog.getByLabel('Most agents at once', { exact: true }).fill('2') } },
+    { name: 'introduce ticket cap', run: async () => { await dialog.getByLabel('Override Largest ticket', { exact: true }).check(); await dialog.getByLabel('Largest ticket', { exact: true }).fill('3') } },
+  ] })
+  await dialog.getByRole('button', { name: /^Save / }).click()
+  await expect(dialog).not.toBeVisible()
+  expect(world.writes[0]?.body.build_settings).toEqual({ max_agents: 2, largest_ticket_hours: 3 })
+  dialog = await choose(page, 'Settings…')
+  await dialog.getByLabel('Override Budget', { exact: true }).check()
+  await dialog.getByLabel('Budget', { exact: true }).fill('1')
+  await dialog.getByRole('button', { name: /^Save / }).click()
+  await expect(dialog.getByText('Widening a project limit requires deployment permission.', { exact: true })).toBeVisible()
+  expect(world.writes).toHaveLength(1)
 })

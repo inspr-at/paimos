@@ -9,6 +9,18 @@ const item=(id:string,release='a',rank='V'):PlanningItem=>({item_id:id,project_i
 const release=(id:string,rank:string):PlanningRelease=>({release_id:id,project_id:'project',rank,revision:1,visibility:'internal',state:'planned',title:id,rollup:{units:1,completed:0,open_hours:1},build_summary:{}})
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals()})
 describe('canonical placement',()=>{
+ it('permits uncut frozen-source removal but keeps destination, Cut, ordering and permission safeguards',()=>{
+  const source={...release('a','B'),state:'frozen' as const},dest=release('b','D'),subject:MoveSubject={kind:'item',record:item('subject')}
+  expect(moveAdvice(subject,{release:dest,slot:{}},[source,dest],false,true)).toBe('')
+  expect(moveAdvice(subject,{release:null,slot:{}},[source,dest],false,true)).toBe('')
+  expect(moveAdvice(subject,{release:source,slot:{position:'top'}},[source,dest],false,true)).toContain('frozen')
+  expect(moveAdvice(subject,{release:dest,slot:{}},[{...source,cut_at:'2026-10-04T12:00:00Z'},dest],false,true)).toContain('frozen')
+  expect(moveAdvice(subject,{release:dest,slot:{}},[source,dest],false,false)).toContain('permission')
+ })
+ it('checks destination capacity using all occupied membership slots',()=>{
+  const source=release('a','B'),dest={...release('b','D'),occupied_rows:1000},subject:MoveSubject={kind:'item',record:item('subject')}
+  expect(moveAdvice(subject,{release:dest,slot:{}},[source,dest],false,true)).toContain('full')
+ })
  it('sends one anchor across hidden gaps and partial page boundaries',()=>{
   const rows=[item('a'),item('b'),item('moved')]
   expect(visibleGap(rows,'b',false,'moved')).toEqual({after_id:'a'})
@@ -23,7 +35,7 @@ describe('canonical placement',()=>{
   expect(moveAdvice(subject,{release:b,slot:{before_id:'peer'}},[a,b],true,true)).toBe('')
   expect(moveAdvice(subject,{release:a,slot:{position:'top'}},[a,b],true,true)).toContain('later')
   b.state='frozen';expect(moveAdvice(subject,{release:b,slot:{}},[a,b],false,true)).toContain('frozen')
-  b.state='planned';b.rollup.units=1000;expect(moveAdvice(subject,{release:b,slot:{}},[a,b],false,true)).toContain('full');b.rollup.units=1;
+  b.state='planned';b.rollup.units=1000;b.occupied_rows=1000;expect(moveAdvice(subject,{release:b,slot:{}},[a,b],false,true)).toContain('full');b.rollup.units=1;b.occupied_rows=1;
   expect(refusal(new APIError(409,'Refused',{code:'rank_space_exhausted'}))).toContain('rank space');expect(refusal(new APIError(409,'Unknown specific refusal',{code:'new_reason'}))).toBe('Unknown specific refusal');
   b.entry_closes_at='2026-01-01';expect(moveAdvice(subject,{release:b,slot:{}},[a,b],true,true,Date.UTC(2026,9,4))).toContain('Entry has closed')
   a.visibility='published';expect(moveAdvice({kind:'release',record:a},{release:b,slot:{}},[a,b],false,true)).toContain('Published releases')

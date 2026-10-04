@@ -184,7 +184,8 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
       const rollover = updated.state === 'abandoned' || updated.state === 'released' || !before?.version && !!updated.version
       if (rollover) {
         updated.rollup_stale = true
-        for (const row of active) if (row.release_id !== updated.release_id && row.visibility === updated.visibility && row.rank > updated.rank) row.rollup_stale = true
+        updated.occupied_rows = undefined
+        for (const row of active) if (row.release_id !== updated.release_id && row.visibility === updated.visibility && row.rank > updated.rank) { row.rollup_stale = true; row.occupied_rows = undefined }
         delete work[`release:${updated.release_id}`]; updated.matches = undefined; overview.value.counts_incomplete = true
       }
       overview.value = { ...overview.value, active, released: { ...overview.value.released, items: released }, abandoned: overview.value.abandoned + Number(updated.state === 'abandoned' && before?.state !== 'abandoned') }
@@ -241,7 +242,9 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
     if (change.recovered?.length) overview.value.counts_incomplete = true
     for (const row of rows()) {
       const revision = change.result.release_revisions?.[row.release_id]
-      if (revision) row.revision = revision
+      // Placement receipts may include unrendered source members. Retire
+      // the old capacity count until a read supplies the full population.
+      if (revision) { row.revision = revision; row.occupied_rows = undefined }
     }
     overview.value = { ...overview.value }
   }

@@ -14,6 +14,9 @@ export interface PlanningRelease {
   release_id: string; project_id: string; title: string; display_name?: string
   visibility: 'published' | 'internal'; state: 'planned' | 'building' | 'frozen' | 'released' | 'abandoned'
   rank: string; revision: number; entry_closes_at?: string | null; version?: string; version_scheme?: string
+  occupied_rows?: number
+  event_ids?: number[]
+  cut_at?: string | null
   rollup: { units: number; completed: number; open_hours: number }
   rollup_stale?: boolean
   matches?: MatchCounts

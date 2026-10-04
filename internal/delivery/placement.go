@@ -408,10 +408,11 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		if err != nil {
 			return nil, nil, err
 		}
-		// Scope and order stay frozen for forward moves and Undo alike. Flag-only
-		// maintenance keeps its existing authority; lifecycle rollover has its
-		// own explicit path. Both containers come from the final fenced locks.
-		if (releases[old.ReleaseID].State == "frozen" || dest.State == "frozen") &&
+		// Planners may remove work from an uncut frozen source, including
+		// recovery Include. Frozen destinations and in-place ordering remain
+		// closed, and Cut fixes the source scope. Undo shares these safeguards.
+		source := releases[old.ReleaseID]
+		if (dest.State == "frozen" || source.State == "frozen" && (source.CutAt != nil || source.Version != "" || old.ReleaseID == next.ReleaseID)) &&
 			(old.ReleaseID != next.ReleaseID || old.Rank != next.Rank) {
 			return nil, nil, ErrFrozen
 		}
@@ -432,9 +433,9 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 				return nil, nil, &Conflict{"expedite_taken", "Another item is already expedited."}
 			}
 		}
-		source := string(w.p.Kind)
+		placementSource := string(w.p.Kind)
 		if history {
-			source = "correction"
+			placementSource = "correction"
 		}
 		if next.Rank == "" {
 			tag, e := w.tx.Exec(w.ctx, `DELETE FROM ships_in WHERE tenant_id=$1 AND project_node_id=$2 AND item_node_id=$3 AND revision=$4`, w.p.TenantID, w.project, n.id, old.Revision)
@@ -444,7 +445,7 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 			}
 			next.Revision = 0
 		} else {
-			next, err = w.savePlacement(old, next, source, now)
+			next, err = w.savePlacement(old, next, placementSource, now)
 		}
 		if err != nil {
 			return nil, nil, err

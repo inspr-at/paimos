@@ -16,7 +16,7 @@ var (
 	ErrPublishedOrder      = &Conflict{"published_order", "Published releases keep their numbered order."}
 	ErrProjectChanged      = &Conflict{"project_changed", "The item belongs to a different project; reload before moving it."}
 	ErrRevisionChanged     = &Conflict{"revision_changed", "The record changed; reload before editing it."}
-	ErrFrozen              = &Conflict{"frozen", "This release is frozen; work cannot move in, out or within it."}
+	ErrFrozen              = &Conflict{"frozen", "This release is frozen; adding or reordering work is closed, and cut scope stays fixed."}
 	ErrEntryClosed         = &Conflict{"entry_closed", "A person with releases.write must move these items."}
 	ErrReleaseClosed       = &Conflict{"release_closed", "This release no longer accepts items."}
 	ErrReleaseCapacity     = &Conflict{"release_capacity", "A release holds at most 1,000 rows; move some out first."}

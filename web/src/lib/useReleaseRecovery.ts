@@ -9,7 +9,13 @@ import { releasePath, requestRelease, type ReleaseRecord, type ReleaseRequest } 
 type RecoverySource = 'unplaced' | 'later'
 export function useReleaseRecovery(options: { release: ReleaseRecord; current: () => boolean; allowed: () => boolean; actions?: DeliveryActions; request?: ReleaseRequest; signal: AbortSignal }) {
   const request = options.request ?? requestRelease, initial = { ...options.release }
-  const revision = ref(initial.revision), room = ref(Math.max(0, 1000 - initial.rollup.units))
+  const revision = ref(initial.revision), room = ref(0)
+  let capacityKnown = false
+  function setCapacity(occupied: number | undefined) {
+    if (!Number.isInteger(occupied) || occupied! < 0 || occupied! > 1000) throw new Error('Release capacity could not be read. Reopen Freeze before including work.')
+    room.value = 1000 - occupied!; capacityKnown = true
+  }
+  if (initial.occupied_rows !== undefined) setCapacity(initial.occupied_rows)
   const placedCount = ref(0)
   const rows = shallowRef<Record<RecoverySource, PlanningItem[]>>({ unplaced: [], later: [] })
   const counts = ref({ unplaced: 0, later: 0 }), cursors = ref({ unplaced: '', later: '' })
@@ -43,6 +49,7 @@ export function useReleaseRecovery(options: { release: ReleaseRecord; current: (
     if (busy.value) return
     busy.value = true; ready.value = false; error.value = ''
     try {
+      if (!capacityKnown) throw new Error('Release capacity could not be read. Reopen Freeze before including work.')
       const unplaced = await read('unplaced'), later = await read('later')
       firstPages.unplaced = unplaced; firstPages.later = later; archived.value = { unplaced: [], later: [] }
       rows.value = { unplaced: unplaced.items, later: later.items }; cursors.value = { unplaced: unplaced.next_cursor ?? '', later: later.next_cursor ?? '' }; ready.value = true
@@ -123,5 +130,5 @@ export function useReleaseRecovery(options: { release: ReleaseRecord; current: (
       busy.value = false
     }
   }
-  return { revision, room, placedCount, rows, counts, cursors, ready, incomplete, busy, error, result, all, total, visible, selected, excluded, load, more, include, checked, toggleAll }
+  return { revision, room, setCapacity, placedCount, rows, counts, cursors, ready, incomplete, busy, error, result, all, total, visible, selected, excluded, load, more, include, checked, toggleAll }
 }

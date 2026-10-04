@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -16,6 +17,7 @@ import (
 type DeliveryStatus struct {
 	ProjectID      string        `json:"project_id"`
 	ProductProject bool          `json:"product_project"`
+	VersionScheme  string        `json:"version_scheme"`
 	Title          string        `json:"title,omitempty"`
 	Mode           string        `json:"mode"`
 	Revision       int64         `json:"revision"`
@@ -94,6 +96,17 @@ func (s *Store) Status(ctx context.Context, p tenant.Principal, project string) 
 		var err error
 		out, err = inventoryStatusTx(ctx, tx, p, project, true)
 		out.ProductProject = s.productTenant == p.TenantID && s.productProject == project
+		if err != nil {
+			return err
+		}
+		if out.ProductProject {
+			out.VersionScheme = releasehistory.SchemeCalVer3
+		} else {
+			// Preserve the project's explicitly recorded scheme, including
+			// reservations on abandoned releases. An unversioned project has
+			// no authoritative scheme yet; the planner chooses one explicitly.
+			err = tx.QueryRow(ctx, `SELECT coalesce((SELECT version_scheme FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND version_scheme IS NOT NULL ORDER BY sequence DESC LIMIT 1),'')`, p.TenantID, project).Scan(&out.VersionScheme)
+		}
 		return err
 	})
 	return out, err

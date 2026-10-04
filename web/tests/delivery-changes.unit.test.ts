@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { parseDeliveryEvent, useDeliveryChanges, placeDelivery, type PlacementReceipt } from '../src/lib/deliveryChanges'
+import { DELIVERY_EVENTS, parseDeliveryEvent, useDeliveryChanges, placeDelivery, type PlacementReceipt } from '../src/lib/deliveryChanges'
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error { constructor(public status: number, message: string, public body: unknown) { super(message) } } }))
 import { api } from '../src/lib/api'
 const move = (id = 7): PlacementReceipt => ({ items: [{ item_id: 'item', project_id: 'project', release_id: 'later', rank: 'V', revision: 3, expedite: false, due_on: null }], undo_event_id: id })
@@ -12,6 +12,19 @@ function setup() {
   return { scope, project, owner, live, changes, apply }
 }
 describe('exact own receipts and held changes', () => {
+  it('correlates exact lifecycle and rollover echoes on either side of the response without Undo', () => {
+    expect(DELIVERY_EVENTS).toContain('ships_in.rolled_over')
+    const h = setup(), captured = h.live.actions.begin()
+    h.live.receive(event(41, 'project', 'release.state_changed'))
+    h.live.receive(event(42, 'project', 'ships_in.rolled_over'))
+    h.live.receive(event(43, 'project', 'release.state_changed'))
+    h.live.actions.commit(captured, { kind: 'lifecycle', result: { release_id: 'release', project_id: 'project', title: 'Cut', visibility: 'published', state: 'frozen', rank: 'V', revision: 3, rollup: { units: 0, completed: 0, open_hours: 0 }, build_summary: {}, event_ids: [41,42,44] } })
+    expect(h.live.pending.value).toBe(1)
+    h.live.receive(event(44, 'project', 'release.cut'))
+    expect(h.live.pending.value).toBe(1)
+    expect(h.live.undo.value).toBeNull()
+    h.scope.stop()
+  })
   it('Include retains exact own correlation without offering multi-page Undo, and lifecycle clears a prior move', () => {
     const h = setup(), captured = h.live.actions.begin()
     h.live.receive(event(7)); h.live.receive(event(8))

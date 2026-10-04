@@ -31,6 +31,26 @@ describe('release planning query', () => {
   })
 })
 describe('bounded release reads', () => {
+  it('retires occupied-row capacity after a placement receipt for an unrendered member', async () => {
+    const h = harness(); h.state.reset(context)
+    const initial = overview(2)
+    initial.active[0]!.occupied_rows = 950; initial.active[1]!.occupied_rows = 999
+    h.requests[0]!.resolve(initial); await settle()
+    h.state.committed({ kind: 'placement', result: { items: [{ item_id: 'unrendered', project_id: 'project', release_id: '1', revision: 2, expedite: false, due_on: null }], release_revisions: { '0': 2, '1': 2 }, undo_event_id: 42 } })
+    expect(h.state.overview.value?.active.map(row => row.occupied_rows)).toEqual([undefined, undefined])
+    expect(h.state.overview.value?.active.map(row => row.revision)).toEqual([2, 2])
+    expect(h.requests).toHaveLength(1); h.state.dispose()
+  })
+  it('retires source and potential successor capacity after lifecycle rollover', async () => {
+    const h = harness(); h.state.reset(context)
+    const initial = overview(2)
+    initial.active[0]!.occupied_rows = 950; initial.active[1]!.occupied_rows = 999
+    h.requests[0]!.resolve(initial); await settle()
+    h.state.committed({ kind: 'lifecycle', result: { ...initial.active[0]!, state: 'frozen', version: '1.0.0', revision: 2 } })
+    expect(h.state.overview.value?.active.map(row => row.occupied_rows)).toEqual([undefined, undefined])
+    expect(h.state.overview.value?.active.every(row => row.rollup_stale)).toBe(true)
+    expect(h.requests).toHaveLength(1); h.state.dispose()
+  })
   it('applies recovered completed work to rollups without inserting hidden/unsearched rows or exposing foreign reads', async () => {
     const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview(2)); await settle()
     h.state.expand('0'); h.requests[1]!.resolve({ ...page(0), matches:counts(0) }); await settle()

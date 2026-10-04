@@ -6,10 +6,10 @@ import { useReleaseRecovery } from '../src/lib/useReleaseRecovery'
 import type { ItemPage, PlanningItem } from '../src/lib/deliveryPlanning'
 import type { DeliveryActions, DeliveryCommit } from '../src/lib/deliveryChanges'
 
-const release: ReleaseRecord = { release_id: 'release', project_id: 'project', title: 'Work', visibility: 'internal', state: 'planned', rank: 'B', revision: 7, entry_closes_at: null, rollup: { units: 10, completed: 2, open_hours: 4 }, build_summary: {} }
+const release: ReleaseRecord = { release_id: 'release', project_id: 'project', title: 'Work', visibility: 'internal', state: 'planned', rank: 'B', revision: 7, entry_closes_at: null, occupied_rows: 10, rollup: { units: 10, completed: 2, open_hours: 4 }, build_summary: {} }
 const rights: ReleaseRights = { person: true, read: true, write: true, deploy: true, product: false }
 const item = (id: string, later = false): PlanningItem => ({ item_id: id, project_id: 'project', release_id: later ? 'later' : undefined, revision: 2, rank: 'V', node_revision: '2026-10-03T12:00:00Z', key: `KEY-${id}`, title: 'Completed work', state: 'done', kind: 'ticket', created_at: '', estimated_hours: 1, expedite: false, due_on: null })
-function harness(options: { unplaced?: number; later?: number; room?: number; incomplete?: boolean; failBatch?: number; failRead?: boolean } = {}) {
+function harness(options: { unplaced?: number; later?: number; room?: number; units?: number; incomplete?: boolean; failBatch?: number; failRead?: boolean } = {}) {
   let current = true, allowed = true, version = 7
   const writes: Record<string, unknown>[] = [], reads: string[] = [], commits: DeliveryCommit[] = []
   const unplaced = Array.from({ length: options.unplaced ?? 150 }, (_, i) => item(String(i))), later = Array.from({ length: options.later ?? 53 }, (_, i) => item(`later-${i}`, true))
@@ -36,7 +36,7 @@ function harness(options: { unplaced?: number; later?: number; room?: number; in
     const end = start + rows.length
     return { items: rows.map(row => ({ ...row })), count: list.length, incomplete: !!options.incomplete, next_cursor: end < list.length ? rows.at(-1)!.item_id : '' } satisfies ItemPage
   }
-  const state = useReleaseRecovery({ release: { ...release, rollup: { ...release.rollup, units: 1000 - (options.room ?? 990) } }, signal: new AbortController().signal, current: () => current, allowed: () => allowed, actions, request })
+  const state = useReleaseRecovery({ release: { ...release, occupied_rows: 1000 - (options.room ?? 990), rollup: { ...release.rollup, units: options.units ?? 1000 - (options.room ?? 990) } }, signal: new AbortController().signal, current: () => current, allowed: () => allowed, actions, request })
   return { state, writes, reads, commits, actions, request, ownerChanged: () => { current = false }, revoke: () => { allowed = false } }
 }
 describe('release rights and deadline', () => {
@@ -92,6 +92,12 @@ describe('Freeze recovery', () => {
     expect(h.state.result.value).toBe('110 placed · 93 remain listed · Include stopped.')
     expect(h.state.error.value).toContain('full'); expect(h.state.room.value).toBe(0)
   })
+  it('sizes Include from occupied membership rows when progress excludes epics, cancellations and tombstones', async () => {
+    const h = harness({ room: 50, units: 900 }); await h.state.load(); await h.state.include()
+    expect(h.writes.map(row => (row.items as unknown[]).length)).toEqual([50])
+    expect(h.state.result.value).toBe('50 placed · 153 remain listed · Include stopped.')
+    expect(h.state.room.value).toBe(0)
+  })
   it('never requests unseen pages when All is off or the count is incomplete', async () => {
     for (const incomplete of [false,true]) {
       const h = harness({ incomplete }); await h.state.load()
@@ -101,6 +107,15 @@ describe('Freeze recovery', () => {
       expect(h.writes.map(row => (row.items as unknown[]).length)).toEqual(incomplete ? [100,53] : [1])
       if (incomplete) { expect(h.state.all.value).toBe(false); expect(h.state.result.value).toContain('at least 50') }
     }
+  })
+  it('keeps Include closed when authoritative capacity is missing, then accepts a bounded detail count', async () => {
+    const h = harness(), state = useReleaseRecovery({ release: { ...release, occupied_rows: undefined }, current: () => true, allowed: () => true, signal: new AbortController().signal, request: h.request })
+    await state.load(); await state.include()
+    expect(state.ready.value).toBe(false); expect(h.writes).toEqual([])
+    expect(state.error.value).toContain('capacity could not be read')
+    expect(() => state.setCapacity(1001)).toThrow('capacity could not be read')
+    state.setCapacity(950); await state.load(); await state.include()
+    expect(h.writes.map(row => (row.items as unknown[]).length)).toEqual([50])
   })
   it('All includes the first page even after browsing a continuation', async () => {
     const h = harness(); await h.state.load(); await h.state.more('unplaced')

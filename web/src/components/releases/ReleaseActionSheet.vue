@@ -21,6 +21,7 @@ const recoveryExcluded = (id: string) => recovery.excluded.value.has(id)
 const laterName = (id?: string) => { const release = props.releases.find(row => row.release_id === id); return release ? releaseName(release) : `Later release${id ? ` · ${id}` : ''}` }
 const busy = ref(false), error = ref(''), hint = ref(''), loaded = ref(false)
 const title = ref(captured.title), body = ref(captured.body ?? ''), visibility = ref(captured.visibility), deadline = ref(localDeadline(captured.entry_closes_at))
+const authoritativeScheme = ref('')
 const scheme = ref(captured.version_scheme || ''), version = ref(''), reservation = ref(''), creationKey = crypto.randomUUID()
 type Window = { timezone: string; slots: { days: number[]; from: string; to: string }[] }
 type Settings = { budget_agent_hours?: number | null; max_agents?: number | null; largest_ticket_hours?: number | null; window?: Window | null }
@@ -53,6 +54,7 @@ async function detail() {
   assertCurrent()
   if (answer.project_id !== captured.project_id || answer.release_id !== captured.release_id || answer.revision !== recovery.revision.value) throw new Error('This release changed. Reopen its actions before saving.')
   record.value = { ...record.value, ...answer }; title.value = answer.title; body.value = answer.body ?? ''; visibility.value = answer.visibility; deadline.value = localDeadline(answer.entry_closes_at)
+  if (answer.occupied_rows !== undefined) recovery.setCapacity(answer.occupied_rows)
   settings.value = answer.build_settings ?? {}; resolved.value = answer.resolved_build_settings ?? {}
   for (const field of settingsFields) { override.value[field.key] = settings.value[field.key] != null; values.value[field.key] = settings.value[field.key] ?? resolved.value[field.key] ?? undefined }
   const window = settings.value.window ?? resolved.value.window
@@ -69,9 +71,10 @@ async function choose(action: ReleaseAction) {
   try {
     await detail()
     if (token !== generation || !current()) return
-    if (action === 'settings') {
-      const project = await requestRelease(`/projects/${encodeURIComponent(captured.project_id)}/delivery`, { signal: controller.signal }) as { project_id: string; build_defaults?: Settings }
+    if (action === 'settings' || action === 'cut') {
+      const project = await requestRelease(`/projects/${encodeURIComponent(captured.project_id)}/delivery`, { signal: controller.signal }) as { project_id: string; build_defaults?: Settings; version_scheme?: string }
       assertCurrent(); if (project.project_id !== captured.project_id) throw new Error('Invalid project settings.'); defaults.value = project.build_defaults ?? {}
+      if (action === 'cut') { authoritativeScheme.value = project.version_scheme || ''; scheme.value = authoritativeScheme.value || record.value.version_scheme || '' }
     }
     if (action === 'notes') {
       const answer = await requestRelease(`${releasePath(captured.project_id, captured.release_id)}/note-snapshot`, { signal: controller.signal }) as Notes
@@ -90,7 +93,7 @@ function settingsPayload(): Settings {
   for (const field of settingsFields) if (override.value[field.key]) {
     const value = values.value[field.key], limit = defaults.value[field.key]
     if (!value || !Number.isFinite(value) || value <= 0 || value > (field.key === 'max_agents' ? 1000 : 1_000_000) || field.key === 'max_agents' && !Number.isInteger(value)) throw new Error(`Choose a valid positive value for ${field.name}.`)
-    if (!props.rights.deploy && (limit == null || value > limit)) throw new Error('Widening a project limit requires deployment permission.')
+    if (!props.rights.deploy && (limit == null ? field.key === 'budget_agent_hours' : value > limit)) throw new Error('Widening a project limit requires deployment permission.')
     next[field.key] = value
   }
   if (windowOverride.value) {
@@ -119,14 +122,14 @@ async function submit() {
       path += '/state'; payload.to = ({ freeze: 'frozen', unfreeze: 'building', abandon: 'abandoned', building: 'building', planned: 'planned' } as Record<string, string>)[action]
     } else {
       path += `/${action}`
-      if (action === 'cut') { if (!scheme.value || !version.value.trim() || version.value.length > 128) throw new Error('Choose the project’s version scheme and enter its exact reserved version.'); payload.version_scheme = scheme.value; payload.version = version.value.trim() }
+      if (action === 'cut') { if (props.rights.product && scheme.value !== authoritativeScheme.value) throw new Error('Use the product’s current version scheme for this reservation.'); if (!scheme.value || !version.value.trim() || version.value.length > 128) throw new Error('Choose the project’s version scheme and enter its exact reserved version.'); payload.version_scheme = scheme.value; payload.version = version.value.trim() }
       if (action === 'publish' && !props.rights.product) { if (!reservation.value.trim() || reservation.value.length > 512) throw new Error('Add the reservation PR or tag URL (up to 512 characters).'); payload.reservation_ref = reservation.value.trim() }
     }
     identity = actions?.begin()
     const answer = await requestRelease(path, { method, signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) as ReleaseRecord & { recovery?: { completed_unplaced: number; completed_later: number; incomplete: boolean } }
     assertCurrent()
     if (answer.project_id !== captured.project_id || !answer.release_id || action !== 'plan' && answer.release_id !== captured.release_id || !Number.isSafeInteger(answer.revision) || answer.revision < recovery.revision.value) throw new Error('Invalid release result. Reload before continuing.')
-    const updated = { ...record.value, ...(action === 'settings' || action === 'plan' ? { title: title.value.trim(), display_name: props.rights.product && visibility.value === 'published' ? record.value.display_name : title.value.trim(), body: body.value, visibility: visibility.value } : {}), ...answer, rollup: answer.rollup ?? { ...record.value.rollup, units: record.value.rollup.units + recovery.placedCount.value, completed: record.value.rollup.completed + recovery.placedCount.value } }
+    const updated = { ...record.value, ...(record.value.occupied_rows !== undefined ? { occupied_rows: record.value.occupied_rows + recovery.placedCount.value } : {}), ...(action === 'settings' || action === 'plan' ? { title: title.value.trim(), display_name: props.rights.product && visibility.value === 'published' ? record.value.display_name : title.value.trim(), body: body.value, visibility: visibility.value } : {}), ...answer, rollup: answer.rollup ?? { ...record.value.rollup, units: record.value.rollup.units + recovery.placedCount.value, completed: record.value.rollup.completed + recovery.placedCount.value } }
     let nameWarning = ''
     if (action === 'plan' && props.rights.product && updated.visibility === 'published') {
       try {
@@ -215,7 +218,7 @@ onBeforeUnmount(() => { disposed = true; generation++; controller.abort() })
           </section>
         </template>
         <template v-if="!['menu','settings','plan','freeze','notes','abandoned'].includes(screen)">
-          <div v-if="screen === 'cut'" class="lifecycle-controls" role="group" aria-label="Cut version"><label>Version scheme<select v-model="scheme" aria-label="Version scheme" :disabled="locked"><option value="">Choose the project’s scheme</option><option value="legacy">Legacy</option><option value="inspr-calendar-v1">Calendar v1</option><option value="inspr-calendar-v2">Calendar v2</option></select></label><label>Reserved version<input v-model="version" aria-label="Reserved version" maxlength="128" :disabled="locked" /></label></div>
+          <div v-if="screen === 'cut'" class="lifecycle-controls" role="group" aria-label="Cut version"><label>Version scheme<select v-model="scheme" aria-label="Version scheme" :disabled="locked"><option value="">Choose the project’s scheme</option><option value="legacy">Legacy</option><option value="inspr-calendar-v1">Calendar v1</option><option value="inspr-calendar-v2">Calendar v2</option><option value="inspr-calver-3">Calendar v3</option></select></label><label>Reserved version<input v-model="version" aria-label="Reserved version" maxlength="128" :disabled="locked" /></label></div>
           <label v-if="screen === 'publish' && !rights.product" class="brief">Reservation PR or tag URL<input v-model="reservation" aria-label="Reservation reference" maxlength="512" :disabled="locked" /></label>
           <div class="copy"><p>{{ lifecycleCopy[screen as ReleaseAction] }}</p><p>Confirming applies immediately. This action has no Undo.</p><p v-if="['cut','close','publish'].includes(screen)">{{ ready ? `${incomplete ? 'At least ' : ''}${total} completed items remain outside this release. They are left out; this warning does not block the action.` : 'The completed-work warning could not be read. No recovery work is included by this action.' }}</p><p v-if="screen === 'publish' && !rights.product">This reservation is attested by the person publishing it. It is not verified against the product’s history.</p><p v-if="record.reservation_basis">Reservation {{ record.reservation_basis }}{{ record.released_by ? ` by ${record.released_by}` : '' }}.</p></div>
         </template>

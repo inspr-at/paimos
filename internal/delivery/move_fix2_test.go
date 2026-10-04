@@ -88,6 +88,32 @@ func TestFrozenPlacementAndUndoRecheckAfterFence(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := dbtest.Await(t, ctx, moved)
+			// Spec §3.3 permits source removal before Cut. The fence still
+			// serialises Freeze and removal, including Undo of an earlier add.
+			if action == "remove" || action == "undo_add" {
+				if action == "remove" {
+					if out.err != nil || out.result.UndoEventID == nil || len(out.result.Items) != 1 || out.result.Items[0].Revision != before.Revision+1 || out.result.Items[0].ReleaseID != "" || out.result.Items[0].Rank == "" {
+						t.Fatalf("permitted frozen removal: %+v %v", out.result, out.err)
+					}
+					if !reflect.DeepEqual(other, f.releaseRow(t, otherID)) || !reflect.DeepEqual(out.result.Items[0], f.placed(t, subject)) {
+						t.Fatal("removal changed another release or lost its exact backlog placement")
+					}
+				} else {
+					if out.undo == nil || out.undo.Code != http.StatusCreated {
+						t.Fatalf("permitted removal Undo: %+v", out.undo)
+					}
+					if got := f.placed(t, subject); got.ReleaseID != f.release || got.Revision != before.Revision+1 {
+						t.Fatalf("Undo removal placement=%+v", got)
+					}
+					if got := f.releaseRow(t, otherID); got.Revision != other.Revision+1 || got.State != other.State {
+						t.Fatal("Undo lost destination revision/lifecycle")
+					}
+				}
+				if got := f.releaseRow(t, freezeID); got.State != "frozen" || got.Revision != freezing.Revision+2 || f.scalar(t, `SELECT count(*) FROM events`) != beforeEvents+2 {
+					t.Fatal("Freeze and permitted removal did not commit exactly once each")
+				}
+				return
+			}
 			if out.undo != nil {
 				if out.undo.Code != http.StatusConflict || !strings.Contains(out.undo.Body.String(), "frozen") {
 					t.Errorf("Undo returned a receipt or wrong refusal: %d %s", out.undo.Code, out.undo.Body.String())

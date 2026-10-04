@@ -17300,6 +17300,7 @@ components:
         rank: {type: string, maxLength: 32}
         revision: {type: integer, minimum: 1}
         undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed release.reranked event for this action; null on reads or non-undoable actions. Never inferred from latest event."}
+        event_ids: {type: array, maxItems: 32, items: {type: integer, minimum: 1}, description: "Exact events committed by a lifecycle or settings action, including rollover and successor planning. Correlation only; these events grant no Undo. Absent on reads and no-op writes."}
         sequence: {type: integer, minimum: 1}
         recovery:
           type: object
@@ -17479,6 +17480,8 @@ components:
         state: {type: string, enum: [planned, building, frozen, released, abandoned]}
         rank: {type: string, maxLength: 32}
         revision: {type: integer, minimum: 1}
+        event_ids: {type: array, maxItems: 32, items: {type: integer, minimum: 1}, description: "Exact lifecycle/settings event receipts for own SSE correlation; never Undo authority."}
+        occupied_rows: {type: integer, minimum: 0, maximum: 1000, description: "Authoritative occupied membership slots, including epics, cancelled work and tombstones. Independent of progress rollup."}
         entry_closes_at: {type: [string, 'null'], format: date-time}
         version_scheme: {type: string}
         version: {type: string}
@@ -17611,6 +17614,7 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         product_project: {type: boolean, description: "True only for the server's explicit tenant/project product binding. Publication uses history verification there and person attestation elsewhere; branding and project titles do not define this authority."}
+        version_scheme: {type: string, description: "Current product scheme for the explicitly bound product; otherwise the project's latest explicitly recorded cut scheme, or empty when no scheme has been recorded. Never inferred from version text."}
         mode: {type: string, enum: [journey, releases]}
         revision: {type: integer, minimum: 0}
         next_sequence: {type: integer, minimum: 1}

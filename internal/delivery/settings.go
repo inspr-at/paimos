@@ -261,7 +261,7 @@ func (s *Store) Update(ctx context.Context, p tenant.Principal, in UpdateRequest
 		}
 		w.audit("release.updated", old.ID, old, map[string]any{"release": out, "title": in.Title, "body": in.Body, "build_settings": in.BuildSettings})
 		return nil
-	})
+	}, &out.EventIDs)
 	return out, err
 }
 func (s *Store) SetDefaults(ctx context.Context, p tenant.Principal, project string, revision int64, raw []byte) error {

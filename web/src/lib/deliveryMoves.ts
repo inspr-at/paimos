@@ -27,8 +27,8 @@ export function moveAdvice(subject: MoveSubject, target: MoveTarget, releases: P
   }
   const source = releases.find(r => r.release_id === subject.record.release_id)
   if (source && ['released','abandoned'].includes(source.state) || dest && ['released','abandoned'].includes(dest.state)) return 'Released work needs a separate history correction.'
-  if (source?.state === 'frozen' || dest?.state === 'frozen') return 'This release is frozen. Work cannot move.'
-  if (dest && dest.release_id !== subject.record.release_id && dest.rollup.units >= 1000) return 'This release is full (1,000 items).'
+  if (dest?.state === 'frozen' || source?.state === 'frozen' && (source.cut_at || source.version || dest?.release_id === source.release_id)) return 'This release is frozen. Adding or reordering work is closed, and cut scope stays fixed.'
+  if (dest && dest.release_id !== subject.record.release_id && dest.occupied_rows !== undefined && dest.occupied_rows >= 1000) return 'This release is full (1,000 items).'
   if (agent) {
     if (dest?.entry_closes_at && Date.parse(dest.entry_closes_at) <= now && dest.release_id !== subject.record.release_id) return 'Entry has closed. A person must add work.'
     if (!subject.record.rank) return 'Only a person can rank new Backlog work.'
@@ -42,7 +42,7 @@ export function moveAdvice(subject: MoveSubject, target: MoveTarget, releases: P
 }
 export function refusal(error: unknown) {
   if (error instanceof APIError) {
-    const codes: Record<string,string> = { frozen: 'This release is frozen. Work cannot move.', entry_closed: 'Entry has closed. A person must add work.', published_order: 'Published releases keep their order.', promotion: 'Agents can only move work later. Ask a person.', rank_space_exhausted: 'There is no rank space at this position.', revision_changed: 'This work changed. Reopen the move.', neighbours_changed: 'The anchor changed. Reopen the move.' }
+    const codes: Record<string,string> = { frozen: 'This release is frozen. Adding or reordering work is closed, and cut scope stays fixed.', entry_closed: 'Entry has closed. A person must add work.', published_order: 'Published releases keep their order.', promotion: 'Agents can only move work later. Ask a person.', rank_space_exhausted: 'There is no rank space at this position.', revision_changed: 'This work changed. Reopen the move.', neighbours_changed: 'The anchor changed. Reopen the move.' }
     return codes[String(error.body?.code)] || error.message
   }
   return error instanceof Error ? error.message : 'The move was refused.'

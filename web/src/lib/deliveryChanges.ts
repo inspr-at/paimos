@@ -18,7 +18,7 @@ export interface DeliveryActions {
 }
 export const DELIVERY_ACTIONS: InjectionKey<DeliveryActions> = Symbol('delivery-actions')
 const KNOWLEDGE_EVENTS = ['knowledge.created', 'knowledge.updated', 'knowledge.deleted', 'knowledge.learning_accepted', 'knowledge.learning_dismissed', 'knowledge.learning_drafted']
-export const DELIVERY_EVENTS = ['ships_in.changed', 'release.reranked', 'release.state_changed', 'project.delivery_adopted', 'project.delivery_changed', 'project.adopted', 'release.planned', 'release.updated', 'release.frozen', 'release.cut', 'release.published', 'release.closed', 'release.abandoned', 'delivery.adopted', ...NODE_EVENTS, ...KNOWLEDGE_EVENTS, 'relation.created', 'relation.deleted', 'relation.undone', ...['registered','bound','heartbeat','yielded','stopped','stop_confirmed','removed','restored','revived','archived','metadata_changed','adopted','handed_over'].map(kind => `harness.${kind}`)]
+export const DELIVERY_EVENTS = ['ships_in.changed', 'ships_in.rolled_over', 'release.reranked', 'release.state_changed', 'project.delivery_adopted', 'project.delivery_changed', 'project.adopted', 'release.planned', 'release.updated', 'release.frozen', 'release.cut', 'release.published', 'release.closed', 'release.abandoned', 'delivery.adopted', ...NODE_EVENTS, ...KNOWLEDGE_EVENTS, 'relation.created', 'relation.deleted', 'relation.undone', ...['registered','bound','heartbeat','yielded','stopped','stop_confirmed','removed','restored','revived','archived','metadata_changed','adopted','handed_over'].map(kind => `harness.${kind}`)]
 interface ChangeEvent { id: number; type: string; project: string; undoOf?: number }
 interface Source { addEventListener(type: string, listener: (event: MessageEvent) => void): void; close(): void; onerror: (() => void) | null }
 export function parseDeliveryEvent(raw: string, project: string): ChangeEvent | null {
@@ -105,7 +105,13 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
         if ('items' in result ? result.items.some(it => it.project_id !== project.value) : result.project_id !== project.value) { error.value = 'The committed action belongs to another project'; return false }
         remember(result.undo_event_id)
         undo.value = result.undo_event_id && !(change.kind === 'placement' && change.undoable === false) ? { id: result.undo_event_id, identity: captured } : null
-      } else undo.value = null
+      } else {
+        if (change.result && change.result.project_id !== project.value) { error.value = 'The committed action belongs to another project'; return false }
+        const receipts = change.result?.event_ids ?? []
+        if (!Array.isArray(receipts) || receipts.length > 32 || receipts.some(id => !Number.isSafeInteger(id) || id < 1)) { error.value = 'Invalid lifecycle event receipt'; return false }
+        for (const id of receipts) remember(id)
+        undo.value = null
+      }
       inFlight = Math.max(0, inFlight - 1); flushBuffered()
       options.committed?.(change); version.value++; return true
     },

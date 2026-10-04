@@ -49,6 +49,7 @@ func (s *Store) WithClock(now func() time.Time) *Store {
 }
 
 type Release struct {
+	EventIDs      []int64         `json:"event_ids,omitempty"`
 	UndoEventID   *int64          `json:"undo_event_id"`
 	Recovery      *RecoveryCounts `json:"recovery,omitempty"`
 	ProjectID     string          `json:"project_id"`
@@ -116,17 +117,18 @@ func fence(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, permissi
 	return authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project})
 }
 
-func (s *Store) mutate(ctx context.Context, p tenant.Principal, project, permission string, person bool, fn func(*write) error) error {
-	return s.mutateWithReceipt(ctx, p, project, permission, person, nil, fn)
+func (s *Store) mutate(ctx context.Context, p tenant.Principal, project, permission string, person bool, fn func(*write) error, eventIDs ...*[]int64) error {
+	return s.mutateWithReceipt(ctx, p, project, permission, person, nil, fn, eventIDs...)
 }
 
 // The receipt is assigned from this transaction only; callers discard it on rollback.
-func (s *Store) mutateWithReceipt(ctx context.Context, p tenant.Principal, project, permission string, person bool, receipt **int64, fn func(*write) error) error {
+func (s *Store) mutateWithReceipt(ctx context.Context, p tenant.Principal, project, permission string, person bool, receipt **int64, fn func(*write) error, eventIDs ...*[]int64) error {
 	if !uuid(project) || !uuid(p.TenantID) || !uuid(p.ID) {
 		return errors.New("delivery write requires UUID identities")
 	}
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(ctx, p), 60*time.Second)
 	defer cancel()
+	var committedIDs []int64
 	err := db.InTenant(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := fence(ctx, tx, p, project, permission); err != nil {
 			return err
@@ -147,6 +149,7 @@ func (s *Store) mutateWithReceipt(ctx context.Context, p tenant.Principal, proje
 			if appendErr != nil {
 				return appendErr
 			}
+			committedIDs = append(committedIDs, event.ID)
 			if receipt != nil && (change.Type == "ships_in.changed" || change.Type == "release.reranked") {
 				id := event.ID
 				*receipt = &id
@@ -154,6 +157,13 @@ func (s *Store) mutateWithReceipt(ctx context.Context, p tenant.Principal, proje
 		}
 		return ctx.Err()
 	})
+	// Lifecycle correlation is independent of Undo. Publish the exact batch
+	// only after the transaction commits; rolled-back events grant no receipt.
+	if err == nil {
+		for _, target := range eventIDs {
+			*target = committedIDs
+		}
+	}
 	return err
 }
 
@@ -301,7 +311,7 @@ func (s *Store) Plan(ctx context.Context, p tenant.Principal, in PlanRequest) (R
 		}
 		out = r
 		return w.counts(nil)
-	})
+	}, &out.EventIDs)
 	if err != nil {
 		return Release{}, err
 	}
@@ -604,7 +614,7 @@ func (s *Store) PromoteRelease(ctx context.Context, p tenant.Principal, in Relea
 		}
 		w.audit("release.updated", old.ID, old, out)
 		return nil
-	})
+	}, &out.EventIDs)
 	if err != nil {
 		return Release{}, err
 	}
@@ -634,7 +644,7 @@ func (s *Store) SetEntryDeadline(ctx context.Context, p tenant.Principal, in Rel
 		}
 		w.audit("release.updated", old.ID, old, out)
 		return nil
-	})
+	}, &out.EventIDs)
 	if err != nil {
 		return Release{}, err
 	}

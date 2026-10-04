@@ -201,7 +201,7 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 
 		w.audit(typ, old.ID, old, out)
 		return nil
-	})
+	}, &out.EventIDs)
 	if err != nil {
 		return Release{}, err
 	}
@@ -450,7 +450,7 @@ func (s *Store) Publish(ctx context.Context, p tenant.Principal, in ReleaseEdit,
 		}
 		w.audit("release.state_changed", old.ID, old, out)
 		return nil
-	})
+	}, &out.EventIDs)
 	if err != nil {
 		return Release{}, err
 	}
