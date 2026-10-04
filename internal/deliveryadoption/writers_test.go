@@ -45,6 +45,8 @@ var nodeWriters = map[string]string{
 	"nodes/project_move.go":             "refuseReleaseNode plus subtree/placement guards",
 	"nodes/tags.go":                     "loadTag and RefuseReleaseNodes before assignment rewrite",
 	"nodes/undo.go":                     "refuseReleaseNode before restoreMovedNode",
+	"questions/outcomes.go":             "checkNode limits criteria to ticket family; knowledge writes use service-owned desk answer identities",
+	"questions/store.go":                "supersession loads typed active desk_decisions",
 	"portal/moderate.go":                "typed public wish/product/feature loader",
 	"requirements/disposable.go":        "typed disposable requirement loader",
 	"rules/store.go":                    "typed rule loader",

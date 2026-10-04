@@ -206,13 +206,24 @@ const headerFold = ref<HTMLElement>()
 let headerAnimation: Animation | null = null
 watch(headerDensity, async (value, before) => {
   const fold = headerFold.value
-  if (!fold || before === 'collapsed' || value === 'collapsed' || matchMedia('(prefers-reduced-motion: reduce)').matches) return
   headerAnimation?.cancel()
+  if (!fold || before === 'collapsed' || value === 'collapsed' || matchMedia('(prefers-reduced-motion: reduce)').matches) return
   const height = fold.offsetHeight
   await nextTick()
   if (!fold.isConnected || value !== headerDensity.value) return
+  // A fresh, inert clone measures the final density without sampling an
+  // in-flight title/padding transition. Remove it before the next paint.
+  const measure = fold.cloneNode(true) as HTMLElement
+  measure.removeAttribute('id')
+  measure.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'))
+  measure.inert = true
+  measure.setAttribute('aria-hidden', 'true')
+  Object.assign(measure.style, { position: 'absolute', visibility: 'hidden', width: `${fold.offsetWidth}px`, pointerEvents: 'none' })
+  fold.parentElement!.appendChild(measure)
+  const targetHeight = measure.offsetHeight
+  measure.remove()
   fold.style.overflow = 'hidden'
-  headerAnimation = fold.animate([{ height: `${height}px` }, { height: `${fold.offsetHeight}px` }], { duration: 260, easing: 'cubic-bezier(.2,.7,.2,1)' })
+  headerAnimation = fold.animate([{ height: `${height}px` }, { height: `${targetHeight}px` }], { duration: 260, easing: 'cubic-bezier(.2,.7,.2,1)' })
   headerAnimation.onfinish = headerAnimation.oncancel = () => { fold.style.overflow = '' }
   fold.querySelector('header')?.animate([{ opacity: .25 }, { opacity: 1 }], { duration: 260, easing: 'ease-out' })
 })
@@ -1889,7 +1900,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :loading="outlineActive ? outline.loading.value : list.loading.value" :loading-more="outlineActive ? outline.loadingMoreRoot.value : list.loadingMore.value"
         :error="outlineActive ? outline.error.value || list.error.value : list.error.value" :more-error="list.moreError.value"
         :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
-        :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
+        :collapsed="collapsed" :total="total" external-count :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
         :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
         :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
@@ -2195,8 +2206,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-navigation.legacy-navigation :deep(.sections) { margin-top: 18px; }
 .project-navigation.legacy-navigation .view-bar { padding: 2px 0 6px; }
 
-.project-fold { display: grid; grid-template-rows: 1fr; }
-.project-fold-body { min-height: 0; }
+.project-fold { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr; }
+.project-fold-body { min-height: 0; min-width: 0; }
 .header-collapsed .project-fold { grid-template-rows: 0fr; visibility: hidden; }
 .header-collapsed .project-fold-body { overflow: hidden; }
 .section-switch { flex: none; max-width: 0; padding: 0; margin-right: -8px; border-width: 0; opacity: 0; overflow: hidden; pointer-events: none; }

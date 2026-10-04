@@ -55,6 +55,7 @@ const props = defineProps<{
   hidingClosed: boolean
   collapsed: Set<string>
   total: number | null
+  externalCount?: boolean
   projectKey: string
   scrollRoot: HTMLElement | null
   now: number
@@ -836,7 +837,7 @@ defineExpose({
     <div v-if="!embedded" ref="sentinel" class="sentinel" aria-hidden="true" />
     <div v-if="!embedded && loadingMore" class="list-foot" role="status"><span class="spinner" aria-hidden="true" />Loading more tickets…</div>
     <div v-else-if="!embedded && moreError" class="list-foot error" role="alert">More tickets could not be loaded. <button type="button" class="btn sm" @click="emit('more')">Retry</button></div>
-    <div v-else-if="!embedded && !loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
+    <div v-else-if="!embedded && !externalCount && !loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
   </div>
 </template>
 

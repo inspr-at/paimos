@@ -28,7 +28,7 @@ Product marketing names use P3's explicit runtime product binding; over-budget
 name inventories or sequences above 10,000 refuse without omitting later hits.
 
 The project’s **Releases** tab (`/p/<key>/releases`) shows Upcoming, Backlog,
-Abandoned and Released. Several releases can expand together; the chevron only
+Abandoned and Shipped. Several releases can expand together; the chevron only
 opens work, while the name also sets the existing URL scope. Expansion is
 remembered separately from Outline per project/person. One overview supplies
 the first release pages without member requests; work loads lazily in ≤200-row
@@ -37,8 +37,11 @@ stay above growing content. Search and Hide use P5’s whole-query server counts
 changing scope/query/person invalidates cursors and late responses. Passive
 insertions above hovered/focused rows wait until those controls are left or
 **Show loaded** is chosen. Capped counts and stale/failed reads stay explicit.
-Expand all includes loaded Upcoming and Released rows within the same queue
-and render bounds. Collapsing clears that source’s pagination history before
+One header toggle collapses every open section, or expands loaded Upcoming
+releases and Backlog within the same queue and render bounds. Shipped releases
+remain individually expandable. Three clipped cards separate Upcoming,
+Backlog/Abandoned and Shipped, with sticky counted labels in the desktop gutter
+and group rows on phones. Collapsing clears that source’s pagination history before
 reopening. Delayed saved expansions use the passive-insertion guard too.
 Planning item pages batch authorized parent/epic and stored assignee summaries
 plus reported progress/ETA for the selected rows in the same read snapshot;
@@ -1275,9 +1278,11 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
-The Tickets project header defaults to Compact: project details, sections with
-saved views and Hide/Display, then the toolbar. Comfortable gives the title and
-description more reading room; Collapsed retains the toolbar. The centered
+The Tickets, Releases and Knowledge project headers default to Compact:
+project details and sections above the toolbar. Tickets retain their saved
+views and Hide/Display controls. Comfortable gives the title and
+description more reading room; Collapsed retains the toolbar and slides in an
+icon/chevron switcher for Releases, Tickets and Knowledge. The centered
 app-bar switch selects all three on desktop. Phones fold with the project badge
 and chevron, and choose Comfortable/Compact in the Filters sheet's Display
 section. Command+Shift+Period on macOS or Ctrl+Shift+Period elsewhere toggles
@@ -3943,6 +3948,9 @@ packages: begin captures project/person/scope identity, commit applies only the
 actual response, and failed releases the pending action. Lifecycle owners apply
 their authoritative results separately and never offer blanket Undo. Own receipt
 echoes are deduplicated even before the response; foreign structural and mode changes wait
-for the fixed count-slot Apply action. Agent/wait summaries are batched in the
-loaded release-page snapshot, omitted without `harness.read`, and marked partial
+for the fixed toolbar Apply action. Search uses the same plain placeholder in
+every section. Counts sit below the list at the right; Live freshness occupies
+the app footer centre. The toolbar gains glass only when stuck after scrolling.
+Header folding and measured density transitions respect reduced motion.
+Agent/wait summaries are batched in the loaded release-page snapshot, omitted without `harness.read`, and marked partial
 past 5,000 active sessions. Budget outlook stays unknown.
