@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -27,6 +28,7 @@ var ErrDisabled = errors.New("workspace model feature is disabled")
 const credentialID = "workspace-model-provider"
 
 type Features struct {
+	ParentBenefits bool `json:"parent_benefits"`
 	CRMNoteRewrite bool `json:"crm_note_rewrite"`
 	Embeddings     bool `json:"embeddings"`
 }
@@ -129,6 +131,9 @@ func (s *Service) Save(ctx context.Context, p tenant.Principal, in Write) (Confi
 	}
 	var out Config
 	err := db.InTenant(db.AllProjects(ctx, "workspace embedding reindex"), s.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.LockMutation(ctx, tx); err != nil {
+			return err
+		}
 		if p.Kind != tenant.Person {
 			return fault(403, "person required")
 		}

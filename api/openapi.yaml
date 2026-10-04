@@ -4386,6 +4386,39 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /nodes/{nodeId}/benefit-generation:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: getParentBenefitGeneration
+      security: *auth
+      description: Parent-only asynchronous bilingual benefit status. Done never waits for generation. Leaf completion gates and published note snapshots are unchanged.
+      responses:
+        '200': {description: Current generation status, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/benefit-generation/retry:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: retryParentBenefitGeneration
+      security: *auth
+      description: Person-only retry requiring nodes.update in the current project. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_generation, expected_revision]
+              properties:
+                expected_generation: {type: string, format: uuid}
+                expected_revision: {type: string, format: date-time}
+      responses:
+        '202': {description: Queued, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/attachments:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
@@ -9998,6 +10031,16 @@ components:
         at: {type: string, format: date-time}
         changed_since: {type: boolean}
         applicable: {type: boolean, description: 'Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.'}
+    ParentBenefitGeneration:
+      type: object
+      required: [is_parent, status, generation, revision, generated]
+      properties:
+        is_parent: {type: boolean}
+        status: {type: string, enum: [none, queued, running, failed, generated, edited, cancelled]}
+        generation: {type: string, description: Opaque attempt identity; empty when no attempt exists.}
+        revision: {type: string, format: date-time}
+        generated: {type: boolean, description: Current text was generated; becomes false after a human edits a benefit field.}
+        error: {type: string, description: Safe actionable failure message; never raw provider output.}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
@@ -10012,6 +10055,7 @@ components:
           required: [crm_note_rewrite, embeddings]
           properties:
             crm_note_rewrite: {type: boolean, default: false, description: Also requires the business_crm plugin and tools.invoke grant; generation creates a draft for human review.}
+            parent_benefits: {type: boolean, default: false, description: Summarises completed parents from their leaves in English and German behind work-parent-status. Never delays Done or edits published snapshots.}
             embeddings: {type: boolean, default: false, description: Allows background node indexing and semantic search queries for this workspace.}
     WorkspaceModelProvider:
       allOf:

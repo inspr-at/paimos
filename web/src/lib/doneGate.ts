@@ -15,8 +15,8 @@ export interface BenefitText {
 
 // True only when a ticket is about to enter done, accepted or delivered without
 // the four texts. Hidden tickets are not exempt. Already-completed tickets are.
-export function needsBenefitPrompt(node: { kind_slug?: string; state: string; fields?: Record<string, unknown> | null }, next: string): boolean {
-  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(next)) return false
+export function needsBenefitPrompt(node: { kind_slug?: string; estimate?: { is_parent?: boolean }; state: string; fields?: Record<string, unknown> | null }, next: string): boolean {
+  if ((node.kind_slug !== 'ticket' && node.kind_slug !== 'work') || node.estimate?.is_parent === true || completedTicketState(node.state) || !completedTicketState(next)) return false
   return benefitIssues(node.fields ?? {}).length > 0
 }
 

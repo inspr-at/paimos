@@ -10,7 +10,7 @@ interface ProviderSettings {
   base_url: string
   chat_model: string
   embedding_model: string
-  features: { crm_note_rewrite: boolean; embeddings: boolean }
+  features: { parent_benefits?: boolean; crm_note_rewrite: boolean; embeddings: boolean }
   revision: number
   has_api_key: boolean
 }
@@ -92,6 +92,8 @@ async function test() {
         <h3>Features allowed to use this provider</h3>
         <label class="check"><input v-model="settings.features.crm_note_rewrite" type="checkbox" />Rewrite customer notes with AI</label>
         <p class="hint">Requires CRM and its AI tool grant. Suggestions remain drafts until a person applies them.</p>
+        <label class="check"><input v-model="settings.features.parent_benefits" type="checkbox" />Generate parent benefits from leaves</label>
+        <p class="hint">Writes editable English and German summaries when a parent becomes Done. Done never waits; failures have a retry. Published notes stay as captured.</p>
         <label class="check"><input v-model="settings.features.embeddings" type="checkbox" />Semantic search and background indexing</label>
         <label for="embedding-model">Embedding model</label>
         <input id="embedding-model" v-model="settings.embedding_model" maxlength="200" :required="settings.features.embeddings" placeholder="Model returning 1536 dimensions" autocomplete="off" spellcheck="false" />
