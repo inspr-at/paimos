@@ -402,63 +402,6 @@ jobs:
           retention-days: 7
           overwrite: true
 
-  # AEON-488 evidence, kept from the old web job: the immutable round-6 release list rendered with the
-  # current screenshot fixture, next to the current one. Not part of the required `web` aggregate.
-  nightly-release-list-comparison:
-    needs: nightly-web-setup
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - name: Download shared web runtime
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: web-runtime
-          path: ${{ runner.temp }}/web-runtime
-      - name: Restore web runtime
-        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
-      - name: Restore Playwright browsers
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ needs.nightly-web-setup.outputs.browser-cache-key }}
-          fail-on-cache-miss: true
-      - name: Install Chromium system dependencies
-        working-directory: web
-        run: npx playwright install-deps chromium
-      - name: Capture the round-6 release list for comparison
-        id: release-list-before
-        working-directory: web
-        env:
-          RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
-          RELEASE_LIST_SHOT_LABEL: before
-        run: |
-          # Render the immutable prior UI with the current screenshot fixture.
-          # Restore the current sources even when capture fails.
-          git fetch --no-tags --depth=1 origin 900c24ebef0d6188f300e13b56d1e5f53b7ac54d
-          trap 'git show HEAD:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue; git show HEAD:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue' EXIT
-          git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue
-          git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue
-          npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
-      - name: Capture the current release list
-        working-directory: web
-        env:
-          RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
-      - name: Upload release list comparison screenshots
-        if: always() && steps.release-list-before.outcome != 'skipped'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: aeon-488-release-list-comparison
-          path: ${{ runner.temp }}/aeon-release-list-shots
-          if-no-files-found: error
-
   # Preserve the ruleset's required check identity, including failed/skipped setup.
   nightly-web:
     name: nightly-web
@@ -635,7 +578,7 @@ jobs:
 
   nightly-tier-measurements:
     if: always()
-    needs: [nightly-go, nightly-web, nightly-release-check, nightly-e2e, nightly-migration-compat, nightly-release-list-comparison]
+    needs: [nightly-go, nightly-web, nightly-release-check, nightly-e2e, nightly-migration-compat]
     runs-on: ubuntu-latest
     permissions:
       contents: read
