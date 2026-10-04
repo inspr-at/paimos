@@ -1628,6 +1628,11 @@
           "listedTests": 90
         },
         {
+          "file": "tests/hide-states.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
+        },
+        {
           "file": "tests/hours-edit.spec.ts",
           "weightSeconds": 24.414634,
           "weightSource": "unmeasured-test-rate",
@@ -1880,6 +1885,11 @@
           "listedTests": 18
         },
         {
+          "file": "tests/project-header.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
+        },
+        {
           "file": "tests/project-list.spec.ts",
           "weightSeconds": 62.146341,
           "weightSource": "unmeasured-test-rate",
@@ -1896,6 +1906,11 @@
           "weightSeconds": 33.292683,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 15
+        },
+        {
+          "file": "tests/project-status-counts.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
         },
         {
           "file": "tests/projects.spec.ts",

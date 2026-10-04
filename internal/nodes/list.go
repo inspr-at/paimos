@@ -105,10 +105,16 @@ type listQuery struct {
 	ParentID    *string   `json:"parent_id"`
 	Descendants bool      `json:"descendants"`
 	HideClosed  bool      `json:"hide_closed"`
+	HideStates  []string  `json:"hide_states,omitempty"`
 	Sort        []sortKey `json:"sort"`
 	FacetNames  []string  `json:"facets"`
 	Limit       int       `json:"limit"`
 	Cursor      string    `json:"-"`
+
+	// Additive header selectors are included in the cursor fingerprint.
+	WorkStates    []string `json:"work_states,omitempty"`
+	WorkStatesNot []string `json:"work_states_not,omitempty"`
+	WorkBuckets   []string `json:"work_buckets,omitempty"`
 	// A "!" before a value excludes it: within a dimension the plain values
 	// are alternatives (OR) and every excluded value must not match (AND NOT);
 	// dimensions combine with AND. "none" stands for an empty value.
@@ -264,6 +270,41 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	if out.States, out.StatesNot, err = negatedList(r, "state", nil); err != nil {
 		return out, err
 	}
+	// Bound the new header selectors before parsing or building SQL. Legacy
+	// exact state filters retain their established semantics.
+	for name, max := range map[string]int{"work_state": 64, "work_bucket": 5, "hide_states": 5} {
+		raw := v[name]
+		bytes := 0
+		tokens := len(raw)
+		for _, value := range raw {
+			bytes += len(value)
+			tokens += strings.Count(value, ",")
+		}
+		if tokens > max || bytes > max*65 {
+			return out, badRequest("too many or oversized " + name + " values")
+		}
+	}
+	if out.WorkStates, out.WorkStatesNot, err = negatedList(r, "work_state", func(value string) (string, bool) {
+		return normaliseWorkState(value), len(value) <= 64
+	}); err != nil {
+		return out, err
+	}
+	if len(out.WorkStates)+len(out.WorkStatesNot) > 64 {
+		return out, badRequest("too many work_state values")
+	}
+	if out.WorkBuckets, err = queryList(r, "work_bucket"); err != nil {
+		return out, err
+	}
+	if len(out.WorkBuckets) > 5 {
+		return out, badRequest("too many work_bucket values")
+	}
+	for _, bucket := range out.WorkBuckets {
+		switch bucket {
+		case "open", "in_progress", "done", "cancelled", "archived":
+		default:
+			return out, badRequest("invalid work_bucket")
+		}
+	}
 	if out.Priorities, out.PrioritiesNot, err = negatedList(r, "priority", nil); err != nil {
 		return out, err
 	}
@@ -340,6 +381,26 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	}
 	if out.HideClosed, err = queryBool(r, "hide_closed"); err != nil {
 		return out, err
+	}
+	if v.Has("hide_states") {
+		if out.HideStates, err = queryList(r, "hide_states"); err != nil {
+			return out, err
+		}
+		if len(out.HideStates) == 0 {
+			return out, badRequest("hide_states requires at least one status")
+		}
+		for i, state := range out.HideStates {
+			state = normaliseWorkState(state)
+			if state == "canceled" {
+				state = "cancelled"
+			}
+			switch state {
+			case "done", "delivered", "accepted", "cancelled", "archived":
+				out.HideStates[i] = state
+			default:
+				return out, badRequest("invalid hide_states")
+			}
+		}
 	}
 	if out.Descendants && !out.ParentSet && out.Within == nil {
 		return out, badRequest("include_descendants requires parent_id")
@@ -979,6 +1040,9 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	}
 	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
 	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
+	add(q.WorkStates, func(v []string) string { return workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[])` })
+	add(q.WorkStatesNot, func(v []string) string { return `NOT (` + workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[]))` })
+	add(q.WorkBuckets, func(v []string) string { return workCountBucketSQL("n.state", "cfg") + `=ANY(` + arg(v) + `::text[])` })
 	add(q.PrioritiesNot, func(v []string) string {
 		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
 	})
@@ -1097,16 +1161,18 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
             coalesce(n.fields->>'priority','') AS priority_raw,`
 	}
-	// Hide closed uses the same buckets as the project counts. Until the filter
-	// is on, the predicate stays the previous literal so an unfiltered list
-	// keeps its plan.
+	// Hide shares the kind-aware project-count buckets. Custom choices split
+	// the finished bucket without changing the default or unfiltered plans.
 	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
 	configuredCTE := ""
 	configuredJoin := ""
-	if q.HideClosed {
+	if q.HideClosed || len(q.WorkBuckets) > 0 {
 		configuredCTE = `, ` + workStateCategoryCTE()
 		configuredJoin = ` LEFT JOIN configured cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state")
 		closedPred = workNotClosedSQL("n.state", "cfg")
+		if q.HideClosed && len(q.HideStates) > 0 {
+			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
+		}
 	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
@@ -1510,7 +1576,21 @@ type projectSummary struct {
 	// actors of the tenant's latest events (90 days, at most 20000) on the project
 	// or anything below it, a linked principal shown as the person it links to.
 	People []projectPerson `json:"people"`
+
+	Archived              int                  `json:"archived_count"`
+	StatusCounts          []projectStatusCount `json:"status_counts"`
+	StatusCountsTruncated bool                 `json:"status_counts_truncated"`
 }
+
+// The status detail is bounded; aggregate totals remain exact even if truncated.
+const maxProjectStatusCounts = 256
+
+type projectStatusCount struct {
+	State  string `json:"state"`
+	Bucket string `json:"bucket"`
+	Count  int    `json:"count"`
+}
+
 type projectPerson struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -1536,7 +1616,9 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := projectPage{Items: []projectSummary{}}
-	err = m.tx(r.Context(), p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	err = m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
             WITH RECURSIVE projects AS (
                 SELECT n.id,n.key,n.title,n.state,n.updated_at
@@ -1551,6 +1633,7 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                     AND c.parent_id=s.node_id AND c.deleted_at IS NULL
             ), `+workStateCategoryCTE()+`, counted AS (
                 SELECT p.id,p.key,p.title,p.state,s.depth,k.slug,s.updated_at,
+                    `+workStatusSQL("s.state")+` AS work_state,
                     `+workCountBucketSQL("s.state", "c")+` AS bucket
                 FROM projects p JOIN subtree s ON s.project_id=p.id
                 JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
@@ -1561,10 +1644,21 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                     count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
                     count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='done')::int AS done,
                     count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
+                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='archived')::int AS archived,
                     count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic'))::int AS total,
                     max(updated_at) AS last_activity
                 FROM counted
                 GROUP BY id,key,title,state
+            ), status_tallies AS (
+                SELECT id,work_state,bucket,count(*)::int AS count
+                FROM counted WHERE depth>0 AND slug IN ('ticket','task','epic')
+                GROUP BY id,work_state,bucket
+            ), status_ranked AS (
+                SELECT *,row_number() OVER (PARTITION BY id ORDER BY work_state,bucket) AS rank FROM status_tallies
+            ), statuses AS (
+                SELECT id,json_agg(json_build_object('state',work_state,'bucket',bucket,'count',count) ORDER BY work_state,bucket)
+                    FILTER (WHERE rank <= $3) AS counts,bool_or(rank > $3) AS truncated
+                FROM status_ranked GROUP BY id
             ), recent AS (
                 SELECT e.node_id,e.actor_principal_id,e.at FROM events e
                 WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id IS NOT NULL AND e.at > now() - interval '90 days'
@@ -1582,21 +1676,25 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 WHERE r.n <= $2
                 GROUP BY r.project_id
             )
-            SELECT s.id::text,s.key,s.title,s.state,s.open,s.in_progress,s.done,s.cancelled,s.total,s.last_activity,coalesce(pp.people,'[]'::json)
-            FROM summary s LEFT JOIN people pp ON pp.project_id=s.id
-            ORDER BY s.last_activity DESC,s.id`, includeArchived, recentPeoplePerProject)
+            SELECT s.id::text,s.key,s.title,s.state,s.open,s.in_progress,s.done,s.cancelled,s.archived,s.total,s.last_activity,coalesce(pp.people,'[]'::json),coalesce(sc.counts,'[]'::json),coalesce(sc.truncated,false)
+            FROM summary s LEFT JOIN people pp ON pp.project_id=s.id LEFT JOIN statuses sc ON sc.id=s.id
+            ORDER BY s.last_activity DESC,s.id`, includeArchived, recentPeoplePerProject, maxProjectStatusCounts)
 		if err != nil {
 			return dbErr("list projects", err)
 		}
 		for rows.Next() {
 			var item projectSummary
-			var people []byte
-			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Cancelled, &item.Total, &item.LastActivity, &people); err != nil {
+			var people, statuses []byte
+			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Cancelled, &item.Archived, &item.Total, &item.LastActivity, &people, &statuses, &item.StatusCountsTruncated); err != nil {
 				rows.Close()
 				return err
 			}
 			if err := json.Unmarshal(people, &item.People); err != nil || item.People == nil {
 				item.People = []projectPerson{}
+			}
+			if err := json.Unmarshal(statuses, &item.StatusCounts); err != nil {
+				rows.Close()
+				return fmt.Errorf("decode project status counts: %w", err)
 			}
 			page.Items = append(page.Items, item)
 		}
