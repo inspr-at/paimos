@@ -84,17 +84,17 @@ func refreshParentTicketOptions(ctx context.Context, tx pgx.Tx, project, release
 	return rows.Err()
 }
 
-// Match the paired tree writers: pairing -> tree -> tenant access fence ->
+// Match the paired tree writers: tenant access fence -> pairing -> tree ->
 // resource rows -> event counter. Recheck authorization under that fence.
 func lockMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&id); err != nil {
+		return err
+	}
 	for _, key := range []string{"aeon-pairing:" + p.TenantID, p.TenantID} {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, key); err != nil {
 			return err
 		}
-	}
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&id); err != nil {
-		return err
 	}
 	if authz.RequireTx(ctx, tx, p, "releases.write", authz.Scope{ProjectID: project}) != nil {
 		return fail(403, "project access required")
