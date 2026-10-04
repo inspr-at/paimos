@@ -290,7 +290,12 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
   const started = Date.now()
   const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
   await page.route('**/api/**', async arrived => {
-    const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+    const request = arrived.request(), url = new URL(request.url()), method = request.method(), query = url.searchParams
+    // Preferences use an encoded path segment; model the server's decoded key
+    // and keep Call.path consistent with the fixture's logical preference keys.
+    const path = url.pathname.startsWith('/api/preferences/')
+      ? `/api/preferences/${decodeURIComponent(url.pathname.slice('/api/preferences/'.length))}`
+      : url.pathname
     const held = options.hold?.({ path, method, query })
     const route = held ? heldRoute(arrived, held) : arrived
     let body: unknown = null

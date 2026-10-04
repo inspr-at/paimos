@@ -103,7 +103,7 @@ function radioKeys(event: KeyboardEvent, options: readonly string[], current: st
             </button>
           </div>
           <p :id="`${id}-palette-detail`" class="detail palette-detail">{{ AGENT_PALETTES.find(p => p.id === appearance.palette)?.description }}</p>
-          <p class="hint">Appearance moved here from Personal › Agents. Heartbeat warnings and estimates stay there.</p>
+          <p class="hint">Appearance moved here from Personal settings, Agents. Heartbeat warnings and estimates stay there.</p>
         </fieldset>
       </div>
       <aside class="previews" aria-label="Agents preview">

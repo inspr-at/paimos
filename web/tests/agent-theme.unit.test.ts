@@ -25,6 +25,8 @@ function deferred<T>() {
 it('theme appearance overrides legacy preferences everywhere while keeping heartbeat behaviour', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/api/me/theme' ? active() : url.startsWith('/api/themes?') ? page() : new Response(JSON.stringify({ value: url.endsWith('agent-state') ? { palette: 'protan', yellowMinutes: 8, redMinutes: 21 } : { style: 'robot-2', ring: 'off', size: 80 } }))))
   const { restoreAgentTheme } = await import('../src/lib/agentTheme')
+  const { setPreferenceOwner } = await import('../src/lib/preferences')
+  setPreferenceOwner({ tenant: { id: 'tenant' }, principal: { id: 'alice' } })
   const { useAgentIndicator } = await import('../src/lib/agentIndicator')
   const { useAgentAppearance } = await import('../src/lib/agentAppearance')
   const indicator = useAgentIndicator(), states = useAgentAppearance()
@@ -71,6 +73,8 @@ it('late theme reads cannot overwrite a newer confirmed theme or a different per
 
 it('a failed load after an identity reset uses defaults, never the legacy appearance cache', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/api/me/theme' ? new Response('{}', { status: 500 }) : url.startsWith('/api/themes?') ? page() : new Response(JSON.stringify({ value: { style: 'sprite', hovering: true, palette: 'monochrome' } }))))
+  const { setPreferenceOwner } = await import('../src/lib/preferences')
+  setPreferenceOwner({ tenant: { id: 'tenant' }, principal: { id: 'alice' } })
   const { useAgentIndicator } = await import('../src/lib/agentIndicator')
   const { useAgentAppearance } = await import('../src/lib/agentAppearance')
   const indicator = useAgentIndicator(), states = useAgentAppearance()
@@ -78,6 +82,7 @@ it('a failed load after an identity reset uses defaults, never the legacy appear
   expect(indicator.choice.value.style).toBe('sprite')
   const { restoreAgentTheme } = await import('../src/lib/agentTheme')
   signIn('bob')
+  setPreferenceOwner({ tenant: { id: 'tenant' }, principal: { id: 'bob' } })
   await restoreAgentTheme('tenant/bob')
   expect(indicator.choice.value).toEqual({ style: 'robot-1', hovering: false })
   expect(states.choice.value.palette).toBe('standard')

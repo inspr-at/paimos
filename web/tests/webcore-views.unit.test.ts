@@ -24,6 +24,7 @@ describe('S8-011: timing writes', () => {
       return json({}, failure)
     })
     const view = mountView('../src/components/settings/WorkspaceSection.vue', {
+      '../../lib/features': { canFeature: () => true },
       '../../lib/api': { api }, '../../lib/brand': { brand: { short_name: 'Aeon' } },
       '../../lib/authz': { can: () => true, myWorkspaceRole: () => null, permissionsAvailable: () => true },
       '../../stores/session': { useSession: () => ({ identity: { tenant: { name: 'Test' } } }) },
@@ -46,6 +47,7 @@ describe('S8-011: timing writes', () => {
     const pending = deferred<Response>()
     const api = vi.fn(async (path: string, init?: RequestInit) => init ? pending.promise : json(path.includes('eta') ? { interval_minutes: 10 } : { heartbeat_lost_minutes: 15 }))
     const view = mountView('../src/components/settings/WorkspaceSection.vue', {
+      '../../lib/features': { canFeature: () => true },
       '../../lib/api': { api }, '../../lib/brand': { brand: {} },
       '../../lib/authz': { can: () => true, myWorkspaceRole: () => null, permissionsAvailable: () => true },
       '../../stores/session': { useSession: () => ({ identity: null }) },

@@ -165,7 +165,15 @@ func TestRelationsCRUDAndTenantIsolation(t *testing.T) {
 		t.Fatal("cross-tenant events leaked")
 	}
 	expect(t, request(f.handler, f.b, "DELETE", "/api/relations/"+first.ID, ""), 404)
-	expect(t, request(f.handler, f.b, "POST", undoPath(f, 1), ""), 404)
+	// The unprivileged foreign agent is denied before event lookup. A qualified
+	// foreign person then proves tenant-isolated lookup (Undo is person-only).
+	expect(t, request(f.handler, f.b, "POST", undoPath(f, 1), ""), 403)
+	foreignPerson := tenant.Principal{TenantID: f.b.TenantID, Kind: tenant.Person}
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Foreign undo reader') RETURNING id::text`, foreignPerson.TenantID).Scan(&foreignPerson.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.db, foreignPerson.TenantID, foreignPerson.ID, "member")
+	expect(t, request(f.handler, foreignPerson, "POST", undoPath(f, 1), ""), 404)
 	expect(t, request(f.handler, f.a, "POST", "/api/relations", fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":"blocks"}`, f.nodes[0], f.foreign)), 404)
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+first.ID, ""), 204)
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+first.ID, ""), 404)

@@ -20,7 +20,7 @@ export function toast(message: string, options: { tone?: Toast['tone']; action?:
   const current = captureToastOwner()
   const item: Toast = {
     id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key, release: options.release,
-    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])].map(action => ({ ...action, run: () => { if (current()) action.run() } })),
+    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])].map(action => ({ ...action, run: () => { if (current()) return action.run() } })),
   }
   toasts.push(item)
   // Sticky toasts are kept when the stack is full; the oldest passing one goes.

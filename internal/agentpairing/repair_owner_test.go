@@ -13,8 +13,24 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
+
+func TestPairingLocksTenantBeforeAdvisory(t *testing.T) {
+	for name, lock := range map[string]func(context.Context, pgx.Tx) error{
+		"pairing":  agentpairing.Lock,
+		"mutation": agentpairing.LockMutation,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			dbtest.TenantBeforeAdvisory(t, f.db, f.tenantID, "aeon-pairing:"+f.tenantID, 0, func(ctx context.Context) error {
+				return db.InTenant(ctx, f.db.App, f.tenantID, func(tx pgx.Tx) error { return lock(ctx, tx) })
+			})
+		})
+	}
+}
 
 func TestPairingApprovalTenantBeforeAdvisory(t *testing.T) {
 	f := newFixture(t)

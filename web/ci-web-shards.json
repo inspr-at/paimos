@@ -2433,6 +2433,26 @@
           "listedTests": 16
         }
       ]
+    },
+    {
+      "id": "webcore-recovery",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/webcore-recovery.spec.ts",
+          "weightSeconds": 12,
+          "weightSource": "unmeasured-test-count-estimate",
+          "listedTests": 4
+        }
+      ]
     }
   ],
   "sourceRevision": "068611ab87b80319ed1f0843bbad79ca897b7dcb",

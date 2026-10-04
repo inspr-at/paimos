@@ -192,7 +192,7 @@ test('the saved order drops projects that are gone, also later; a failed save sa
   await expect(names(page)).toHaveText(['Pharos'])
   await expect.poll(() => lastOrder(calls)).toEqual(['p-aeon', 'p-pharos'])
   const writes = calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/projects:order').length
-  await page.route('**/api/preferences/projects:order', route => route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'down' } }) : route.fallback())
+  await page.route('**/api/preferences/projects%3Aorder', route => route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'down' } }) : route.fallback())
   expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/projects:order').length).toBe(writes)
   await page.getByRole('group', { name: 'Groups' }).getByRole('button', { name: /^Archived/ }).click()
   await expect(names(page)).toHaveText(['Pharos', 'Aeon', 'Glint'])
