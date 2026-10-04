@@ -262,6 +262,19 @@ workflow wiring, exact-once default selection and propagation of each spec's
 failure. The layout fix passed six variants × 20 locally; hosted execution of
 the integrated revision must still be verified by the coordinator. Inspect drift
 without browsers using `npm --prefix web run ci:web:shard -- --check --strict`.
+
+**AEON-676 hosted acceptance is open:** the 2026-10-04 final-round read-only
+GitHub check found no commit `42537130c7488f43f6899f1377cd6bbbc964bd33`
+(HTTP 422), no `work/aeon-676` ref (HTTP 404), no PR and zero Actions runs
+for that SHA. The worker is forbidden to push; local checks do not close this
+gate. The coordinator must publish the integrated branch and run `CI` on that
+branch (PR or branch dispatch, keeping mbp2606 off limits). Retain the run URL,
+checked-out SHA, logs/reports showing `clip-tip`, `aeon-632b-clip`, `key-trim`
+and `model-prefs` actually executed without skips, and successful `web-setup`,
+all 12 `web-shard` jobs and the required `web` aggregate. A later revision must
+retain these fixes and identify its exact SHA; selection-only output or a run
+on an unrelated revision does not establish hosted acceptance.
+
 A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
 reruns exactly one test in its original config group.
 
