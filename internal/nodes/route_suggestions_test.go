@@ -212,6 +212,19 @@ func TestEstimateRouteDefaultsAndDerivedComplexity(t *testing.T) {
 	if fields["complexity"] != "L" || fields["complexity_source"] != "suggested" || fields["complexity_confirmed"] != false {
 		t.Fatal(fields)
 	}
+	// Role changes still recompute derived complexity with unchanged hours.
+	fields["route_role"] = "build"
+	delete(fields, "route_role_source")
+	body, err := json.Marshal(map[string]any{"fields": fields})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, string(body))
+	n = decode[nodeJSON](t, code, raw, 200)
+	fields = routeFieldMap(t, n.Fields)
+	if fields["complexity"] != "M" || fields["complexity_source"] != "suggested" || fields["complexity_confirmed"] != false {
+		t.Fatal(fields)
+	}
 	// Explicit caller classification wins over all suggestions and is stamped.
 	n = mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"RLS schema migration","fields":{"estimate_hours":1,"route_role":"scout","area":"design","complexity":"S","complexity_by":"forged","complexity_confirmed":false}}`, ticketKind.ID))
 	fields = routeFieldMap(t, n.Fields)
