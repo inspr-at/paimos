@@ -3,6 +3,36 @@ import { expect, test } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
+test.beforeEach(async ({ page }) => {
+  // Keep the feed connected for ETA assertions; an unmocked stream correctly
+  // switches the UI to "Last ..." instead of the relative estimate under test.
+  // Live cases deliver exactly one named change, without heartbeat or replay.
+  await page.addInitScript(() => {
+    const sources: QuietSource[] = []
+    class QuietSource extends EventTarget {
+      readyState = 1
+      onerror: ((event: Event) => void) | null = null
+      constructor(readonly url: string) {
+        super()
+        if (url.includes('/api/events/stream')) {
+          sources.push(this)
+          queueMicrotask(() => this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 700, resumed: false }) })))
+        }
+      }
+      close() { this.readyState = 2 }
+    }
+    Object.assign(window, {
+      EventSource: QuietSource,
+      aggregateEvent: (event: { id: number; type: string }) => {
+        for (const source of sources) source.dispatchEvent(new MessageEvent(event.type, { data: JSON.stringify(event), lastEventId: String(event.id) }))
+      },
+      disconnectAggregateStream: () => {
+        for (const source of sources) { source.readyState = 0; source.onerror?.(new Event('error')) }
+      },
+    })
+  })
+})
+
 for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
   test(`parent leaf totals at ${width} ${theme}`, async ({ page }) => {
     const errors = watchErrors(page)
@@ -65,26 +95,6 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
 
 for (const type of ['status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed']) {
   test(`live leaf aggregates refresh from ${type} with unchanged parent status`, async ({ page }) => {
-    // An isolated stream delivers exactly one ready envelope and the named
-    // change. No heartbeat, polling replay or parent derivation can mask it.
-    await page.addInitScript(() => {
-      const sources: EventTarget[] = []
-      class QuietSource extends EventTarget {
-        readyState = 1
-        onerror = null
-        constructor(readonly url: string) {
-          super()
-          if (url.includes('/api/events/stream')) {
-            sources.push(this)
-            queueMicrotask(() => this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 700, resumed: false }) })))
-          }
-        }
-        close() { this.readyState = 2 }
-      }
-      Object.assign(window, { EventSource: QuietSource, aggregateEvent: (event: { id: number; type: string }) => {
-        for (const source of sources) source.dispatchEvent(new MessageEvent(event.type, { data: JSON.stringify(event), lastEventId: String(event.id) }))
-      } })
-    })
     const errors = watchErrors(page)
     const data = fixtures()
     for (const node of data.nodes) node.kind_slug = 'work'
@@ -141,6 +151,7 @@ for (const scenario of [
     parent.eta = { finished: false, progress_pct: scenario.progress, leaf_count: 2, estimated_leaves: scenario.estimated, progress_basis: 'estimate', open_leaves: 1, ready_leaves: scenario.partial ? 0 : 1, ready_partial: scenario.partial, eta_ready_at: '2026-10-04T12:00:00Z', ready_reported_at: '2026-10-04T08:00:00Z', ready_stale: true }
     await mockWork(page, data)
     await page.goto('/p/PHAROS')
+    await expect(page.locator('.list-freshness')).toHaveText('Live')
     const row = page.locator('#row-n-1')
     const eta = row.locator('.eta-cell')
     const progress = row.locator('.progress-read')
@@ -170,12 +181,20 @@ for (const scenario of [
     const plan = panel.getByRole('button', { name: /^Parent estimate:/ })
     await expect(plan).toBeVisible()
     await expect(panel.locator('.eta-cell .shown')).toHaveText(`~2 h${scenario.partial ? ' · partial' : ''}`)
-    await expectStableControls({ controls: { 'parent plan': plan }, scrollAreas: { panel }, interactions: [{ name: 'read parent plan', run: async () => {
+    await expect(panel.locator('.eta-cell')).toHaveAttribute('data-tip', /work remains/)
+    const controls = { 'parent plan': plan, 'more actions': panel.getByRole('button', { name: 'More actions', exact: true }) }
+    await expectStableControls({ controls, scrollAreas: { panel }, interactions: [{ name: 'read parent plan', run: async () => {
       await plan.hover()
       await expect(plan).toHaveAttribute('data-tip', /kept separately/)
       await page.mouse.move(0, 0)
     } }] })
     await page.screenshot({ path: `test-results/aeon-651-fix7/${scenario.name.replaceAll(' ', '-')}-parent-${width}-${theme}.png`, fullPage: true })
+    await expectStableControls({ controls, scrollAreas: { panel }, interactions: [{ name: 'disconnect the estimate feed', run: async () => {
+      await page.evaluate(() => (window as unknown as { disconnectAggregateStream: () => void }).disconnectAggregateStream())
+      await expect(panel.locator('.eta-cell .shown')).toHaveText(/^Last /)
+      await expect(panel.locator('.eta-cell')).toHaveAttribute('data-tip', /Showing the last successful update/)
+      await expect(eta.locator('.shown')).toHaveText(await panel.locator('.eta-cell .shown').innerText())
+    } }] })
     expect(errors).toEqual([])
   })
 }

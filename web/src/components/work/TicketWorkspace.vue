@@ -5,9 +5,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, w
 import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { rowStore } from '../../lib/rowStore'
+import { liveNodes } from '../../lib/liveNodes'
+import { etaFromTicket } from '../../lib/eta'
 import { toast } from '../../lib/toast'
 import { queueable } from '../../lib/workQueue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
+import EtaCell from './EtaCell.vue'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket, type RelatedNode, type TicketChange } from '../../lib/useTicket'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
@@ -92,11 +95,18 @@ const ticket = useTicket(item, {
   live: { busy: liveBusy, me: () => props.me?.id ?? null },
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
+const eta = computed(() => etaFromTicket(item.value?.eta))
+const etaConnectionStale = ref(liveNodes.state !== 'live')
+onBeforeUnmount(liveNodes.onState(state => { etaConnectionStale.value = state !== 'live' }))
 const convertOpen = ref(false)
 const workActionsOpen = ref(false)
 watch(() => [props.item?.id, props.me?.id], () => { workActionsOpen.value = false })
 function workLifecycleCompleted() { void ticket.refresh(); activity.load() }
 const header = ref<{ focusMore: () => void } | null>(null)
+function closeWorkActions() {
+  workActionsOpen.value = false
+  void nextTick(() => header.value?.focusMore())
+}
 function finishConvert() {
   convertOpen.value = false
   if (item.value) toast(`${item.value.key} is now ${kindLabel(item.value.kind_slug).toLowerCase()}`)
@@ -532,16 +542,18 @@ defineExpose({
       ref="header"
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :can-work-actions="item?.kind_slug === 'work' && editable && humanCheckPerson"
        :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @convert="convertOpen = true" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
+      @work-actions="workActionsOpen = true"
     >
-      <template #queue><button v-if="item?.kind_slug === 'work' && editable && humanCheckPerson" type="button" class="btn sm" @click="workActionsOpen = true">Work actions</button><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
+      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
-    <WorkLifecycleSheet v-if="workActionsOpen && item && me" :node-id="item.id" :node-key="item.key" :person-id="me.id" @close="workActionsOpen = false" @completed="workLifecycleCompleted" />
+    <WorkLifecycleSheet v-if="workActionsOpen && item && me" :node-id="item.id" :node-key="item.key" :person-id="me.id" @close="closeWorkActions" @completed="workLifecycleCompleted" />
     <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
@@ -630,6 +642,7 @@ defineExpose({
           </section>
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
           <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
+          <p v-if="eta" class="meta ws-eta"><span>Progress and ETA</span><EtaCell :eta="eta" :now="now" align="start" labelled :connection-stale="etaConnectionStale" /></p>
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
@@ -748,6 +761,7 @@ defineExpose({
 .ws-props { margin-top: 14px; }
 .meta { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
 .meta time { color: var(--ink-2); }
+.ws-eta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .divider { height: 1px; margin: 18px 0 20px; background: linear-gradient(90deg, var(--line-2), transparent); }
 .read-only { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 12px; border-radius: 10px; background: var(--code-bg); font-size: 12.5px; color: var(--ink-2); }
 .ws-benefits { margin-top: 26px; }

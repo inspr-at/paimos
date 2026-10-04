@@ -5,6 +5,11 @@ import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { WorkAction, WorkPreview } from '../src/lib/workLifecycle'
 
+async function openWorkActions(page: Page) {
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Work actions', exact: true }).click()
+}
+
 async function openWork(page: Page, theme: 'light' | 'dark', parent = false) {
   const data = fixtures()
   const target = data.nodes.find(n => n.id === 'n-1')!
@@ -33,7 +38,7 @@ async function openWork(page: Page, theme: 'light' | 'dark', parent = false) {
   })
   await page.goto('/p/PHAROS/PHAROS-11')
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-  await page.getByRole('button', { name: 'Work actions', exact: true }).click()
+  await openWorkActions(page)
   const sheet = page.getByRole('dialog', { name: 'Work actions', exact: true })
   await expect(sheet.getByText(parent ? '3 open leaves will be cancelled.' : 'This leaf is busy.', { exact: false })).toBeVisible()
   return { sheet, requests, stop: () => { stopped = true }, revoke: () => { failContinue = true } }
@@ -69,13 +74,13 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.reload()
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     // Reopen with a completed action: the saved intent cannot run twice.
-    await page.getByRole('button', { name: 'Work actions', exact: true }).click()
+    await openWorkActions(page)
     await expect(sheet).toBeVisible()
     await expect(sheet.getByText(/This leaf is busy/)).toBeVisible()
     await controls.close.click()
     // A fresh page/context below uses a new visible leaf preview.
     await page.route('**/api/nodes/*/work-lifecycle', route => route.fulfill({ json: { is_leaf: true, busy: true, open_leaves: 1, updated_at: '2026-09-23T12:00:00Z', scope_revision: 'a'.repeat(64), pending: null } }))
-    await page.getByRole('button', { name: 'Work actions', exact: true }).click()
+    await openWorkActions(page)
     await expect(sheet.getByText(/This leaf is busy/)).toBeVisible()
     await cancel.click()
     await expect(sheet.getByText(/1 open leaf will be cancelled/)).toBeVisible()
@@ -94,7 +99,7 @@ test('cancel shows parent leaf count, honest permission failure, and saved inten
   await expect(sheet.getByRole('status')).toContainText('Permission was revoked')
   expect(requests).toHaveLength(1)
   await sheet.getByRole('button', { name: /^Close/ }).click()
-  await page.getByRole('button', { name: 'Work actions', exact: true }).click()
+  await openWorkActions(page)
   await expect(sheet.getByText(/Waiting for 3 leaves/)).toBeVisible()
 })
 

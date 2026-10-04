@@ -9,7 +9,7 @@ import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
-  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
+  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean; canWorkActions?: boolean
   // Keys of the tickets followed to get here (oldest first), and the edit state.
   trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean
   // The peek dock: a labeled way into the project, and a way back to the view it covered.
@@ -17,7 +17,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []; convert: []
-  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []
+  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []; workActions: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // The trail shows its last two steps; older ones fold into an ellipsis.
@@ -42,6 +42,7 @@ function pick(action: 'copyKey' | 'copyLink' | 'delete' | 'prev' | 'next') {
 }
 function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value = null; if (anchor) emit('move', anchor) }
 function pickConvert() { moreAnchor.value = null; emit('convert') }
+function pickWorkActions() { moreAnchor.value = null; emit('workActions') }
 const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
 const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
@@ -106,6 +107,7 @@ void props
         </template>
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
+        <button v-if="canWorkActions" type="button" role="menuitem" class="menu-item" @click="pickWorkActions"><AppIcon name="task" :size="14" />Work actions</button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
