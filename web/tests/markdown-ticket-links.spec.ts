@@ -128,3 +128,46 @@ test('markdown ticket links and the epic panel, light and dark', async ({ page }
     }
   }
 })
+
+for (const [oldKey, canonicalKey, projectId, projectKey] of [
+  ['PHAROS-14', 'AEON-2', 'p-aeon', 'AEON'],
+  ['AEON-1', 'PHAROS-17', 'p-pharos', 'PHAROS'],
+]) {
+  test(`a moved Markdown key ${oldKey} follows ${canonicalKey} and Back restores the source`, async ({ page }) => {
+    const errors = watchErrors(page)
+    const data = fixtures()
+    const source = data.nodes.find(node => node.key === 'PHAROS-12')!
+    source.body = `Follow ${oldKey}.`
+    const moved = data.nodes.find(node => node.key === oldKey)!
+    moved.key = canonicalKey
+    moved.project = projectId
+    moved.parent_id = projectId
+    await mockWork(page, data)
+    // The server's key alias resolves the old display key to its current owner.
+    await page.route('**/api/nodes/lookup?*', async route => {
+      const keys = new URL(route.request().url()).searchParams.get('keys')?.split(',') ?? []
+      if (!keys.includes(oldKey)) return route.fallback()
+      await route.fulfill({ json: { items: [{ id: moved.id, key: moved.key, title: moved.title,
+        state: moved.state, requested_key: oldKey, project_id: moved.project }] } })
+    })
+    const sourceURL = '/p/PHAROS/PHAROS-12?q=Oracle&type=ticket'
+    await page.goto(sourceURL)
+    const ws = page.getByRole('complementary', { name: 'Ticket details' })
+    await expect(ws.getByRole('heading', { name: source.title, exact: true })).toBeVisible()
+    const link = ws.getByRole('link', { name: `${oldKey}: ${moved.title}`, exact: true })
+    await expect(link).toHaveText(oldKey)
+    await expect(link).toHaveAttribute('href', `/p/${projectKey}/${canonicalKey}`)
+    await link.click()
+    await expect(page).toHaveURL(`/p/${projectKey}/${canonicalKey}?q=Oracle&type=ticket`)
+    await expect(ws).toHaveCount(1)
+    await expect(ws.getByRole('button', { name: `Copy ${canonicalKey}`, exact: true })).toBeVisible()
+    await expect(ws.getByRole('heading', { name: moved.title, exact: true })).toBeVisible()
+    await expect(page).toHaveTitle(new RegExp(canonicalKey))
+    await expect(page.locator('.ticket-peek-host')).toHaveCount(0)
+    await ws.getByRole('button', { name: /Back to PHAROS-12/ }).click()
+    await expect(page).toHaveURL(sourceURL)
+    await expect(ws.getByRole('heading', { name: source.title, exact: true })).toBeVisible()
+    await expect(ws.getByRole('link', { name: `${oldKey}: ${moved.title}`, exact: true })).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}

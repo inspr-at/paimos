@@ -444,7 +444,7 @@ for (const first of ['lookup', 'list'] as const) {
 }
 
 test('the routed panel keeps usable list space and stable controls', async ({ page }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(120_000)
   const data = linkedKnowledge()
   const title = 'Ein Arbeitsknoten: verlässliche Zuordnung und nachvollziehbare Änderungen im gesamten Projekt'
   data.nodes.find(node => node.id === 'n-1')!.title = title
@@ -453,33 +453,35 @@ test('the routed panel keeps usable list space and stable controls', async ({ pa
     data.preferences.layout = savedWidth ? { panel: savedWidth } : {}
     for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme })
-      for (const width of [1440, 1024, 390]) {
-        await page.setViewportSize({ width, height: 900 })
-        await page.goto('/p/PHAROS/PHAROS-11?q=11&type=ticket&peek=GUI-18')
-        const ws = panel(page)
-        await expect(ws).toHaveCount(1)
-        await expect(ws.getByRole('heading', { name: title })).toBeVisible()
-        if (width >= 1024) {
-          const grid = page.getByRole('grid', { name: 'Tickets' })
-          await expect(page.locator('#row-n-1')).toBeVisible()
-          const listBox = (await grid.boundingBox())!
-          const panelBox = (await ws.boundingBox())!
-          expect(listBox.width).toBeGreaterThan(400)
-          expect(listBox.x + listBox.width).toBeLessThanOrEqual(panelBox.x)
+      for (const search of [true, false]) {
+        for (const width of [1440, 1024, 390]) {
+          await page.setViewportSize({ width, height: 900 })
+          await page.goto(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket&peek=GUI-18`)
+          const ws = panel(page)
+          await expect(ws).toHaveCount(1)
+          await expect(ws.getByRole('heading', { name: title })).toBeVisible()
+          if (width >= 1024) {
+            const grid = page.getByRole('grid', { name: 'Tickets' })
+            await expect(page.locator('#row-n-1')).toBeVisible()
+            const listBox = (await grid.boundingBox())!
+            const panelBox = (await ws.boundingBox())!
+            expect(listBox.width).toBeGreaterThan(400)
+            expect(listBox.x + listBox.width).toBeLessThanOrEqual(panelBox.x)
+          }
+          await expectStableControls({
+            controls: { close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }) },
+            scrollAreas: { panel: ws },
+            interactions: [{ name: 'open and close actions', run: async () => {
+              await ws.getByRole('button', { name: 'More actions' }).click()
+              await expect(page.getByRole('menu')).toBeVisible()
+              await expect(page.getByRole('menuitem', { name: 'Open as full page' })).toBeVisible()
+              await expect(page.getByRole('menuitem', { name: 'Open in a new tab' })).toBeVisible()
+              await page.keyboard.press('Escape')
+              await expect(page.getByRole('menu')).toHaveCount(0)
+            } }],
+          })
+          await page.screenshot({ path: `test-results/aeon-687-wrongrec/${savedWidth ? 'wide' : 'default'}-${search ? 'search' : 'plain'}-${colorScheme}-${width}.png` })
         }
-        await expectStableControls({
-          controls: { close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }) },
-          scrollAreas: { panel: ws },
-          interactions: [{ name: 'open and close actions', run: async () => {
-            await ws.getByRole('button', { name: 'More actions' }).click()
-            await expect(page.getByRole('menu')).toBeVisible()
-            await expect(page.getByRole('menuitem', { name: 'Open as full page' })).toBeVisible()
-            await expect(page.getByRole('menuitem', { name: 'Open in a new tab' })).toBeVisible()
-            await page.keyboard.press('Escape')
-            await expect(page.getByRole('menu')).toHaveCount(0)
-          } }],
-        })
-        await page.screenshot({ path: `test-results/aeon-687-wrongrec/${savedWidth ? 'wide' : 'default'}-${colorScheme}-${width}.png` })
       }
     }
   }

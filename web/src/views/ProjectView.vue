@@ -27,6 +27,7 @@ import { useTicketList } from '../lib/useTicketList'
 import { useLiveList } from '../lib/useLiveList'
 import { rowStore } from '../lib/rowStore'
 import { TICKET_PEEK } from '../lib/ticketPeek'
+import { ticketRef } from '../lib/ticketLinks'
 import { scopeOwner } from '../lib/identityScope'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
@@ -837,6 +838,14 @@ function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(step
 // Related tickets can live in another project: open them where they belong.
 async function openRelated(key: string, newTabRequested = false) {
   if (newTabRequested) { newTab(key); return }
+  // Markdown displays the key that was written, but its resolved link may
+  // name a moved record. Use the same canonical key and owner as its href.
+  const resolved = ticketRef(key)
+  const target = resolved ? projects.byId(resolved.projectId) : undefined
+  if (resolved && target) {
+    follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(resolved.key)}`)
+    return
+  }
   const from = route.fullPath
   const ownerScope = scopeOwner(session.identity)
   const stale = () => route.fullPath !== from || scopeOwner(session.identity) !== ownerScope
