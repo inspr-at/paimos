@@ -18,6 +18,7 @@ import (
 
 func TestEventBriefingRange(t *testing.T) {
 	d, a, b := fixture(t)
+	base := logPosition(t, d, a)
 	start := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
@@ -35,11 +36,11 @@ func TestEventBriefingRange(t *testing.T) {
 	appendEvents(t, d, b, 1)
 	m := New(d.App).(*module)
 	got, err := m.read(t.Context(), a, "", 0, 1, eventRange{from: &start, to: &end})
-	if err != nil || len(got.Items) != 1 || got.Items[0].ID != 2 || got.NextAfter == nil {
+	if err != nil || len(got.Items) != 1 || got.Items[0].ID != base+2 || got.NextAfter == nil {
 		t.Fatalf("first page %+v %v", got, err)
 	}
 	next, err := m.read(t.Context(), a, "", *got.NextAfter, 1, eventRange{from: &start, to: &end})
-	if err != nil || len(next.Items) != 1 || next.Items[0].ID != 3 || next.NextAfter != nil {
+	if err != nil || len(next.Items) != 1 || next.Items[0].ID != base+3 || next.NextAfter != nil {
 		t.Fatalf("next page %+v %v", next, err)
 	}
 	// Type filters never change cursor semantics or return unrelated snapshots.
@@ -70,6 +71,7 @@ func TestEventBriefingRange(t *testing.T) {
 // differing from append order. The legacy ID stream remains unchanged.
 func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 	d, p, _ := fixture(t)
+	base := logPosition(t, d, p)
 	now := time.Now().UTC()
 	ats := []time.Time{now.Add(-time.Hour), now.Add(-3 * time.Hour), now.Add(-time.Hour)}
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
@@ -111,7 +113,7 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 	}
 	var rows []Event
 	_ = json.Unmarshal(first["items"], &rows)
-	if len(rows) != 1 || rows[0].ID != 2 {
+	if len(rows) != 1 || rows[0].ID != base+2 {
 		t.Fatalf("not timestamp ordered: %+v", rows)
 	}
 	ids := []int64{rows[0].ID}
@@ -129,7 +131,7 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 		}
 		ids = append(ids, rows[0].ID)
 	}
-	if ids[0] != 2 || ids[1] != 1 || ids[2] != 3 {
+	if ids[0] != base+2 || ids[1] != base+1 || ids[2] != base+3 {
 		t.Fatalf("skipped or repeated timestamp tie: %v", ids)
 	}
 	// Saved cutoffs come from PostgreSQL, which stores microsecond timestamps.

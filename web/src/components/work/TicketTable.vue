@@ -1004,7 +1004,8 @@ td.c-title { position: relative; overflow: hidden; }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
 @media (min-width: 721px) and (pointer: coarse) {
   /* Keep the compact visuals, but reserve each full 44px reach plus the
-     existing 2px separation. Padding contains the outer edges as well. */
+     existing 2px separation before interaction. Touch can set :hover during
+     a hold; reserving space only then shrinks the name under the pointer. */
   .row-actions { gap: 22px; padding: 0 10px; }
   .compact .row-actions { gap: 24px; padding: 0 11px; }
   /* Reserve the touch action reach before hover/focus so the recurring

@@ -162,6 +162,10 @@ func TestClaudeStatuslineSettingsConsentAndPreservation(t *testing.T) {
 }
 
 func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
+	for _, name := range []string{"USER", "LOGNAME"} {
+		t.Setenv(name, "login-session-fixture")
+	}
+	t.Setenv("TMPDIR", privateCapacityHome(t))
 	home := privateCapacityHome(t)
 	path := filepath.Join(home, "fixture-claude")
 	raw := []byte("#!/bin/sh\nexit 88\n")
@@ -173,7 +177,7 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 	calls := 0
 	a.usage = &claudeUsageCapability{binaryPath: path, binarySHA256: sha256Hex(raw), version: "fixture-1", capture: func(_ context.Context, _ string, environment []string) (json.RawMessage, error) {
 		calls++
-		if len(environment) != 5 {
+		if len(environment) != 8 {
 			t.Fatal("child env expanded")
 		}
 		return []byte(`{}`), nil

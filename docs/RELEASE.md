@@ -246,11 +246,60 @@ system libraries. The shard command is `npm --prefix web run ci:web:shard --
 i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
-cancelled or skipped setup/shards. The shards run today's measured gate scope
-(49 specs); the 164 specs of the `remaining-ui` group are declared in
+cancelled or skipped setup/shards. The shards select 53 gated specs: the original
+49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
+weights are scheduling estimates. `clip-tip` uses its complete local serial
+runtime plus a 20 percent margin; the other three use listed test counts.
+These are not hosted runtime measurements. The 164 specs of the
+`remaining-ui` group are declared in
 `web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
-follow-up ticket measures them. A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
+follow-up ticket measures them. Unit CI checks the source manifest before
+reconciliation: every spec (including nested files) must belong to a group or
+an explicit exclusion with a ticket key and reason. AEON-676 fixes the touch
+name-width shift and gates all four additions in `clipped-names-and-preferences`,
+with no `clip-tip` exclusion. Browser-free regression checks verify the hosted
+workflow wiring, exact-once default selection and propagation of each spec's
+failure. The layout fix passed six variants × 20 locally; hosted execution of
+the integrated revision must still be verified by the coordinator. Inspect drift
+without browsers using `npm --prefix web run ci:web:shard -- --check --strict`.
+
+**AEON-676 hosted acceptance is open:** the earlier 2026-10-04 read-only
+GitHub check found no commit `42537130c7488f43f6899f1377cd6bbbc964bd33`
+(HTTP 422), no `work/aeon-676` ref (HTTP 404), no PR and zero Actions runs
+for that SHA. The FIX6 check now confirms that the coordinator published
+`2e8c089c3e863fd8d2e2a05cae0ddef41dbdce66` on
+[PR #257](https://github.com/inspr-at/paimos/pull/257). Its
+[CI run 37176759250](https://github.com/inspr-at/paimos/actions/runs/37176759250)
+(attempt 1, `pull_request`, that exact head SHA) has cancelled `web-setup`
+and `web-shard` jobs and a queued `web` aggregate at observation time. The
+setup annotation says a higher-priority request for `ci-pull_request-257`
+superseded it; no successful setup or 12-shard execution establishes acceptance.
+The worker's read-only snapshot is `tmp/aeon-676/fix6/hosted-evidence.json`.
+Post-merge local checks pass: hosted wiring 2/2, shard integration 19/19 and
+signal/failure guard 49/49, all without skips; strict coverage remains 53 gated
+and 164 ungated specs across 12 shards. No behavior or assertion was changed.
+
+The worker is forbidden to push; local checks do not close this gate. The
+coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
+keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
+showing `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs` actually
+executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
+and the required `web` aggregate. A later revision must retain these fixes
+and identify its exact SHA; selection-only output or a run on an unrelated
+revision does not establish hosted acceptance. FIX6 completes only the worker's
+verification and handoff; review-cg27's hosted finding remains open.
+
+A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
 reruns exactly one test in its original config group.
+Signal termination fails the guard before quarantine or test-output handling
+on either attempt; a terminated retry stops the remaining retries. Failure
+evidence records the signal, even when captured output reports passing or
+quarantined tests.
+The AEON-676 FIX5 check confirmed that fix `40f5b53f` survives the main merge
+at `2a6a0803`: all nine signal regressions fail against the reviewed
+`2c51fcd0` implementation, while the guard's 49 tests and the shard integration's
+21 tests pass after the merge. Strict manifest validation also passes. These
+local checks leave the hosted acceptance requirement above open.
 
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below

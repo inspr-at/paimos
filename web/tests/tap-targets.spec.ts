@@ -147,7 +147,7 @@ for (const { width, coarse } of [
       await expectReach(twisty, expanded)
       await expectReach(status, expanded)
       await capture(page, `tickets-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}`)
-      await expectStableControls({ controls: { row, twisty, status, ...(phone ? { title: row.locator('.title-link') } : {}) }, interactions: [
+      await expectStableControls({ controls: { row, twisty, status, title: row.locator('.title-link') }, interactions: [
         { name: 'hover arrow', run: () => twisty.hover() },
         { name: 'expand at hit-area edge', run: async () => {
           await edgeClick(page, twisty, expanded, phone)
