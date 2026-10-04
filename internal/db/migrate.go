@@ -284,6 +284,11 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1215_one_work_kind.sql" {
+		if err := migrateWorkNodes(ctx, tx); err != nil {
+			return fmt.Errorf("reconcile %s: %w", name, err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 		return fmt.Errorf("record %s: %w", name, err)
 	}

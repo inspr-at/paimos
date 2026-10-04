@@ -239,3 +239,54 @@ unknown; it never synthesizes a quota figure. A newer measured observation
 replaces it, while delayed readings remain blocked across reset transitions.
 Classify this table as personal quota telemetry, located by
 `(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
+
+AEON-649 reserves **1215** from its coordinator-assigned 1215–1224 range for
+`1215_one_work_kind.sql`. Its same-transaction runner hook reconciles legacy
+work schemas under FORCE RLS, validates existing fields against the merged
+schema, rewrites allowed-child references and substitutes the work kind on
+live and deleted epic/ticket/task nodes. Keys, IDs, parent links, timestamps,
+status, fields, estimates and release-note settings stay unchanged. Historical
+sessions, Decision Desk nodes/projections and journey memberships retain their
+IDs and references. One append-only `node.work_kind_migrated` snapshot per
+changed node records the old kind and the backup-only rollback policy.
+
+Property definitions and state categories must agree wherever they overlap;
+required sets must agree across kinds. Incompatible constraints, a pre-existing
+reserved `work` slug, invalid historical fields or fields over the bounded
+1 MiB validation limit stop the entire migration with tenant/node identifiers,
+without exposing field values. Reconcile explicitly, then retry. A live work
+parent with a bound session, queued/active claim or running child work order
+also stops the migration and reports up to 100 keys. Only live work children
+make a parent; stopped historical sessions and non-work children do not block.
+
+This is a maintenance migration, not an expand-safe upgrade. The exact-byte
+policy exception is a coordinator review artifact. Release 122 must be
+published and the merge/work queues drained; stop writers, verify an
+instance-specific pre-upgrade database/files backup by restoring it elsewhere,
+and deploy the completed work-node chain before AEON-596 ship adoption.
+The worker does not approve, push or deploy it. New naming and derived status
+remain downstream features behind AEON-429; this package changes no UI.
+
+The migration takes pairing → tree → tenant → resource locks before publishing
+any events. The tenant table fence prevents concurrent seeding, and maintenance
+table locks freeze sessions, runs and work orders. The tree validator is disabled
+only while substituting kind IDs, so tombstones under deleted parents migrate;
+it is restored before event publication in the same transaction, including on
+rollback. Other validators, RLS and the append-only event guard remain active.
+No resource mutation or resource lock follows the final event-counter pass.
+
+Local drill: with `aeon-dev-db` running, execute the targeted
+`TestWorkNodesVerifiedBackupRestoreDrill` test in `internal/db`, using the local
+`AEON_TEST_DATABASE_URL`. It creates synthetic disposable databases, retains a
+custom-format archive and SHA-256 evidence at `tmp/aeon-649-wn/`, compares every
+public table plus starter/tree-function digest, and migrates the restored old
+schema with an ordinary non-bypass role. The already-installed pgvector
+extension is excluded from the archive and supplied by the recovery bootstrap.
+This proves the local fixture round trip, not a production restore. Rollback
+restores the matching old database/files backup and exact old binary; per-node
+Undo and running an old binary against the migrated database are unsupported.
+Importer replay keeps `fields.classic.type` and normalizes only the exact recorded
+kind substitution, so person edits still conflict. Existing classic journey
+ticket membership semantics use retained provenance, including stored import
+events during relation backfill; broader parent/leaf release placement belongs
+to AEON-652. No permanent tables or columns are added for DSAR classification.

@@ -52,7 +52,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				return id, nil
 			}
 			var id string
-			prefix := map[string]string{"project": "PRJ", "epic": "EPC", "ticket": "TKT", "task": "TSK", "release": "REL", "sprint": "SPR", "cost_unit": "CU", "memory": "MEM", "runbook": "RUN", "guideline": "GUI", "external_system": "EXT", "related_project": "RPR"}[slug]
+			prefix := map[string]string{"project": "PRJ", "work": "TKT", "release": "REL", "sprint": "SPR", "cost_unit": "CU", "memory": "MEM", "runbook": "RUN", "guideline": "GUI", "external_system": "EXT", "related_project": "RPR"}[slug]
 			if prefix == "" {
 				return "", fmt.Errorf("unsupported classic issue type %q", slug)
 			}
@@ -536,6 +536,21 @@ func importNodeDiverged(ctx context.Context, tx pgx.Tx, tenantID, nodeID string)
 	}
 	if err := json.Unmarshal(imported, &baseline); err != nil {
 		return false, err
+	}
+	// The work-kind migration changes kind_id alone, retaining the original
+	// importer snapshot and fields.classic.type. Normalize only the exact
+	// recorded substitution; all person edits still compare to the old baseline.
+	if !reflect.DeepEqual(have["kind_id"], baseline["kind_id"]) {
+		var migrated bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events
+		 WHERE tenant_id=$1 AND node_id=$2 AND type='node.work_kind_migrated'
+		 AND after->>'migration'='AEON-649' AND before->>'kind_id'=$3
+		 AND after->>'kind_id'=$4)`, tenantID, nodeID, baseline["kind_id"], have["kind_id"]).Scan(&migrated); err != nil {
+			return false, err
+		}
+		if migrated {
+			baseline["kind_id"] = have["kind_id"]
+		}
 	}
 	for _, field := range []string{"title", "body", "fields", "kind_id", "parent_id", "deleted_at"} {
 		if !reflect.DeepEqual(have[field], baseline[field]) {
