@@ -42,7 +42,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	// Existing uncompleted lease must be replayed before taking later work.
 	var d Delivery
-	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
+	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.chat_thread_id IS NULL AND d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
 	if err == nil {
 		return []Delivery{d}, nil
 	}
@@ -53,7 +53,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// another generation for the same principal continue independently.
 	var messageID, sender, body string
 	var cursor int64
-	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id FROM inbox_messages m WHERE m.recipient_principal_id=$1 AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID).Scan(&messageID, &sender, &body, &cursor)
+	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id FROM inbox_messages m WHERE m.chat_thread_id IS NULL AND m.recipient_principal_id=$1 AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID).Scan(&messageID, &sender, &body, &cursor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []Delivery{}, nil
 	}
@@ -118,7 +118,7 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	var completed, released *time.Time
 	// Lock order (AEON-280): worker() locked the session; then the message row,
 	// then the drain lease; FailMessage and receipts follow.
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2) FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE chat_thread_id IS NULL AND id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2) FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
 		return nil, err
 	}
 	err = tx.QueryRow(ctx, `SELECT message_id::text,cursor,completed_at,released_at FROM harness_deliveries WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, in.DeliveryID).Scan(&messageID, &cursor, &completed, &released)
@@ -146,7 +146,7 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 		// unacknowledged. The lease is completed first: FailMessage releases open
 		// drain leases, and a lease is completed or released, never both.
 		var acked bool
-		if err = tx.QueryRow(ctx, `SELECT acked_at IS NOT NULL FROM inbox_messages WHERE id=$1 AND recipient_principal_id=$2`, messageID, s.AgentPrincipalID).Scan(&acked); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		if err = tx.QueryRow(ctx, `SELECT acked_at IS NOT NULL FROM inbox_messages WHERE chat_thread_id IS NULL AND id=$1 AND recipient_principal_id=$2`, messageID, s.AgentPrincipalID).Scan(&acked); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
 		if acked || errors.Is(err, pgx.ErrNoRows) {
@@ -158,7 +158,7 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 		err = inbox.FailSessionMessage(ctx, tx, p, messageID, in.FailureReason)
 	} else {
 		var acked *time.Time
-		err = tx.QueryRow(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1 AND recipient_principal_id=$2 AND acked_at IS NULL RETURNING acked_at`, messageID, s.AgentPrincipalID).Scan(&acked)
+		err = tx.QueryRow(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE chat_thread_id IS NULL AND id=$1 AND recipient_principal_id=$2 AND acked_at IS NULL RETURNING acked_at`, messageID, s.AgentPrincipalID).Scan(&acked)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, workorders.Fail(409, "message already acknowledged elsewhere")
 		}
