@@ -308,7 +308,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1215_one_work_kind.sql', '1233_work_parent_releases.sql', '1234_recurrence_work_templates.sql', '1237_work_release_leaf_lifecycle.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1215_one_work_kind.sql', '1225_work_parent_status.sql', '1230_work_leaf_aggregates.sql', '1233_work_parent_releases.sql', '1234_recurrence_work_templates.sql', '1237_work_release_leaf_lifecycle.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -377,6 +377,31 @@ test('AEON-649 kind retirement pins its backup-only coordinator rollout exceptio
   assert.match(entry.reason, /No production backup, push or deployment is claimed/);
 });
 
+for (const [file, ticket] of [
+  ['1225_work_parent_status.sql', 'AEON-650'],
+  ['1230_work_leaf_aggregates.sql', 'AEON-651'],
+]) test(`${ticket} inherited contract evidence pins source provenance and retains rollout gates`, () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = manifest.exceptions.find(entry => entry.file === file);
+  assert.ok(entry, `${file}: missing exact-byte contract evidence`);
+  assert.equal(entry.ticket, ticket);
+  assert.match(entry.sourceCommit, /^[a-f0-9]{40}$/);
+  const source = readFileSync(new URL('../internal/db/migrations/' + file, import.meta.url), 'utf8');
+  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
+  assert.equal(execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${file}`], {encoding: 'utf8'}), source);
+  assert.equal(destructive(source), true);
+  assert.match(entry.reason, /AEON-648.*Q17/);
+  assert.match(entry.reason, /coordinator consolidated review before merge\/release/);
+  assert.match(entry.reason, /instance-specific verified backup\/restore/);
+  assert.match(entry.reason, /does not waive previous-binary compatibility/);
+  assert.match(entry.reason, /No coordinator byte approval, production backup, push or deployment is claimed/);
+  const exceptions = {schema: manifest.schema, exceptions: [entry]};
+  assert.deepEqual(checkMigrations(new Map([[file, source]]), new Map(), null, {exceptions}), []);
+  assert.match(checkMigrations(new Map([[file, source]]), new Map(), null).join('\n'), /: non-allowlisted/);
+  assert.match(checkMigrations(new Map([[file, source + '\n-- changed']]), new Map(), null, {exceptions}).join('\n'), /: exception migration changed/);
+  assert.match(checkMigrations(new Map(), new Map(), null, {exceptions}).join('\n'), /: exception migration removed/);
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -385,7 +410,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1215_one_work_kind.sql', '1233_work_parent_releases.sql', '1234_recurrence_work_templates.sql', '1237_work_release_leaf_lifecycle.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1215_one_work_kind.sql', '1225_work_parent_status.sql', '1230_work_leaf_aggregates.sql', '1233_work_parent_releases.sql', '1234_recurrence_work_templates.sql', '1237_work_release_leaf_lifecycle.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 

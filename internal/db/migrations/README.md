@@ -333,6 +333,16 @@ Migration 1230 also admits `status_autopilot.undone` to project-visible events,
 under the same target and referenced-node visibility checks. This lets another
 person's leaf Undo refresh aggregates when the parent status is unchanged.
 
+The exact-byte policy records for 1225 and 1230 pin their owning tickets and
+source commits in `scripts/migration-policy-exceptions.json`. They expose the
+non-allowlisted function bodies, helper replacements and event-policy widening
+for the coordinator's consolidated review; they are not evidence that byte
+approval or previous-binary compatibility has passed. The owner-accepted
+AEON-648 concept and Q17 rollout remain binding: release 122 first, drained
+queues, stopped writers and an instance-specific verified backup/restore under
+AEON-649, plus AEON-429 activation integration and whole-chain validation.
+The static guard passing grants no merge, activation or deployment approval.
+
 ## AEON-653 release placement and recurring leaves
 
 Coordinator-reserved **1233–1234** belong only to AEON-653. The coordinator
