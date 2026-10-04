@@ -108,7 +108,7 @@ func TestUpgradeMigrationProtectsOnlyExistingTenants(t *testing.T) {
 func TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms(t *testing.T) {
 	f := setup(t)
 	f.grace(time.Now().UTC().Add(24 * time.Hour))
-	ids := []string{f.add("AUT-2", "ticket", "in_progress", 4, nil), f.add("AUT-3", "ticket", "delivered", 31, nil), f.add("AUT-4", "ticket", "new", 8, nil)}
+	ids := []string{f.add("AUT-2", "work", "in_progress", 4, nil), f.add("AUT-3", "work", "delivered", 31, nil), f.add("AUT-4", "work", "new", 8, nil)}
 	before := []node{f.state(ids[0]), f.state(ids[1]), f.state(ids[2])}
 	f.call(f.p, "PUT", "/api/projects/"+f.project+"/status-autopilot", `{"mode":"on","expected_revision":0}`, 200)
 	f.run(f.now)
@@ -150,10 +150,10 @@ func TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms(t *testing.T) {
 func TestProposalApplyDismissAndStaleGuards(t *testing.T) {
 	t.Setenv("AEON_STATUS_AUTOPILOT", "suggest")
 	f := setup(t)
-	applyID := f.add("AUT-2", "ticket", "in_progress", 4, nil)
-	dismissID := f.add("AUT-3", "ticket", "in_progress", 4, nil)
-	staleID := f.add("AUT-4", "ticket", "delivered", 31, nil)
-	backlogID := f.add("AUT-5", "ticket", "backlog", 91, nil)
+	applyID := f.add("AUT-2", "work", "in_progress", 4, nil)
+	dismissID := f.add("AUT-3", "work", "in_progress", 4, nil)
+	staleID := f.add("AUT-4", "work", "delivered", 31, nil)
+	backlogID := f.add("AUT-5", "work", "backlog", 91, nil)
 	f.run(f.now)
 	items := f.proposals()
 	if len(items) != 4 {
@@ -198,7 +198,7 @@ func TestProposalApplyDismissAndStaleGuards(t *testing.T) {
 func TestGraceExpiryRescansWithinSameDay(t *testing.T) {
 	f := setup(t)
 	f.grace(f.now.Add(12 * time.Hour))
-	id := f.add("AUT-2", "ticket", "in_progress", 4, nil)
+	id := f.add("AUT-2", "work", "in_progress", 4, nil)
 	f.run(f.now)
 	f.run(f.now.Add(12*time.Hour - time.Nanosecond))
 	if f.state(id).State != "in_progress" {
@@ -215,9 +215,9 @@ func TestServerModesCapProjectsAndPublication(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("AEON_STATUS_AUTOPILOT", mode)
 			f := setup(t)
-			progress := f.add("AUT-2", "ticket", "in_progress", 4, nil)
-			done := f.add("AUT-3", "ticket", "done", 15, nil)
-			fresh := f.add("AUT-4", "ticket", "new", 8, nil)
+			progress := f.add("AUT-2", "work", "in_progress", 4, nil)
+			done := f.add("AUT-3", "work", "done", 15, nil)
+			fresh := f.add("AUT-4", "work", "new", 8, nil)
 			f.call(f.p, "PUT", "/api/projects/"+f.project+"/status-autopilot", `{"mode":"on","expected_revision":0}`, 200)
 			release := f.release([]string{done})
 			f.tx(func(tx pgx.Tx) error { return PublishTx(t.Context(), tx, f.p.TenantID, release) })
@@ -250,7 +250,7 @@ func TestServerModesCapProjectsAndPublication(t *testing.T) {
 func TestUpgradePublicationWaitsAndResumesAfterConfirmation(t *testing.T) {
 	f := setup(t)
 	f.grace(time.Now().UTC().Add(24 * time.Hour))
-	id := f.add("AUT-2", "ticket", "done", 15, nil)
+	id := f.add("AUT-2", "work", "done", 15, nil)
 	release := f.release([]string{id})
 	f.tx(func(tx pgx.Tx) error { return PublishTx(t.Context(), tx, f.p.TenantID, release) })
 	if f.state(id).State != "done" || len(f.proposals()) != 1 {
@@ -266,7 +266,7 @@ func TestUpgradePublicationWaitsAndResumesAfterConfirmation(t *testing.T) {
 func TestProposalResolutionPermissionsAndTenantIsolation(t *testing.T) {
 	t.Setenv("AEON_STATUS_AUTOPILOT", "suggest")
 	f := setup(t)
-	f.add("AUT-2", "ticket", "in_progress", 4, nil)
+	f.add("AUT-2", "work", "in_progress", 4, nil)
 	f.run(f.now)
 	item := f.proposals()[0]
 	path := fmt.Sprintf("/api/status-autopilot/proposals/%d", item.EventID)
@@ -307,10 +307,10 @@ func TestSuggestPublicationFullBatchYieldsAndRetainsHumanChecks(t *testing.T) {
 	f := setup(t)
 	ids := []string{}
 	for i := range batchSize + 1 {
-		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", "done", 15, nil))
+		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "work", "done", 15, nil))
 	}
 	human := "Review"
-	checked := f.add("AUT-100", "ticket", "done", 15, &human)
+	checked := f.add("AUT-100", "work", "done", 15, &human)
 	ids = append(ids, checked)
 	f.release(ids)
 	f.run(time.Now().UTC())

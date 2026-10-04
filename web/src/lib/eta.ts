@@ -16,7 +16,7 @@ export interface EtaSide {
 }
 
 export interface EtaInput {
-  coverage?: { total: number; estimated: number; basis: string }
+  coverage?: { total: number; estimated: number; basis: string; open?: number }
   ready?: EtaSide | null
   live?: EtaSide | null
   progress?: number | null
@@ -74,7 +74,7 @@ function etaInput(eta: EtaReading): EtaInput | null {
   const progress = typeof eta.progress_pct === 'number' ? eta.progress_pct : null
   const finished = eta.finished ? { at: eta.finished_at, by: eta.finished_by } : null
   if (!ready && !live && progress == null && !finished) return null
-  return { ready, live, progress, coverage: typeof eta.leaf_count === 'number' ? { total: eta.leaf_count, estimated: eta.estimated_leaves ?? 0, basis: eta.progress_basis ?? 'leaves' } : undefined, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), finished }
+  return { ready, live, progress, coverage: typeof eta.leaf_count === 'number' ? { total: eta.leaf_count, estimated: eta.estimated_leaves ?? 0, basis: eta.progress_basis ?? 'leaves', open: eta.open_leaves } : undefined, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), finished }
 }
 
 export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | null {
@@ -136,9 +136,10 @@ function sideTip(side: EtaSide, now: number, timeZone: string): string[] {
   return side.stale ? [`Estimate from ${from}${by} is ${span(age)} old`, head] : [head, `Estimated${by} at ${from}`]
 }
 
-// At 100% there is nothing left to estimate: a due time that passed is not late, and
-// a report that aged is not stale. Only the server's completion evidence reads Done;
-// 100% with a session still on the ticket is just a full percent.
+// A full report without leaf coverage suppresses its ETA; work projections
+// additionally need all leaves closed.
+// Weighted or rounded 100% can leave work open, so retain its ETA and staleness.
+// Only the server's positive completion evidence reads Done.
 function doneTip(finished: NonNullable<EtaInput['finished']>, now: number, timeZone: string): string {
   const who = finished.by?.trim()
   return `All work reported${who ? ` by ${who}` : ''}${valid(finished.at) ? ` at ${clock(finished.at, now, timeZone)}` : ''}`
@@ -151,12 +152,12 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
   const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side && valid(side.at))
   const pct = typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : null
   if (!sides.length && pct == null && !input.finished) return null
-  const complete = pct === 100 || !!input.finished
+  const complete = (typeof input.progress === 'number' && input.progress >= 100 && (!input.coverage || input.coverage.open === 0)) || !!input.finished
   const main = complete ? null : sides[0] ?? null
   const stale = connectionStale || (!complete && (!!input.stale || sides.some(side => side.stale)))
   const tip = input.finished ? [doneTip(input.finished, now, timeZone)] : complete ? ['100% done'] : [
     ...sides.flatMap(side => sideTip(side, now, timeZone)),
-    ...(pct != null ? [`${pct}% done`] : []),
+    ...(pct != null ? [pct === 100 ? `${pct}% progress; work remains` : `${pct}% done`] : []),
   ]
   if (stale && !sides.some(side => side.stale && valid(side.reported_at))) tip.push('Estimate not refreshed in time')
   if (connectionStale) {

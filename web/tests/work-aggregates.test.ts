@@ -41,3 +41,38 @@ test('migrated work is included by the default list and live filter', () => {
   assert.deepEqual(typed.type, ['work'])
   assert.deepEqual(apiParams('project', typed).kind, ['work'])
 })
+
+for (const scenario of [
+  { name: 'weighted 100% with an unestimated open leaf', progress_pct: 100, estimated_leaves: 1, open_leaves: 1, ready_partial: true },
+  { name: 'weighted progress rounded by the server to 100%', progress_pct: 100, estimated_leaves: 2, open_leaves: 1, ready_partial: false },
+  { name: 'fractional progress rounded by the formatter to 100%', progress_pct: 99.6, estimated_leaves: 2, open_leaves: 1, ready_partial: false },
+]) {
+  test(`${scenario.name} retains ETA and staleness in every mode`, () => {
+    const now = Date.parse('2026-10-04T10:00:00Z')
+    const input = etaFromTicket({ finished: false, leaf_count: 2, progress_basis: 'estimate',
+      ...scenario, eta_ready_at: '2026-10-04T09:45:00Z', ready_reported_at: '2026-10-04T09:00:00Z', ready_stale: true })
+    for (const mode of ['relative', 'clock', 'both'] as const) {
+      const view = formatEta(input, mode, now)!
+      assert.equal(view.kind, 'Ready')
+      assert.equal(view.pct, 100)
+      assert.equal(view.done, false)
+      assert.equal(view.stale, true)
+      assert.equal(view.overdue, true)
+      assert.equal(view.text, (mode === 'clock' ? '09:45' : 'overdue 15 min') + (scenario.ready_partial ? ' · partial' : ''))
+      assert.equal(view.hover, mode === 'both' ? '09:45' : null)
+      assert.match(view.tip, /Estimate from 09:00 is 60 min old/)
+      assert.match(view.tip, /work remains/)
+      assert.doesNotMatch(view.tip, /100% done/)
+    }
+  })
+}
+
+test('only closed aggregate leaves or explicit completion suppress a parent ETA at 100%', () => {
+  const now = Date.parse('2026-10-04T10:00:00Z')
+  const eta = { finished: false, progress_pct: 100, leaf_count: 2, estimated_leaves: 2,
+    progress_basis: 'estimate' as const, open_leaves: 0, eta_ready_at: '2026-10-04T09:45:00Z', ready_stale: true }
+  const closed = formatEta(etaFromTicket(eta), 'relative', now)!
+  assert.deepEqual([closed.text, closed.stale, closed.overdue, closed.done], [null, false, false, false])
+  const finished = formatEta(etaFromTicket({ ...eta, finished: true, open_leaves: 1 }), 'relative', now)!
+  assert.deepEqual([finished.text, finished.stale, finished.overdue, finished.done], [null, false, false, true])
+})

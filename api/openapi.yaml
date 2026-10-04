@@ -14732,7 +14732,7 @@ components:
         leaf_count: {type: integer, minimum: 0, description: Non-archived non-cancelled leaves contributing to progress.}
         estimated_leaves: {type: integer, minimum: 0}
         progress_basis: {type: string, enum: [estimate, leaves]}
-        open_leaves: {type: integer, minimum: 0}
+        open_leaves: {type: integer, minimum: 0, description: Leaves whose workflow status is not complete. A parent retains its ETA and staleness while this is positive even when estimate-weighted or rounded progress_pct is 100.}
         ready_leaves: {type: integer, minimum: 0}
         live_leaves: {type: integer, minimum: 0}
         ready_partial: {type: boolean, description: Some open leaves have no ready ETA.}
