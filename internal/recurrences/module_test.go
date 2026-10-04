@@ -636,25 +636,24 @@ func TestDefinitionEditsPreserveDueCursorAndPausedManualRun(t *testing.T) {
 	}
 }
 
-// Signal at the exact tree-lock statement. On the old implementation the
-// recurrence already held the tenant row here; existing writers held the tree
-// and then needed that row. This barrier deterministically creates that cycle.
-type treeBarrierTx struct {
+// Signal at the exact tenant-lock statement. Existing writers hold tenant
+// before tree; the recurrence must wait here before acquiring tree.
+type tenantBarrierTx struct {
 	pgx.Tx
 	attempted chan struct{}
 	once      sync.Once
 }
 
-func (tx *treeBarrierTx) signal(sql string) {
-	if strings.Contains(sql, "pg_advisory_xact_lock") {
+func (tx *tenantBarrierTx) signal(sql string) {
+	if strings.Contains(sql, "FROM tenants") && strings.Contains(sql, "FOR NO KEY UPDATE") {
 		tx.once.Do(func() { close(tx.attempted) })
 	}
 }
-func (tx *treeBarrierTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (tx *tenantBarrierTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	tx.signal(sql)
 	return tx.Tx.Exec(ctx, sql, args...)
 }
-func (tx *treeBarrierTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+func (tx *tenantBarrierTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	tx.signal(sql)
 	return tx.Tx.QueryRow(ctx, sql, args...)
 }
@@ -681,6 +680,9 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 			if _, err = other.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true)`, f.p.TenantID); err != nil {
 				t.Fatal(err)
 			}
+			if _, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.p.TenantID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err = other.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, f.p.TenantID); err != nil {
 				t.Fatal(err)
 			}
@@ -688,7 +690,7 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				done <- db.InTenant(ctx, f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
-					barrier := &treeBarrierTx{Tx: tx, attempted: attempted}
+					barrier := &tenantBarrierTx{Tx: tx, attempted: attempted}
 					if _, err := lock(ctx, barrier, f.p.TenantID, false); err != nil {
 						return err
 					}
@@ -702,7 +704,7 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 			select {
 			case <-attempted:
 			case err := <-done:
-				t.Fatalf("recurrence failed before tree barrier: %v", err)
+				t.Fatalf("recurrence failed before tenant barrier: %v", err)
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
@@ -711,8 +713,8 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 				_, err = other.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position)
  SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Concurrent node',$2,4096 FROM node_kinds k WHERE slug='ticket'`, f.p.TenantID, f.parent)
 			} else {
-				// Match lockProjectMutation: tree first, then tenant FOR UPDATE.
-				_, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, f.p.TenantID)
+				// The tenant fence already serializes this membership change.
+				_, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.p.TenantID)
 				if err == nil {
 					_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
 				}

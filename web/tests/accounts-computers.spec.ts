@@ -29,10 +29,10 @@ async function setup(page: Page, options: CapacityOptions & { manage?: boolean }
   await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld(options)
-  data.accounts = capacity.accounts as unknown as typeof data.accounts
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).map(a => ({ ...a, registered_by_principal_id: me.id }))
   data.approvals = data.approvals.filter(a => a.decision)
   data.messages = data.messages.filter(m => !m.is_action_request)
-  await mockAgents(page, data, { capacity })
+  await mockAgents(page, data, { capacity, workingPreference: () => work.preferences['agents.working'] })
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', ...(options.manage === false ? [] : ['account.manage']), 'run.create', 'run.read', 'models.read', 'work_orders.read']
@@ -78,48 +78,66 @@ test('one card per computer: offline says why and the fix, and never calls an ac
   await shot(page, 'desktop-offline-readings')
 })
 
-test('no reading yet is said once, with Check now; an offline computer has no reading', async ({ page }) => {
+test('no reading yet is said once, with Check now; unsupported limits and offline computers stay honest', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  await setup(page, { unmeasured: true, unread: true })
+  await setup(page, { unmeasured: true, unread: true, unreadCodex: true })
   await open(page)
-  // Every vendor without a reading, Pi and Cursor included: "No reading yet" and Check now (Ready.dc.html).
+  // Codex can report a quota: show the empty state once and let the person refresh it.
+  const codex = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Spare' })
+  await expect.poll(async () => (await codex.innerText()).split('No reading yet').length - 1).toBe(1)
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeVisible()
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(codex.getByRole('meter')).toHaveCount(0)
+  // AEON-623: Pi has no quota reader; a refresh or a run cannot produce its limit.
   const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
-  await expect(pi).toContainText('No reading yet')
+  await expect(pi.getByText("Pi doesn't show its limit · one run at a time by day", { exact: true })).toHaveCount(1)
+  await expect(pi).not.toContainText('No reading yet')
   await expect(pi).not.toContainText('usage limit')
-  await expect(pi.getByRole('button', { name: 'Check now' })).toBeVisible()
-  await expect(computer(page, 'studio').getByRole('row').first()).toContainText('No reading while the computer is offline')
+  await expect(pi.getByRole('button', { name: 'Check now' })).toHaveCount(0)
+  await expect(pi.getByRole('meter')).toHaveCount(0)
+  const offline = computer(page, 'studio').getByRole('row').first()
+  await expect(offline.getByText('No reading while the computer is offline', { exact: true })).toHaveCount(1)
+  await expect(offline.getByRole('button', { name: 'Check now' })).toHaveCount(0)
+  await expect(offline.getByRole('meter')).toHaveCount(0)
   await shot(page, 'desktop-unmeasured')
 })
 
 // AEON-499 review: refresh() never rejected, so a failed read said "No reading yet".
 test('Check now says what came back: a failure as a failure, still nothing, then the reading', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  const { capacity } = await setup(page, { unread: true })
+  const { capacity } = await setup(page, { unreadCodex: true })
   await open(page)
-  const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
+  const codex = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Spare' })
   const toasts = page.locator('.toast')
   let mode: 'fail' | 'empty' | 'read' = 'fail'
   await page.route('**/api/agent-accounts/capacity', async route => {
     if (route.request().method() !== 'GET' || mode === 'empty') return route.fallback()
     if (mode === 'fail') return route.fulfill({ status: 500, json: { error: 'internal error' } })
     const answer = capacity.handle('/api/agent-accounts/capacity', 'GET', undefined)!.json as { account_id: string; windows: unknown[] }[]
-    const spare = answer.find(a => a.windows.length)!
-    return route.fulfill({ json: answer.map(a => (a.account_id === ACCOUNTS.pi ? { ...a, windows: spare.windows } : a)) })
+    const main = answer.find(a => a.account_id === ACCOUNTS.main)!
+    return route.fulfill({ json: answer.map(a => (a.account_id === ACCOUNTS.spare ? { ...a, windows: main.windows } : a)) })
   })
   // Failed: a 500 is an error with the server's answer, never the reassuring "no reading yet".
-  await pi.getByRole('button', { name: 'Check now' }).click()
+  await codex.getByRole('button', { name: 'Check now' }).click()
   await expect(toasts.filter({ hasText: /^Capacity could not be read: The server answered .internal error. \(500\)\. Please try again\./ })).toBeVisible()
-  await expect(toasts.filter({ hasText: 'No reading yet for Pi' })).toHaveCount(0)
-  await expect(pi.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(toasts.filter({ hasText: 'No reading yet' })).toHaveCount(0)
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(codex.getByRole('meter')).toHaveCount(0)
   // Empty: the read worked and still has no reading.
   mode = 'empty'
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'No reading yet for Pi on mbp2607. It arrives with its next run.' })).toBeVisible()
+  await codex.getByRole('button', { name: 'Check now' }).click()
+  await expect(toasts.filter({ hasText: 'No reading yet — readings need a managed run.' })).toBeVisible()
+  await expect(codex.getByText('No reading yet', { exact: true })).toHaveCount(1)
+  await expect(codex.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  await expect(codex.getByRole('meter')).toHaveCount(0)
   // Successful: the reading arrives and replaces the button with the bar.
   mode = 'read'
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'Pi on mbp2607: reading updated.' })).toBeVisible()
-  await expect(pi.getByRole('meter')).toHaveCount(1)
+  await codex.getByRole('button', { name: 'Check now' }).click()
+  await expect(toasts.filter({ hasText: 'Codex on mbp2607: reading updated.' })).toBeVisible()
+  await expect(codex.getByRole('meter')).toHaveCount(1)
+  await expect(codex).toContainText('42% left')
+  await expect(codex.getByRole('button', { name: 'Check now' })).toHaveCount(0)
+  await expect(codex.getByText('No reading yet', { exact: true })).toHaveCount(0)
 })
 
 // AEON-499 review: --gold-ink on the 17% gold tint was about 4.04:1 in light.
@@ -193,84 +211,81 @@ test('phone: stacked rows, no sideways scroll', async ({ page }) => {
   await shot(page, 'phone')
 })
 
-test('Agents working: the total and per-model targets are the person’s own, counts are the live sessions', async ({ page }) => {
+test('Agents at once saves one ceiling and independent harness limits', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
   const { work } = await setup(page)
   await open(page)
-  const working = page.getByRole('region', { name: 'Agents working at once' })
-  await expect(working).toBeVisible()
-  // No total chosen yet: nothing stands in for it; the line says what runs now.
-  await expect(working.locator('.big-num')).toHaveText('—')
-  await expect(working.locator('.big-num')).toHaveAttribute('aria-label', 'Target: not set yet')
-  await expect(working.locator('.now')).toHaveText('5 running now · no target set yet')
-  // By area lists only areas with work or a target; the others are quiet choices.
-  await expect(working.getByRole('listitem')).toHaveCount(1)
-  await expect(working.getByRole('button', { name: 'More agents on Frontend' })).toBeVisible()
-  await working.getByRole('button', { name: 'More agents at once' }).click()
-  await expect(working.locator('.big-num')).toHaveText('6')
-  await expect(working.locator('.now')).toHaveText('5 running now · 1 slot free')
-  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ cap: 6 })
-  await working.getByRole('tab', { name: 'By model' }).click()
-  await expect(working.getByRole('tab', { name: 'By model' })).toHaveAttribute('aria-selected', 'true')
-  const codex = working.getByRole('listitem').filter({ hasText: 'Codex' })
-  await codex.getByRole('button', { name: 'More agents on Codex' }).click()
-  await expect(codex.locator('.target')).toHaveText('1')
-  await expect(working.locator('.foot')).toContainText('1 of 6 assigned · 5 flexible: any model takes them')
-  await expect(working).not.toContainText(/autopilot/i)
+  const working = page.getByRole('region', { name: 'Agents at once' })
+  await expect(working.locator('.f-num')).toHaveText('15')
+  await working.getByRole('button', { name: 'One agent more at once' }).click()
+  await expect(working.locator('.f-num')).toHaveText('16')
+  await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: {} })
+  const codex = working.locator('[data-key="codex"]')
+  await codex.getByRole('radio', { name: 'At most', exact: true }).click()
+  await codex.getByRole('button', { name: 'Codex: at most one more' }).click()
+  await expect(codex.locator('.lim-num')).toHaveText('3')
+  await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: { codex: 3 } })
+  await expect(working).not.toContainText(/assigned|flexible|target|plan/i)
   const axe = await new AxeBuilder({ page }).include('.working').analyze()
-  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
+  expect(axe.violations.map(v => v.id)).toEqual([])
   if (shots) { mkdirSync(shots, { recursive: true }); await working.screenshot({ path: `${shots}/working.png`, animations: 'disabled' }) }
   await page.setViewportSize({ width: 390, height: 900 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
   if (shots) await working.screenshot({ path: `${shots}/working-phone.png`, animations: 'disabled' })
 })
 
-// AEON-499 review: with zero to three running, the control once showed "Target: 4",
-// four slots and "0 of 4 assigned" before the person chose anything.
 for (const running of [0, 2]) {
-  test(`Agents working with ${running} running and no total invents no target`, async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 1100 })
+  test(`with ${running} running the backend's default ceiling stays 15`, async ({ page }) => {
     const { data } = await setup(page)
-    const keep = new Set(data.sessions.filter(s => s.phase === 'working' && s.activity === 'busy' && s.management_mode === 'managed').slice(0, running).map(s => s.id))
-    data.sessions = data.sessions.filter(s => s.phase === 'stopped' || keep.has(s.id))
+    data.sessions = data.sessions.filter(s => !s.stopped_at).slice(0, running)
     await open(page)
-    const working = page.getByRole('region', { name: 'Agents working at once' })
-    await expect(working.locator('.now')).toHaveText(`${running} running now · no target set yet`)
-    await expect(working.locator('.big-num')).toHaveText('—')
-    await expect(working.locator('.big-num')).toHaveAttribute('aria-label', 'Target: not set yet')
-    await expect(working.locator('.dots .dot')).toHaveCount(running)
-    await expect(working.locator('.dots .dot:not(.on)')).toHaveCount(0)
-    await expect(working).not.toContainText(/assigned|flexible|Target: 4/)
-    // − sets a total below what runs now, so with fewer than two running there is nothing below.
-    if (running > 1) await expect(working.getByRole('button', { name: 'Fewer agents at once' })).toBeEnabled()
-    else await expect(working.getByRole('button', { name: 'Fewer agents at once' })).toBeDisabled()
-    await working.getByRole('button', { name: 'More agents at once' }).click()
-    await expect(working.locator('.big-num')).toHaveText(String(running + 1))
-    await expect(working.locator('.now')).toHaveText(`${running} running now · 1 slot free`)
-    await expect(working.locator('.foot')).toContainText(`0 of ${running + 1} assigned`)
+    const working = page.getByRole('region', { name: 'Agents at once' })
+    await expect(working.locator('.f-num')).toHaveText('15')
+    await expect(working.locator('.f-live')).toContainText(`${running} running`)
+    await expect(working.getByRole('button', { name: 'One agent fewer at once' })).toBeEnabled()
+    await working.getByRole('button', { name: 'One agent more at once' }).click()
+    await expect(working.locator('.f-num')).toHaveText('16')
   })
 }
 
-test('Agents working waits for the stored total: no flash of "no target set" while it loads', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1100 })
-  await page.addInitScript(() => {
-    const seen = () => { if (document.querySelector('.working .big-num')?.textContent === '—') (window as unknown as { flashed: boolean }).flashed = true }
-    new MutationObserver(seen).observe(document, { subtree: true, childList: true, characterData: true })
-  })
+test('stored ceiling arrives without a made-up total while the snapshot loads', async ({ page }) => {
   await setup(page)
   let release: () => void = () => {}
   const held = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/preferences/agents.working', async route => {
-    if (route.request().method() !== 'GET') return route.fallback()
+  await page.route('**/api/agents/plan', async route => {
     await held
-    return route.fulfill({ json: { key: 'agents.working', value: { cap: 3 }, updated_at: new Date(NOW).toISOString() } })
+    return route.fulfill({ json: { total: 3, limits: {}, principal_id: me.id, running: { codex: 5 }, running_total: 5, source: 'legacy', updated_at: null } })
   })
   await open(page)
-  const working = page.getByRole('region', { name: 'Agents working at once' })
-  await expect(working).toHaveCount(0)
+  const working = page.getByRole('region', { name: 'Agents at once' })
+  await expect(working).toContainText('Reading the total…')
+  await expect(working.locator('.f-num')).toHaveCount(0)
   release()
-  await expect(working.locator('.big-num')).toHaveText('3')
-  await expect(working.locator('.big-num')).toHaveAttribute('aria-label', 'Target: 3 agents at once')
-  await expect(working.locator('.now')).toHaveText('5 running now · 2 over your target')
-  expect(await page.evaluate(() => (window as unknown as { flashed?: boolean }).flashed ?? false)).toBe(false)
+  await expect(working.locator('.f-num')).toHaveText('3')
+  await expect(working.locator('.f-num')).toHaveAttribute('aria-label', 'Run up to 3 at once')
+  await expect(working.locator('.f-live')).toContainText('5 running · winding down to 3')
+})
+
+// AEON-581: the pin is a prerequisite, independent of usage or connectivity.
+test('Touch ID pairing readiness and upgrade guidance keep the computer control in place', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 1000 })
+  const { capacity } = await setup(page)
+  Object.assign(capacity.computers[0]!, { local_auth_pinned: true })
+  await open(page)
+  const card = computer(page, 'mbp2607')
+  await expect(card.getByText('Touch ID confirmation: ready (pairing key pinned)', { exact: true })).toBeVisible()
+  const more = card.getByRole('button', { name: 'More for mbp2607', exact: true })
+  const before = await more.boundingBox()
+  Object.assign(capacity.computers[0]!, { local_auth_pinned: false })
+  await page.reload()
+  await expect(card.getByText(/Touch ID confirmation: needs pairing upgrade/)).toBeVisible()
+  await expect(card.getByText(/run aeon-agentd status on this computer for its exact pairing command/)).toBeVisible()
+  const after = await more.boundingBox()
+  expect(before).not.toBeNull()
+  expect(after).not.toBeNull()
+  expect(after!.x).toBe(before!.x)
+  expect(after!.y).toBe(before!.y)
+  expect(after!.width).toBe(before!.width)
+  expect(after!.height).toBe(before!.height)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })

@@ -59,6 +59,7 @@ func limitWorldAt(t *testing.T, slug string, parallel int, at time.Time) limitFi
 	}
 	f.mod = mod
 	callStatus(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "main", "harness": "codex", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": parallel}), 201, &f.account)
+	ownFixtureAccount(t, f.admin, &f.account)
 	callStatus(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule("Europe/Vienna")
 	for i := range s.Week {

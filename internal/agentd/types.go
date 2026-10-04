@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/laneprotocol"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -93,6 +94,7 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`
 	DoingAt          time.Time               `json:"-"`
 	ToolActivity     *agentactivity.Activity `json:"-"`
@@ -170,6 +172,7 @@ type Telemetry struct {
 	ModelEvidence          string                   `json:"model_evidence,omitempty"`
 	ErrorCode              string                   `json:"error_code,omitempty"`
 	GitCommits             []GitCommit              `json:"git_commits,omitempty"`
+	ServiceTier            string                   `json:"service_tier,omitempty"`
 }
 
 // GitCommit is one commit introduced after the run's launch revision.
@@ -232,6 +235,11 @@ type API interface {
 }
 
 type StartRequest struct {
+	ServiceTier string
+	// Lifetime is the accepted run budget rooted in the supervisor lifetime.
+	// The Start call's context only covers dispatch/startup and may end as soon
+	// as polling finishes. Adapters without a supervisor use the caller context.
+	Lifetime      context.Context
 	ManagedPolicy bool
 	Capabilities  []string // Exact capabilities advertised for this session.
 	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
@@ -258,6 +266,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	ModelReports []modelreport.Observation
+	HarnessTier  string
 	Doing        string
 	ToolActivity *agentactivity.Activity
 	VendorLimit  *capacity.LimitHit
@@ -326,6 +336,7 @@ type ProbeStatus struct {
 	OpenRouterCredits *openrouter.Credits
 	OK                bool
 	Failure           string
+	ReasonDetail      string // Fixed publishable phrase; never raw vendor output.
 }
 
 const (

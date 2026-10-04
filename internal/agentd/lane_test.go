@@ -123,6 +123,13 @@ func TestLaneStartGrantAndConfirmedSettlement(t *testing.T) {
 	if _, ok := adapter.startContext.Deadline(); !ok || adapter.startContext.Err() != nil {
 		t.Fatal("lane process context must retain its grant after StartRun returns")
 	}
+	startDeadline, _ := adapter.startContext.Deadline()
+	if adapter.request.Lifetime == nil {
+		t.Fatal("owned process lifetime missing")
+	}
+	if lifetimeDeadline, ok := adapter.request.Lifetime.Deadline(); !ok || !lifetimeDeadline.Equal(startDeadline) || adapter.request.Lifetime.Err() != nil {
+		t.Fatal("owned process lifetime must preserve the startup/lane deadline")
+	}
 	entry := s.runs[laneRunA]
 	entry.mu.Lock()
 	record, done := entry.record, entry.monitorDone
@@ -140,6 +147,9 @@ func TestLaneStartGrantAndConfirmedSettlement(t *testing.T) {
 	<-done
 	if adapter.startContext.Err() != context.Canceled {
 		t.Fatal("settled process context was not released")
+	}
+	if adapter.request.Lifetime.Err() != context.Canceled {
+		t.Fatal("settled owned process lifetime was not released")
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

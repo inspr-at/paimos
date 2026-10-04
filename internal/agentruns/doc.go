@@ -45,11 +45,14 @@
 // Agents create their own runs, read their own runs, and see only their queue.
 // Claim requires the assigned agent or a live, unrevoked run.claim grant for
 // this run. The caller must also own the reserved daemon account. A new claim
-// verifies all reservation IDs, active windows, compatible profile, recent
+// verifies all reservation IDs, active holds, compatible profile, recent
 // successful probe (two minutes), account availability and remaining order
 // budget. Same-generation claims replay without mutation; another generation
 // cannot take over a live process. Profile and requested model are pinned when
 // queued; effective model is separately retained with vendor evidence.
+// Obsolete managed measurements defer to current account admission; only an
+// outstanding recoverable stop needs a recovery permit. Manual and pairing
+// window expiry remains binding, and exact reservation IDs survive revalidation.
 //
 // AEON-600 lane enforcement: the scheduler calls lanecontrol.ReserveTx with
 // its durable dispatch ID, then BindRunTx for explicitly budgeted later work.

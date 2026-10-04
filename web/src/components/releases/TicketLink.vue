@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, watchEffect } from 'vue'
+import { computed, inject, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
@@ -16,8 +16,10 @@ const router = useRouter()
 const peek = inject(TICKET_PEEK, null)
 
 // Asks for its key, and again after an access change dropped the answer.
+watch(() => normalKey(props.ticketKey), (key, _old, onCleanup) => {
+  onCleanup(showingTicketKeys(key))
+}, { immediate: true, flush: 'sync' })
 watchEffect(() => { if (ticketRef(props.ticketKey) === undefined) wantTicketKey(props.ticketKey) })
-onBeforeUnmount(showingTicketKeys())
 const ticket = computed(() => ticketRef(props.ticketKey))
 const href = computed(() => {
   const project = ticket.value ? projects.byId(ticket.value.projectId) : undefined

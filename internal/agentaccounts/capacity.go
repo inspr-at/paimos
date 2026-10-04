@@ -36,11 +36,30 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
 		if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
 			return err
 		}
-		return ingestReadings(r.Context(), tx, p, r.PathValue("accountId"), in.Readings)
+		if err := ingestReadings(r.Context(), tx, p, r.PathValue("accountId"), in.Readings); err != nil {
+			return err
+		}
+		a, err := getAccount(r.Context(), tx, r.PathValue("accountId"))
+		if err != nil {
+			return err
+		}
+		now, err := dbNow(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		notices, err := prepareQuotaWarnings(r.Context(), tx, p, a, now)
+		if err != nil {
+			return err
+		}
+		system, err := quotaSystemActor(r.Context(), tx, p.TenantID, len(notices) > 0)
+		if err != nil {
+			return err
+		}
+		return flushQuotaNotices(r.Context(), tx, system, notices)
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -438,24 +457,14 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		if err != nil {
 			return nil, err
 		}
-		if _, cleared, err := recoveryClearedAt(ctx, tx, a.ID); err != nil {
-			return nil, err
-		} else if cleared {
-			open := false
-			for _, v := range readings {
-				if v.Source != "estimate" && now.Before(v.ResetsAt) && (v.OrdinaryUsageAllowed == nil || *v.OrdinaryUsageAllowed) {
-					open = true
-					break
-				}
-			}
-			if !open {
-				item.AwaitingReading = true
-				item.LimitingReset = nil
-				out = append(out, item)
+		item.AwaitingReading = true
+		for _, v := range readings {
+			if !now.Before(v.ResetsAt) {
 				continue
 			}
-		}
-		for _, v := range readings {
+			if v.Source != "estimate" && v.Freshness(now) == "fresh" {
+				item.AwaitingReading = false
+			}
 			if budget > 0 {
 				if steps += previewSteps(v.StartsAt(), v.ResetsAt); steps > budget {
 					return nil, fail(http.StatusRequestEntityTooLarge, "too many long capacity windows to preview at once")
@@ -467,6 +476,9 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 				return nil, err
 			}
 			item.Windows = append(item.Windows, capacityWindow{v, v.StartsAt(), 100, left, v.Freshness(now), pace, known})
+		}
+		if len(item.Windows) == 0 {
+			item.LimitingReset = nil
 		}
 		if item.Limit, err = accountLimitUse(ctx, tx, a, now); err != nil {
 			return nil, err
@@ -828,13 +840,10 @@ func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedu
 func applyCapacityPacing(ctx context.Context, tx pgx.Tx, a Account, windows []Window, now time.Time, s capacity.Schedule) error {
 	for i := range windows {
 		w := &windows[i]
-		if w.capacityReadAt == nil {
+		if w.capacityReadAt == nil || synthetic(*w) {
 			continue
 		}
 		ws := s
-		if synthetic(*w) {
-			ws.Reserve, ws.ReservePercent = capacity.ReserveOff, 0
-		}
 		v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute), ResetsAt: w.EndsAt, ReadAt: *w.capacityReadAt, UsedPercent: float64(w.Used), Source: w.capacitySource}
 		p, _, err := readingPacing(ctx, tx, w.AccountID, v, now, ws)
 		if err != nil {

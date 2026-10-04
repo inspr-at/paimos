@@ -21,12 +21,26 @@ import (
 // It is acquired by every paired
 // dispatch, claim, probe, settlement and lifecycle mutation. This serializes
 // revocation with in-flight credentials that passed the HTTP auth boundary.
+// Keep this primitive free of tree locks: run polling and telemetry do not need tree.
 func Lock(ctx context.Context, tx pgx.Tx) error {
 	var tenantID string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=NULLIF(current_setting('aeon.tenant_id'),'')::uuid FOR NO KEY UPDATE`).Scan(&tenantID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+
+// LockMutation enters an account/lifecycle transaction in the merged order:
+// tenant, pairing, tree, then resource rows. Lock takes the tenant authorization
+// fence before pairing; add tree only for mutations whose callers may write
+// tree rows. Call only at transaction entry, before resource locks.
+// NO KEY UPDATE permits FK checks while RequireTx sees live grants.
+func LockMutation(ctx context.Context, tx pgx.Tx) error {
+	if err := Lock(ctx, tx); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
 	return err
 }
 
@@ -440,11 +454,12 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 		if agentsetup.KnownHarnessState(detail.State) {
 			statuses[harness] = detail.State
 		}
+		detail = detail.WithProbeDetail(harness, report.ReasonDetail)
 		// Never persist client-supplied commands, paths or diagnostics: the
 		// fix is derived from the harness and reason code. Attention on a
-		// non-ready report is ignored. A ready report keeps only enrolled
-		// accounts that are a proper subset and still need a fix.
-		if detail.State == "ready" {
+		// blocked/login_required report may name every enrolled account;
+		// a ready report requires a proper subset.
+		if detail.State == "ready" || detail.State == "blocked" || detail.State == "login_required" {
 			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
 			detail.Attention = block.Accounts
 			detail.AttentionCount = block.Count

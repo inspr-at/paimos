@@ -30,6 +30,7 @@
     "stage": "stages",
     "stage_handoffs": "stage handoffs",
     "inbox": "messages",
+    "model_prefs": "model preferences",
     "models": "models",
     "plugins": "plugins",
     "imports": "imports",
@@ -62,6 +63,7 @@
     "pause": "Pause"
   },
   "special": {
+    "agents.plan.read": "See their agent start plan",
     "harness.watch": "View live conversations"
   }
 }

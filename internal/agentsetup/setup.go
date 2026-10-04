@@ -118,22 +118,24 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
-	BlockedAccounts   []BlockedAccount         `json:"blocked_accounts,omitempty"`
-	HarnessDetails    map[string]HarnessDetail `json:"harness_details,omitempty"`
-	HarnessStatuses   map[string]string        `json:"harness_statuses,omitempty"`
-	VersionStatus     string                   `json:"version_status,omitempty"`
-	AccountingState   string                   `json:"accounting_state,omitempty"`
-	Schema            string                   `json:"schema"`
-	Stage             string                   `json:"stage"`
-	RequestID         string                   `json:"request_id,omitempty"`
-	ComputerID        string                   `json:"computer_id,omitempty"`
-	UserCode          string                   `json:"user_code,omitempty"`
-	VerificationURI   string                   `json:"verification_uri,omitempty"`
-	Accounts          []Enrollment             `json:"accounts,omitempty"`
-	LocalProcesses    string                   `json:"local_processes"`
-	ServerRevocation  string                   `json:"server_revocation,omitempty"`
-	Action            string                   `json:"action,omitempty"`
-	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
+	TouchIDConfirmation   string                   `json:"touch_id_confirmation,omitempty"`
+	TouchIDUpgradeCommand string                   `json:"touch_id_upgrade_command,omitempty"`
+	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
+	HarnessDetails        map[string]HarnessDetail `json:"harness_details,omitempty"`
+	HarnessStatuses       map[string]string        `json:"harness_statuses,omitempty"`
+	VersionStatus         string                   `json:"version_status,omitempty"`
+	AccountingState       string                   `json:"accounting_state,omitempty"`
+	Schema                string                   `json:"schema"`
+	Stage                 string                   `json:"stage"`
+	RequestID             string                   `json:"request_id,omitempty"`
+	ComputerID            string                   `json:"computer_id,omitempty"`
+	UserCode              string                   `json:"user_code,omitempty"`
+	VerificationURI       string                   `json:"verification_uri,omitempty"`
+	Accounts              []Enrollment             `json:"accounts,omitempty"`
+	LocalProcesses        string                   `json:"local_processes"`
+	ServerRevocation      string                   `json:"server_revocation,omitempty"`
+	Action                string                   `json:"action,omitempty"`
+	RetryAfterSeconds     int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
 	VerificationReasons                    map[string]string
@@ -243,6 +245,22 @@ func (e *Engine) save(s *snapshot, first bool) error {
 }
 func (e *Engine) progress(s *snapshot) Progress {
 	p := Progress{Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	if s.View.ComputerID != "" {
+		p.TouchIDConfirmation = "needs pairing upgrade"
+		if s.Request.Platform != "darwin" {
+			p.TouchIDConfirmation = "unsupported on this platform"
+		} else if s.View.LocalAuthPinned == nil {
+			p.TouchIDConfirmation = "unknown (server pin not reported)"
+		} else if *s.View.LocalAuthPinned && s.LocalAuthKeyID != "" && attachwatch.LocalAuthPublicKey(s.Request.LocalAuthPublicKey) != nil {
+			p.TouchIDConfirmation = "ready (pairing key pinned)"
+		} else if e.Store != nil {
+			p.TouchIDUpgradeCommand = "aeon-agentd pair --url " + touchIDQuote(s.Origin) + " --state-root " + touchIDQuote(e.Store.Path()+"-touch-id") + " --workspace " + touchIDQuote(s.Request.Workspace)
+		}
+		if s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState == "revoked" {
+			p.TouchIDConfirmation = "unavailable (pairing disconnected)"
+			p.TouchIDUpgradeCommand = ""
+		}
+	}
 	if s.Phase == "awaiting_approval" {
 		p.UserCode = s.Response.UserCode
 		p.VerificationURI = s.Response.VerificationURI
@@ -864,3 +882,6 @@ func candidateEnrollable(c Candidate) bool {
 	return candidateReady(c) ||
 		((c.Harness == "gemini" || c.Harness == "opencode") && c.Login == "unverified" && c.Identity == "local-profile")
 }
+
+// Quote every saved choice; status emits a command, never interprets it.
+func touchIDQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
