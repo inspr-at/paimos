@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -134,8 +135,14 @@ func TestDoneDoesNotWaitAndSummarisesLeaves(t *testing.T) {
 	go func() { _, err := f.m.Once(t.Context(), f.p.TenantID); result <- err }()
 	select {
 	case <-entered:
+	case err := <-result:
+		t.Fatalf("worker finished before provider barrier: %v", err)
 	case <-t.Context().Done():
 		t.Fatal("provider not entered")
+	}
+	// A second server must not claim an unexpired attempt.
+	if claimed, err := New(f.d.App, f.m.chat).Once(t.Context(), f.p.TenantID); err != nil || claimed {
+		t.Fatal("overlapping worker claimed active lease", claimed, err)
 	}
 	// A separate GET must finish while the external request is held at a barrier.
 	if s := f.status(t); s.State != "running" {
@@ -275,5 +282,218 @@ func TestSummaryRejectsInvalidOrUnboundedModelOutput(t *testing.T) {
 	}
 	if _, err := parse(string(raw)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPublishedSnapshotAndUnrelatedFieldsSurvive(t *testing.T) {
+	f := setup(t)
+	var project string
+	var original string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title,key) SELECT $1,id,'Published project','PRJ-1' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot) VALUES($1::uuid,$2::uuid,'frozen-fixture',jsonb_build_object('schema','aeon.release-note-snapshot.v1','membership_source','release-manifest-tickets','label','backfilled','backfilled',true,'tenant_id',$1::uuid::text,'project_node_id',$2::uuid::text,'version','frozen-fixture','items',jsonb_build_array($3::jsonb))) RETURNING snapshot::text`, f.p.TenantID, project, `{"pill_en":"Published leaf benefits","pill_de":"Veröffentlichter Nutzen bleibt","benefit_en":"Previously published text.","benefit_de":"Bereits veröffentlichter Text."}`).Scan(&original)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.done(t)
+	j, err := f.m.claim(t.Context(), f.p.TenantID)
+	if err != nil || j == nil {
+		t.Fatal(err)
+	}
+	// A concurrent unrelated edit is preserved by the four-field merge.
+	f.call(t, f.p, "PATCH", "/api/nodes/"+f.parent, map[string]any{"fields": map[string]any{"priority": "high", "hide_from_release_notes": true}}, 200)
+	if err := f.m.finish(t.Context(), *j, summary); err != nil {
+		t.Fatal(err)
+	}
+	fields := f.readFields(t)
+	if fields["priority"] != "high" || fields["hide_from_release_notes"] != true || fields["benefit_en"] != summary.BenefitEN {
+		t.Fatal("unrelated fields lost", fields)
+	}
+	f.call(t, f.p, "PATCH", "/api/nodes/"+f.parent, map[string]any{"fields": sample}, 200)
+	if f.status(t).Generated {
+		t.Fatal("edited text still marked generated")
+	}
+	var current string
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT snapshot::text FROM release_manifest_note_snapshots WHERE project_node_id=$1`, project).Scan(&current)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if current != original {
+		t.Fatal("published note snapshot rewritten")
+	}
+}
+func TestNestedLeafSourcesAndExplicitLimits(t *testing.T) {
+	f := setup(t)
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+		raw, _ := json.Marshal(sample)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title,key,state,fields,parent_id) SELECT $1,id,'Nested leaf','BEN-3','done',$3,$2 FROM node_kinds WHERE slug='work'`, f.p.TenantID, f.leaf, raw); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title,key,fields,parent_id) SELECT $1,id,'Non-work knowledge','MEM-1','{}',$2 FROM node_kinds WHERE slug='memory'`, f.p.TenantID, f.parent); err != nil {
+			return err
+		}
+		leaves, _, err := sources(t.Context(), tx, f.parent)
+		if err != nil {
+			return err
+		}
+		if len(leaves) != 1 || leaves[0].ID == f.leaf || leaves[0].BenefitEN != sample.BenefitEN {
+			t.Fatalf("not leaf-only: %+v", leaves)
+		}
+		// One additional leaf beyond the source budget must fail, not truncate.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title,key,state,fields,parent_id) SELECT $1,k.id,'Limit leaf','LIM-'||g,'done',$3,$2 FROM node_kinds k CROSS JOIN generate_series(1,$4)g WHERE slug='work'`, f.p.TenantID, f.parent, raw, maxLeaves); err != nil {
+			return err
+		}
+		_, _, err = sources(t.Context(), tx, f.parent)
+		if !errors.Is(err, errSources) {
+			t.Fatalf("wrong scope-limit result: %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+func TestSourceTextBudgetAndMissingBenefitsFailVisibly(t *testing.T) {
+	for _, missing := range []bool{true, false} {
+		t.Run(map[bool]string{true: "missing", false: "oversized"}[missing], func(t *testing.T) {
+			f := setup(t)
+			f.done(t)
+			text := sample
+			if missing {
+				text.BenefitDE = ""
+			} else {
+				text.BenefitDE = strings.Repeat("x", maxTextBytes+1)
+			}
+			f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"fields": text}, 200)
+			calls := 0
+			f.m.chat = func(context.Context, string, string, int64, []modelprovider.Message) (modelprovider.Completion, error) {
+				calls++
+				return modelprovider.Completion{}, nil
+			}
+			if _, err := f.m.Once(t.Context(), f.p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			s := f.status(t)
+			if calls != 0 || s.State != "failed" || s.Error != errSources.Error() {
+				t.Fatal("bad source sent or wrong failure", calls, s)
+			}
+			f.readFields(t)
+		})
+	}
+}
+func TestFlagAndProviderOffNeverPreventDone(t *testing.T) {
+	for _, off := range []string{"flag", "provider"} {
+		t.Run(off, func(t *testing.T) {
+			f := setup(t)
+			if off == "flag" {
+				if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE features SET enabled=false WHERE key='work-parent-status'`)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"state": "done"}, 200)
+				if f.status(t).State != "none" {
+					t.Fatal("feature off queued generation")
+				}
+			} else {
+				if _, err := f.provider.Save(tenant.WithPrincipal(t.Context(), f.p), f.p, modelprovider.Write{ExpectedRevision: 1, Settings: modelprovider.Settings{}}); err != nil {
+					t.Fatal(err)
+				}
+				f.done(t)
+				if _, err := f.m.Once(t.Context(), f.p.TenantID); err != nil {
+					t.Fatal(err)
+				}
+				if f.status(t).State != "failed" {
+					t.Fatal("provider off reported success")
+				}
+				f.readFields(t)
+			}
+		})
+	}
+}
+
+func TestRetryIsPersonOnlyAndRechecksPermission(t *testing.T) {
+	f := setup(t)
+	f.done(t)
+	f.m.chat = func(context.Context, string, string, int64, []modelprovider.Message) (modelprovider.Completion, error) {
+		return modelprovider.Completion{}, errors.New("fixture outage")
+	}
+	if _, err := f.m.Once(t.Context(), f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	s := f.status(t)
+	body := map[string]any{"expected_generation": s.Generation, "expected_revision": s.Revision}
+	agent := f.p
+	agent.Kind = tenant.Agent
+	f.call(t, agent, "POST", "/api/nodes/"+f.parent+"/benefit-generation/retry", body, 403)
+	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "viewer")
+	f.call(t, f.p, "POST", "/api/nodes/"+f.parent+"/benefit-generation/retry", body, 403)
+	if now := f.status(t); now.Generation != s.Generation || now.State != "failed" {
+		t.Fatal("rejected retry changed attempt", now)
+	}
+	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "admin")
+	body["expected_revision"] = s.Revision.Add(-time.Second)
+	f.call(t, f.p, "POST", "/api/nodes/"+f.parent+"/benefit-generation/retry", body, 409)
+}
+
+func TestCombinedHumanEditAndStatusChangeKeepsAuthoredText(t *testing.T) {
+	f := setup(t)
+	f.done(t)
+	j, err := f.m.claim(t.Context(), f.p.TenantID)
+	if err != nil || j == nil {
+		t.Fatal(err)
+	}
+	// Exercise the combined-write boundary in the engine's write context; a
+	// person-facing status request remains forbidden by the parent status guard.
+	err = db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.work_status_deriving','on',true)`); err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(sample)
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='open',fields=fields||$2::jsonb WHERE id=$1`, f.parent, raw)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.finish(t.Context(), *j, summary); err != nil {
+		t.Fatal(err)
+	}
+	if s := f.status(t); s.State != "edited" || s.Generated || s.Generation == j.Generation {
+		t.Fatal("combined edit lost its fence", s)
+	}
+	f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"state": "open"}, 200)
+	f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"state": "done"}, 200)
+	if s := f.status(t); s.State != "edited" || f.readFields(t)["benefit_en"] != sample.BenefitEN {
+		t.Fatal("recompletion replaced authored text", s)
+	}
+}
+
+func TestGenerationRechecksCurrentFieldSchema(t *testing.T) {
+	f := setup(t)
+	f.done(t)
+	j, err := f.m.claim(t.Context(), f.p.TenantID)
+	if err != nil || j == nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties,benefit_en,maxLength}','1'::jsonb) WHERE slug='work'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.finish(t.Context(), *j, summary); err != nil {
+		t.Fatal(err)
+	}
+	if s := f.status(t); s.State != "failed" || !strings.Contains(s.Error, "field rules") {
+		t.Fatal("current field schema was ignored", s)
+	}
+	if _, exists := f.readFields(t)["benefit_en"]; exists {
+		t.Fatal("invalid generated fields applied")
 	}
 }

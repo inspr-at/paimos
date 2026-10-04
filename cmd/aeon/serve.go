@@ -170,7 +170,6 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// In-app models are workspace opt-ins. There is no global vendor fallback.
 	workspaceModels := modelprovider.New(pool, authCfg.SessionKey)
 	parentBenefits := parentbenefits.New(pool, workspaceModels.ParentBenefits)
-	go parentBenefits.Run(ctx)
 	workspaceNotes := crm.WorkspaceNotes{Provider: workspaceModels}
 	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, func() (plugins.Plugin, error) { return crm.PluginWithNoteGenerator(workspaceNotes) }, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin, host.Plugin}
 	journalStore, err := journal.NewStore(pool)
@@ -253,6 +252,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("public quotes: %w", err)
 	}
 	go embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(ctx)
+	go parentBenefits.Run(ctx)
 	go runConfirmationJobs(ctx, pool, confirmationMod, pdfConcurrency)
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()

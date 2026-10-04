@@ -4401,7 +4401,7 @@ paths:
     post:
       operationId: retryParentBenefitGeneration
       security: *auth
-      description: Person-only retry requiring nodes.update in the current project. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
+      description: Person-only retry requiring nodes.write in the current project. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
       requestBody:
         required: true
         content:

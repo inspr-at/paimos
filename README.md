@@ -455,6 +455,24 @@ applies it separately. A changed customer or provider configuration refuses the
 stale generation. Delegated agent runs and Aithema intake retain their existing
 harness, plugin and approval controls; this setting does not select their models.
 
+**Generate parent benefits from leaves** is a separate opt-in (AEON-654), behind
+`work-parent-status` (AEON-429). Completing a parent queues an asynchronous English
+and German pill/benefit summary; its Done never waits for the model. The parent
+shows pending/running, generated provenance, or a safe failure with **Retry
+generation**. **Edit benefit** preserves human text and cancels stale attempts.
+The worker uses the saved chat model; it never launches a harness or falls back to
+a vendor. The person who saved the provider must still have `settings.manage`,
+`nodes.read` and `nodes.write` for the current parent when a result is applied.
+It summarises up to 200 leaves / 64 KB of benefit data, excludes cancelled/archived
+leaves, refuses incomplete or cross-project sources, and never silently truncates.
+Provider changes, moved/reopened parents, changed leaves and edited benefits fence
+in-flight results. Leases recover after restart. Leaves keep the bilingual Done
+gate; published snapshots remain immutable. Migration `1237` stores only job and
+provenance metadata on existing nodes. `GET /api/nodes/{id}/benefit-generation`
+reports status; the person-only retry POST requires the displayed generation and
+node revision. A generated write emits `node.benefits_generated` for live refresh;
+it has no generic node Undo, which could overwrite unrelated fields.
+
 API keys are optional and encrypted through the existing tenant-bound AES-GCM
 vault, separate from JSON settings and event data. Reads reveal only whether a
 key is set. A blank replacement clears the key; omitting it preserves it.

@@ -104,3 +104,12 @@ test('a rejected benefit write is asked again with the typed text', () => {
   assert.equal(hidden.hide_from_release_notes, true)
   assert.equal(hidden.pill_en, text.pill_en)
 })
+
+test('work leaves retain completion prompts while parents never wait for benefits', () => {
+  const work = { kind_slug: 'work', state: 'in_progress', fields: {} }
+  for (const next of ['done', 'accepted', 'delivered']) {
+    assert.equal(needsBenefitPrompt(work, next), true)
+    assert.equal(needsBenefitPrompt({ ...work, estimate: { is_parent: true } }, next), false)
+    assert.equal(needsBenefitPrompt({ ...work, fields: text }, next), false)
+  }
+})

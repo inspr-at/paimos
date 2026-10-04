@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/fieldschema"
 	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -73,13 +74,17 @@ func (m *Module) pass(ctx context.Context) error {
 		m.afterTenant = ""
 		return nil
 	}
+	var firstError error
 	for _, id := range ids {
-		if _, err := m.Once(ctx, id); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if _, err := m.Once(ctx, id); err != nil && firstError == nil {
+			firstError = err
 		}
 		m.afterTenant = id
 	}
-	return nil
+	return firstError
 }
 
 // Once is also the integration-test boundary: no sleeps or running goroutine are
@@ -132,7 +137,7 @@ func consent(ctx context.Context, tx pgx.Tx, tid, project string) (modelprovider
 	if err = authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: project}); err != nil {
 		return c, p, err
 	}
-	err = authz.RequireTx(ctx, tx, p, "nodes.update", authz.Scope{ProjectID: project})
+	err = authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{ProjectID: project})
 	return c, p, err
 }
 func jsonInt(v int64) string { raw, _ := json.Marshal(v); return string(raw) }
@@ -219,6 +224,22 @@ func (m *Module) finish(ctx context.Context, j job, texts Texts) error {
 				j.problem = failureChanged
 			}
 		}
+		if j.problem == "" {
+			raw, _ := json.Marshal(texts)
+			var schema, merged []byte
+			if err := tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(k.field_schema::text)<=1048576 THEN k.field_schema ELSE NULL END,CASE WHEN octet_length(n.fields::text)<=1048576 THEN n.fields||$2::jsonb ELSE NULL END FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE n.id=$1`, j.id, raw).Scan(&schema, &merged); err != nil {
+				return err
+			}
+			if len(schema) == 0 || len(schema) > 1048576 || len(merged) == 0 || len(merged) > 1048576 {
+				j.problem = "The parent fields exceed the generation limit. Edit its benefits directly."
+			} else {
+				compiled, err := fieldschema.Compile(schema)
+				value, decodeErr := fieldschema.Decode(merged)
+				if err != nil || decodeErr != nil || compiled.Validate(value) != nil {
+					j.problem = "The summary does not match the parent field rules. Edit its benefits directly."
+				}
+			}
+		}
 		actor, err := systemactor.Ensure(ctx, tx, j.tenant)
 		if err != nil {
 			return err
@@ -245,7 +266,7 @@ func (m *Module) finish(ctx context.Context, j job, texts Texts) error {
 		beforeSnap := map[string]any{"id": j.id, "fields": json.RawMessage(now.fields), "updated_at": now.Revision}
 		afterSnap := map[string]any{"id": j.id, "fields": json.RawMessage(after.fields), "updated_at": after.Revision}
 		meta, _ := json.Marshal(map[string]any{"job": "parent-benefits", "generated": true, "generation": j.Generation, "source_sha256": j.hash})
-		_, err = events.Append(ctx, tx, actor, events.Change{NodeID: &j.id, Type: "node.updated", Before: beforeSnap, After: afterSnap, Metadata: meta})
+		_, err = events.Append(ctx, tx, actor, events.Change{NodeID: &j.id, Type: "node.benefits_generated", Before: beforeSnap, After: afterSnap, Metadata: meta})
 		return err
 	})
 }

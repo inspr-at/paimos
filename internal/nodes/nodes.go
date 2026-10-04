@@ -334,7 +334,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node = loaded
-		if kind.Slug == "ticket" {
+		if kind.Slug == "ticket" || kind.Slug == "work" {
 			node.Warnings = ticketbenefits.Issues(fields)
 		}
 		if p.Kind == tenant.Agent && (kind.Slug == "ticket" || kind.Slug == "task") {

@@ -2,6 +2,7 @@
 -- AEON-654 reserved slot 1237. Metadata lives on the already-locked parent,
 -- so a derived transition never acquires another lock after the event counter.
 -- No historical rows or published release-note snapshots are rewritten.
+-- DSAR classification: nodes.benefit_generation is metadata, located by (tenant_id,id).
 ALTER TABLE nodes ADD COLUMN benefit_generation jsonb NOT NULL DEFAULT '{}'::jsonb
  CHECK (jsonb_typeof(benefit_generation)='object' AND octet_length(benefit_generation::text)<=4096);
 CREATE INDEX nodes_parent_benefit_jobs ON nodes(tenant_id,id)
@@ -26,6 +27,8 @@ BEGIN
    AND OLD.benefit_generation<>'{}'::jsonb THEN
   NEW.benefit_generation := OLD.benefit_generation || jsonb_build_object(
     'status','edited','generated',false,'generation',gen_random_uuid()::text,'error','');
+  -- An edit saved together with a status change still owns these texts.
+  RETURN NEW;
  END IF;
  -- Use canonical shape without exposing hidden child identities to callers.
  PERFORM set_config('aeon.system','on',true),set_config('aeon.visible_projects','*',true);
@@ -43,7 +46,7 @@ BEGIN
      (OLD.benefit_generation='{}'::jsonb AND EXISTS(SELECT 1 FROM jsonb_each_text(aeon_benefit_texts(NEW.fields)) t WHERE btrim(coalesce(t.value,''))<>'')) THEN
     NEW.benefit_generation := jsonb_build_object('status','edited','generated',false,'generation',gen_random_uuid()::text);
    ELSE
-    NEW.benefit_generation := jsonb_build_object('status','queued','generated',false,'generation',gen_random_uuid()::text);
+    NEW.benefit_generation := jsonb_build_object('status','queued','generated',coalesce((OLD.benefit_generation->>'generated')::boolean,false),'generation',gen_random_uuid()::text);
    END IF;
   ELSIF OLD.benefit_generation->>'status' IN ('queued','running','failed') AND
     (NOT parent OR NEW.deleted_at IS NOT NULL OR next_category NOT IN ('done','accepted','delivered')) THEN

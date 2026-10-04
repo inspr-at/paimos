@@ -19,14 +19,15 @@ const label = computed(() => {
     case 'queued': return 'Parent is Done. Benefit generation is queued.'
     case 'running': return 'Parent is Done. Benefits are being generated from its leaves.'
     case 'failed': return status.value.error || 'Benefit generation failed. Retry when ready.'
-    case 'generated': return 'Generated from leaf benefits · editable by people.'
-    case 'edited': return 'Edited by a person. Automatic generation keeps this text.'
+    case 'generated': return 'From leaf benefits · editable by people.'
+    case 'edited': return 'Edited text. Automatic generation keeps this text.'
     case 'cancelled': return 'Generation stopped because the parent changed.'
     default: return 'Parent benefits are editable. Done does not wait for generation.'
   }
 })
 function stop() { clearTimeout(timer); controller?.abort(); epoch++ }
 async function load(id: string, version: number) {
+  if (version !== epoch || props.nodeId !== id) return
   controller?.abort(); controller = new AbortController()
   try {
     const response = await api(`/nodes/${encodeURIComponent(id)}/benefit-generation`, { signal: controller.signal })
@@ -44,7 +45,7 @@ async function load(id: string, version: number) {
     timer = setTimeout(() => void load(id, version), 5000)
   }
 }
-watch(() => [props.nodeId, session.identity?.principal.id], () => {
+watch(() => [props.nodeId, session.identity?.principal.id, session.identity?.tenant.id], () => {
   stop(); status.value = null; busy.value = false; problem.value = ''
   void load(props.nodeId, epoch)
 }, { immediate: true })
@@ -52,6 +53,7 @@ onBeforeUnmount(stop)
 async function retry() {
   const current = status.value
   if (!current || current.status !== 'failed' || busy.value || !props.editable) return
+  stop()
   const id = props.nodeId, version = epoch
   busy.value = true; problem.value = ''
   try {
@@ -66,7 +68,10 @@ async function retry() {
   } catch {
     if (version === epoch && props.nodeId === id) problem.value = 'Generation could not be queued. Reload the parent and try again.'
   } finally {
-    if (version === epoch && props.nodeId === id) busy.value = false
+    if (version === epoch && props.nodeId === id) {
+      busy.value = false
+      timer = setTimeout(() => void load(id, version), 5000)
+    }
   }
 }
 </script>

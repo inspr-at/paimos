@@ -51,7 +51,7 @@ type target struct {
 func load(ctx context.Context, tx pgx.Tx, id string) (target, error) {
 	var t target
 	t.id = id
-	err := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,''),fields,benefit_generation,updated_at,aeon_work_status_is_parent(id) FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, id).Scan(&t.project, &t.fields, &t.raw, &t.Revision, &t.IsParent)
+	err := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,''),CASE WHEN coalesce(octet_length(fields->>'pill_en'),0)+coalesce(octet_length(fields->>'pill_de'),0)+coalesce(octet_length(fields->>'benefit_en'),0)+coalesce(octet_length(fields->>'benefit_de'),0)<=16000 THEN aeon_benefit_texts(fields) ELSE '{}'::jsonb END,benefit_generation,updated_at,aeon_work_status_is_parent(id) FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, id).Scan(&t.project, &t.fields, &t.raw, &t.Revision, &t.IsParent)
 	if err != nil {
 		return t, err
 	}
@@ -180,7 +180,7 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err := authz.RequireTx(ctx, tx, p, "nodes.update", authz.Scope{ProjectID: out.project}); err != nil {
+		if err := authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{ProjectID: out.project}); err != nil {
 			return err
 		}
 		if !out.IsParent || out.State != "failed" || out.Generation != in.Generation || !out.Revision.Equal(in.Revision) {
@@ -193,7 +193,7 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 		if !completed {
 			return fault{409, "Parent is no longer Done."}
 		}
-		if err := writeMeta(ctx, tx, id, `jsonb_build_object('status','queued','generation',gen_random_uuid()::text,'generated',false)`); err != nil {
+		if err := writeMeta(ctx, tx, id, `jsonb_build_object('status','queued','generation',gen_random_uuid()::text,'generated',coalesce((benefit_generation->>'generated')::boolean,false))`); err != nil {
 			return err
 		}
 		out, err = load(ctx, tx, id)
@@ -214,6 +214,6 @@ func writeMeta(ctx context.Context, tx pgx.Tx, id, expression string, args ...an
 		return err
 	}
 	values := append([]any{id}, args...)
-	_, err := tx.Exec(ctx, `UPDATE nodes SET benefit_generation=`+expression+` WHERE id=$1::uuid`, values)
+	_, err := tx.Exec(ctx, `UPDATE nodes SET benefit_generation=`+expression+` WHERE id=$1::uuid`, values...)
 	return err
 }

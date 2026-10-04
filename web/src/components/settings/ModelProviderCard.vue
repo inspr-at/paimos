@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../../lib/api'
 import { brand } from '../../lib/brand'
+import { useSession } from '../../stores/session'
 import SettingsCard from './SettingsCard.vue'
 
 interface ProviderSettings {
@@ -22,6 +23,8 @@ const busy = ref(false)
 const loading = ref(true)
 const problem = ref('')
 const notice = ref('')
+const session = useSession()
+let epoch = 0
 const dirty = computed(() => JSON.stringify(settings.value) !== saved.value || !!apiKey.value || clearKey.value)
 
 function accept(next: ProviderSettings) {
@@ -30,18 +33,27 @@ function accept(next: ProviderSettings) {
   apiKey.value = ''; clearKey.value = false
 }
 async function load() {
+  const version = ++epoch
   loading.value = true; problem.value = ''
   try {
     const response = await api('/settings/model-provider')
+    if (version !== epoch) return
     if (!response.ok) throw new Error('read')
-    accept(await response.json() as ProviderSettings)
-  } catch { problem.value = 'Model provider settings could not be loaded. Try again.' }
-  finally { loading.value = false }
+    const next = await response.json() as ProviderSettings
+    if (version === epoch) accept(next)
+  } catch { if (version === epoch) problem.value = 'Model provider settings could not be loaded. Try again.' }
+  finally { if (version === epoch) loading.value = false }
 }
-onMounted(load)
+watch(() => [session.identity?.tenant.id, session.identity?.principal.id], () => {
+  settings.value = null; saved.value = ''; apiKey.value = ''; clearKey.value = false
+  busy.value = false; notice.value = ''; problem.value = ''
+  void load()
+}, { immediate: true })
+onBeforeUnmount(() => { epoch++ })
 
 async function save() {
   if (!settings.value || busy.value) return
+  const version = epoch
   busy.value = true; problem.value = ''; notice.value = ''
   try {
     const current = settings.value
@@ -51,25 +63,31 @@ async function save() {
         ...(clearKey.value ? { api_key: '' } : apiKey.value ? { api_key: apiKey.value } : {}),
       }),
     })
+    if (version !== epoch) return
     if (!response.ok) {
       if (response.status === 409) { problem.value = 'Another admin changed these settings. Reload before saving.'; return }
       const result = await response.json().catch(() => ({})) as { error?: string }
+      if (version !== epoch) return
       problem.value = result.error || 'The settings could not be saved.'; return
     }
-    accept(await response.json() as ProviderSettings)
+    const next = await response.json() as ProviderSettings
+    if (version !== epoch) return
+    accept(next)
     notice.value = 'Saved. Only the selected features may use this provider.'
-  } catch { problem.value = 'The settings could not be saved. Check the connection and try again.' }
-  finally { busy.value = false; apiKey.value = '' }
+  } catch { if (version === epoch) problem.value = 'The settings could not be saved. Check the connection and try again.' }
+  finally { if (version === epoch) { busy.value = false; apiKey.value = '' } }
 }
 async function test() {
   if (!settings.value || busy.value || dirty.value) return
+  const version = epoch
   busy.value = true; problem.value = ''; notice.value = ''
   try {
     const response = await api('/settings/model-provider/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: settings.value.revision }) }, 35_000)
+    if (version !== epoch) return
     if (!response.ok) { problem.value = response.status === 409 ? 'Save or reload the provider settings before testing.' : 'Connection test failed. Check the server address, model and API key.'; return }
     notice.value = 'Connection succeeded. The chat model answered the test.'
-  } catch { problem.value = `Connection test failed. Check that the model server is reachable from ${brand.value.short_name}.` }
-  finally { busy.value = false }
+  } catch { if (version === epoch) problem.value = `Connection test failed. Check that the model server is reachable from ${brand.value.short_name}.` }
+  finally { if (version === epoch) busy.value = false }
 }
 </script>
 
@@ -100,7 +118,7 @@ async function test() {
         <p class="hint">Uses the same server and API key. Selected features send their content to this server. Agent runs and Aithema use their own settings.</p>
       </fieldset>
       <div class="actions">
-        <button type="submit" class="btn" :disabled="busy || !dirty">{{ busy ? 'Working…' : 'Save settings' }}</button>
+        <button type="submit" class="btn" :disabled="busy || !dirty" :aria-busy="busy">Save settings</button>
         <button type="button" class="btn" :disabled="busy || dirty || !settings.base_url || !settings.chat_model" @click="test">Test connection</button>
         <span v-if="dirty" class="hint">Save before testing.</span>
       </div>

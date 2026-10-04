@@ -74,3 +74,14 @@ func TestCompletionTransitions(t *testing.T) {
 		}
 	}
 }
+
+func TestUnifiedWorkLeavesKeepCompletionRequirements(t *testing.T) {
+	for _, state := range []string{"done", "accepted", "delivered"} {
+		if len(Transition("work", "open", state, json.RawMessage(`{}`))) != 4 {
+			t.Fatal("work leaf gate missing", state)
+		}
+		if len(Transition("work", "done", state, json.RawMessage(`{}`))) != 0 {
+			t.Fatal("historical completed work blocked", state)
+		}
+	}
+}
