@@ -9304,7 +9304,7 @@ paths:
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisationWrite'}}}}
       responses:
-        '201': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '400': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}:
     get:
@@ -9321,7 +9321,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisationWrite'}}}}
       responses:
-        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteCRMOrganisation
@@ -9329,7 +9329,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '204': {description: Deleted}
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/visibility:
     patch:
@@ -9340,7 +9340,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
       responses:
-        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/related:
     get:
@@ -9357,7 +9357,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [contact_node_id, expected_revision], properties: {contact_node_id: {type: string, format: uuid}, expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
-        '200': {description: Customer with new primary, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer with new primary, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/number/reformat:
     post:
@@ -9382,7 +9382,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactWrite'}}}}
       responses:
-        '201': {description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
   /crm/contacts/{contactId}:
     get:
       operationId: getCRMContact
@@ -9397,7 +9397,7 @@ paths:
       parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactWrite'}}}}
       responses:
-        '200': {description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
         '409': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteCRMContact
@@ -9405,7 +9405,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '204': {description: Deleted}
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
   /crm/documents/{attachmentId}/metadata:
     put:
       operationId: putCRMDocumentMetadata
@@ -9472,7 +9472,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}, {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
   /crm/providers:
     get:
       operationId: listCRMProviders
@@ -9566,7 +9566,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: expected_revision, in: query, required: true, schema: {type: integer, minimum: 1}}]
       responses:
-        '204': {description: Deleted}
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -9765,7 +9765,7 @@ paths:
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
-        '201': {description: New quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: New quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/visibility:
     patch:
@@ -9776,7 +9776,7 @@ paths:
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
       responses:
-        '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/versions:
     get:
@@ -10565,6 +10565,9 @@ components:
   # Additive optional response fields require a minor bump; removals, type changes,
   # and newly required fields require a major bump. Never add a version body field.
   headers:
+    MutationEventIds:
+      description: Exact event IDs committed by this mutation, comma separated in reverse append order for Undo. Absent for an unchanged record or when a complete bounded receipt cannot be supplied. Never resolve an absent or lost receipt by finding the newest event.
+      schema: {type: string, maxLength: 22528, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}
     StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.0']}}
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}

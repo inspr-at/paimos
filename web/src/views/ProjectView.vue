@@ -1449,7 +1449,10 @@ async function chooseRelease(target: ReleaseTarget) {
 function dirty() { return !!panel.value?.isDirty() || !!knowledgeEntry.value?.isDirty() }
 async function confirmDiscard() {
   if (skipGuard || !dirty()) return true
-  return confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+  const outgoing = panel.value, outgoingKnowledge = knowledgeEntry.value
+  const ok = await confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+  if (ok) { outgoing?.discard(); outgoingKnowledge?.discard() }
+  return ok
 }
 // Which knowledge entry an address shows (its page or the docked pane), so leaving
 // an entry asks about unsaved edits, while Expand (same entry, now its page) does not.
@@ -1794,14 +1797,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <KnowledgeEntryPage
-        v-if="shownEntry" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
+        v-if="shownEntry" :key="`${project.id}/${me?.id ?? ''}`" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
         :type="shownEntry.type" :slug="shownEntry.slug" :state="knowledge" :can-write="knowledgeWritable" :can-delete="knowledgeDeletable" :now="now" :list-query="knowledgeListQuery"
         @close="shownEntry.mode === 'dock' ? closeKnowledgeDock() : closeKnowledgeEntry()"
       />
       <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
       <PanelSplitter v-if="ticketKey && !fullView" />
       <TicketWorkspace
-        v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
+        v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
         :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"

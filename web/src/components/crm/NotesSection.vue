@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { api } from '../../lib/api'
-import { applyNote, draftNote, errorText, statusOf, undoLatest, type Customer, type NoteProposal } from '../../lib/crm'
+import { applyNote, draftNote, errorText, statusOf, undoEvents, type Customer, type NoteProposal } from '../../lib/crm'
 import { toast } from '../../lib/toast'
 import { useCustomers } from '../../stores/customers'
 import AppIcon from '../AppIcon.vue'
@@ -115,7 +115,7 @@ async function apply() {
       timeout: 8000,
       action: {
         label: 'Undo', run: () => {
-          void undoLatest([{ node: props.customer.id, types: ['crm.note_rewrite_applied'] }])
+          void undoEvents(updated.event_ids)
             .then(() => { emit('reload'); toast('The earlier notes are back.') })
             .catch(e => toast(errorText(e), { tone: 'error' }))
         },

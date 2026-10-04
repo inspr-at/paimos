@@ -58,19 +58,26 @@ const activeHeading = ref('')
 const moreAnchor = ref<HTMLElement | null>(null)
 const moreButton = ref<HTMLButtonElement>()
 const editing = ref(false)
-const writable = computed(() => props.canWrite && !readOnly.value && entry.value?.type !== 'decision')
+const saving = ref(false)
+const locator = () => `${props.project.id}/${props.type}/${props.slug}`
+const loadedLocator = ref('')
+const currentEntry = computed(() => !!entry.value && loadedLocator.value === locator() && !loading.value && !error.value && !missing.value)
+const writable = computed(() => props.canWrite && !readOnly.value && currentEntry.value && entry.value?.type !== 'decision')
 const meta = computed(() => typeMeta(entry.value?.type ?? props.type))
 let generation = 0
 
 // ---------- Loading, and following a renamed slug ----------
 async function load() {
-  const request = ++generation
+  const request = ++generation, requestedLocator = locator()
+  const projectId = props.project.id, type = props.type, slug = props.slug
+  loadedLocator.value = ''
   loading.value = true; error.value = ''; missing.value = false
   try {
-    const found = await resolveKnowledge(props.project.id, props.type, props.slug)
+    const found = await resolveKnowledge(projectId, type, slug)
     if (request !== generation) return
     const switched = entry.value?.id !== found.id
     entry.value = found
+    loadedLocator.value = requestedLocator
     // The pane starts each entry at its top, unless the address names a section.
     if (switched && dock.value && !route.hash) scroller.value?.scrollTo({ top: 0 })
     if (found.renamed_from && found.slug !== props.slug) {
@@ -80,18 +87,20 @@ async function load() {
   } catch (e) {
     if (request !== generation) return
     if (e instanceof KnowledgeError && e.status === 404) { missing.value = true; entry.value = null }
-    else error.value = e instanceof Error ? e.message : 'The entry could not be loaded.'
+    else { error.value = e instanceof Error ? e.message : 'The entry could not be loaded.'; entry.value = null }
   } finally {
     if (request === generation) loading.value = false
   }
 }
-watch([() => props.project.id, () => props.type, () => props.slug], ([, type, slug]) => {
+watch([() => props.project.id, () => props.type, () => props.slug], ([projectId, type, slug]) => {
   // Our own rename (or its undo) changes the address, not the entry.
-  if (entry.value && entry.value.type === type && entry.value.slug === slug) return
-  editing.value = false
+  generation++
+  if (entry.value && entry.value.project?.id === projectId && entry.value.type === type && entry.value.slug === slug && !error.value) { loadedLocator.value = locator(); loading.value = false; return }
+  editing.value = false; saving.value = false; readOnly.value = false
   headings.value = []
   void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => { generation++ })
 watch(entry, current => { if (current) setPageTitle(`${current.title} · ${props.project.routeKey} Knowledge`) })
 // Another entry is on its way: the one shown stays, quietly dimmed, so nothing jumps.
 const switching = computed(() => loading.value && !!entry.value && (entry.value.type !== props.type || entry.value.slug !== props.slug))
@@ -221,7 +230,6 @@ function linkTarget(l: KnowledgeLink) {
 }
 
 // ---------- Edit mode: title, slug, status, details and text; one Save ----------
-const saving = ref(false)
 const titleField = ref<HTMLTextAreaElement>()
 const slugField = ref<HTMLInputElement>()
 const editor = ref<InstanceType<typeof MarkdownEditor>>()
@@ -283,7 +291,7 @@ async function cancelEdit() {
 }
 async function save() {
   const current = entry.value
-  if (!current || saving.value) return
+  if (!current || !writable.value || saving.value) return
   touched.value = true
   if (titleIssue.value) { titleField.value?.focus(); return }
   if (slugIssue.value) { slugField.value?.focus(); return }
@@ -296,21 +304,24 @@ async function save() {
   if (draft.slug.trim() !== current.slug) patch.slug = draft.slug.trim()
   if (detailsChanged()) patch.metadata = mergeDetails(current.type, current.metadata, draft.details)
   if (!Object.keys(patch).length) { editing.value = false; conflict.value = null; return }
+  const request = generation
   saving.value = true
   try {
     const saved = await updateKnowledge(current.id, patch, stamp.value)
+    if (request !== generation) return
     editing.value = false; conflict.value = null
     applySaved(saved, current.slug)
     const renamed = saved.slug !== current.slug
-    toast(renamed ? `Saved as ${saved.slug}. Agents need the new slug.` : `Saved ${saved.slug}`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!) } } : {})
+    toast(renamed ? `Saved as ${saved.slug}. Agents need the new slug.` : `Saved ${saved.slug}`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!, saved.id) } } : {})
     void nextTick(() => root.value?.focus({ preventScroll: true }))
   } catch (e) {
+    if (request !== generation) return
     if (e instanceof KnowledgeError && e.status === 412 && e.entry) { conflict.value = e.entry; comparing.value = false }
     else if (e instanceof KnowledgeError && e.code === 'slug_taken') { slugError.value = e.message; slugField.value?.focus() }
     else if (e instanceof KnowledgeError && e.status === 403) { readOnly.value = true; toast(e.message, { tone: 'error' }) }
     else if (e instanceof KnowledgeError && e.status === 404) { missing.value = true; editing.value = false }
     else toast(`Not saved: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
-  } finally { saving.value = false }
+  } finally { if (request === generation || entry.value?.id === current.id && currentEntry.value) saving.value = false }
 }
 // The server's copy replaces ours everywhere; a new slug moves the address.
 function applySaved(saved: KnowledgeEntry, previousSlug: string) {
@@ -319,15 +330,18 @@ function applySaved(saved: KnowledgeEntry, previousSlug: string) {
   generation++
   loading.value = false; missing.value = false; error.value = ''
   entry.value = saved
+  loadedLocator.value = locator()
   props.state.upsert(saved)
   if (saved.slug !== previousSlug || saved.type !== props.type) void router.replace(placeOf(saved.type, saved.slug))
 }
-async function undo(eventId: number) {
+async function undo(eventId: number, entryId: string) {
+  const current = entry.value, request = generation
+  if (!current || current.id !== entryId || !currentEntry.value) return
   try {
     await undoKnowledge(eventId)
-    const current = entry.value
-    if (!current) return
+    if (request !== generation) return
     const restored = await getKnowledge(current.id)
+    if (request !== generation) return
     applySaved(restored, current.slug)
     toast(restored.slug !== current.slug ? `Undone. It is ${restored.slug} again.` : 'Undone')
   } catch (e) { toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }) }
@@ -410,46 +424,55 @@ async function pick(action: 'link' | 'slug' | 'command' | 'archive' | 'delete') 
   else await remove()
 }
 async function setArchived(archived: boolean) {
+  const request = generation
   const current = entry.value
   if (!current || !writable.value) return
   try {
     const saved = await updateKnowledge(current.id, { status: archived ? 'archived' : 'active' }, current.updated_at)
+    if (request !== generation) return
     applySaved(saved, current.slug)
-    toast(archived ? `Archived ${saved.slug}. Agents skip it now.` : `${saved.slug} is active again`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!) } } : {})
+    toast(archived ? `Archived ${saved.slug}. Agents skip it now.` : `${saved.slug} is active again`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!, saved.id) } } : {})
   } catch (e) {
+    if (request !== generation) return
     if (e instanceof KnowledgeError && e.status === 412 && e.entry) { entry.value = e.entry; props.state.upsert(e.entry); toast('Someone changed this entry just now. The newer version is shown; nothing was archived.', { tone: 'error' }) }
     else toast(e instanceof Error ? e.message : 'That did not work.', { tone: 'error' })
   }
 }
 async function confirmProposed() {
+  const request = generation
   const current = entry.value
   if (!current || !writable.value) return
   try {
     const saved = await updateKnowledge(current.id, { status: 'active' }, current.updated_at)
+    if (request !== generation) return
     applySaved(saved, current.slug)
-    toast(`${saved.slug} is confirmed. Agents rely on it now.`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!) } } : {})
+    toast(`${saved.slug} is confirmed. Agents rely on it now.`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!, saved.id) } } : {})
   } catch (e) {
+    if (request !== generation) return
     if (e instanceof KnowledgeError && e.status === 412 && e.entry) { entry.value = e.entry; props.state.upsert(e.entry); toast('Someone changed this entry just now. Read the newer version before you confirm it.', { tone: 'error' }) }
     else toast(e instanceof Error ? e.message : 'That did not work.', { tone: 'error' })
   }
 }
 async function remove() {
+  const request = generation
   const current = entry.value
-  if (!current || !props.canDelete) return
+  if (!current || !currentEntry.value || !props.canDelete) return
   const ok = await confirmAction({
     title: `Delete ${current.slug}?`,
     body: `“${current.title}” leaves the project’s knowledge and agents stop finding it. You can undo this right after; the history stays in the audit log.`,
     confirmLabel: `Delete ${meta.value.label.toLowerCase()}`, danger: true,
   })
-  if (!ok) return
+  if (!ok || request !== generation) return
   try {
     const result = await deleteKnowledge(current.id, current.updated_at)
+    if (request !== generation) return
     props.state.remove(current.id)
     skipGuard = true
     await router.replace(listLink())
     skipGuard = false
     toast(`Deleted ${current.type} ${current.slug}`, { action: { label: 'Undo', run: () => void restore(result.event_id, current) } })
   } catch (e) {
+    if (request !== generation) return
     toast(e instanceof KnowledgeError && e.status === 412 ? 'Someone changed this entry just now, so it was not deleted.' : `Not deleted: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
     if (e instanceof KnowledgeError && e.entry) { entry.value = e.entry; props.state.upsert(e.entry) }
   }
@@ -511,7 +534,8 @@ async function reload() {
   if (editing.value) return
   await load()
 }
-defineExpose({ isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null, applyServer, reload })
+function discard() { generation++; editing.value = false; saving.value = false; conflict.value = null }
+defineExpose({ discard, isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null, applyServer, reload })
 const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.value?.updated_by ? `by ${entry.value.updated_by.name}` : '')
 </script>
 
@@ -555,7 +579,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         <button type="button" class="btn" @click="emit('close')">{{ dock ? 'Close' : 'Back to Knowledge' }}</button>
       </div>
     </div>
-    <div v-else-if="error && !entry" class="e-state glass-card" role="alert">
+    <div v-else-if="error" class="e-state glass-card" role="alert">
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
       <h2>This entry could not be opened</h2>
       <p>{{ error }}</p>

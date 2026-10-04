@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
-import { onScopeDispose, ref } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import { api, getSession, sessionEnded, type Identity } from '../lib/api'
 import { resetAgentTheme, restoreAgentTheme } from '../lib/agentTheme'
 import { restoreTheme } from '../lib/theme'
@@ -8,6 +8,9 @@ import { accessChanged, clearPermissions, refreshPermissions, revokePermissions 
 import { clearSignInReturn } from '../lib/signInReturn'
 import { dropAttachCode } from '../lib/attachLink'
 import { followAuthentication, OIDC_PENDING_KEY } from '../lib/authTabs'
+import { resetToasts } from '../lib/toast'
+import { settleConfirm } from '../lib/confirm'
+import { setPreferenceOwner } from '../lib/preferences'
 import { resetPositions } from '../lib/position'
 
 export class SignInError extends Error {
@@ -31,6 +34,14 @@ export const useSession = defineStore('session', () => {
   onScopeDispose(tabs.stop)
 
   function authenticationCurrent() { return tabs.current() }
+  watch(identity, (who, before) => {
+    const same = !!who && !!before && who.tenant.id === before.tenant.id && who.principal.id === before.principal.id
+    if (!same) {
+      resetToasts()
+      settleConfirm(false)
+    }
+    setPreferenceOwner(who, authenticationCurrent)
+  }, { immediate: true, flush: 'sync' })
 
   function beginSignIn() {
     invalidate()
@@ -106,6 +117,9 @@ export const useSession = defineStore('session', () => {
     // End outstanding work before the cookie can change. Keep the account menu
     // until the server answers, so a failed sign-out still offers its retry.
     const started = ++epoch
+    setPreferenceOwner(null, authenticationCurrent)
+    resetToasts()
+    settleConfirm(false)
     dropAttachCode()
     revokePermissions()
     tabs.publish()
@@ -113,7 +127,7 @@ export const useSession = defineStore('session', () => {
       const response = await api('/auth/logout', { method: 'POST' })
       if (!response.ok) throw new Error('Sign out failed')
     } catch (error) {
-      if (started === epoch && tabs.current() && identity.value) { clearPermissions(); void refreshPermissions() }
+      if (started === epoch && tabs.current() && identity.value) { setPreferenceOwner(identity.value, authenticationCurrent); clearPermissions(); void refreshPermissions() }
       throw error
     }
     invalidate()

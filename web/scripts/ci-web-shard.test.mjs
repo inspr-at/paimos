@@ -22,7 +22,7 @@ test('source manifest accounts for every spec, including nested files, before re
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
   assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
   assert.deepEqual(manifest.exclusions, [])
-  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts']) {
+  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
     assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
   }
 })

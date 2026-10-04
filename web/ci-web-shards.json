@@ -911,6 +911,12 @@
       ],
       "specs": [
         {
+          "file": "tests/record-ownership.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
           "file": "tests/no-shift.spec.ts",
           "weightSeconds": 114.05848,
           "weightSource": "web-13",
