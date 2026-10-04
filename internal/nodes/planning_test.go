@@ -270,6 +270,9 @@ type planningWorld struct {
 func planningSetup(t *testing.T) planningWorld {
 	t.Helper()
 	admin := newPrincipal(t, "planning-columns")
+	// Historical mixed-kind subtrees remain readable alongside current work.
+	customKind(t, admin, "epic", "epic")
+	customKind(t, admin, "task", "task")
 	w := planningWorld{admin: admin, nodes: map[string]nodeJSON{}}
 	w.root = mustNode(t, admin, `{"kind_id":"`+kindBySlug(t, admin, "project").ID+`","title":"Planning"}`)
 	// Registry: build-hard → Codex astra xhigh; build → Claude opus high;
@@ -300,7 +303,7 @@ func (w planningWorld) node(t *testing.T, key, kind, parent, state string, field
 	if fields == nil {
 		fields = map[string]any{}
 	}
-	if state == "done" && kind == "ticket" {
+	if state == "done" && kind == "work" {
 		fields["pill_en"], fields["pill_de"], fields["benefit_en"], fields["benefit_de"] = "Planning works now", "Planung geht jetzt", "Planning shows real numbers.", "Die Planung zeigt echte Zahlen."
 	}
 	raw, _ := json.Marshal(map[string]any{"kind_id": kindBySlug(t, w.admin, kind).ID, "key": key, "title": key, "state": state, "parent_id": parent, "fields": fields})
@@ -309,7 +312,9 @@ func (w planningWorld) node(t *testing.T, key, kind, parent, state string, field
 	return n
 }
 
-// session adds a stopped session of the given length with one usage row.
+// session adds a stopped session of the exact given length with one usage row.
+// One transaction timestamp keeps 1-minute samples on the 60-second eligibility
+// boundary despite wall-clock adjustments during a long package run.
 // billing "api" stores the list estimate the reporter would have priced.
 func (w planningWorld) session(t *testing.T, node, harness, model, effort, usageModel string, minutes int, input, output, cached int64, billing, plan string) {
 	t.Helper()
@@ -321,7 +326,7 @@ func (w planningWorld) session(t *testing.T, node, harness, model, effort, usage
             VALUES ($1, $2, $3, $4, $5, 'test', 'unmanaged', 'worker', 'ship',
                 decode(replace(gen_random_uuid()::text, '-', ''), 'hex'), decode(replace(gen_random_uuid()::text, '-', ''), 'hex'),
                 'stopped', 'busy', nullif($6::text,''), nullif($7::text,''),
-                clock_timestamp() - make_interval(mins => $8::int), clock_timestamp(), clock_timestamp(), 'completed')
+                now() - make_interval(mins => $8::int), now(), now(), 'completed')
             RETURNING id::text`, w.admin.TenantID, w.root.ID, w.agent, node, harness, model, effort, minutes).Scan(&id); err != nil {
 			return err
 		}
@@ -354,14 +359,15 @@ func planningOf(t *testing.T, who tenant.Principal, path string) map[string]*pla
 func TestListPlanningColumns(t *testing.T) {
 	w := planningSetup(t)
 	epic := w.node(t, "PLN-1", "epic", w.root.ID, "open", nil)
-	built := w.node(t, "PLN-2", "ticket", epic.ID, "in_progress", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
-	task := w.node(t, "PLN-3", "task", built.ID, "open", nil)
-	done := w.node(t, "PLN-4", "ticket", epic.ID, "done", map[string]any{"route_role": "mechanical", "area": "docs", "estimate_hours": 1})
-	cancelled := w.node(t, "PLN-5", "ticket", epic.ID, "cancelled", map[string]any{"estimate_hours": 3})
-	w.node(t, "PLN-6", "ticket", w.root.ID, "open", map[string]any{"route_role": "build"})
-	w.node(t, "PLN-7", "ticket", w.root.ID, "open", map[string]any{"route_role": "review-gate", "area": "backend"})
-	w.node(t, "PLN-8", "ticket", w.root.ID, "open", map[string]any{"route_role": "build", "area": "frontend"})
-	w.node(t, "PLN-9", "ticket", w.root.ID, "open", nil)
+	built := w.node(t, "PLN-2", "work", epic.ID, "in_progress", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
+	// The leaf carries the 2h estimate; its parent's matching 2h plan is separate.
+	task := w.node(t, "PLN-3", "task", built.ID, "open", map[string]any{"estimate_hours": 2, "route_role": "build-hard", "area": "backend"})
+	done := w.node(t, "PLN-4", "work", epic.ID, "done", map[string]any{"route_role": "mechanical", "area": "docs", "estimate_hours": 1})
+	cancelled := w.node(t, "PLN-5", "work", epic.ID, "cancelled", map[string]any{"estimate_hours": 3})
+	w.node(t, "PLN-6", "work", w.root.ID, "open", map[string]any{"route_role": "build"})
+	w.node(t, "PLN-7", "work", w.root.ID, "open", map[string]any{"route_role": "review-gate", "area": "backend"})
+	w.node(t, "PLN-8", "work", w.root.ID, "open", map[string]any{"route_role": "build", "area": "frontend"})
+	w.node(t, "PLN-9", "work", w.root.ID, "open", nil)
 	_ = done
 
 	// PLN-2: $3.80 pay-per-use on Codex, $0.68 at list price under a Claude plan,
@@ -369,7 +375,7 @@ func TestListPlanningColumns(t *testing.T) {
 	w.session(t, built.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1_000_000, 20_000, 800_000, "api", "")
 	w.session(t, built.ID, "claude", "claude-opus-5-5", "high", "claude-opus-5-5", 30, 500_000, 10_000, 400_000, "subscription", "Max 20x")
 	w.session(t, task.ID, "claude", "", "", "unpriced-model", 10, 9_000, 1_000, 0, "unknown", "")
-	// A cancelled child does not roll up.
+	// A cancelled child's spend remains; its estimate does not roll up.
 	w.session(t, cancelled.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 7_000_000, 0, 0, "api", "")
 
 	path := "/api/nodes?within=" + w.root.ID + "&sort=key"
@@ -377,10 +383,14 @@ func TestListPlanningColumns(t *testing.T) {
 
 	// Model: the registry's resolution with its revision; gaps explain "—".
 	b := views["PLN-2"]
-	if b == nil || b.Route == nil || b.Route.Label != "Codex astra · xhigh" || b.Route.Profile != "codex-astra-xhigh" || !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(b.Route.Revision) {
-		t.Fatalf("PLN-2 route: %#v", b)
+	leaf := views["PLN-3"]
+	if b == nil || b.Route != nil || b.Children == nil || b.Children.Total != 1 || b.Children.Uncalibrated != 1 || b.Tokens.Estimated != nil || b.Tokens.Calibration != nil {
+		t.Fatalf("PLN-2 parent must aggregate its leaf without planning its own hours: %#v", b)
 	}
-	if v := views["PLN-8"]; v == nil || v.Route == nil || v.Route.Label != "Claude opus · high" || v.Route.Revision != b.Route.Revision {
+	if leaf == nil || leaf.Route == nil || leaf.Route.Label != "Codex astra · xhigh" || leaf.Route.Profile != "codex-astra-xhigh" || !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(leaf.Route.Revision) {
+		t.Fatalf("PLN-3 leaf route: %#v", leaf)
+	}
+	if v := views["PLN-8"]; v == nil || v.Route == nil || v.Route.Label != "Claude opus · high" || v.Route.Revision != leaf.Route.Revision {
 		t.Fatalf("PLN-8 route: %#v", v)
 	}
 	for key, gap := range map[string]string{"PLN-4": "registry", "PLN-6": "area", "PLN-7": "review_gate"} {
@@ -397,8 +407,8 @@ func TestListPlanningColumns(t *testing.T) {
 		t.Fatalf("PLN-2 tokens: %#v", b.Tokens)
 	}
 	// Estimated: 2h × the default until five finished tickets exist.
-	if b.Tokens.Estimated == nil || *b.Tokens.Estimated != 2*defaultTokensPerHour || b.Tokens.Calibration == nil || b.Tokens.Calibration.Basis != "default" || b.Tokens.Calibration.AnyRoute {
-		t.Fatalf("PLN-2 estimate: %#v %#v", b.Tokens, b.Tokens.Calibration)
+	if leaf.Tokens.Estimated == nil || *leaf.Tokens.Estimated != 2*defaultTokensPerHour || leaf.Tokens.Calibration == nil || leaf.Tokens.Calibration.Basis != "default" || leaf.Tokens.Calibration.AnyRoute {
+		t.Fatalf("PLN-3 estimate: %#v %#v", leaf.Tokens, leaf.Tokens.Calibration)
 	}
 	if d := views["PLN-4"]; d.Tokens.Estimated == nil || *d.Tokens.Estimated != defaultTokensPerHour || !d.Tokens.Calibration.AnyRoute || d.Tokens.Spent != nil {
 		t.Fatalf("PLN-4 tokens: %#v", d.Tokens)
@@ -411,8 +421,8 @@ func TestListPlanningColumns(t *testing.T) {
 	}
 	// Estimated at list price: 10M tokens under the documented mix at gpt-6-astra
 	// prices; Codex last billed pay-per-use, so paid follows list.
-	if c.ListEstimated == nil || *c.ListEstimated != "27.000000" || c.PaidEstimated == nil || *c.PaidEstimated != "27.000000" {
-		t.Fatalf("PLN-2 cost estimate: %#v %v %v", c, c.ListEstimated, c.PaidEstimated)
+	if c.ListEstimated != nil || c.PaidEstimated != nil || leaf.Cost == nil || leaf.Cost.ListEstimated == nil || *leaf.Cost.ListEstimated != "27.000000" || leaf.Cost.PaidEstimated == nil || *leaf.Cost.PaidEstimated != "27.000000" {
+		t.Fatalf("only the leaf has a default cost estimate: parent %#v leaf %#v", c, leaf.Cost)
 	}
 
 	// Epic: rolls up its open and done children, not the cancelled one.
@@ -420,13 +430,13 @@ func TestListPlanningColumns(t *testing.T) {
 	if e == nil || e.Route != nil || e.Children == nil || e.Children.Total != 2 || e.Children.Estimated != 0 || e.Children.Uncalibrated != 2 {
 		t.Fatalf("PLN-1 children: %#v", e)
 	}
-	if e.Tokens.Spent == nil || *e.Tokens.Spent != *b.Tokens.Spent || e.Tokens.Sessions != 3 {
+	if e.Tokens.Spent == nil || *e.Tokens.Spent != *b.Tokens.Spent+7_000_000 || e.Tokens.Sessions != 4 {
 		t.Fatalf("PLN-1 spent: %#v", e.Tokens)
 	}
 	if e.Tokens.Estimated != nil || e.Tokens.Calibration != nil {
 		t.Fatalf("PLN-1 estimate: %#v", e.Tokens)
 	}
-	if e.Cost == nil || e.Cost.ListEstimated != nil || !e.Cost.ListUnpriced || *e.Cost.ListSpent != "4.480000" {
+	if e.Cost == nil || e.Cost.ListEstimated != nil || !e.Cost.ListUnpriced || e.Cost.ListSpent == nil || *e.Cost.ListSpent != "74.480000" || e.Cost.PaidSpent == nil || *e.Cost.PaidSpent != "73.800000" {
 		t.Fatalf("PLN-1 cost: %#v", e.Cost)
 	}
 
@@ -440,15 +450,16 @@ func TestListPlanningColumns(t *testing.T) {
 	// Model sorting always uses the shown model's full identity and version,
 	// with unknowns last; it must match actual and frozen planned cells.
 	keys := func(who tenant.Principal, sort string) []string {
-		return listKeys(t, who, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+sort)
+		return listKeys(t, who, "/api/nodes?within="+w.root.ID+"&kind=work,epic&sort="+sort)
 	}
 	for _, order := range []string{"model", "-model", "model,-tokens"} {
-		items := listPage(t, w.admin, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+order).Items
+		items := listPage(t, w.admin, "/api/nodes?within="+w.root.ID+"&kind=work,epic&sort="+order).Items
 		previous := ""
 		empty := false
 		for _, item := range items {
 			name := ""
-			if item.KindSlug != "epic" && item.Planning != nil {
+			// Parents also display historical models from their descendants.
+			if item.Planning != nil {
 				plan := item.Planning
 				if len(plan.Models) > 0 {
 					name = plan.Models[0].FullName()
@@ -484,24 +495,22 @@ func TestListPlanningColumns(t *testing.T) {
 	}
 
 	// Measured values lead; uncalibrated estimates and absent values tie by ID.
-	known := []nodeJSON{w.nodes["PLN-1"], w.nodes["PLN-2"]}
 	missing := []nodeJSON{w.nodes["PLN-4"], w.nodes["PLN-6"], w.nodes["PLN-7"], w.nodes["PLN-8"], w.nodes["PLN-9"]}
-	slices.SortFunc(known, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(missing, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
-	wantTokens := []string{"PLN-5", known[0].Key, known[1].Key}
+	wantTokens := []string{"PLN-1", "PLN-5", "PLN-2"}
 	for _, n := range missing {
 		wantTokens = append(wantTokens, n.Key)
 	}
 	if got := keys(w.admin, "-tokens"); !slices.Equal(got, wantTokens) {
 		t.Fatalf("tokens sort: %v want %v", got, wantTokens)
 	}
-	if got := keys(w.admin, "-paid"); got[0] != "PLN-5" || slices.Index(got, "PLN-9") < 3 {
+	if got := keys(w.admin, "-paid"); got[0] != "PLN-1" || got[1] != "PLN-5" || got[2] != "PLN-2" || slices.Index(got, "PLN-9") < 3 {
 		t.Fatalf("paid sort: %v", got)
 	}
 	// Without harness.read every cost ties, leaving only the node ID.
-	hidden := listPage(t, w.viewer, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort=paid").Items
+	hidden := listPage(t, w.viewer, "/api/nodes?within="+w.root.ID+"&kind=work,epic&sort=paid").Items
 	for _, sort := range []string{"paid", "-paid", "list_cost", "-list_cost"} {
-		got := listPage(t, w.viewer, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+sort).Items
+		got := listPage(t, w.viewer, "/api/nodes?within="+w.root.ID+"&kind=work,epic&sort="+sort).Items
 		if !slices.IsSortedFunc(got, func(a, b listItem) int { return strings.Compare(a.ID, b.ID) }) || len(got) != len(hidden) {
 			t.Fatalf("hidden cost sort %s must tie by ID: %+v", sort, got)
 		}
@@ -516,18 +525,18 @@ func TestListPlanningColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	moved := planningOf(t, w.admin, path)
-	if v := moved["PLN-8"]; v.Route == nil || v.Route.Label != "Codex sol · xhigh" || v.Route.Revision == b.Route.Revision || moved["PLN-2"].Route.Revision != v.Route.Revision {
+	if v := moved["PLN-8"]; v.Route == nil || v.Route.Label != "Codex sol · xhigh" || v.Route.Revision == leaf.Route.Revision || moved["PLN-3"].Route.Revision != v.Route.Revision || moved["PLN-2"].Route != nil {
 		t.Fatalf("registry change: %#v", v.Route)
 	}
 
 	// Five finished Codex astra tickets calibrate the route: 2M, 4M, 6M, 8M and
 	// 10M tokens an hour, median 6M. Their list price per hour is the median too.
 	for i := range 5 {
-		fin := w.node(t, "FIN-"+strconv.Itoa(i+1), "ticket", w.root.ID, "done", nil)
+		fin := w.node(t, "FIN-"+strconv.Itoa(i+1), "work", w.root.ID, "done", nil)
 		tokens := int64(2_000_000 * (i + 1))
 		w.session(t, fin.ID, "codex", "gpt-6-astra", "", "gpt-6-astra", 60, tokens, 0, 0, "api", "")
 	}
-	calibrated := planningOf(t, w.admin, path)["PLN-2"]
+	calibrated := planningOf(t, w.admin, path)["PLN-3"]
 	cal := calibrated.Tokens.Calibration
 	if cal == nil || cal.Basis != "median" || cal.Tickets != 5 || math.Abs(float64(cal.TokensPerHour)-6_000_000) > 2_000 {
 		t.Fatalf("median calibration: %#v", cal)

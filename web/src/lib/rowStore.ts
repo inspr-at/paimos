@@ -2,7 +2,7 @@
 // The tab's causal row store (AEON-326). One entry per node, shared by the
 // ticket list and the ticket panel (wherever the panel opens), and fed by
 // every read and every write: list pages, refetches, panel reads, save
-// answers and live events. Because every path goes through here, four rules
+// answers and live events. Because every path goes through here, five rules
 // hold by construction:
 //
 // 1. Revisions only move forward. A copy is kept only when its revision is at
@@ -37,6 +37,7 @@ export interface RowChange { id: string; change: 'created' | 'updated' | 'delete
 export type News = 'older' | 'known' | 'newer'
 
 interface Tomb { revision: string | null; at: number }
+interface StatusSnapshot { value: ListItem['state']; position?: number; sent: number }
 interface Entry {
   // The display object views show (reactive); null until a copy arrived.
   row: ListItem | null
@@ -70,6 +71,9 @@ interface Entry {
   // Provenance is shared by list/GET reads and changes without a node write.
   recurrenceRead?: { position?: number; sent: number; landed: number; value?: NodeRecurrence }
   projectionRead?: { position?: number; sent: number; landed: number }
+  // Status and its ordering fence are one snapshot, installed together with
+  // latest. Positioned lists use server order; across sources use request order.
+  status?: StatusSnapshot
   projectionChangedAt?: number
   projectionFloor?: number
   // Keep the most recently delivered hint separately from the monotonic floor:
@@ -253,35 +257,47 @@ export class RowStore {
     // A newer hint need not prevent progress on the one this read already covers.
     const floor = projectionFloor ?? entry.projectionFloor
     const predatesHint = !rewound && sent < (entry.projectionChangedAt ?? 0) && !(position !== undefined && floor !== undefined && position >= floor)
-    if (full && order === 0 && (olderProjection || predatesHint)) return this.visible(entry) ? entry.row : null
+    // Derived state can change at the same edit revision. Node reads have no
+    // projection position, so judge them by request order against every read
+    // that confirmed latest; they must also cover the newest derived hint.
+    const olderRead = full ? olderProjection : sent < entry.readAt
+    if (order === 0 && (olderRead || predatesHint)) return this.visible(entry) ? entry.row : null
     // Older than a revision the store already knows (an event, a write): dropped.
     // The first copy of a node is kept even so; the view reads it again.
     const behind = !!entry.latest && compareRevision(revision, entry.revision) < 0
     if (!early && order >= 0 && !behind) {
-      // At least as new as the newest copy: this read confirms it.
-      const unversioned = sent >= entry.touched && entry.readAt < entry.touched
+      // Acceptance is independent of whether the cache already has list
+      // projections. In particular every accepted node payload is merged over
+      // latest before it can confirm freshness or fence a late list's status.
+      const incoming = make()
+      const previous = entry.latest
+      const staleCount = full && sent < entry.countChangedAt && !!previous
+      const heldStatus = entry.status
+      const status = order === 0 && heldStatus && sent < heldStatus.sent
+        && (position === undefined || heldStatus.position === undefined)
+        ? heldStatus : { value: incoming.state, position, sent }
+      const copy = staleCount || status === heldStatus ? frozen({
+        ...incoming,
+        ...(staleCount ? { children_count: previous!.children_count } : {}),
+        state: status.value,
+      }) : incoming
+      if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
+      entry.latest = copy
+      // These watermarks describe the copy above. A list supplying projections
+      // with older status cannot consume the accepted node's status fence.
+      entry.status = status
       entry.readAt = Math.max(entry.readAt, sent)
-      // The same revision from a list page refreshes the projections a node
-      // read does not carry; older copies are dropped.
-      if (order > 0 || full || !entry.full || unversioned) {
-        const incoming = make()
-        const staleCount = full && sent < entry.countChangedAt && !!entry.latest
-        const copy = staleCount ? frozen({ ...incoming, children_count: entry.latest!.children_count }) : incoming
-        const previous = entry.latest
-        if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
-        entry.latest = copy
-        if (full) entry.projectionRead = { position, sent, landed: ++this.clock }
-        entry.full = full || (order === 0 && entry.full)
-        // A list page replaces the count, so earlier local child deltas no
-        // longer describe its baseline. Node reads only carry the previous
-        // projection and must keep the dedupe shared by panel and Outline.
-        if (full && !staleCount) entry.children.clear()
-        if (copy.assignee?.name && copy.assignee.name !== 'Someone') this.names.set(copy.assignee.id, copy.assignee.name)
-        if (full && copy.parent?.kind_slug && copy.parent.key) this.learnParent(copy.parent)
-        // The same revision with the list projections (the parent chip a node
-        // read could only guess): the display object showing it takes them now.
-        if (order === 0 && entry.row && entry.shown === previous && entry.pins === 0) this.assign(entry, copy)
-      }
+      if (full) entry.projectionRead = { position, sent, landed: ++this.clock }
+      entry.full = full || (order === 0 && entry.full)
+      // A list page replaces the count, so earlier local child deltas no
+      // longer describe its baseline. Node reads only carry the previous
+      // projection and must keep the dedupe shared by panel and Outline.
+      if (full && !staleCount) entry.children.clear()
+      if (copy.assignee?.name && copy.assignee.name !== 'Someone') this.names.set(copy.assignee.id, copy.assignee.name)
+      if (full && copy.parent?.kind_slug && copy.parent.key) this.learnParent(copy.parent)
+      // Same-revision refreshes update the displayed copy without an editor
+      // conflict; pinned editors adopt it when they end or explicitly rebase.
+      if (order === 0 && entry.row && entry.shown === previous && entry.pins === 0) this.assign(entry, copy)
     }
     if (!entry.row && entry.latest && this.showable(entry)) {
       entry.row = reactive(clone(entry.latest)) as ListItem
@@ -327,7 +343,10 @@ export class RowStore {
     const entry = this.entry(change.id)
     const order = change.revision && entry.revision ? compareRevision(change.revision, entry.revision) : 1
     if (order < 0) return 'older'
-    if (change.type === 'status_autopilot.derived' || change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
+    // Import reparenting, like derivation, can retain updated_at. Its hint
+    // must invalidate reads and record causal news even at that revision.
+    const sameRevisionChange = change.type === 'status_autopilot.derived' || change.type === 'import.parent_changed'
+    if (sameRevisionChange || change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
       entry.projectionChangedAt = ++this.clock
       entry.projectionHintPosition = change.eventId && change.eventId > 0 ? change.eventId : undefined
       if (change.eventId && change.eventId > 0) entry.projectionFloor = Math.max(entry.projectionFloor ?? 0, change.eventId)
@@ -337,7 +356,7 @@ export class RowStore {
       this.bury(entry, change.revision, this.clock + 1)
       return known ? 'known' : 'newer'
     }
-    if (order === 0 && !entry.tomb && change.type !== 'status_autopilot.derived') return 'known'
+    if (order === 0 && !entry.tomb && !sameRevisionChange) return 'known'
     if (entry.tomb) {
       // Only a restore ends a deletion: a creation (a restore reads as one),
       // or a revision newer than the tombstone's. One without revision (a
@@ -472,13 +491,14 @@ export class RowStore {
 
   // Aggregates depend on descendants that may not be loaded. Conservatively
   // invalidate visible parents in the affected project, including former leaves
-  // and both sides of a move; never guess an incomplete ancestry chain.
-  aggregateParents(projectIds: Set<string>, includeLeaves = false): ListItem[] {
+  // and both sides of a move; null means the source project is unknown.
+  // Never guess an incomplete ancestry chain.
+  aggregateParents(projectIds: Set<string> | null, includeLeaves = false): ListItem[] {
     const kept = new Set<string>()
     for (const ids of this.holders) for (const id of ids()) kept.add(id)
     return [...kept].flatMap(id => {
       const entry = this.entries.get(id), row = entry?.row
-      return row && !entry?.tomb && row.project && projectIds.has(row.project.id)
+      return row && !entry?.tomb && row.project && (projectIds === null || projectIds.has(row.project.id))
         && (row.estimate?.is_parent || row.children_count > 0 || includeLeaves && ['work', 'ticket', 'task', 'epic'].includes(row.kind_slug)) ? [row] : []
     })
   }

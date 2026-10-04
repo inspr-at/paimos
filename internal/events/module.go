@@ -375,9 +375,11 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 	var confirm struct {
 		Cause int64 `json:"confirmed_cause_event_id"`
 	}
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(10 * time.Second))
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	if err := httpapi.BufferRequestBody(w, r, 1024); err != nil {
+		failure(w, ErrConflict)
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	decodeErr := decoder.Decode(&confirm)
 	if decodeErr != nil && decodeErr != io.EOF {
@@ -391,7 +393,6 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_ = controller.SetReadDeadline(time.Time{})
 	var result Event
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		e, err := scanEvent(tx.QueryRow(r.Context(), `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
@@ -399,13 +400,15 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		// Event snapshots are immutable. Identify causal Undo first, then take
-		// its tree/access fence before the per-event lock in both flag states.
-		// Otherwise activation could invert their order against flagged Undo.
-		if e.Type == derivedStatusEvent {
-			if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
-				return err
-			}
+		// Match handlers that enter pairing before tree/access, including
+		// Knowledge Undo. Take the whole prefix before the per-event lock in
+		// both flag states, so ordinary writes and activation cannot invert it.
+		// Use the shared SQL key here: agentpairing itself depends on events.
+		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`); err != nil {
+			return err
+		}
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
 			return err

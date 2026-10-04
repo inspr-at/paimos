@@ -18,8 +18,8 @@ import (
 func TestBriefingReadsPublishedAndSkippedSnapshotsUnderProjectVisibility(t *testing.T) {
 	f := setup(t)
 	human := "Touch ID"
-	delivered := f.add("AUT-2", "ticket", "done", 15, nil)
-	skipped := f.add("AUT-3", "ticket", "done", 15, &human)
+	delivered := f.add("AUT-2", "work", "done", 15, nil)
+	skipped := f.add("AUT-3", "work", "done", 15, &human)
 	release := f.release([]string{delivered, skipped})
 	foreignProject := f.add("AUT-20", "project", "open", 1, nil)
 	start := time.Now().UTC().Add(-time.Second)
@@ -98,11 +98,11 @@ func TestBriefingReadsPublishedAndSkippedSnapshotsUnderProjectVisibility(t *test
 
 func TestProgressUsesPersistedWorkEvidence(t *testing.T) {
 	f := setup(t)
-	comment := f.add("AUT-2", "ticket", " In--Progress ", 10, nil)
-	branch := f.add("AUT-3", "ticket", "inprogress", 10, nil)
-	staleBranch := f.add("AUT-4", "ticket", "inprogress", 10, nil)
-	pr := f.add("AUT-5", "ticket", "inprogress", 10, nil)
-	stalePR := f.add("AUT-6", "ticket", "inprogress", 10, nil)
+	comment := f.add("AUT-2", "work", " In--Progress ", 10, nil)
+	branch := f.add("AUT-3", "work", "inprogress", 10, nil)
+	staleBranch := f.add("AUT-4", "work", "inprogress", 10, nil)
+	pr := f.add("AUT-5", "work", "inprogress", 10, nil)
+	stalePR := f.add("AUT-6", "work", "inprogress", 10, nil)
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Recent title edit',updated_at=clock_timestamp() WHERE id=$1`, comment); err != nil {
 			return err
@@ -165,7 +165,7 @@ func TestPausedSessionsOccupyTicketUntilResumedOrArchived(t *testing.T) {
 		{"cancelled", "paused", false, false},
 		{"paused", "process_exited", false, false},
 	} {
-		id := f.add(fmt.Sprintf("AUT-%d", 800+i), "ticket", "in_progress", 20, nil)
+		id := f.add(fmt.Sprintf("AUT-%d", 800+i), "work", "in_progress", 20, nil)
 		at := f.now.Add(-10 * 24 * time.Hour)
 		f.tx(func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,created_at,heartbeat_at,stopped_at,stop_reason,pause_record,archived_at,recovery_process_state,recovery_request_id,recovery_request_digest,recovery_actor_id,recovery_reason)
@@ -206,7 +206,7 @@ func TestHumanChecksPermitNonDeliveryDailyRules(t *testing.T) {
 		state, flag string
 		days        int
 	}{{"new", "triage_list", 7}, {"backlog", "cancel_suggested", 90}, {"blocked", "blocked_reminder", 14}, {"in_progress", "", 3}, {"done", "missed_release", 14}} {
-		id := f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", tc.state, tc.days, &human)
+		id := f.add(fmt.Sprintf("AUT-%d", i+2), "work", tc.state, tc.days, &human)
 		f.run(f.now.Add(time.Duration(i) * 24 * time.Hour))
 		n := f.state(id)
 		if tc.flag == "" {
@@ -227,7 +227,7 @@ func TestProjectOffRunsNoRulesButWorkspaceOffListsSuggestions(t *testing.T) {
 	f.call(f.p, "PUT", "/api/projects/"+f.project+"/status-autopilot", `{"mode":"off","expected_revision":0}`, 200)
 	ids := []string{}
 	for i, state := range []string{"new", "backlog", "blocked", "in_progress", "done", "delivered"} {
-		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", state, 100, nil))
+		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "work", state, 100, nil))
 	}
 	release := f.release([]string{ids[4]})
 	f.tx(func(tx pgx.Tx) error { return PublishTx(t.Context(), tx, f.p.TenantID, release) })
@@ -256,11 +256,11 @@ func TestProjectOffRunsNoRulesButWorkspaceOffListsSuggestions(t *testing.T) {
 func TestDailyBatchCommitsAndResumesAfterFailure(t *testing.T) {
 	f := setup(t)
 	for i := range batchSize + 3 {
-		f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", "in_progress", 10, nil)
+		f.add(fmt.Sprintf("AUT-%d", i+2), "work", "in_progress", 10, nil)
 	}
 	var failID string
 	f.tx(func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' ORDER BY n.id OFFSET $1 LIMIT 1`, batchSize).Scan(&failID); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='work' ORDER BY n.id OFFSET $1 LIMIT 1`, batchSize).Scan(&failID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_second_batch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='`+failID+`'::uuid THEN RAISE EXCEPTION 'test interruption'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_second_batch BEFORE UPDATE ON nodes FOR EACH ROW EXECUTE FUNCTION reject_second_batch()`)
@@ -323,7 +323,7 @@ func TestDailyBatchCommitsAndResumesAfterFailure(t *testing.T) {
 
 func TestMissingReleaseDoesNotPoisonDailyCursor(t *testing.T) {
 	f := setup(t)
-	id := f.add("AUT-2", "ticket", "done", 1, nil)
+	id := f.add("AUT-2", "work", "done", 1, nil)
 	release := f.release([]string{id})
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, release)
@@ -375,7 +375,7 @@ func TestPublishIsBoundedAndIsolatesUnreadableTicket(t *testing.T) {
 	f := setup(t)
 	ids := []string{}
 	for i := range batchSize + 3 {
-		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", "done", 1, nil))
+		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "work", "done", 1, nil))
 	}
 	release := f.release(ids)
 	var bad string
@@ -425,13 +425,13 @@ func TestCurrentFlagsOutliveRecentChangesAndDisappearOnResolution(t *testing.T) 
 	f := setup(t)
 	ids := []string{}
 	for i := range 53 {
-		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", "new", 10, nil))
+		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "work", "new", 10, nil))
 	}
 	for i, tc := range []struct {
 		state string
 		days  int
 	}{{"backlog", 100}, {"blocked", 20}, {"done", 20}} {
-		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+100), "ticket", tc.state, tc.days, nil))
+		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+100), "work", tc.state, tc.days, nil))
 	}
 	f.run(f.now)
 	f.tx(func(tx pgx.Tx) error {

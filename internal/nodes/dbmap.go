@@ -44,6 +44,9 @@ func mapDB(err error) *httpError {
 		}
 		return badRequest("related row does not exist")
 	case "23514":
+		if pgErr.ConstraintName == "work_leaf_required" || pgErr.ConstraintName == "busy_work_leaf" || pgErr.ConstraintName == "work_handover_pending" {
+			return conflictCoded(pgErr.Message, pgErr.ConstraintName)
+		}
 		return badRequest("invalid value")
 	case "22P02":
 		return badRequest("bad request")

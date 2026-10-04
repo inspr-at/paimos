@@ -57,6 +57,11 @@ var RoutePermissions = map[string]string{
 	"POST /api/themes/{themeId}/duplicate": "profile.write|profile.portal_write|settings.manage",
 	"PUT /api/me/theme":                    "profile.write|profile.portal_write",
 
+	"GET /api/nodes/{nodeId}/work-lifecycle":                      "nodes.read",
+	"POST /api/nodes/{nodeId}/work-lifecycle":                     "nodes.write",
+	"POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue": "nodes.write",
+	"DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}":        "nodes.write",
+
 	"POST /api/agent-keys/{id}/trim-proposals":           "approvals.request",
 	"GET /api/key-trim-proposals":                        "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",
@@ -575,6 +580,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain":                         "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat":                     "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop":                          "harness.worker",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit":                  "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield":                         "harness.worker",
 	"POST /api/projects/{projectId}/intake/drafts":                                              "intake.write",
 	"POST /api/projects/{projectId}/intake/drafts/{draftId}/replace":                            "intake.write",

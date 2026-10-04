@@ -9,7 +9,7 @@ import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
-  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
+  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean; canWorkActions?: boolean
   canRepeat?: boolean
   recurrenceLabel?: string
   canEditRecurrence?: boolean
@@ -20,7 +20,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []; convert: []
-  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []
+  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []; workActions: []
   repeat: []; editRecurrence: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -48,6 +48,7 @@ function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value 
 function pickConvert() { moreAnchor.value = null; emit('convert') }
 function pickView() { moreAnchor.value = null; if (props.mode === 'panel') emit('expand'); else emit('collapse') }
 function pickNewTab() { moreAnchor.value = null; emit('newTab') }
+function pickWorkActions() { moreAnchor.value = null; emit('workActions') }
 const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
 const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
@@ -116,6 +117,7 @@ void props
         <button v-if="recurrenceLabel" type="button" role="menuitem" class="menu-item" :disabled="!canEditRecurrence" :data-tip="!canEditRecurrence ? 'Needs the Manage recurring work permission' : undefined" @click="closeMore(false); emit('editRecurrence')"><AppIcon name="edit" :size="14" /><span>Edit {{ recurrenceLabel }}…</span></button>
         <button type="button" role="menuitem" class="menu-item" @click="pickView"><AppIcon :name="mode === 'panel' ? 'expand' : 'collapse'" :size="14" />{{ mode === 'panel' ? 'Open as full page' : 'Show beside the list' }}</button>
         <button type="button" role="menuitem" class="menu-item" @click="pickNewTab"><AppIcon name="external" :size="14" />Open in a new tab</button>
+        <button v-if="canWorkActions" type="button" role="menuitem" class="menu-item" @click="pickWorkActions"><AppIcon name="task" :size="14" />Work actions</button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />

@@ -279,11 +279,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		fields, err := validateFields(schema, in.Fields)
-		if err == nil && (kind.Slug == "ticket" || kind.Slug == "task") {
+		if err == nil && (kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task") {
 			fields, err = humanCheckFields(p, fields, nil, nil, humanCheck, true)
 		}
-		if humanCheck != nil && kind.Slug != "ticket" && kind.Slug != "task" {
-			return badRequest("human_check is for tickets and tasks")
+		if humanCheck != nil && kind.Slug != "work" && kind.Slug != "ticket" && kind.Slug != "task" {
+			return badRequest("human_check is for work items, tickets and tasks")
 		}
 		if err == nil {
 			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
@@ -353,10 +353,10 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node = loaded
-		if kind.Slug == "ticket" {
+		if kind.Slug == "work" || kind.Slug == "ticket" {
 			node.Warnings = ticketbenefits.Issues(fields)
 		}
-		if p.Kind == tenant.Agent && (kind.Slug == "ticket" || kind.Slug == "task") {
+		if p.Kind == tenant.Agent && (kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task") {
 			var f map[string]any
 			_ = json.Unmarshal(fields, &f)
 			if f["estimate_hours"] == nil {
@@ -527,8 +527,8 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		nextCheck := current.HumanCheck
 		rawCheck, checkChanged := raw["human_check"]
 		if checkChanged {
-			if kind.Slug != "ticket" && kind.Slug != "task" {
-				return badRequest("human_check is for tickets and tasks")
+			if kind.Slug != "work" && kind.Slug != "ticket" && kind.Slug != "task" {
+				return badRequest("human_check is for work items, tickets and tasks")
 			}
 			nextCheck, err = parseHumanCheck(rawCheck)
 			if err != nil {
@@ -536,7 +536,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			sets = append(sets, "human_check = "+add(nextCheck))
 		}
-		if kind.Slug == "ticket" || kind.Slug == "task" {
+		if kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task" {
 			nextFields, err = humanCheckFields(p, nextFields, current.Fields, current.HumanCheck, nextCheck, checkChanged)
 			if err != nil {
 				return err

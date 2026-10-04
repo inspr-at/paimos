@@ -416,8 +416,12 @@ live-row limit. If an already enabled tenant exceeds it, entry leaves derivation
 inactive and restores caller visibility, allowing reads and feature disablement
 while the work-write guard fails closed. Causal Undo independently fences access
 changes when the flag is disabled, and reads confirmation before transaction
-entry. Its cause reference stays in private metadata and is exposed only through
-the visibility-checked event envelope; legacy snapshots are redacted on read.
+entry. Ordinary Undo also takes its tree fence before its event fence across
+activation. Cause snapshots are bounded on expanded JSON size in Postgres before
+transfer. Kind conversion away from the last work child emits retention evidence
+with the conversion cause. Cause references stay in private metadata and are
+exposed only through the visibility-checked event envelope; legacy snapshots
+are redacted on read.
 
 The migration does not backfill statuses or enable flags. Initial reconciliation
 is caused by child changes or state-category configuration changes. Before any
@@ -482,3 +486,7 @@ checks do not claim that validation. Evidence is retained in
 `tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
 `r123-*` logs. No feature change, origin push, deployment, migration renumbering,
 ticket status change or model review ran.
+
+Migration 1230 also admits `status_autopilot.undone` to project-visible events,
+under the same target and referenced-node visibility checks. This lets another
+person's leaf Undo refresh aggregates when the parent status is unchanged.

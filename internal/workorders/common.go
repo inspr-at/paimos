@@ -3,6 +3,7 @@
 package workorders
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -82,9 +84,20 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 				return
 			}
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		// Finish network reads before InTenant can acquire admission, tree or
+		// tenant locks. Handlers still decode and authorize in the transaction,
+		// but their body is now bounded memory, never a stalled client socket.
+		if err := BufferBody(w, r); err != nil {
+			WriteError(w, err)
+			return
+		}
 		var result any
 		err := db.InTenant(r.Context(), pool, p.TenantID, func(tx pgx.Tx) error {
+			if workBindingMutation(r) {
+				if err := db.LockWorkTreeTx(r.Context(), tx); err != nil {
+					return err
+				}
+			}
 			if err := authorizeKey(r, tx, p, scope); err != nil {
 				return err
 			}
@@ -115,6 +128,54 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		}
 		httpapi.WriteJSON(w, status, result)
 	}
+}
+
+// BufferBody reads at most 1 MiB under a ten-second connection deadline before
+// transaction admission. Failed reads retain the deadline for net/http's drain;
+// successful reads replace the body with memory and clear the deadline.
+func BufferBody(w http.ResponseWriter, r *http.Request) error {
+	if r.Body == nil || r.Body == http.NoBody {
+		r.Body = http.NoBody
+		return nil
+	}
+	controller := http.NewResponseController(w)
+	// net/http supports this through the production middleware's Unwrap.
+	// In-memory response recorders used by handler tests have no connection.
+	if err := controller.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		// Keep the deadline on failed reads so net/http cannot drain a stalled
+		// body indefinitely after the handler returns.
+		var timeout interface{ Timeout() bool }
+		if errors.As(err, &timeout) && timeout.Timeout() {
+			return Fail(http.StatusRequestTimeout, "request body read timed out")
+		}
+		return Fail(http.StatusBadRequest, "invalid JSON")
+	}
+	_ = r.Body.Close()
+	_ = controller.SetReadDeadline(time.Time{})
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return nil
+}
+
+// Admission/binding and generation recovery take the tree fence before any
+// resource rows. A heartbeat can revive a generation, and resume can register
+// its successor; both must use this protocol with the status rollout disabled.
+func workBindingMutation(r *http.Request) bool {
+	switch r.Pattern {
+	case "POST /api/work-orders", "PATCH /api/work-orders/{workOrderId}",
+		"POST /api/work-orders/{workOrderId}/runs", "POST /api/runs/{runId}/claim",
+		"POST /api/projects/{projectId}/harness-sessions",
+		"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit",
+		"PUT /api/nodes/{nodeId}/live-eta",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/resume":
+		return true
+	}
+	return false
 }
 
 func authorizeKey(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string) error {
@@ -175,6 +236,10 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
+		if pg.ConstraintName == "work_leaf_required" || pg.ConstraintName == "busy_work_leaf" || pg.ConstraintName == "work_handover_pending" {
+			httpapi.WriteJSON(w, 409, map[string]string{"error": pg.Message, "code": pg.ConstraintName})
+			return
+		}
 		switch pg.Code {
 		case "23503", "23514", "22P02", "22003", "P0001":
 			httpapi.WriteError(w, 400, "invalid value or related resource")

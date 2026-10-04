@@ -161,3 +161,71 @@ LANGUAGE sql STABLE AS $$
  SELECT a.eta_ready_at,a.eta_live_at,a.progress_pct,a.ready_reported_at,a.live_reported_at,
   a.ready_by,a.live_by,a.ready_stale,a.live_stale FROM aeon_work_aggregates(ARRAY[target]) a;
 $$;
+
+-- Current work members retain the existing frozen public-note whitelist.
+-- Existing snapshots stay immutable; only future captures use the work kind.
+CREATE OR REPLACE FUNCTION aeon_release_note_snapshot(p_project uuid, p_release uuid) RETURNS jsonb
+LANGUAGE sql STABLE AS $$
+    SELECT jsonb_build_object(
+        'schema', 'aeon.release-note-snapshot.v1',
+        'tenant_id', r.tenant_id,
+        'project_node_id', r.project_node_id,
+        'release_node_id', r.release_node_id,
+        'version', coalesce(r.version, ''),
+        'version_scheme', coalesce(r.version_scheme, ''),
+        'release_revision', r.revision,
+        'captured_at', statement_timestamp(),
+        'membership_source', 'journey_tickets.release_node_id',
+        'field_source', 'nodes.fields',
+        'frozen', false,
+        'tickets', coalesce((SELECT jsonb_agg(jsonb_build_object(
+            'id', t.ticket_node_id,
+            'key', coalesce(n.key, ''),
+            'position', t.walker_position,
+            'group', aeon_release_note_group(n.fields),
+            'updated_at', n.updated_at,
+            'fields', CASE
+                WHEN n.id IS NOT NULL AND n.deleted_at IS NULL AND k.slug IN ('work','ticket') THEN (
+                    SELECT coalesce(jsonb_object_agg(f.key, f.value), '{}'::jsonb)
+                    FROM jsonb_each(n.fields) f
+                    WHERE f.key IN ('pill_en', 'pill_de', 'benefit_en', 'benefit_de', 'hide_from_release_notes'))
+                WHEN n.id IS NOT NULL THEN jsonb_build_object('hide_from_release_notes', coalesce(n.fields->'hide_from_release_notes', 'false'::jsonb))
+                ELSE NULL END,
+            'unavailable', CASE
+                WHEN n.id IS NULL THEN 'Member is unavailable.'
+                WHEN n.deleted_at IS NOT NULL THEN 'Member was deleted before capture.'
+                WHEN k.slug IS DISTINCT FROM 'ticket' AND k.slug IS DISTINCT FROM 'work' THEN 'Member is not a ticket.'
+                ELSE '' END)
+            ORDER BY t.walker_position, t.ticket_node_id)
+            FROM journey_tickets t
+            LEFT JOIN nodes n ON n.tenant_id = t.tenant_id AND n.id = t.ticket_node_id AND n.project_id = t.project_node_id
+            LEFT JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
+            WHERE t.tenant_id = r.tenant_id AND t.project_node_id = r.project_node_id AND t.release_node_id = r.release_node_id), '[]'::jsonb))
+    FROM journey_releases r
+    JOIN nodes rn ON rn.tenant_id = r.tenant_id AND rn.id = r.release_node_id AND rn.deleted_at IS NULL
+    JOIN nodes pn ON pn.tenant_id = r.tenant_id AND pn.id = r.project_node_id AND pn.deleted_at IS NULL
+    WHERE r.tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid
+      AND r.project_node_id = p_project
+      AND r.release_node_id = p_release;
+$$;
+
+-- Leaf Undo changes aggregate projections even when parent status is unchanged.
+-- Admit only this public fact, retaining target visibility and every node-ref
+-- check. Unknown automation domains and hidden referenced nodes remain private.
+ALTER POLICY events_project_visibility ON events
+    USING ((SELECT aeon_visible_all())
+        OR (CASE
+                WHEN node_id IS NULL THEN
+                    (SELECT aeon_visibility_system())
+                    OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[])
+                ELSE EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id = events.tenant_id AND n.id = events.node_id)
+                    AND (split_part(type, '.', 1) IN ('node', 'nodes', 'comment', 'comments', 'attachment',
+                            'attachments', 'relation', 'relations', 'import', 'journey', 'intake', 'requirement',
+                            'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
+                            'kind', 'kinds', 'profile')
+                         OR type IN ('status_autopilot.changed', 'status_autopilot.undone', 'status_autopilot.skipped', 'status_autopilot.derived', 'status_autopilot.retained', 'status_autopilot.causal_undo')
+                         OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))
+            END
+            AND (cardinality(node_refs) = 0
+                 OR NOT EXISTS (SELECT 1 FROM unnest(node_refs) AS ref(id)
+                                WHERE ref.id NOT IN (SELECT n.id FROM nodes n)))));

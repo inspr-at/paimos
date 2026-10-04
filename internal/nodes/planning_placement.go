@@ -47,14 +47,17 @@ func placementKeySQL(alias string) string {
 	return `concat_ws('|',` + alias + `.project,` + alias + `.person,coalesce(nullif(` + alias + `.area,''),'other'),` + alias + `.bucket,` + alias + `.role,` + alias + `.residency)`
 }
 
-// Collect distinct placements from the same filtered set used by the final
-// list statement, including an epic's priced children. Never build a view for
+// Collect distinct placements for displayed work rows and their eligible
+// priced descendant leaves. Closed rows keep their own route even though they
+// do not contribute to ancestors. Never build a view for
 // every match; cap resolver work before reading profiles or calibrations.
 func filteredPlanPlacements(ctx context.Context, tx pgx.Tx, q listQuery) ([]planRow, error) {
 	prefix, args := listFilterSQL(q, false)
 	args = append(args, planningViewer(ctx, tx))
 	viewer := fmt.Sprintf("$%d", len(args))
 	sql := prefix + `, plan_targets AS (
+ SELECT id FROM filtered WHERE kind_slug IN ('work','ticket','task','epic')
+ UNION
  SELECT DISTINCT id FROM aeon_work_scope(ARRAY(SELECT id FROM filtered WHERE kind_slug IN ('work','ticket','task','epic')))
  WHERE is_leaf AND bucket NOT IN ('cancelled','archived')
  ) SELECT DISTINCT ` + planPlacementColumns(viewer) + `

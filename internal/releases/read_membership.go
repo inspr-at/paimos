@@ -59,7 +59,7 @@ func (m *module) readMemberships(w http.ResponseWriter, r *http.Request) {
 		rows, err := tx.Query(r.Context(), `SELECT n.id::text,live.release_node_id::text,live.title,live.state
  FROM unnest($2::uuid[]) WITH ORDINALITY AS requested(id,ordinal)
  JOIN nodes n ON n.id=requested.id AND n.project_id=$1 AND n.deleted_at IS NULL
- JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug IN ('ticket','task')
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug IN ('work','ticket','task')
  LEFT JOIN journey_tickets t ON t.tenant_id=n.tenant_id AND t.project_node_id=n.project_id AND t.ticket_node_id=n.id
  LEFT JOIN (
    SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state,rn.title

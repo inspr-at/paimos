@@ -125,8 +125,8 @@ BEGIN
   IS DISTINCT FROM ROW(OLD.title,OLD.body,OLD.state,OLD.fields,OLD.parent_id,OLD.project_id,OLD.deleted_at,OLD.kind_id,OLD.human_check) THEN
   NEW.updated_at := greatest(clock_timestamp(),NEW.updated_at,OLD.updated_at+interval '1 microsecond');
  END IF;
- a := jsonb_build_object('id',NEW.id,'parent_id',NEW.parent_id,'project_id',NEW.project_id,'state',NEW.state,'deleted_at',NEW.deleted_at,'updated_at',NEW.updated_at);
- IF TG_OP='UPDATE' THEN b := jsonb_build_object('id',OLD.id,'parent_id',OLD.parent_id,'project_id',OLD.project_id,'state',OLD.state,'deleted_at',OLD.deleted_at,'updated_at',OLD.updated_at); END IF;
+ a := jsonb_build_object('id',NEW.id,'kind_id',NEW.kind_id,'parent_id',NEW.parent_id,'project_id',NEW.project_id,'state',NEW.state,'deleted_at',NEW.deleted_at,'updated_at',NEW.updated_at);
+ IF TG_OP='UPDATE' THEN b := jsonb_build_object('id',OLD.id,'kind_id',OLD.kind_id,'parent_id',OLD.parent_id,'project_id',OLD.project_id,'state',OLD.state,'deleted_at',OLD.deleted_at,'updated_at',OLD.updated_at); END IF;
  IF TG_OP='INSERT' OR NEW.state IS DISTINCT FROM OLD.state OR NEW.parent_id IS DISTINCT FROM OLD.parent_id
    OR NEW.project_id IS DISTINCT FROM OLD.project_id OR NEW.deleted_at IS DISTINCT FROM OLD.deleted_at OR NEW.kind_id IS DISTINCT FROM OLD.kind_id THEN
   IF NOT EXISTS(SELECT 1 FROM pg_temp.aeon_work_changes WHERE tenant_id=NEW.tenant_id AND id=NEW.id)
@@ -245,6 +245,12 @@ BEGIN
    IF EXISTS(SELECT 1 FROM pg_temp.aeon_work_changes c WHERE c.tenant_id=target_tenant
       AND c.before->>'parent_id'=r.id::text AND (c.after->>'parent_id' IS DISTINCT FROM c.before->>'parent_id'
         OR c.after->>'deleted_at' IS DISTINCT FROM c.before->>'deleted_at'
+        OR (c.after->>'kind_id' IS DISTINCT FROM c.before->>'kind_id'
+          AND c.before->>'deleted_at' IS NULL
+          AND EXISTS(SELECT 1 FROM node_kinds k WHERE k.tenant_id=target_tenant
+            AND k.id=(c.before->>'kind_id')::uuid AND k.slug='work')
+          AND NOT EXISTS(SELECT 1 FROM node_kinds k WHERE k.tenant_id=target_tenant
+            AND k.id=(c.after->>'kind_id')::uuid AND k.slug='work'))
         OR c.after->>'state' IS DISTINCT FROM c.before->>'state'))
      OR (EXISTS(SELECT 1 FROM pg_temp.aeon_work_settings WHERE tenant_id=target_tenant)
        AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.id=c.kind_id AND k.tenant_id=c.tenant_id

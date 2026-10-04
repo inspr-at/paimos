@@ -1129,6 +1129,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	}
 	from, scopeCondition := "nodes n", ""
 	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
+	kindCTE := ""
 	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
 	scopeSeed := ""
 	if q.Within != nil || (q.ParentSet && q.Descendants) {
@@ -1146,8 +1147,13 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		// Keep kind lookup dependent on the node. Stale tenant statistics on
 		// node_kinds can otherwise put kinds before scope and repeat the entire
 		// scoped node lookup and its JSON filters once per kind (AEON-248).
+		// Read the tenant's visible kind catalog once. Keep the dependent
+		// lookup so stale kind statistics cannot repeat scope traversal.
+		kindCTE = `, list_kinds AS MATERIALIZED (
+            SELECT id,slug FROM node_kinds WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+        )`
 		kindJoin = ` JOIN LATERAL (
-            SELECT slug FROM node_kinds WHERE id=n.kind_id AND tenant_id=n.tenant_id OFFSET 0
+            SELECT slug FROM list_kinds WHERE id=n.kind_id OFFSET 0
         ) k ON true `
 		if q.Within != nil {
 			scopeCondition = ` AND n.id<>$7::uuid`
@@ -1181,7 +1187,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
             ORDER BY updated_at DESC OFFSET 0
         ) c
-    )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
+    )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
             coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + `
@@ -1395,12 +1401,21 @@ func facetSQL(q listQuery) (string, []any) {
 		extra += `
     UNION ALL SELECT 'release',coalesce(nullif(` + labelSQL("release") + `,''),'none') FROM filtered f JOIN nodes n ON n.id=f.id`
 	}
-	sql := prefix + `, facet_values AS (
-    SELECT 'state' AS name,f.state AS value FROM filtered f
- WHERE f.kind_slug NOT IN ('work','ticket','task','epic') OR NOT EXISTS (
- SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
- WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=f.id AND c.deleted_at IS NULL
- AND ck.slug IN ('work','ticket','task','epic'))
+	// Read visible work-parent identities once, rather than probing child
+	// rows and their RLS for every state facet row.
+	stateParents, stateJoin, stateWhere := "", "", ""
+	if want("state") {
+		stateParents = `, state_parents AS MATERIALIZED (
+ SELECT DISTINCT c.parent_id AS id FROM nodes c
+ JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+ WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
+ AND ck.slug IN ('work','ticket','task','epic')
+ AND c.parent_id IN (SELECT id FROM filtered))`
+		stateJoin = ` LEFT JOIN state_parents sp ON sp.id=f.id`
+		stateWhere = ` WHERE f.kind_slug NOT IN ('work','ticket','task','epic') OR sp.id IS NULL`
+	}
+	sql := prefix + stateParents + `, facet_values AS (
+    SELECT 'state' AS name,f.state AS value FROM filtered f` + stateJoin + stateWhere + `
     UNION ALL SELECT 'kind',f.kind_slug FROM filtered f
     UNION ALL SELECT 'priority',f.priority FROM filtered f
     UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
@@ -1640,14 +1655,19 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,c.kind_id,s.depth+1
                 FROM subtree s JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid
                     AND c.parent_id=s.node_id AND c.deleted_at IS NULL
-            ), `+workStateCategoryCTE()+`, counted AS (
+            ), `+workStateCategoryCTE()+`, work_parents AS MATERIALIZED (
+                SELECT DISTINCT ch.parent_id AS id FROM nodes ch
+                JOIN node_kinds ck ON ck.tenant_id=ch.tenant_id AND ck.id=ch.kind_id
+                WHERE ch.tenant_id=current_setting('aeon.tenant_id')::uuid AND ch.deleted_at IS NULL
+                    AND ck.slug IN ('work','ticket','task','epic')
+                    AND ch.parent_id IN (SELECT node_id FROM subtree)
+            ), counted AS MATERIALIZED (
                 SELECT p.id,p.key,p.title,p.state,s.depth,k.slug,s.updated_at,
-                    NOT EXISTS (SELECT 1 FROM nodes ch JOIN node_kinds ck ON ck.tenant_id=ch.tenant_id AND ck.id=ch.kind_id
-                    WHERE ch.tenant_id=current_setting('aeon.tenant_id')::uuid AND ch.parent_id=s.node_id AND ch.deleted_at IS NULL
-                    AND ck.slug IN ('work','ticket','task','epic')) AS is_leaf,
+                    wp.id IS NULL AS is_leaf,
                     `+workStatusSQL("s.state")+` AS work_state,
                     `+workCountBucketSQL("s.state", "c")+` AS bucket
                 FROM projects p JOIN subtree s ON s.project_id=p.id
+                LEFT JOIN work_parents wp ON wp.id=s.node_id
                 JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
                 LEFT JOIN configured c ON c.kind_id=s.kind_id AND c.norm=`+workStateNormSQL("s.state")+`
             ), summary AS (
