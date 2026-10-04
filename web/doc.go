@@ -16,9 +16,11 @@
 // active search and the selected node. Native EventSource manages replay IDs.
 // Keep its event-name list aligned with backend writers during integration.
 // Unsaved drafts survive refreshes; observed concurrent changes block saving.
-// R1 has no conditional-write token, so the preflight version check cannot
-// prevent a write racing between the GET and PATCH. Markdown raw HTML and
-// embedded images are disabled; links use markdown-it's protocol validation.
+// Conditional node writes send the observed updated_at in If-Unmodified-Since;
+// the backend compares it under the row lock and returns HTTP 412 for a stale
+// write, including a change between the preflight GET and PATCH. Markdown raw
+// HTML and embedded images are disabled; links use markdown-it's protocol
+// validation.
 //
 // Validation: npm run typecheck, npm run build, npm run test:unit, and npm test
 // (playwright.ui.config.ts). UI tests mock R1 routes and EventSource, covering
@@ -37,10 +39,12 @@
 // All writes go to the owning backend modules, which own tenant transactions
 // and events. This package performs no database queries or server wiring.
 //
-// src/lib/agentLive.ts owns each view's SSE connection and a 30-second fallback
-// refresh. Named R2 hints, generic messages and reconnections refresh authorized
-// projections; a latest-request fence discards stale responses. Connections and
-// timers close on unmount, and user drafts survive refresh. The coordinator
+// src/lib/agents.ts owns the agent SSE connection. src/lib/streamHealth.ts checks
+// stream health at a 5-second interval and reconnects after 45-second silence
+// while visible and online, or on browser wake signals. Named R2 hints and
+// reconnections refresh authorized projections; a latest-request fence discards
+// stale responses. Connections and timers close on unmount, and user drafts
+// survive refresh. The coordinator
 // should align named hints with the final backend event writers. Polling covers
 // additional names without inventing projection data from event snapshots.
 //

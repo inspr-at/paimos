@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { brand, pageName } from '../lib/brand'
 import { fitLogo, headerBrand } from '../lib/tenantBrand'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
@@ -206,13 +206,19 @@ function fitMoon() {
   if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap - 0.1) { moonAway.value = false; returnedAt = width }
 }
 let fitFrame = 0
-function refit() { cancelAnimationFrame(fitFrame); fitFrame = requestAnimationFrame(() => { fitMoon(); fitFrame = requestAnimationFrame(fitMoon) }) }
+function refit() {
+  cancelAnimationFrame(fitFrame)
+  // Fit the updated navigation before paint. Deferring the first measurement
+  // lets a newly rendered ticket key clip while the moon still takes its room.
+  fitMoon()
+  fitFrame = requestAnimationFrame(fitMoon)
+}
 function remeasure() { heldAt = -1; refit() }
 const resized = new ResizeObserver(refit)
 const crumbsChanged = new MutationObserver(refit)
 // A web font swapping in changes the room without resizing the header.
 const fonts = 'fonts' in document ? document.fonts : undefined
-watch([() => route.fullPath, () => places.value.length, navReady], () => { heldAt = -1; void nextTick(refit) })
+watch([() => route.fullPath, () => places.value.length, navReady], () => { heldAt = -1; refit() }, { flush: 'post' })
 onMounted(() => {
   if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
   narrow.addEventListener('change', remeasure)
