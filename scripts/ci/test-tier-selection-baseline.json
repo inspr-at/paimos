@@ -126,5 +126,124 @@
     "remote": "Presence guard refused: Mailina is the console user.",
     "runnerMinutes": null,
     "runnerMinutesNote": "Actions instrumentation records complete job durations. Local collection does not establish runner-minute savings."
+  },
+  "fixRound1": {
+    "sourceCommit": "f49a5216",
+    "reviewedCommit": "82c20cba",
+    "policy": "OPS #260 temporary demotion of one AEON-675, one AEON-676 and seven AEON-683 cases. All nine remain in changed-area and full/nightly selection, including five AEON-541 guards. No test bodies or assertions were weakened.",
+    "inventory": {
+      "go": {
+        "ESSENTIAL": 331,
+        "NIGHTLY": 3162,
+        "total": 3493,
+        "active": 3472
+      },
+      "web": {
+        "ESSENTIAL": 207,
+        "NIGHTLY": 4787,
+        "total": 4994,
+        "browser": 3434,
+        "unit": 1560
+      }
+    },
+    "scenarios": [
+      {
+        "label": "docs",
+        "event": "pull_request",
+        "paths": [
+          "README.md"
+        ],
+        "full": false,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 0
+        },
+        "browser": 52,
+        "unit": 155,
+        "goReason": "essential plus changed area and reverse dependencies",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "one-package",
+        "event": "pull_request",
+        "paths": [
+          "internal/scopecode/code.go"
+        ],
+        "full": false,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 1
+        },
+        "browser": 52,
+        "unit": 155,
+        "goReason": "essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (2922)",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "uncertain",
+        "event": "pull_request",
+        "paths": [
+          "go.mod"
+        ],
+        "full": true,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 3158
+        },
+        "browser": 3434,
+        "unit": 1560,
+        "goReason": "full event or uncertain impact",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "queue-docs",
+        "event": "merge_group",
+        "paths": [
+          "README.md"
+        ],
+        "full": false,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 0
+        },
+        "browser": 52,
+        "unit": 155,
+        "goReason": "essential plus changed area and reverse dependencies",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "nightly",
+        "event": "schedule",
+        "paths": [],
+        "full": true,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 3158
+        },
+        "browser": 3434,
+        "unit": 1560,
+        "goReason": "full event or uncertain impact",
+        "isolatedTimingCases": 4
+      }
+    ],
+    "evidence": {
+      "regressionBefore": {
+        "commit": "82c20cba",
+        "failed": 6,
+        "note": "New regression tests against original core/diff, manifests and CI workflow fail with assertions, rather than import errors."
+      },
+      "regressionAfter": {
+        "tierAndExactSHAReusePassed": 83,
+        "webShardAndNativeSelectorsPassed": 23,
+        "finalTierValidationPassed": 22,
+        "goRunnerGuard": "passed (Go 1.26.8, GOMAXPROCS=2, -p 2)"
+      },
+      "collection": "Existing same-tree Go/Node/Vitest inventories reconciled to current manifests. Fresh native browser list checks verify the 52 essential and all 3434 full-suite registrations without opening browsers; native Node/Vitest selectors execute three representative units.",
+      "remoteGo": "remote-test.sh refused (exit 3): Mailina is the console user. No remote ref was pushed.",
+      "remoteBrowser": "Approved browser launcher refused (exit 3): OPS-247 bootstrap is pending. No SSH or browser launch.",
+      "pending": "Coordinator CI: affected releaseworkflow/test-tier-go packages, full native Go/database execution and hosted Linux Chromium execution. Heavy local suites remain prohibited. No origin push, deployment or merge/rebase onto #259.",
+      "runnerMinutes": null,
+      "runnerMinutesNote": "Hosted scheduling/runtime savings still require measurement; removing planner setup/full history is not a measured timing claim."
+    }
   }
 }

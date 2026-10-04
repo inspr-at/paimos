@@ -131,7 +131,9 @@ test('lean planner fetches only the exact event base before diffing and widens o
     assert.equal(schedulingMode(event,failed),'full')
   }
   writeFileSync(eventPath,JSON.stringify({pull_request:{base:{sha:'--invalid'}}}))
-  assert.equal(changedPaths('pull_request',{GITHUB_EVENT_PATH:eventPath},{fetchBase:true,exec:()=>assert.fail('Invalid base must never be fetched')}),undefined)
+  const invalidCalls=[]
+  assert.equal(changedPaths('pull_request',{GITHUB_EVENT_PATH:eventPath},{fetchBase:true,exec:(...args)=>{invalidCalls.push(args);return ''}}),undefined)
+  assert.deepEqual(invalidCalls,[], 'Invalid base must never be fetched')
 })
 
 test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',()=>{

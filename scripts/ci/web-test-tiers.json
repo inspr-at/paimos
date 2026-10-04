@@ -2,7 +2,7 @@
   "version": 1,
   "ticket": "AEON-681",
   "defaultNewTier": "NIGHTLY",
-  "policy": "Every registration is explicit; unknown and stale entries fail. delete-candidate remains NIGHTLY until a separate approved removal.",
+  "policy": "Every registration is explicit; unknown and stale entries fail. Known-flaky case keys cannot be ESSENTIAL. delete-candidate remains NIGHTLY until a separate approved removal.",
   "source": "AEON-679 zb-web essential allowlist (60 browser, 155 unit)",
   "taggingNote": "Exact Go/unit/whole-browser candidates carry per-test tags; ambiguous mixed browser recommendations carry group tags, never guessed per-test deletion verdicts. Every member remains classified and runs nightly.",
   "deleteCandidateGroups": [
