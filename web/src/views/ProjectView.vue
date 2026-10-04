@@ -2009,6 +2009,15 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .project-page[class*="header-"] .stat-line { gap: 8px; }
 }
 @media (max-width: 900px) { .project-view-settings { display: none; } }
+@container projecthead (max-width: 760px) {
+  .project-page.header-compact .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; }
+  .project-page.header-compact .title-line { grid-area: title; max-width: none; }
+  .project-page.header-compact .head-stats { display: contents; }
+  .project-page.header-compact .head-stats > .project-status-counts { grid-area: stats; }
+  .project-page.header-compact .progress-line { grid-area: progress; }
+  .project-page.header-compact .description-block { grid-area: description; }
+  .project-page.header-compact .activity { grid-area: activity; }
+}
 @media (max-width: 600px) {
   .header-activity { display: none; }
   .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description"; gap: 4px 10px; }

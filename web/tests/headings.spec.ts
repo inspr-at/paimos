@@ -323,7 +323,11 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       await desc.focus()
       await fittingTip(page.locator('.tooltip'), short)
       await desc.evaluate(el => { el.style.maxWidth = 'none' })
-      await expect(desc).not.toHaveAttribute('data-tip')
+      // Compact keeps a narrow summary slot even after the test width is removed.
+      // Disclosure follows actual clipping, including the full-width narrow layout.
+      const stillClipped = await desc.evaluate(el => el.scrollWidth > el.clientWidth + 1)
+      if (stillClipped) await expect(desc).toHaveAttribute('data-tip', short)
+      else await expect(desc).not.toHaveAttribute('data-tip')
       await desc.blur()
     }
     await screenshot(page, 'project', width, theme)
