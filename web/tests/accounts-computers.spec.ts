@@ -222,7 +222,8 @@ test('Agents at once saves one ceiling and independent harness limits', async ({
   await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: {} })
   const codex = working.locator('[data-key="codex"]')
   await codex.getByRole('radio', { name: 'At most', exact: true }).click()
-  await codex.getByRole('button', { name: 'Codex: at most one more' }).click()
+  await expect(codex.locator('.lim-num')).toHaveText('2')
+  await codex.getByRole('button', { name: 'Codex: at most 3', exact: true }).click()
   await expect(codex.locator('.lim-num')).toHaveText('3')
   await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: { codex: 3 } })
   await expect(working).not.toContainText(/assigned|flexible|target|plan/i)
@@ -262,7 +263,7 @@ test('stored ceiling arrives without a made-up total while the snapshot loads', 
   await expect(working.locator('.f-num')).toHaveCount(0)
   release()
   await expect(working.locator('.f-num')).toHaveText('3')
-  await expect(working.locator('.f-num')).toHaveAttribute('aria-label', 'Run up to 3 at once')
+  await expect(working.locator('.f-num').getByRole('button')).toHaveAccessibleName('Agents at once: Run up to 3 at once. Click to type 0 to 30.')
   await expect(working.locator('.f-live')).toContainText('5 running · winding down to 3')
 })
 
