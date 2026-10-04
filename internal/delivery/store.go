@@ -363,7 +363,7 @@ func nullable(value string) any {
 // Slot identifies a gap by record identities, never by client-supplied ranks.
 // With one neighbour supplied the other is resolved by a bounded index seek.
 // With neither supplied the write appends to the ranked portion.
-type Slot struct{ BeforeID, AfterID string }
+type Slot struct{ BeforeID, AfterID, Position string }
 
 func (w *write) rank(c Container, slot Slot, exclude string, items bool) (string, error) {
 	read := func(id string) (*Neighbour, error) {
@@ -374,10 +374,15 @@ func (w *write) rank(c Container, slot Slot, exclude string, items bool) (string
 		if items {
 			table, column = "ships_in", "item_node_id"
 		}
-		query := `SELECT ` + column + `::text,rank FROM ` + table + ` WHERE tenant_id=$1 AND project_node_id=$2 AND ` + column + `=$3`
+		query := `SELECT p.` + column + `::text,p.rank FROM ` + table + ` p JOIN nodes n ON n.tenant_id=p.tenant_id AND n.id=p.` + column + ` JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE p.tenant_id=$1 AND p.project_node_id=$2 AND p.` + column + `=$3 AND n.deleted_at IS NULL AND n.project_id=$2`
+		if items {
+			query += ` AND k.slug IN ('epic','ticket','task')`
+		} else {
+			query += ` AND k.slug='release'`
+		}
 		args := []any{c.TenantID, c.ProjectID, id}
 		if items {
-			query += ` AND release_node_id IS NOT DISTINCT FROM $4::uuid`
+			query += ` AND p.release_node_id IS NOT DISTINCT FROM $4::uuid`
 			args = append(args, nullable(c.ReleaseID))
 		}
 		n, err := readNeighbour(w.ctx, w.tx, query, args)
@@ -385,6 +390,48 @@ func (w *write) rank(c Container, slot Slot, exclude string, items bool) (string
 			err = ErrNotFound
 		}
 		return n, err
+	}
+	// Explicit item top uses physical occupied keys, including tombstones.
+	// It must not turn an internal extremum into a caller-visible direct anchor.
+	if items && slot.Position == "top" {
+		n, err := ItemNeighbours(w.ctx, w.tx, c, "", exclude)
+		if err != nil {
+			return "", err
+		}
+		if n.Next == nil {
+			return After("")
+		}
+		return Between("", n.Next.Rank)
+	}
+	if !items && slot.Position != "" {
+		order := "ASC"
+		if slot.Position == "append" {
+			order = "DESC"
+		}
+		n, err := readNeighbour(w.ctx, w.tx, `SELECT release_node_id::text,rank FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id<>$3 AND state IN ('planned','building','frozen') ORDER BY rank `+order+` LIMIT 1`, []any{c.TenantID, c.ProjectID, exclude})
+		if err != nil {
+			return "", err
+		}
+		slot = Slot{}
+		if n != nil {
+			// Keep terminal occupied keys as physical neighbours of the active extremum.
+			physical, err := neighbours(w.ctx, w.tx, c, n.Rank, exclude, false)
+			if err != nil {
+				return "", err
+			}
+			if order == "ASC" {
+				lower := ""
+				if physical.Previous != nil {
+					lower = physical.Previous.Rank
+				}
+				return Between(lower, n.Rank)
+			}
+			upper := ""
+			if physical.Next != nil {
+				upper = physical.Next.Rank
+			}
+			return Between(n.Rank, upper)
+		}
 	}
 	var lower, upper *Neighbour
 	var err error
@@ -435,8 +482,13 @@ func (w *write) rank(c Container, slot Slot, exclude string, items bool) (string
 	return Between(a, b)
 }
 
+// ValidPosition preserves anchor-free append and strict two-anchor legacy callers.
+func ValidPosition(position, before, after string) bool {
+	return position == "" || (position == "top" || position == "append") && before == "" && after == ""
+}
+
 func validSlot(slot Slot) bool {
-	return (slot.BeforeID == "" || uuid(slot.BeforeID)) && (slot.AfterID == "" || uuid(slot.AfterID))
+	return ValidPosition(slot.Position, slot.BeforeID, slot.AfterID) && (slot.BeforeID == "" || uuid(slot.BeforeID)) && (slot.AfterID == "" || uuid(slot.AfterID))
 }
 
 type ReleaseEdit struct {

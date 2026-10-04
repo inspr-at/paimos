@@ -17390,6 +17390,7 @@ components:
         expected_revision: {type: integer, minimum: 1}
         before_id: {type: string, format: uuid}
         after_id: {type: string, format: uuid}
+        position: {type: string, enum: [top, append], description: "Explicit extremum; exclusive with before_id and after_id. Rank extrema use Upcoming; placement extrema use all physical ranked members."}
     DeliveryStateRequest:
       type: object
       additionalProperties: false
@@ -17423,6 +17424,7 @@ components:
         expected_release_revision: {type: integer, minimum: 1}
         before_id: {type: string, format: uuid}
         after_id: {type: string, format: uuid}
+        position: {type: string, enum: [top, append], description: "Explicit extremum; exclusive with before_id and after_id. Rank extrema use Upcoming; placement extrema use all physical ranked members."}
         expedite: {type: boolean}
         due_on: {type: [string, 'null'], format: date}
         reason: {type: string, maxLength: 2048}

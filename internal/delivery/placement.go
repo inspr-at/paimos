@@ -401,13 +401,7 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 			}
 		} else {
 			if request.Top {
-				neighbours, e := ItemNeighbours(w.ctx, w.tx, Container{TenantID: w.p.TenantID, ProjectID: w.project, ReleaseID: request.ReleaseID}, "", n.id)
-				if e != nil {
-					return nil, nil, e
-				}
-				if neighbours.Next != nil {
-					request.Slot = Slot{BeforeID: neighbours.Next.ID}
-				}
+				request.Slot = Slot{Position: "top"}
 			}
 			next.Rank, err = w.rank(Container{TenantID: w.p.TenantID, ProjectID: w.project, ReleaseID: request.ReleaseID}, request.Slot, n.id, true)
 		}
