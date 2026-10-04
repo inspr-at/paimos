@@ -87,3 +87,27 @@ func TestStoredRecurrenceKindMigrationPreservesReceipts(t *testing.T) {
 		}
 	}
 }
+
+func TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload(t *testing.T) {
+	f := setup(t)
+	in := f.input()
+	in.QueueEach = true
+	r := f.create(in)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET template=jsonb_set(template,'{type}','"task"'::jsonb) WHERE id=$1`, r.ID)
+		return err
+	})
+	occurrence := f.manual(r.ID, "legacy-queued")
+	if occurrence.Outcome != "created" || occurrence.NodeID == nil {
+		t.Fatalf("legacy definition failed: %+v", occurrence)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var kind string
+		var queued int
+		err := tx.QueryRow(t.Context(), `SELECT k.slug,(SELECT count(*) FROM agent_runs WHERE queue_node_id=n.id) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE n.id=$1`, *occurrence.NodeID).Scan(&kind, &queued)
+		if kind != "work" || queued != 1 {
+			t.Errorf("kind=%s queued=%d", kind, queued)
+		}
+		return err
+	})
+}

@@ -18,9 +18,10 @@ type parentPlacement struct {
 // Match the paired tree writers: pairing -> tree -> tenant access fence ->
 // resource rows -> event counter. Recheck authorization under that fence.
 func lockMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0)),
- pg_advisory_xact_lock(hashtextextended($1,0))`, p.TenantID); err != nil {
-		return err
+	for _, key := range []string{"aeon-pairing:" + p.TenantID, p.TenantID} {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, key); err != nil {
+			return err
+		}
 	}
 	var id string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&id); err != nil {
@@ -34,35 +35,40 @@ func lockMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, project 
 
 // Bound expansion before loading memberships or mutating anything. A parent
 // plus a selected descendant is one leaf set, with deterministic row order.
-func expandWorkLeaves(ctx context.Context, tx pgx.Tx, project string, ids []string) ([]string, []string, error) {
+func expandWorkLeaves(ctx context.Context, tx pgx.Tx, project string, ids []string) ([]string, []string, map[string]bool, error) {
 	leaves := map[string]bool{}
 	out := []string{}
 	parents := []string{}
+	fromParents := map[string]bool{}
 	for _, id := range ids {
 		var valid bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
    WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket'))`, id, project).Scan(&valid); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if !valid {
-			return nil, nil, fail(404, "work node not found in project")
+			return nil, nil, nil, fail(404, "work node not found in project")
 		}
 		rows, err := tx.Query(ctx, `SELECT id::text,is_leaf FROM aeon_work_release_scope(ARRAY[$1::uuid]) WHERE project_id=$2 AND kind_slug IN ('work','epic','ticket','task') ORDER BY id LIMIT 1001`, id, project)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		total := 0
 		parent := false
+		rootLeaves := []string{}
 		for rows.Next() {
 			var node string
 			var leaf bool
 			if err = rows.Scan(&node, &leaf); err != nil {
 				rows.Close()
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			total++
 			if node == id && !leaf {
 				parent = true
+			}
+			if leaf {
+				rootLeaves = append(rootLeaves, node)
 			}
 			if leaf && !leaves[node] {
 				leaves[node] = true
@@ -72,17 +78,20 @@ func expandWorkLeaves(ctx context.Context, tx pgx.Tx, project string, ids []stri
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if total > 1000 || len(leaves) > 1000 {
-			return nil, nil, fail(409, "parent release placement exceeds 1000 work nodes")
+			return nil, nil, nil, fail(409, "parent release placement exceeds 1000 work nodes")
 		}
 		if parent {
 			parents = append(parents, id)
+			for _, leaf := range rootLeaves {
+				fromParents[leaf] = true
+			}
 		}
 	}
 	sort.Strings(parents)
-	return out, parents, nil
+	return out, parents, fromParents, nil
 }
 
 func placeParents(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, parents []string, before, after *membershipSnapshot) error {

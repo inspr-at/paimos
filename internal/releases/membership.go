@@ -207,7 +207,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 	if rev != in.Revision {
 		return result, fail(409, "release revision changed")
 	}
-	leaves, parents, err := expandWorkLeaves(ctx, tx, project, in.IDs)
+	leaves, parents, fromParents, err := expandWorkLeaves(ctx, tx, project, in.IDs)
 	if err != nil {
 		return result, err
 	}
@@ -236,7 +236,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		if nodeProject != project || (kind != "ticket" && kind != "work") {
 			return result, fail(404, "ticket not found in project")
 		}
-		if closedTicketState(status) && len(parents) == 0 {
+		if closedTicketState(status) && !fromParents[id] {
 			return result, fail(409, "closed tickets cannot be added")
 		}
 		old := memberState{TicketID: id}
@@ -248,7 +248,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		old.Exists = err == nil
 		if old.ReleaseID != nil {
 			if *old.ReleaseID == release {
-				if len(parents) == 0 {
+				if !fromParents[id] {
 					return result, fail(409, "ticket is already included")
 				}
 				before.Members = append(before.Members, old)

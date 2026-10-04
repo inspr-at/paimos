@@ -2,14 +2,106 @@
 package releases
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestWorkParentPlacementRechecksRevokedGrantUnderFence(t *testing.T) {
+	f := ticketSetup(t)
+	f.existing("work", f.feature, "Leaf", "open")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	held, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback(ctx)
+	if _, err = held.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan *httptest.ResponseRecorder, 1)
+	raw, _ := json.Marshal(membershipInput{Revision: 1, IDs: []string{f.feature}})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, f.membershipPath(), strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(ctx, f.person))
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, req)
+		result <- w
+	}()
+	for {
+		var waiting bool
+		err = held.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks mine JOIN pg_locks waiter ON waiter.locktype=mine.locktype AND waiter.database IS NOT DISTINCT FROM mine.database AND waiter.classid=mine.classid AND waiter.objid=mine.objid AND waiter.objsubid=mine.objsubid WHERE mine.pid=pg_backend_pid() AND mine.locktype='advisory' AND mine.granted AND waiter.pid<>mine.pid AND NOT waiter.granted)`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case w := <-result:
+			t.Fatalf("request bypassed lock barrier: %d %s", w.Code, w.Body.String())
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
+	}
+	if _, err = held.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.person.TenantID, f.person.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = held.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case w := <-result:
+		if w.Code != 403 || !strings.Contains(w.Body.String(), "project access required") {
+			t.Fatalf("wrong rejection after revocation: %d %s", w.Code, w.Body.String())
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var count int
+	if err = f.db.Admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM journey_tickets WHERE tenant_id=$1)+(SELECT count(*) FROM work_parent_releases WHERE tenant_id=$1)`, f.person.TenantID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("revoked placement left writes: count=%d err=%v", count, err)
+	}
+}
+
+func TestWorkParentPlacementBoundAndWorkEdges(t *testing.T) {
+	f := ticketSetup(t)
+	leaf := f.existing("work", f.feature, "Leaf", "open")
+	memory := f.existing("memory", f.feature, "Notes", "open")
+	hiddenUnderMemory := f.existing("work", memory, "Separate work", "open")
+	out := membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	if len(out.LeafIDs) != 1 || out.LeafIDs[0] != leaf {
+		t.Fatalf("non-work edge changed scope: %v", out.LeafIDs)
+	}
+	if row := f.readMembership(hiddenUnderMemory)[0]; row.ReleaseCount != 0 {
+		t.Fatalf("placement crossed non-work edge: %+v", row)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),$2,'Wide leaf '||i FROM node_kinds k CROSS JOIN generate_series(1,1000) i WHERE k.slug='work'`, f.person.TenantID, f.feature)
+		return err
+	})
+	// Each inherited create changed the release revision. Obtain the real fence
+	// so the assertion cannot pass merely because the request was stale.
+	var rev int64
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT revision FROM journey_releases WHERE release_node_id=$1`, f.release).Scan(&rev)
+	})
+	raw, _ := json.Marshal(membershipInput{Revision: rev, IDs: []string{f.feature}})
+	w := f.request(f.person, http.MethodPost, f.membershipPath(), string(raw))
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "exceeds 1000") {
+		t.Fatalf("wrong expansion failure: %d %s", w.Code, w.Body.String())
+	}
+}
 
 func TestWorkParentPlacementAndFutureLeaves(t *testing.T) {
 	f := ticketSetup(t)
@@ -133,4 +225,25 @@ func TestWorkParentSplitShipsInAndAtomicFrozenRejection(t *testing.T) {
 		}
 		return err
 	})
+}
+
+// A selected parent may include its done descendants, but must not relax the
+// closed-leaf rule for an unrelated directly selected leaf in the same batch.
+func TestWorkParentPlacementDoesNotPermitUnrelatedClosedLeaf(t *testing.T) {
+	f := ticketSetup(t)
+	child := f.existing("work", f.feature, "Closed descendant", "done")
+	other := f.existing("work", f.project, "Unrelated closed leaf", "done")
+	w := f.addExisting([]string{f.feature, other}, 1, false)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "closed tickets") {
+		t.Fatalf("wrong rejection: %d %s", w.Code, w.Body.String())
+	}
+	for _, row := range f.readMembership(f.feature, child, other) {
+		if row.ReleaseCount != 0 {
+			t.Fatalf("rejected batch wrote membership: %+v", row)
+		}
+	}
+	out := membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	if len(out.Walker.Tickets) != 1 || out.Walker.Tickets[0].NodeID != child {
+		t.Fatalf("parent placement missed its closed descendant: %+v", out.Walker.Tickets)
+	}
 }

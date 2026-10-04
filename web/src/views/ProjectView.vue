@@ -58,7 +58,7 @@ import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
-import { listNativeMemberships, openedMembershipMessage, type NativeReleaseView } from '../lib/releaseMembership'
+import { listNativeMemberships, openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../lib/releaseMembership'
 import { useJourney } from '../stores/journey'
 import { flowPillContext } from '../lib/flowPillContext'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
@@ -626,7 +626,7 @@ const membershipIds = computed(() => {
   const seen = new Set<string>()
   const project = projectId.value
   const push = (row: { id: string; kind_slug: string; project?: { id: string } | null } | null | undefined) => {
-    if (!row || row.kind_slug === 'epic' || seen.has(row.id)) return
+    if (!row || seen.has(row.id)) return
     // A project change can render before the previous list is replaced.
     if (project && row.project?.id && row.project.id !== project) return
     seen.add(row.id)
@@ -1320,7 +1320,7 @@ async function chooseRelease(target: ReleaseTarget) {
   const rows = list.rows.value.filter(row => ids.includes(row.id))
   const tickets = ids.map(id => {
     const row = rows.find(item => item.id === id)
-    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug }
+    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug, isParent: releaseViewIsParent(nativeReleases.value.get(id)) }
   })
   bulkMenu.value = null
   const attempt = ++releaseAttempt
@@ -1338,7 +1338,7 @@ async function chooseRelease(target: ReleaseTarget) {
     }
     const joined = outcome.opened?.status === 'added'
       ? outcome.opened.count
-      : outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
+      : outcome.result?.walker.tickets.filter(ticket => (outcome.result?.leaf_node_ids ?? ids).includes(ticket.ticket_node_id) && ticket.included).length ?? 0
     if (!joined) {
       toast('Nothing was added to the release.')
       void refreshMemberships()

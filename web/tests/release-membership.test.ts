@@ -360,3 +360,18 @@ test('a failed membership read is unknown, and ids are asked in batches of 100',
   assert.equal(new URL(`http://local${paths[0]}`).searchParams.getAll('ticket_node_id').length, 100)
   assert.equal(new URL(`http://local${paths[1]}`).searchParams.getAll('ticket_node_id').length, 1)
 })
+
+test('parents show actual ships-in summaries and deduplicate leaf counts', () => {
+  const rows = parseNativeMemberships({ tickets: [
+    { ticket_node_id: 'parent', is_parent: true, release_count: 1, release_node_id: 'r-2', release_title: 'Cobalt Comet', release_state: 'planning', leaf_node_ids: ['a', 'b'] },
+    { ticket_node_id: 'a', is_parent: false, release_count: 1, release_node_id: 'r-2', release_title: 'Cobalt Comet', release_state: 'planning', leaf_node_ids: ['a'] },
+    { ticket_node_id: 'split', is_parent: true, release_count: 2, release_node_id: null, release_title: null, release_state: null, leaf_node_ids: ['a', 'b'] },
+    { ticket_node_id: 'later', is_parent: false, release_count: 0, release_node_id: null, release_title: null, release_state: null, inheritance_note: 'parent_release_closed' },
+  ] })
+  const views = nativeViews(['parent', 'a', 'split', 'later'], rows)
+  assert.equal(releaseCell(views.get('parent')).text, 'Ships in Cobalt Comet')
+  assert.equal(releaseCell(views.get('split')).text, 'Ships in 2 releases')
+  assert.match(releaseCell(views.get('later')).label, /Backlog.*frozen or released/)
+  assert.deepEqual(reconcileOpenedMembership(['parent', 'a'], views), { status: 'added', releaseId: 'r-2', releaseTitle: 'Cobalt Comet', count: 2 })
+  assert.equal(reconcileOpenedMembership(['split'], views).status, 'changed')
+})

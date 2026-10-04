@@ -43,6 +43,7 @@ export interface MembershipWrite {
 }
 
 export interface MembershipResult {
+  leaf_node_ids?: string[]
   walker: Walker
   event_id: number
 }
@@ -92,7 +93,7 @@ export function nextReleaseTitle(releases: Pick<ReleaseRef, 'number'>[]): string
 }
 
 export function canOpenRelease(journey: Journey, planning: ReleaseRef | null): { ok: boolean; reason: string } {
-  if (planning) return { ok: false, reason: `${releaseName(planning)} is still in planning. Add tickets there, or finish it before opening another.` }
+  if (planning) return { ok: false, reason: `${planning.title.trim() || releaseName(planning)} is still in planning. Add tickets there, or finish it before opening another.` }
   if (!journey.current_release_id) {
     if (journey.next_action.key === 'open_first_release' && journey.next_action.available) return { ok: true, reason: '' }
     return { ok: false, reason: journey.next_action.reason || 'The journey is not ready for its first release.' }
@@ -144,9 +145,9 @@ export function parseTicketOptions(data: unknown): TicketOptions {
 
 export function parseMembership(data: unknown): MembershipResult {
   if (!data || typeof data !== 'object') throw new Error('The release did not answer.')
-  const body = data as { walker?: Walker; event_id?: unknown }
+  const body = data as { walker?: Walker; event_id?: unknown; leaf_node_ids?: unknown }
   if (!body.walker || typeof body.walker !== 'object' || !Array.isArray(body.walker.tickets)) throw new Error('The release did not answer.')
-  return { walker: body.walker, event_id: typeof body.event_id === 'number' ? body.event_id : 0 }
+  return { walker: body.walker, event_id: typeof body.event_id === 'number' ? body.event_id : 0, ...(Array.isArray(body.leaf_node_ids) ? { leaf_node_ids: body.leaf_node_ids.filter((id): id is string => typeof id === 'string') } : {}) }
 }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -357,6 +358,10 @@ export async function openReleaseWithTickets(projectId: string, ticketIds: strin
 export const MEMBERSHIP_BATCH = 100
 
 export interface NativeMembership {
+  is_parent?: boolean
+  release_count?: number
+  leaf_node_ids?: string[]
+  inheritance_note?: string | null
   ticket_node_id: string
   release_node_id: string | null
   release_title: string | null
@@ -366,8 +371,8 @@ export interface NativeMembership {
 export type NativeReleaseView =
   | { status: 'pending' }
   | { status: 'unknown' }
-  | { status: 'none' }
-  | { status: 'member'; title: string; releaseId: string; releaseState: string | null }
+  | { status: 'none'; isParent?: boolean; inheritanceNote?: string | null }
+  | { status: 'member'; title: string; releaseId: string; releaseState: string | null; isParent?: boolean; releaseCount?: number; leafNodeIds?: string[] }
 
 export function membershipQuery(ids: string[]): string {
   const params = new URLSearchParams()
@@ -391,6 +396,10 @@ export function parseNativeMemberships(data: unknown): NativeMembership[] {
       release_node_id: nullable(ticket.release_node_id),
       release_title: nullable(ticket.release_title),
       release_state: nullable(ticket.release_state),
+      ...(typeof ticket.is_parent === 'boolean' ? { is_parent: ticket.is_parent } : {}),
+      ...(Number.isSafeInteger(ticket.release_count) && (ticket.release_count as number)>=0 ? { release_count: ticket.release_count as number } : {}),
+      ...(Array.isArray(ticket.leaf_node_ids) ? { leaf_node_ids: ticket.leaf_node_ids.filter((id): id is string => typeof id==='string') } : {}),
+      ...(typeof ticket.inheritance_note==='string' ? { inheritance_note: ticket.inheritance_note } : {}),
     })
   }
   return tickets
@@ -404,11 +413,11 @@ export function nativeViews(requested: string[], rows: NativeMembership[]): Map<
   const out = new Map<string, NativeReleaseView>()
   for (const id of requested) {
     const row = byId.get(id)
-    if (!row || !row.release_title) {
-      out.set(id, row ? { status: 'none' } : { status: 'unknown' })
+    if (!row || (!row.release_title && !(row.is_parent && (row.release_count ?? 0)>1))) {
+      out.set(id, row ? { status: 'none', ...(row.is_parent ? { isParent: true } : {}), ...(row.inheritance_note ? { inheritanceNote: row.inheritance_note } : {}) } : { status: 'unknown' })
       continue
     }
-    out.set(id, { status: 'member', title: row.release_title, releaseId: row.release_node_id ?? '', releaseState: row.release_state })
+    out.set(id, { status: 'member', title: row.release_title ?? '', releaseId: row.release_node_id ?? '', releaseState: row.release_state, ...(row.is_parent ? { isParent: true, releaseCount: row.release_count, leafNodeIds: row.leaf_node_ids } : {}) })
   }
   return out
 }
@@ -425,16 +434,19 @@ export function reconcileOpenedMembership(ticketIds: string[], views: Map<string
   if (!ticketIds.length) return { status: 'changed' }
   let releaseId = ''
   let releaseTitle = ''
+  const leaves = new Set<string>()
   for (const id of ticketIds) {
     const view = views.get(id)
     if (!view || view.status === 'unknown' || view.status === 'pending') return { status: 'unknown' }
     if (view.status !== 'member' || !view.releaseId || !view.title) return { status: 'changed' }
+    if (view.isParent && !view.leafNodeIds) return { status: 'unknown' }
+    for (const leaf of view.leafNodeIds ?? [id]) leaves.add(leaf)
     if (!releaseId) {
       releaseId = view.releaseId
       releaseTitle = view.title
     } else if (releaseId !== view.releaseId) return { status: 'changed' }
   }
-  return { status: 'added', releaseId, releaseTitle, count: ticketIds.length }
+  return { status: 'added', releaseId, releaseTitle, count: leaves.size }
 }
 
 export function openedMembershipMessage(outcome: OpenedMembership): string | null {
@@ -443,9 +455,12 @@ export function openedMembershipMessage(outcome: OpenedMembership): string | nul
   return 'The release action is confirmed, but those tickets are not all in one release.'
 }
 
+export function releaseViewIsParent(view: NativeReleaseView | undefined): boolean { return !!view && (view.status === 'none' || view.status === 'member') && view.isParent === true }
+
 export function releaseCell(view: NativeReleaseView | undefined): { text: string; label: string; kind: 'unknown' | 'none' | 'member' } {
   if (!view || view.status === 'pending' || view.status === 'unknown') return { text: '—', label: 'Release unknown', kind: 'unknown' }
-  if (view.status === 'none') return { text: '—', label: 'No release', kind: 'none' }
+  if (view.status === 'none') return { text: '—', label: view.inheritanceNote === 'parent_release_closed' ? 'Backlog: the parent release is frozen or released' : 'No release', kind: 'none' }
+  if (view.isParent) { const value = (view.releaseCount ?? 1)>1 ? `Ships in ${view.releaseCount} releases` : `Ships in ${view.title}`; return { text: value, label: value, kind: 'member' } }
   return { text: view.title, label: `Release ${view.title}`, kind: 'member' }
 }
 

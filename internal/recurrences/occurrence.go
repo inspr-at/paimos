@@ -187,6 +187,11 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if err != nil {
 		return Occurrence{}, err
 	}
+	// The locked reload replaces the earlier normalized copy.
+	switch r.Template.Type {
+	case "epic", "ticket", "task":
+		r.Template.Type = "work"
+	}
 	if reason == "" && r.OverlapPolicy == "skip" {
 		var open bool
 		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrence_occurrences o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.node_id WHERE o.recurrence_id=$1 AND n.deleted_at IS NULL AND regexp_replace(lower(btrim(n.state)),'[[:space:]-]+','_','g') NOT IN ('done','cancelled','canceled','archived','delivered','accepted'))`, r.ID).Scan(&open)

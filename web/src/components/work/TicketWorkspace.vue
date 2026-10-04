@@ -43,7 +43,7 @@ import { needsBenefitPrompt } from '../../lib/doneGate'
 import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
-import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
+import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import QueueAction from './QueueAction.vue'
@@ -127,8 +127,8 @@ watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true }
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 const canQueue = computed(() => !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
-const canRelease = computed(() => editable.value && !!props.item && props.item.kind_slug !== 'epic' && can('releases.write', props.project.id))
-const releaseView = computed(() => props.item?.kind_slug === 'epic' ? { status: 'none' as const } : props.nativeReleases?.get(props.item?.id ?? ''))
+const canRelease = computed(() => editable.value && !!props.item && can('releases.write', props.project.id))
+const releaseView = computed(() => props.nativeReleases?.get(props.item?.id ?? ''))
 const journeys = useJourney()
 
 // ---------- Following links: a modified click opens a new tab ----------
@@ -405,7 +405,7 @@ async function chooseRelease(target: ReleaseTarget) {
   const it = item.value
   const projectId = props.project.id
   if (!it || !canRelease.value) return
-  const ticket = { id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }
+  const ticket = { id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug, isParent: releaseViewIsParent(releaseView.value) }
   menu.value = null
   try {
     const outcome = await assignToRelease(projectId, [ticket], target)
@@ -421,7 +421,11 @@ async function chooseRelease(target: ReleaseTarget) {
     const title = outcome.opened?.status === 'added' ? outcome.opened.releaseTitle : outcome.releaseTitle
     const skipped = outcome.skipped.length ? ` ${outcome.skipped[0].reason}` : ''
     const eventId = outcome.result?.event_id
-    toast(`Added ${ticket.key} to ${title}.${skipped}`, {
+    const count = outcome.opened?.status === 'added' ? outcome.opened.count : outcome.result?.leaf_node_ids?.length
+    const message = ticket.isParent
+      ? count === undefined ? `Release placement for ${ticket.key} could not be confirmed. Refresh to check its leaves.` : `Added ${count} ${count === 1 ? 'leaf' : 'leaves'} under ${ticket.key} to ${title}.${skipped}`
+      : `Added ${ticket.key} to ${title}.${skipped}`
+    toast(message, {
       timeout: 8000,
       action: eventId ? { label: 'Undo', run: () => void undoRelease(eventId, ticket.key) } : undefined,
     })
