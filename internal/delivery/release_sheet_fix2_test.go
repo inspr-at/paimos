@@ -95,6 +95,77 @@ func TestSheetRecoveryMovesCompletedWorkOutOfFrozenSource(t *testing.T) {
 	}
 }
 
+func TestSheetRecoveryExcludesCutFrozenSources(t *testing.T) {
+	f := newStoreFixture(t)
+	// An internal destination may rank before an already-cut published release.
+	target := f.addRelease(t, f.project, "REL-3", "internal", "planned", "A")
+	cutID := f.item(t, "ticket", "TK-1", "done", f.release, "V")
+	uncutA := f.item(t, "task", "TSK-1", "delivered", f.next, "V")
+	uncutB := f.item(t, "ticket", "TK-2", "accepted", f.next, "W")
+	unplaced := f.item(t, "task", "TSK-2", "done", "", "")
+	adopted := f.clock.Add(-time.Hour)
+	f.exec(t, `UPDATE project_delivery SET adopted_at=$2 WHERE project_node_id=$1`, f.project, adopted)
+	for i, id := range []string{uncutA, uncutB, unplaced, cutID} {
+		at := adopted.Add(time.Duration(i+1) * time.Minute)
+		f.exec(t, `UPDATE nodes SET updated_at=$2 WHERE id=$1`, id, at)
+		f.exec(t, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after,at)
+ SELECT $1,$2,id,'node.updated','{"state":"open"}',jsonb_build_object('state',state),$4 FROM nodes WHERE id=$3`, f.tenant, f.person.ID, id, at)
+	}
+	cut := cutFixture(t, f, "legacy", "1.0.0")
+	cut = f.releaseRow(t, cut.ID)
+	uncut := f.freeze(t, f.next)
+	cutPlacement := f.placed(t, cutID)
+	var eligible []ItemView
+	t.Run("pages and selection totals", func(t *testing.T) {
+		opt := ReadOptions{CompletedLater: true, Limit: 1}
+		for i, id := range []string{uncutB, uncutA} {
+			page, err := f.store.Items(t.Context(), f.person, f.project, target.ID, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Count != 2 || page.Incomplete || len(page.Items) != 1 || page.Items[0].ItemID != id || (page.NextCursor != "") != (i == 0) {
+				t.Fatalf("cut source entered recovery page or selection total: %+v", page)
+			}
+			eligible = append(eligible, page.Items[0])
+			opt.Cursor = page.NextCursor
+		}
+	})
+	t.Run("warning totals", func(t *testing.T) {
+		f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+			counts, err := recoveryCounts(ctx, tx, f.person, target)
+			if err != nil {
+				return err
+			}
+			if counts.Unplaced != 1 || counts.Later != 2 || counts.Incomplete {
+				t.Fatalf("cut source entered recovery warning totals: %+v", counts)
+			}
+			return nil
+		})
+	})
+	if t.Failed() {
+		return
+	}
+	requests := make([]PlacementRequest, 0, len(eligible))
+	for _, row := range eligible {
+		requests = append(requests, PlacementRequest{ItemID: row.ItemID, ExpectedProjectID: row.ProjectID, ExpectedRevision: row.Revision, ReleaseID: target.ID, ExpectedReleaseRevision: target.Revision, Slot: Slot{Position: "append"}})
+	}
+	out, err := f.store.PlaceWithRevision(t.Context(), f.person, f.project, requests)
+	if err != nil || len(out.Items) != 2 || out.UndoEventID == nil {
+		t.Fatalf("Include eligible mixed-source recovery: %+v: %v", out, err)
+	}
+	for _, id := range []string{uncutA, uncutB} {
+		if f.placed(t, id).ReleaseID != target.ID {
+			t.Fatal("eligible recovery did not reach the captured destination")
+		}
+	}
+	if !reflect.DeepEqual(cutPlacement, f.placed(t, cutID)) || !reflect.DeepEqual(cut, f.releaseRow(t, cut.ID)) {
+		t.Fatal("Include changed the cut source scope or lifecycle")
+	}
+	if source := f.releaseRow(t, uncut.ID); source.State != "frozen" || source.CutAt != nil || source.Revision != uncut.Revision+1 {
+		t.Fatalf("Include changed the uncut source lifecycle: %+v", source)
+	}
+}
+
 func TestSheetCutSourceScopeRejectsRemovalAndUndo(t *testing.T) {
 	for _, action := range []string{"remove", "rerank", "undo"} {
 		t.Run(action, func(t *testing.T) {

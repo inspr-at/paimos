@@ -433,6 +433,13 @@ func (s *Store) Items(ctx context.Context, p tenant.Principal, project, release 
 	return out, err
 }
 
+// Match placement's cut-source fence before candidate admission so neither
+// pages nor their selection/warning totals offer work Include cannot remove.
+const recoveryLaterPredicate = `e.release_rank>$3 COLLATE "C" AND e.release_state IN ('planned','building','frozen')
+ AND NOT EXISTS (SELECT 1 FROM project_releases source
+ WHERE source.tenant_id=e.tenant_id AND source.project_node_id=e.project_node_id
+ AND source.release_node_id=e.release_node_id AND (source.cut_at IS NOT NULL OR source.version IS NOT NULL))`
+
 func recoveryItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, opt ReadOptions, limit int) (ItemPage, error) {
 	out := ItemPage{Items: []ItemView{}}
 	if opt.CompletedUnplaced && release != "" || opt.CompletedLater && release == "" {
@@ -458,7 +465,7 @@ func recoveryItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, 
 	}
 	pred := `e.release_node_id IS NULL`
 	if opt.CompletedLater {
-		pred = `e.release_rank>$3 COLLATE "C" AND e.release_state IN ('planned','building','frozen')`
+		pred = recoveryLaterPredicate
 	} else {
 		pred += ` AND $3::text=''`
 	}
@@ -512,13 +519,13 @@ func recoveryCounts(ctx context.Context, tx pgx.Tx, p tenant.Principal, r Releas
  JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id
  WHERE e.tenant_id=$1 AND e.project_node_id=$2 AND e.kind IN ('ticket','task')
  AND e.state IN ('done','accepted','delivered') AND n.updated_at>=d.adopted_at
- AND (e.release_node_id IS NULL OR (e.release_rank>$3 COLLATE "C" AND e.release_state IN ('planned','building','frozen')))
+ AND (e.release_node_id IS NULL OR (`+recoveryLaterPredicate+`))
  ORDER BY n.updated_at DESC,e.item_node_id DESC LIMIT 5001), recovered AS MATERIALIZED (
  SELECT e.* FROM (SELECT * FROM candidates ORDER BY updated_at DESC,item_node_id DESC LIMIT 5000) e
  JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id
  JOIN LATERAL (SELECT at FROM events ev WHERE ev.tenant_id=e.tenant_id AND ev.node_id=e.item_node_id
  AND ev.after->>'state' IN ('done','accepted','delivered') AND ev.before->>'state' IS DISTINCT FROM ev.after->>'state'
  ORDER BY ev.id DESC LIMIT 1) episode ON episode.at>d.adopted_at)
- SELECT count(*) FILTER(WHERE release_node_id IS NULL), count(*) FILTER(WHERE release_rank>$3 COLLATE "C" AND release_state IN ('planned','building','frozen')),(SELECT count(*) FROM candidates)>5000 FROM recovered`, p.TenantID, r.ProjectID, r.Rank).Scan(&out.Unplaced, &out.Later, &out.Incomplete)
+ SELECT count(*) FILTER(WHERE release_node_id IS NULL), count(*) FILTER(WHERE release_node_id IS NOT NULL),(SELECT count(*) FROM candidates)>5000 FROM recovered`, p.TenantID, r.ProjectID, r.Rank).Scan(&out.Unplaced, &out.Later, &out.Incomplete)
 	return out, err
 }

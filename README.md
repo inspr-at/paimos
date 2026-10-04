@@ -63,7 +63,7 @@ stay in place. Lifecycle changes confirm before saving and offer no Undo;
 Cut defaults to the project's recorded scheme (Calendar v3 for the bound
 product) and reserves its explicit scheme/version permanently. Other projects require
 a person's reservation reference for Publish; the product checks its history.
-Freeze lists completed unplaced work and completed work in later releases,
+Freeze lists completed unplaced work and completed work in later uncut releases,
 with at most 200 checkboxes on screen. All follows keyset pages; unchecked
 rows stay out. Include is person-only, sends batches of at most 100 with
 captured item/project revisions, and carries each committed destination
@@ -72,6 +72,7 @@ and reports placed and remaining counts, including partial/unknown outcomes.
 Capacity counts all membership rows, including epics, cancelled work and
 tombstones. Planners may recover work from an uncut frozen source; adding or
 reordering within a frozen release and removing work after Cut remain closed.
+Cut sources are excluded from recovery pages, selection totals and warning counts.
 Write-only settings may introduce agent-count and ticket-size caps without
 project defaults; missing budget or window limits still require deployment
 permission. Include pages and lifecycle actions correlate their exact event

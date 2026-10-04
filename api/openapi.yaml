@@ -213,7 +213,7 @@ paths:
       - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: listProjectReleaseItems
-      description: Effective placement, captured revisions and epic context. through is derived include-earlier; completed_later is mutually exclusive and uses bounded recovery candidates plus events.
+      description: Effective placement, captured revisions and epic context. through is derived include-earlier; completed_later is mutually exclusive and uses bounded recovery candidates plus events. Recovery rows and counts exclude sources with a reserved version or cut timestamp.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {$ref: '#/components/parameters/DeliveryPlanningView'}
