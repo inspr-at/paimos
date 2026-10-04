@@ -42,6 +42,17 @@ func fixture(t *testing.T) (*dbtest.DB, tenant.Principal, tenant.Principal) {
 	return d, ps[0], ps[1]
 }
 
+// Bootstrap writes are audited too. Tests assert their own event sequence from
+// the observed starting position rather than depending on an empty tenant log.
+func logPosition(t *testing.T, d *dbtest.DB, p tenant.Principal) int64 {
+	t.Helper()
+	var n int64
+	if err := d.Admin.QueryRow(t.Context(), `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, p.TenantID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 func appendEvents(t *testing.T, d *dbtest.DB, p tenant.Principal, n int) []Event {
 	t.Helper()
 	result := make([]Event, 0, n)
@@ -63,6 +74,7 @@ func appendEvents(t *testing.T, d *dbtest.DB, p tenant.Principal, n int) []Event
 
 func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 	d, a, b := fixture(t)
+	base, foreignBase := logPosition(t, d, a), logPosition(t, d, b)
 	sentinel := errors.New("rollback")
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		if _, err := Append(t.Context(), tx, a, Change{Type: "test.changed", Before: map[string]string{"value": "before"}, After: map[string]string{"value": "after"}}); err != nil {
@@ -74,11 +86,11 @@ func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := appendEvents(t, d, a, 1)[0]
-	if first.ID != 1 || first.Before != nil || first.NodeID != nil || first.UndoOf != nil {
+	if first.ID != base+1 || first.Before != nil || first.NodeID != nil || first.UndoOf != nil {
 		t.Fatalf("invalid first event %+v", first)
 	}
 	foreign := appendEvents(t, d, b, 1)[0]
-	if foreign.ID != 1 {
+	if foreign.ID != foreignBase+1 {
 		t.Fatal("IDs are not tenant-local")
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
@@ -86,7 +98,7 @@ func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&n); err != nil {
 			return err
 		}
-		if n != 1 {
+		if int64(n) != base+1 {
 			t.Fatalf("RLS exposed %d events", n)
 		}
 		for _, query := range []string{`UPDATE events SET type='test.modified'`, `DELETE FROM events`} {
@@ -122,13 +134,14 @@ func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 		}
 	}
 	next := appendEvents(t, d, a, 1)[0]
-	if next.ID != 2 {
+	if next.ID != base+2 {
 		t.Fatal("failed append consumed an ID")
 	}
 }
 
 func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	d, a, _ := fixture(t)
+	base := logPosition(t, d, a)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	conn, err := pgx.ConnectConfig(ctx, d.App.Config().ConnConfig.Copy())
@@ -166,7 +179,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	}()
 	select {
 	case e := <-written:
-		if e.ID != 1 {
+		if e.ID != base+1 {
 			t.Fatal(e.ID)
 		}
 	case err := <-firstDone:
@@ -199,7 +212,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	if err := <-secondDone; err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []int64{1, 2} {
+	for _, want := range []int64{base + 1, base + 2} {
 		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -214,7 +227,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	}
 	m := New(d.App).(*module)
 	got, err := m.read(ctx, a, "", 0, 50)
-	if err != nil || len(got.Items) != 2 || got.Items[0].ID != 1 || got.Items[1].ID != 2 {
+	if err != nil || len(got.Items) != 2 || got.Items[0].ID != base+1 || got.Items[1].ID != base+2 {
 		t.Fatalf("bad commit order %+v %v", got, err)
 	}
 }
@@ -294,13 +307,13 @@ func nextEvent(t *testing.T, sc *bufio.Scanner) Event {
 
 func TestSSEReplayLiveResumeAndPoolCapacity(t *testing.T) {
 	d, a, b := fixture(t)
-	appendEvents(t, d, a, 205)
+	replayed := appendEvents(t, d, a, 205)
 	appendEvents(t, d, b, 3)
 	srv := testServer(t, d, a, b)
 	resp, sc := stream(t, srv, "")
-	for want := int64(1); want <= 205; want++ {
+	for _, want := range replayed {
 		e := nextEvent(t, sc)
-		if e.ID != want || e.ActorPrincipalID != a.ID || e.Type != "test.changed" {
+		if e.ID != want.ID || e.ActorPrincipalID != a.ID || e.Type != "test.changed" {
 			t.Fatalf("bad replay event %+v", e)
 		}
 	}
@@ -309,7 +322,7 @@ func TestSSEReplayLiveResumeAndPoolCapacity(t *testing.T) {
 	scanners := make([]*bufio.Scanner, 0, 5)
 	responses := make([]*http.Response, 0, 5)
 	for range 5 {
-		r, s := stream(t, srv, "205")
+		r, s := stream(t, srv, strconv.FormatInt(replayed[len(replayed)-1].ID, 10))
 		responses = append(responses, r)
 		scanners = append(scanners, s)
 	}
@@ -317,17 +330,17 @@ func TestSSEReplayLiveResumeAndPoolCapacity(t *testing.T) {
 	own := appendEvents(t, d, a, 1)[0]
 	for _, scanner := range scanners {
 		e := nextEvent(t, scanner)
-		if e.ID != 206 || e.ActorPrincipalID != a.ID || !e.At.Equal(own.At) {
+		if e.ID != own.ID || e.ActorPrincipalID != a.ID || !e.At.Equal(own.At) {
 			t.Fatalf("bad live event %+v", e)
 		}
 	}
 	for _, r := range responses {
 		r.Body.Close()
 	}
-	appendEvents(t, d, a, 1)
-	resumed, scanner := stream(t, srv, "206")
+	last := appendEvents(t, d, a, 1)[0]
+	resumed, scanner := stream(t, srv, strconv.FormatInt(own.ID, 10))
 	defer resumed.Body.Close()
-	if e := nextEvent(t, scanner); e.ID != 207 {
+	if e := nextEvent(t, scanner); e.ID != last.ID {
 		t.Fatalf("bad resumed event %+v", e)
 	}
 }
@@ -352,16 +365,16 @@ func TestSSEHeartbeatAndInvalidResume(t *testing.T) {
 	if !sc.Scan() || sc.Text() != ": keepalive" {
 		t.Fatalf("missing heartbeat: %q %v", sc.Text(), sc.Err())
 	}
-	appendEvents(t, d, a, 1)
-	if e := nextEvent(t, sc); e.ID != 1 {
+	appended := appendEvents(t, d, a, 1)[0]
+	if e := nextEvent(t, sc); e.ID != appended.ID {
 		t.Fatal(e.ID)
 	}
 }
 
 func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 	d, a, _ := fixture(t)
-	appendEvents(t, d, a, 1)
-	for _, opts := range [][]Option{nil, {WithUndo("test.changed", func(ctx context.Context, tx pgx.Tx, p tenant.Principal, e Event) (Change, error) {
+	event := appendEvents(t, d, a, 1)[0]
+	for i, opts := range [][]Option{nil, {WithUndo("test.changed", func(ctx context.Context, tx pgx.Tx, p tenant.Principal, e Event) (Change, error) {
 		if _, err := tx.Exec(ctx, `UPDATE principals SET name='Should rollback' WHERE id=$1`, p.ID); err != nil {
 			return Change{}, err
 		}
@@ -374,10 +387,10 @@ func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 	})}} {
 		mux := http.NewServeMux()
 		New(d.App, opts...).Mount(mux)
-		req := httptest.NewRequest("POST", "/api/events/1/undo", nil).WithContext(tenant.WithPrincipal(t.Context(), a))
+		req := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", event.ID), nil).WithContext(tenant.WithPrincipal(t.Context(), a))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
-		if w.Code != 409 && w.Code != 500 {
+		if w.Code != []int{409, 409, 500}[i] {
 			t.Fatalf("unexpected undo %d %s", w.Code, w.Body.String())
 		}
 	}
@@ -393,7 +406,7 @@ func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&count); err != nil {
 			return err
 		}
-		if count != 1 {
+		if int64(count) != event.ID {
 			t.Fatal("failed undo changed history")
 		}
 		return nil

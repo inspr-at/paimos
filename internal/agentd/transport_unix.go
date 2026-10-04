@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -31,7 +32,12 @@ type LocalServer struct {
 	closeErr  error
 }
 
-func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
+func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ *LocalServer, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("start local socket %s: %w", socket, resultErr)
+		}
+	}()
 	if s == nil || !filepath.IsAbs(socket) {
 		return nil, errors.New("invalid local socket")
 	}
@@ -72,23 +78,23 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	tokenFile := socket + ".token"
 	f, err := os.OpenFile(tokenFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create socket token %s: %w", tokenFile, err)
 	}
 	tokenInfo, err = f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("stat socket token %s: %w", tokenFile, err)
 	}
 	if _, err = f.WriteString(token); err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("write socket token %s: %w", tokenFile, err)
 	}
 	if err = f.Sync(); err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("sync socket token %s: %w", tokenFile, err)
 	}
 	if err = f.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("close socket token %s: %w", tokenFile, err)
 	}
 	listener, err = net.Listen("unix", socket)
 	if err != nil {

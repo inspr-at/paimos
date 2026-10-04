@@ -178,6 +178,9 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 	fmt.Fprintf(rt.stdout, "question: %s\nstate: %s\nrevision: %d\n", q.ID, q.State, q.Revision)
 	for _, a := range q.Askers {
 		fmt.Fprintf(rt.stdout, "comment destination: %s\nreply root: %s\n", a.CommentNodeID, a.ReplyRootID)
+		if a.FromRecord != nil {
+			fmt.Fprintf(rt.stdout, "%s: %s (revision %d)\n", a.FromRecord.Label, a.FromRecord.DecisionID, a.FromRecord.Revision)
+		}
 	}
 	if q.Answer != nil {
 		fmt.Fprintln(rt.stdout, "answer:", q.Answer.Answer)
