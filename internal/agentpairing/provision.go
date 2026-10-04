@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -28,7 +29,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		WriteError(w, err)
 		return
 	}
-	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > 5 {
+	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > len(agentverification.Harnesses()) {
 		WriteError(w, fail(400, "invalid_request", "review digest, selected accounts and verification choice required"))
 		return
 	}

@@ -8,8 +8,10 @@ import { router } from './router'
 
 import { isRenderError, reportFatal } from './lib/fatal'
 import { toast } from './lib/toast'
+import { vClipTip } from './directives/clipTip'
 
 const app = createApp(App)
+app.directive('clip-tip', vClipTip)
 app.use(createPinia())
 app.use(router)
 // Global error boundary: page-breaking errors show the error page, the rest a toast.
