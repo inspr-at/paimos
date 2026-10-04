@@ -6683,7 +6683,7 @@ paths:
   /models/routes:
     get:
       operationId: readModelRoutes
-      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; dispatch additionally applies family order, review floors, platform capability, approved accounts and preferences. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; ordinary managed review uses legacy family/tier order until an explicit saved-order activation, then saved priorities. Qualification floors, platform capability, approved accounts and preferences still apply. order_mode and managed_fallback_order (profile IDs before qualification/preferences) share the stored-row SQL snapshot; truncated order is incomplete. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
       security: *auth
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
@@ -6695,15 +6695,16 @@ paths:
         '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
-      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 250 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
+      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; review-gate tokens include ordering mode. Explicit order_mode is allowed only for conditional review-gate writes; omission and legacy whole-tenant writes preserve the mode. Rows and mode change atomically, including mode-only audit events with before_order_mode/after_order_mode metadata; before/after arrays retain their shape; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 250 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
       security: [{session: []}]
       parameters:
         - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: If-Match, in: header, description: Required in role mode; complete strong SHA-256 content token from GET. No wildcard or weak/list form., schema: {type: string, maxLength: 66}}
+        - {name: order_mode, in: query, description: Only with role=review-gate. saved explicitly activates saved managed fallback priorities; legacy compensates activation. Omission preserves current mode., schema: {type: string, enum: [legacy, saved]}}
         - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
       requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 250, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
       responses:
-        '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token in conditional mode, schema: {type: string}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token including ordinary review mode in conditional mode, schema: {type: string}}, Model-Order-Mode: {description: Actual stored ordinary review mode for role=review-gate, schema: {type: string, enum: [legacy, saved]}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
         '400': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
@@ -14454,7 +14455,9 @@ components:
                   profile: {$ref: '#/components/schemas/ModelProfile'}
         setup: {type: boolean, description: Whether the tenant has any model profiles; false means the registry has not been set up.}
         truncated: {type: boolean, description: More than 50 steps exist for this role; the omitted steps still apply.}
-        dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used by review dispatch, before further qualification and preferences.'}
+        order_mode: {type: string, enum: [legacy, saved], description: Present for review-gate; absent metadata means legacy. Included in the complete token.}
+        managed_fallback_order: {type: array, maxItems: 50, items: {type: string, format: uuid}, description: Present for review-gate. Applied fallback order of the displayed profiles before qualification and model preferences; incomplete when truncated.}
+        dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used only by legacy ordinary review dispatch.'}
         review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}
     ModelResolution:
       type: object
@@ -14698,6 +14701,7 @@ components:
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
         selector: {$ref: '#/components/schemas/ModelSelector'}
+        order_mode: {type: string, enum: [legacy, saved], description: Ordinary managed review fallback source captured with its ladder; preferences still apply within qualified candidates.}
         role: {type: string}
         project_id: {type: string, format: uuid}
         ticket_requirement: {type: string, enum: [any, eu, local]}

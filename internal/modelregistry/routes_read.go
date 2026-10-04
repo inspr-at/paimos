@@ -23,15 +23,17 @@ type routeDisplay struct {
 }
 
 type routesRead struct {
-	Role                string         `json:"role"`
-	Steps               []routeDisplay `json:"steps"`
-	Setup               bool           `json:"setup"`
-	Truncated           bool           `json:"truncated"`
-	DispatchFamilyOrder []string       `json:"dispatch_family_order"`
-	ReviewFloors        []string       `json:"review_floors"`
-	Routes              []Route        `json:"routes"`
-	EditToken           *string        `json:"edit_token"`
-	CanEdit             bool           `json:"can_edit"`
+	OrderMode            string         `json:"order_mode,omitempty"`
+	ManagedFallbackOrder []string       `json:"managed_fallback_order"`
+	Role                 string         `json:"role"`
+	Steps                []routeDisplay `json:"steps"`
+	Setup                bool           `json:"setup"`
+	Truncated            bool           `json:"truncated"`
+	DispatchFamilyOrder  []string       `json:"dispatch_family_order"`
+	ReviewFloors         []string       `json:"review_floors"`
+	Routes               []Route        `json:"routes"`
+	EditToken            *string        `json:"edit_token"`
+	CanEdit              bool           `json:"can_edit"`
 }
 
 func dispatchFamilyOrder() []string {
@@ -61,7 +63,7 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout+time.Second)
 	defer cancel()
-	out := routesRead{Role: roles[0], Steps: []routeDisplay{}, DispatchFamilyOrder: dispatchFamilyOrder(), ReviewFloors: []string{
+	out := routesRead{ManagedFallbackOrder: []string{}, Role: roles[0], Steps: []routeDisplay{}, DispatchFamilyOrder: dispatchFamilyOrder(), ReviewFloors: []string{
 		"A reviewer must be from a different family than the author.",
 		"Review dispatch requires a frontier or strong profile at xhigh reasoning.",
 		"Dispatch checks platform capability, an approved account with capacity, and model preferences.",
@@ -84,7 +86,7 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 		// One statement supplies both setup and the capped ladder under the same
 		// snapshot. A LEFT JOIN retains setup even if this role has no steps.
 		rows, err := tx.Query(ctx, `
-			SELECT catalog.setup, step.value
+			SELECT catalog.setup, COALESCE((SELECT ordinary_review_order_mode FROM model_review_order), 'legacy'), step.value
 			FROM (SELECT EXISTS(SELECT 1 FROM model_profiles) AS setup) catalog
 			LEFT JOIN LATERAL (
 				SELECT jsonb_build_object('role', r.role, 'priority', r.priority,
@@ -108,7 +110,7 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 		for rows.Next() {
 			var step *routeDisplay
-			if err := rows.Scan(&out.Setup, &step); err != nil {
+			if err := rows.Scan(&out.Setup, &out.OrderMode, &step); err != nil {
 				return err
 			}
 			if step != nil {
@@ -132,13 +134,25 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 	if out.Truncated {
 		out.Steps = out.Steps[:routesDisplayLimit]
 	}
+	if out.Role == "review-gate" {
+		managed := append([]routeDisplay{}, out.Steps...)
+		if out.OrderMode == reviewOrderLegacy {
+			sortLegacyReview(managed, func(s routeDisplay) Profile { return s.Profile })
+		}
+		out.ManagedFallbackOrder = []string{}
+		for _, step := range managed {
+			out.ManagedFallbackOrder = append(out.ManagedFallbackOrder, step.ProfileID)
+		}
+	} else {
+		out.OrderMode = ""
+	}
 	out.Routes = []Route{}
 	for _, step := range out.Steps {
 		out.Routes = append(out.Routes, step.Route)
 	}
 	out.CanEdit = out.CanEdit && out.Setup && !out.Truncated
 	if !out.Truncated {
-		token := routeEditToken(out.Role, out.Routes)
+		token := routeEditToken(out.Role, out.Routes, out.OrderMode)
 		out.EditToken = &token
 		w.Header().Set("ETag", token)
 	}

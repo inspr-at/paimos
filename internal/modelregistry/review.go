@@ -4,7 +4,6 @@ package modelregistry
 import (
 	"context"
 	"maps"
-	"sort"
 	"strings"
 	"time"
 
@@ -71,22 +70,17 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		out.Trace.Hard = []string{"security_review"}
 		return out, nil
 	}
-	steps, err := catalog.ladder(ctx, tx, out.Role)
+	steps, mode, err := catalog.ladderSnapshot(ctx, tx, out.Role)
 	if err != nil {
 		return out, err
 	}
 	if out.Role == "review-gate" {
-		sort.SliceStable(steps, func(i, j int) bool {
-			a, b := steps[i].Profile, steps[j].Profile
-			if reviewFamilyRank[a.Family] != reviewFamilyRank[b.Family] {
-				return reviewFamilyRank[a.Family] < reviewFamilyRank[b.Family]
-			}
-			if a.Tier != b.Tier {
-				return a.Tier == "frontier"
-			}
-			return false
-		})
+		out.Trace.OrderMode = mode
+		if mode == reviewOrderLegacy {
+			sortLegacyReview(steps, func(s ladderStep) Profile { return s.Profile })
+		}
 	}
+
 	role, _ := roleByName(out.Role)
 	qualified := map[string]*agentaccounts.Account{}
 	for _, step := range steps {

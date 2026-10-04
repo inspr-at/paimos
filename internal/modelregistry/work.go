@@ -28,6 +28,7 @@ type WorkQuery struct {
 	TicketResidency  string
 }
 type PreferenceTrace struct {
+	OrderMode            string                     `json:"order_mode,omitempty"`
 	Selector             *modelprefs.Cell           `json:"selector,omitempty"`
 	Role                 string                     `json:"role,omitempty"`
 	ProjectID            string                     `json:"project_id,omitempty"`

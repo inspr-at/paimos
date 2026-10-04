@@ -20,6 +20,7 @@ type preferencePreviewCatalog struct {
 	profilesError error
 	ladders       map[string][]ladderStep
 	ladderErrors  map[string]error
+	orderModes    map[string]string
 }
 
 func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
@@ -38,23 +39,28 @@ func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]P
 }
 
 func (c *preferencePreviewCatalog) ladder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
+	steps, _, err := c.ladderSnapshot(ctx, tx, role)
+	return steps, err
+}
+
+func (c *preferencePreviewCatalog) ladderSnapshot(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, string, error) {
 	if c == nil {
-		return loadLadder(ctx, tx, role)
+		return loadLadderSnapshot(ctx, tx, role, 0)
 	}
 	if c.ladders == nil {
 		c.ladders = map[string][]ladderStep{}
 		c.ladderErrors = map[string]error{}
+		c.orderModes = map[string]string{}
 	}
 	if _, read := c.ladders[role]; !read {
-		steps, err := loadLadderLimit(ctx, tx, role, preferencePreviewLimit+1)
+		steps, mode, err := loadLadderSnapshot(ctx, tx, role, preferencePreviewLimit+1)
 		if err == nil && len(steps) > preferencePreviewLimit {
 			steps = nil
 			err = errPreferencePreviewIncomplete
 		}
-		c.ladders[role], c.ladderErrors[role] = steps, err
+		c.ladders[role], c.orderModes[role], c.ladderErrors[role] = steps, mode, err
 	}
-	// Managed review sorts its ladder; never let a caller change the cached order.
-	return append([]ladderStep(nil), c.ladders[role]...), c.ladderErrors[role]
+	return append([]ladderStep(nil), c.ladders[role]...), c.orderModes[role], c.ladderErrors[role]
 }
 
 // Picker membership does not decode the tenant's complete route inventory.

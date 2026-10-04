@@ -112,45 +112,50 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 }
 
 func loadLadderLimit(ctx context.Context, tx pgx.Tx, role string, limit int) ([]ladderStep, error) {
-	query := `
-		SELECT r.priority, r.profile_id::text, r.state, r.reason, r.valid_until,
-		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at,
-		       d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider,
-		       EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id)
-		FROM model_role_routes r
-		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
-		JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-		WHERE r.role = $1
-		ORDER BY r.priority, r.profile_id`
+	steps, _, err := loadLadderSnapshot(ctx, tx, role, limit)
+	return steps, err
+}
+
+// Rows and ordering mode share one statement snapshot even under READ COMMITTED.
+// The anchor retains mode for an empty ladder without initializing metadata.
+func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) ([]ladderStep, string, error) {
+	query := `SELECT COALESCE((SELECT ordinary_review_order_mode FROM model_review_order), 'legacy'), step.value
+ FROM (SELECT 1) anchor LEFT JOIN LATERAL (
+  SELECT (to_jsonb(r) - 'tenant_id') || jsonb_build_object('profile',
+   (to_jsonb(p) - 'tenant_id') || jsonb_build_object(
+    'display_name', d.model_display->>'display_name', 'short_name', d.model_display->>'short_name',
+    'model_version', d.model_display->>'model_version', 'effort_level', d.effort_level, 'provider', d.provider),
+   'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id)) AS value,
+   r.priority, r.profile_id
+  FROM model_role_routes r
+  JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
+  JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+  WHERE r.role = $1 ORDER BY r.priority,r.profile_id`
 	args := []any{role}
 	if limit > 0 {
 		query += ` LIMIT $2`
 		args = append(args, limit)
 	}
+	query += `) step ON true ORDER BY step.priority,step.profile_id`
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
-	var out []ladderStep
+	out, mode := []ladderStep{}, reviewOrderLegacy
 	for rows.Next() {
-		var step ladderStep
-		if err := rows.Scan(
-			&step.Priority, &step.ProfileID, &step.State, &step.Reason, &step.ValidUntil,
-			&step.Profile.ID, &step.Profile.Slug, &step.Profile.Version, &step.Profile.Harness,
-			&step.Profile.Family, &step.Profile.Model, &step.Profile.Effort, &step.Profile.Tier,
-			&step.Profile.Enabled, &step.Profile.CreatedAt, &step.Profile.DisplayName, &step.Profile.ShortName, &step.Profile.ModelVersion, &step.Profile.EffortLevel, &step.Profile.Provider,
-			&step.Retired,
-		); err != nil {
-			return nil, err
+		var step *ladderStep
+		if err := rows.Scan(&mode, &step); err != nil {
+			return nil, "", err
 		}
-		step.Role = role
-		if step.Profile.Harness == "gemini" {
-			step.Profile.EffortLevel = harnesslaunch.GeminiEffortLevel(step.Profile.Effort)
+		if step != nil {
+			if step.Profile.Harness == "gemini" {
+				step.Profile.EffortLevel = harnesslaunch.GeminiEffortLevel(step.Profile.Effort)
+			}
+			out = append(out, *step)
 		}
-		out = append(out, step)
 	}
-	return out, rows.Err()
+	return out, mode, rows.Err()
 }
 
 func ladderHasHarness(steps []ladderStep, harness string) bool {

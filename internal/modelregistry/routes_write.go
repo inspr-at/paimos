@@ -25,13 +25,21 @@ const routesTotalLimit = 250
 
 // routeEditToken covers canonical stored content, independent of wall time,
 // input order, timezone spelling, profile display metadata and event position.
-func routeEditToken(role string, routes []Route) string {
+func routeEditToken(role string, routes []Route, modes ...string) string {
+	mode := ""
+	if role == "review-gate" {
+		mode = reviewOrderLegacy
+		if len(modes) > 0 && modes[0] != "" {
+			mode = modes[0]
+		}
+	}
 	canonical := canonicalRoutes(routes)
 	raw, _ := json.Marshal(struct {
-		Version int     `json:"version"`
-		Role    string  `json:"role"`
-		Routes  []Route `json:"routes"`
-	}{1, role, canonical})
+		Version   int     `json:"version"`
+		Role      string  `json:"role"`
+		Routes    []Route `json:"routes"`
+		OrderMode string  `json:"order_mode,omitempty"`
+	}{1, role, canonical, mode})
 	sum := sha256.Sum256(raw)
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
@@ -159,12 +167,15 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		}
 		clear = values[0] == "clear"
 	}
-	// Ordering-mode persistence/dispatch is owned by package 633g. Until that
-	// integration lands, do not silently accept a requested mode activation.
-	if q.Has("order_mode") {
-		writePreferenceError(w, prefFail(400, "invalid_order_mode"))
-		return
+	requestedMode := ""
+	if values, present := q["order_mode"]; present {
+		if role != "review-gate" || len(values) != 1 || (values[0] != reviewOrderLegacy && values[0] != reviewOrderSaved) {
+			writePreferenceError(w, prefFail(400, "invalid_order_mode"))
+			return
+		}
+		requestedMode = values[0]
 	}
+
 	expected := ""
 	if role != "" {
 		values := r.Header.Values("If-Match")
@@ -213,6 +224,7 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out []Route
+	var outMode string
 	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
 			return err
@@ -233,7 +245,15 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if role != "" && routeEditToken(role, roleRoutes(role, before)) != expected {
+		beforeMode, err := storedReviewOrder(ctx, tx)
+		if err != nil {
+			return err
+		}
+		outMode = beforeMode
+		if requestedMode != "" {
+			outMode = requestedMode
+		}
+		if role != "" && routeEditToken(role, roleRoutes(role, before), beforeMode) != expected {
 			return prefFail(409, "stale_revision")
 		}
 		clock := m.validationClock
@@ -270,19 +290,27 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out = normalized
-		if routesEqual(before, after) {
+		sameRoutes := routesEqual(before, after)
+		if sameRoutes && beforeMode == outMode {
 			return nil
 		}
-		if role == "" {
-			_, err = tx.Exec(ctx, `DELETE FROM model_role_routes`)
-		} else {
-			_, err = tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role=$1`, role)
+		if !sameRoutes {
+			if role == "" {
+				_, err = tx.Exec(ctx, `DELETE FROM model_role_routes`)
+			} else {
+				_, err = tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role=$1`, role)
+			}
+			if err != nil {
+				return err
+			}
+			for _, row := range normalized {
+				if err := insertRoute(ctx, tx, p.TenantID, row); err != nil {
+					return err
+				}
+			}
 		}
-		if err != nil {
-			return err
-		}
-		for _, row := range normalized {
-			if err := insertRoute(ctx, tx, p.TenantID, row); err != nil {
+		if beforeMode != outMode {
+			if err := saveReviewOrder(ctx, tx, p.TenantID, outMode); err != nil {
 				return err
 			}
 		}
@@ -295,14 +323,17 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		if role != "" {
 			out = roleRoutes(role, after)
 		}
-		return writeEvent(ctx, tx, p, evRoutes, before, after)
+		return writeRoutesEvent(ctx, tx, p, before, after, beforeMode, outMode)
 	})
 	if err != nil {
 		writePreferenceError(w, err)
 		return
 	}
 	if role != "" {
-		w.Header().Set("ETag", routeEditToken(role, out))
+		w.Header().Set("ETag", routeEditToken(role, out, outMode))
+	}
+	if role == "review-gate" {
+		w.Header().Set("Model-Order-Mode", outMode)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpapi.WriteJSON(w, 200, out)

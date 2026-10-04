@@ -32,10 +32,18 @@ place; a person without the source permission sees only its permission sentence.
 People with `models.read` and `models.manage` can edit one complete role order,
 using its quoted `If-Match` token. Truncated snapshots remain read-only.
 Add, move and remove operations renumber the draft in displayed order, including
-orders with gaps in their stored priorities. The current base retains managed
-review's built-in family fallback, so the ordinary
-review editor explicitly labels its command-line ordering effect. Saved-order
-managed dispatch activation belongs to the separate 633g integration.
+orders with gaps in their stored priorities. Ordinary managed reviews retain
+built-in family/tier fallback until a person deliberately saves the review order.
+The draft starts from the currently applied fallback. Save sends
+`order_mode=saved` on the conditional `review-gate` PUT; Undo restores the captured
+rows and `legacy`/`saved` mode together. Omitted mode and whole-tenant legacy PUTs
+preserve activation. The strong role token covers both rows and mode; mode-only
+changes emit `model.routes_replaced` with unchanged before/after arrays and
+`before_order_mode`/`after_order_mode` metadata. GET returns `order_mode` and
+`managed_fallback_order` from the same snapshot, and review traces capture the
+mode. Preferences may still choose another qualified reviewer. Author-family,
+effort/tier, platform, account and residency checks stay enforced; security uses
+its separate refusing path. Already queued profile/account bindings stay fixed.
 
 Model preferences use Default, You and an explicitly visible Project, with the
 source GET/write permissions. Project-only management also needs workspace
