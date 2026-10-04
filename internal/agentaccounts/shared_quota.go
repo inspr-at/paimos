@@ -86,6 +86,15 @@ func confirmQuotaPool(ctx context.Context, tx pgx.Tx, p tenant.Principal, in quo
 	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=$2 WHERE id::text=ANY($1::text[])`, ids, fingerprint); err != nil {
 		return err
 	}
+	for _, id := range ids {
+		a, err := getAccount(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if err := reconcileReadinessResources(ctx, tx, a); err != nil {
+			return err
+		}
+	}
 	return writeEvent(ctx, tx, p, "account.quota_pool_confirmed", nil, in)
 }
 

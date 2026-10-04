@@ -197,7 +197,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&estimate, "estimate-hours", 0, "agent work hours until ready for review (alias of --estimate)")
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
-			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")
+			fs.string(&area, "area", 0, "active default or project work-kind slug, including security")
 			fs.string(&complexity, "complexity", 0, "work complexity: S, M, or L")
 			fs.string(&typ, "type", 0, "refuses a different kind; use issue convert")
 			fs.string(&status, "status", 0, "new status")
@@ -506,31 +506,39 @@ func (rt *runtime) cmdModel() *Command {
 	return &Command{
 		Name:  "model",
 		Short: "Model roles",
-		Use:   "model <resolve>",
+		Use:   "model <resolve|prefs|refresh|report>",
 		subs: []*Command{
 			rt.cmdModelResolve(),
+			rt.cmdModelPrefs(),
+			rt.cmdModelRefresh(),
+			rt.cmdModelReport(),
 		},
 	}
 }
 
 func (rt *runtime) cmdModelResolve() *Command {
-	var author, harness, workspace string
+	var author, harness, workspace, ticket string
 	return &Command{
 		Name:    "resolve",
 		Short:   "Resolve a model role",
-		Use:     "model resolve <role>",
-		minArgs: 1,
+		Use:     "model resolve [role] [--ticket KEY]",
+		minArgs: 0,
 		maxArgs: 1,
 		addFlags: func(fs *flagSet) {
 			fs.string(&author, "author-family", 0, "author model family; required for review-gate once this exists")
 			fs.string(&harness, "harness", 0, "restrict to codex, claude, pi, or cursor")
 			fs.string(&workspace, "workspace", 0, "workspace path")
+			fs.string(&ticket, "ticket", 0, "ticket key or UUID; uses its placement and role")
 		},
 		run: func(args []string) error {
-			if strings.TrimSpace(args[0]) == "" {
-				return usagef("role is required")
+			role := ""
+			if len(args) > 0 {
+				role = strings.TrimSpace(args[0])
 			}
-			return rt.resolveModel(args[0], author, harness)
+			if role == "" && strings.TrimSpace(ticket) == "" {
+				return usagef("role or --ticket is required")
+			}
+			return rt.resolveModelForTicket(role, author, harness, ticket)
 		},
 	}
 }

@@ -71,6 +71,19 @@ func TestStatusErrorRetainsAttachCauseWithoutChangingMessage(t *testing.T) {
 	}
 }
 
+func TestStatusErrorRetainsPermissionReasonWithoutChangingMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"permission denied","code":"forbidden","reason_code":"missing_key_scope"}`))
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "fixture").Do(t.Context(), "POST", "/api/agent-pairing/attach", nil, nil)
+	se, ok := err.(*StatusError)
+	if !ok || se.Status != 403 || se.Message != "permission denied" || se.ReasonCode != "missing_key_scope" || se.AttachRefusal != "" {
+		t.Fatal("additive permission reason or existing message lost")
+	}
+}
+
 func TestDoPostsJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

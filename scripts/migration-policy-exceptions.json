@@ -39,6 +39,12 @@
       "reason": "Additive work-kind tables and tenant seed with an area-schema widening from the six existing strings to their slug-pattern superset. The classifier conservatively flags the tenant-loop DO backfill and CREATE OR REPLACE of the schema helper. Existing values, rows, and binary writes remain valid; Go area gates remain unchanged until 502c. Exact bytes are exposed in this draft PR for coordinator review; migration compatibility is measured in CI before any merge/release."
     },
     {
+      "file": "1112_session_service_tiers.sql",
+      "sha256": "7593aecb93a920a9dbec5a835d8cf548517834834fc9319e49dbc923e1aeb48a",
+      "ticket": "AEON-436",
+      "reason": "Strict-superset control enum and setting-value checks add tier after installing replacements; all previous values and writes stay valid. The classifier flags DROP CONSTRAINT. This exact-byte exception requires coordinator review before merge/release and does not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
       "file": "1114_owner_guard_access_fence.sql",
       "sha256": "8a250cda5f7db57dced4c582aa59ada0ddcb943fee3b39606ecd85c8c60dada5",
       "ticket": "AEON-558",
