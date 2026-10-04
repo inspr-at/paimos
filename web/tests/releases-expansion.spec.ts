@@ -105,6 +105,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark']) {
     await search(page).focus(); await search(page).hover(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1)
     await page.keyboard.press('Meta+A'); await expect(search(page)).toBeFocused()
     await page.keyboard.press('Escape'); await expect(search(page)).not.toBeFocused()
+    await page.locator('#main').evaluate(el => { el.scrollTop = 0 })
     mkdirSync('test-results/aeon-596-mm', { recursive: true }); await page.screenshot({ path: `test-results/aeon-596-mm/releases-${width}-${theme}.png`, fullPage: false })
     expect(world.errors).toEqual([])
   })

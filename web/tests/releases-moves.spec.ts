@@ -91,7 +91,9 @@ test('collapsed append, frozen hover and authoritative refusal keep controls and
  expect(world.writes[0]!.body.before_id).toBeUndefined();expect(world.writes[0]!.body.after_id).toBeUndefined();await expect(page.locator('.move-feedback')).toContainText('changed');await expect(block(page,b).getByRole('button',{name:/^Expand /})).toHaveAttribute('aria-expanded','false');await expect(row(page,work)).toBeVisible();expect(world.undos).toEqual([]);expect(world.errors).toEqual([])
 })
 test('500ms phone pickup uses clock, quick swipe cancels and edge scroll never reorders',async({page})=>{
- await page.setViewportSize({width:390,height:800});const world=await setup(page,{rows:40});await open(page,a);await open(page,b);await page.locator('#main').evaluate(el=>{el.scrollTop=0});const clockStart=new Date('2026-10-04T12:00:00Z');await page.clock.install({time:clockStart});await page.clock.pauseAt(new Date(clockStart.getTime()+60000))
+ // Install before Vue mounts: bubbling listeners must share the clock origin.
+ const clockStart=new Date('2026-10-04T12:00:00Z');await page.clock.install({time:clockStart})
+ await page.setViewportSize({width:390,height:800});const world=await setup(page,{rows:40});await open(page,a);await open(page,b);await page.locator('#main').evaluate(el=>{el.scrollTop=0});await page.clock.pauseAt(new Date(clockStart.getTime()+60000))
  const el=row(page,work).getByRole('button',{name:/^Drag /});const box=await el.boundingBox();expect(box).toBeTruthy()
  const pointer=async(type:string,x:number,y:number)=>el.dispatchEvent(type,{pointerId:9,pointerType:'touch',button:0,clientX:x,clientY:y,bubbles:true})
  const x=box!.x+10,y=box!.y+10

@@ -3948,8 +3948,7 @@ packages: begin captures project/person/scope identity, commit applies only the
 actual response, and failed releases the pending action. Lifecycle owners apply
 their authoritative results separately and never offer blanket Undo. Own receipt
 echoes are deduplicated even before the response; foreign structural and mode changes wait
-for the fixed toolbar Apply action. Search uses the same plain placeholder in
-every section. Counts sit below the list at the right; Live freshness occupies
+for the fixed toolbar Apply action. Tickets and Releases use the plain Search placeholder. Counts sit below the list at the right; Live freshness occupies
 the app footer centre. The toolbar gains glass only when stuck after scrolling.
 Header folding and measured density transitions respect reduced motion.
 Agent/wait summaries are batched in the loaded release-page snapshot, omitted without `harness.read`, and marked partial

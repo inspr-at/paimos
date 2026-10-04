@@ -58,7 +58,7 @@ export function usePlanningMoves(options: { root: Ref<HTMLElement | undefined>; 
       const id = value.kind === 'item' ? value.record.item_id : value.record.release_id
       requestAnimationFrame(() => { if (identity === options.identity()) {
         const element = [...options.root.value?.querySelectorAll<HTMLElement>('[data-planning-item], [data-planning-release]') ?? []].find(el => el.dataset.planningItem === id || el.dataset.planningRelease === id)
-        ;(element?.querySelector<HTMLElement>('[data-move-handle], .release-more') ?? options.root.value?.querySelector<HTMLElement>('.expansion-controls button'))?.focus({ preventScroll: true })
+        ;(element?.querySelector<HTMLElement>('[data-move-handle], .release-more') ?? [...options.root.value?.querySelectorAll<HTMLElement>('.expand-toggle') ?? []].find(toggle => toggle.getClientRects().length > 0))?.focus({ preventScroll: true })
       } })
     } catch (e) { if (identity === options.identity()) feedback.value = refusal(e) }
     finally { if (identity === options.identity()) busy.value = false }
