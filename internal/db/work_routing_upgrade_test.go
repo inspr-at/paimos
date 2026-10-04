@@ -31,6 +31,9 @@ func TestWorkRoutingUpgradePreservesResidencyAndPins(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO account_ticket_pins(tenant_id,ticket_id,harness,account_id) VALUES($1,$2,'codex',$3)`, tid, leaf, account); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `UPDATE node_kinds SET allowed_child_kinds=array_append(allowed_child_kinds,'work_order') WHERE slug='ticket'`); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'ORDER-1','Upgrade order',$2 FROM node_kinds WHERE slug='work_order' RETURNING id::text`, tid, leaf).Scan(&order); err != nil {
 			return err
 		}
@@ -91,6 +94,7 @@ func TestWorkRoutingUpgradePreservesResidencyAndPins(t *testing.T) {
 	// non-work targets. Each rejection runs in its own real transaction.
 	for _, tc := range []struct{ query, message string }{
 		{`UPDATE account_ticket_pins SET harness='claude' WHERE ticket_id=$1`, "pin account harness mismatch"},
+		{`UPDATE account_ticket_pins SET harness='claude',account_id=NULL,group_id=(SELECT id FROM account_groups WHERE name='Upgrade group') WHERE ticket_id=$1`, "pin group harness mismatch"},
 		{`UPDATE account_ticket_pins SET ticket_id=(SELECT id FROM nodes WHERE key='PRJ-1') WHERE ticket_id=$1`, "pin target must be a ticket"},
 	} {
 		err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error { _, err := tx.Exec(ctx, tc.query, leaf); return err })
