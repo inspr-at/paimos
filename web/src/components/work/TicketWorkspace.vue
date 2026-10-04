@@ -138,7 +138,7 @@ const editable = computed(() => props.canWrite && !ticket.readOnly.value && !tic
 const session = useSession()
 const repeatSource = ref<ListItem | null>(null)
 const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
-const mayRepeat = computed(() => !!item.value && ['epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
+const mayRepeat = computed(() => !!item.value && ['work', 'epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
 const sourceProject = computed(() => item.value?.recurrence ? { id: item.value.recurrence.project_id, routeKey: item.value.recurrence.project_key } : null)
 const mayEditRecurrence = computed(() => !!item.value?.recurrence && !item.value.recurrence.retired && can('recurrences.manage', item.value.recurrence.project_id))
 const recurrenceScope = useIdentityScope()

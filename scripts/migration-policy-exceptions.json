@@ -148,6 +148,12 @@
       "sha256": "cae59d099482b126fe367639074a468025b59a3b350ba53d00bb6d130ea0fd43",
       "ticket": "AEON-653",
       "reason": "Reconcile planning/backlog members when live leaf shape changes; retain the complete bounded membership projection and synchronize explicit placement changes including Undo. Future-child inheritance prefers current parent intent, including explicit backlog, over preserved historical membership; without intent it falls back to membership. Add live leaf filtering and coverage while preserving frozen membership rows, published snapshots and historical identities. Replacement helpers, nullable backlog intent and the tenant-scoped repair block are conservatively outside the expansion allowlist. These unshipped branch bytes require coordinator consolidated review, paused structural writers and the existing whole-chain backup/previous-binary gates; this local worker grants no release approval."
+    },
+    {
+      "file": "1240_work_account_pins.sql",
+      "sha256": "009afe1caec0684ca46ceeba5aca4a4c38021fc7ea248f388b826098e417c38d",
+      "ticket": "AEON-648",
+      "reason": "Forward repair of the account pin guard after canonical work migration. CREATE OR REPLACE FUNCTION is conservatively outside the expand-safe allowlist. The guard only adds canonical work as a valid pin target; existing ticket pins, tenant matching, soft-delete rejection and account/group harness checks are preserved. Existing tables, columns, rows and wire names are unchanged. Pre-1215 upgrade and account routing/API regressions cover retained pins, editing, harness mismatch and non-work rejection. This exact-byte exception requires coordinator review before merge/release and grants no acceptance, deployment authority or waiver of previous-binary probes."
     }
   ]
 }
