@@ -248,16 +248,16 @@ func TestTicketOptionsHistoricalParentCanJoinNextRelease(t *testing.T) {
 					t.Fatalf("Undo did not return the existing leaf to backlog: %+v", row)
 				}
 				f.tx(func(tx pgx.Tx) error {
-					var count int
-					if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM work_parent_releases WHERE parent_node_id=$1 AND release_node_id IS NULL`, f.feature).Scan(&count); err != nil {
+					var count, backlogCount int
+					if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE release_node_id IS NULL) FROM work_parent_releases WHERE parent_node_id=$1`, f.feature).Scan(&count, &backlogCount); err != nil {
 						return err
 					}
 					want := 0
 					if tc.backlogIntent {
 						want = 1
 					}
-					if count != want {
-						t.Fatalf("Undo restored %d backlog intents, want %d", count, want)
+					if count != want || backlogCount != want {
+						t.Fatalf("Undo restored %d intents (%d backlog), want %d backlog intents", count, backlogCount, want)
 					}
 					return nil
 				})
@@ -272,7 +272,7 @@ func TestTicketOptionsHistoricalParentCanJoinNextRelease(t *testing.T) {
 				if row.ReleaseID == nil || *row.ReleaseID != next || row.ReleaseCount != 1 {
 					t.Fatalf("future child did not inherit current parent placement: %+v", row)
 				}
-				if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", result.EventID), ""); w.Code != 409 || !strings.Contains(w.Body.String(), "conflict") {
+				if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", result.EventID), ""); w.Code != 409 || !strings.Contains(w.Body.String(), events.ErrConflict.Error()) {
 					t.Fatalf("stale Undo after inherited child: %d %s", w.Code, w.Body.String())
 				}
 			}
