@@ -4,7 +4,7 @@ import { vClipTip } from '../../lib/clipTip'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
-import { plural, type SortKey } from '../../lib/work'
+import { type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import ProjectTabs from './ProjectTabs.vue'
 import { TICKET_VIEWS, KNOWLEDGE_VIEWS, type TicketView } from './projectNavigation'
@@ -184,20 +184,18 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
 <template>
   <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'releases' ? 'Release list controls' : view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
+    <slot name="section-switch" />
     <ProjectTabs v-if="view !== 'journey' && view !== 'releases'" class="view-switch"
       :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
       :tips="view !== 'knowledge'"
       :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="count-live">
-      <slot name="freshness" />
-      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
-    </span>
+    <span v-if="pendingChanges" class="count-live apply-slot" aria-live="polite"><button v-if="pendingChanges" type="button" class="btn sm apply-changes" @click="emit('applyChanges')">{{ pendingIncomplete ? '≥ ' : '' }}{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button></span>
     <span v-if="view !== 'knowledge' && view !== 'journey'" class="phone-break" aria-hidden="true" />
     <template v-if="view !== 'knowledge' && view !== 'journey'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
-      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" :aria-label="view === 'releases' ? 'Search releases and work in this project' : 'Search tickets in this project'" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
+      <input ref="input" v-model="draft" class="field" type="search" placeholder="Search" :aria-label="view === 'releases' ? 'Search releases and work in this project' : 'Search tickets in this project'" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
       <kbd v-if="!draft && !narrow" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
@@ -414,4 +412,9 @@ defineExpose({ focusSearch, openFilterMenu, input })
   .facet-x { min-width: 44px; }
 }
 
+
+.apply-slot { position: absolute; right: 5rem; top: 6px; z-index: 2; }
+
+.apply-slot { background: var(--surface-raised); border-radius: 6px; max-width: calc(100% - 8rem); overflow: hidden; }
+@media (max-width: 600px) { .apply-slot { top: auto; bottom: 8px; right: 4.5rem; } }
 </style>

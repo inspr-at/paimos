@@ -67,7 +67,6 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/features/{key}":           "settings.manage",
 	"GET /api/agentd/step-ups/{challenge_id}":    "harness.worker",
 	"PUT /api/agent-keys/{id}/owner-workstation": "keys.manage",
-	"GET /api/model-preferences":                 "models.read",
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",

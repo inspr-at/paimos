@@ -86,7 +86,7 @@ defineExpose({ open })
   </Teleport>
   <div class="scope-line" role="group" aria-label="Current project scope">
     <button type="button" class="scope-picker" aria-label="Filters: release scope" aria-haspopup="dialog" @click="open"><AppIcon name="filter" :size="14" /><span v-clip-tip="label">{{ label }}</span><AppIcon name="chevron" :size="12" /></button>
-    <span class="scope-count" :title="countText" role="status"><button v-if="pendingChanges" type="button" @click="emit('applyChanges')">{{ pendingIncomplete ? '≥ ' : '' }}{{ pendingChanges }} {{ pendingChanges === 1 ? 'change' : 'changes' }} · Apply <kbd class="keycap">a</kbd></button><span v-else v-clip-tip="countText || ''">{{ countText }}</span></span>
+
     <button type="button" class="scope-clear" aria-label="Clear scope" :disabled="scope.kind === 'all'" @click="choose([])"><AppIcon name="close" :size="14" /></button>
   </div>
   <Teleport to="body">

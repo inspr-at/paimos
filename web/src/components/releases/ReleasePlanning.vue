@@ -19,7 +19,7 @@ import PlanningWork from './PlanningWork.vue'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ applyVersion?: number; projectId: string; projectKey: string; person: string; filters: ListFilters; hideStates?: string[]; scrollRoot: HTMLElement | null; now: number; density: 'compact' | 'comfortable' }>()
-const emit = defineEmits<{ open: [key: string]; copy: [key: string]; newTab: [key: string]; scope: [id: string]; summary: [value: { total: number | null; loading: boolean; incomplete: boolean }]; menu: [releaseId: string, anchor: HTMLElement]; abandoned: [anchor: HTMLElement] }>()
+const emit = defineEmits<{ open: [key: string]; copy: [key: string]; newTab: [key: string]; scope: [id: string]; summary: [value: { total: number | null; loading: boolean; incomplete: boolean; updatedAt: number | null }]; menu: [releaseId: string, anchor: HTMLElement]; abandoned: [anchor: HTMLElement] }>()
 const root = ref<HTMLElement>()
 let hovered: Element | null = null
 function activeElements() {
@@ -36,6 +36,8 @@ function canInsert(source: PlanningSource) {
 }
 const planning = useReleasePlanning({ canInsert })
 const { overview, expanded, work, loading, stale, error, pageError, pending: pendingPages, inFlight, queued, budgetBlocked, rendered, paging, continuations } = planning
+const updatedAt = ref<number | null>(null)
+watch(overview, value => { updatedAt.value = value ? Date.now() : null })
 const pendingExpansion = ref(false)
 const pending = computed(() => pendingPages.value + Number(pendingExpansion.value))
 const mode = ref<'checking' | 'journey' | 'releases' | 'error'>('checking')
@@ -144,7 +146,8 @@ function toggle(id: string) {
   if (expanded.has(id)) { returnFocus(id); planning.collapse(id) } else planning.expand(id)
   void saveExpansion()
 }
-function expandAll() { planning.expandAll(); void saveExpansion() }
+function expandAll() { for (const row of overview.value?.active ?? []) planning.expand(row.release_id); planning.expand('backlog'); void saveExpansion() }
+function toggleAll() { if (expanded.size) collapseAll(); else expandAll() }
 function collapseAll() { for (const id of expanded) returnFocus(id); planning.collapseAll(); void saveExpansion() }
 function scope(id: string) { planning.expand(id); void saveExpansion(); emit('scope', id === 'backlog' ? 'none' : id) }
 function flush(force = false) { restoreExpansion(force); planning.flush(force) }
@@ -166,7 +169,7 @@ function workProps(source: PlanningSource, matches?: MatchCounts) {
   return { source, items: state?.items ?? [], matches: state?.matches ?? matches, loaded: state?.loaded ?? false, loading: state?.loading ?? false, error: state?.error ?? '', more: !!state?.cursor,
     incomplete: state?.incomplete ?? false, projectId: props.projectId, projectKey: props.projectKey, now: props.now, query: props.filters.q, scrollRoot: props.scrollRoot, density: props.density }
 }
-watch([overview, loading, stale], () => emit('summary', { total: stale.value ? null : overview.value?.matches?.shown_count ?? null, loading: loading.value || mode.value === 'checking', incomplete: overview.value?.counts_incomplete ?? false }), { immediate: true })
+watch([overview, loading, stale], () => emit('summary', { total: stale.value || !overview.value ? null : overview.value.active.length + (overview.value.released.matches?.matched_count ?? overview.value.released.items.length) + overview.value.abandoned, loading: loading.value || mode.value === 'checking', incomplete: !!overview.value?.active_next_cursor || !!overview.value?.released.next_cursor && !overview.value.released.matches || (overview.value?.counts_incomplete ?? false), updatedAt: stale.value || error.value ? null : updatedAt.value }), { immediate: true })
 onBeforeUnmount(() => { disposed = true; statusAbort?.abort(); planning.dispose() })
 defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? loadMode() : planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value }) })
 </script>
@@ -174,13 +177,9 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
 <template>
   <section ref="root" class="release-planning" aria-label="Release planning" @pointerover="pointer" @pointerleave="leave" @focusout="focusOut" @pointerdown="moves.down" @click.capture="moves.click" @contextmenu="moves.context">
     <div class="planning-controls" role="toolbar" aria-label="Release expansion and continuation">
-      <div class="expansion-controls">
-        <button type="button" class="btn sm ghost" :disabled="!overview || stale" @click="expandAll"><AppIcon name="expand-all" :size="14" />Expand all</button>
-        <button type="button" class="btn sm ghost" :disabled="!overview || stale" @click="collapseAll"><AppIcon name="collapse-all" :size="14" />Collapse all</button>
-      </div>
       <div class="release-continuation">
         <button type="button" class="btn sm ghost" :disabled="!overview?.active_next_cursor || stale || paging.has('active')" aria-label="Load more upcoming releases" @click="planning.more('active')">More upcoming</button>
-        <button type="button" class="btn sm ghost" :disabled="!overview?.released.next_cursor || stale || paging.has('released')" aria-label="Load more released releases" @click="planning.more('released')">Load more</button>
+        <button type="button" class="btn sm ghost" :disabled="!overview?.released.next_cursor || stale || paging.has('released')" aria-label="Load more shipped releases" @click="planning.more('released')">Load more</button>
       </div>
       <div class="work-continuation">
         <select v-model="nextSource" aria-label="Work to continue loading" :disabled="!continuations.length || stale"><option v-if="!continuations.length" value="">No work waiting</option><option v-for="source in continuations" :key="source" :value="source">{{ sourceLabel(source) }}</option></select>
@@ -197,13 +196,14 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
       <span v-else-if="budgetBlocked">{{ rendered }} work rows loaded · collapse a release to load more</span>
       <span v-else-if="queued || inFlight">{{ inFlight }} reads running · {{ queued }} pages waiting</span>
       <span v-else-if="overview?.counts_incomplete">Counts are a lower bound; more matches may exist.</span>
-      <span v-else-if="overview">{{ overview.active.length }} upcoming · {{ overview.released.items.length }} released loaded</span>
+      <span v-else-if="overview">{{ overview.active.length }} upcoming · {{ overview.released.items.length }} shipped loaded</span>
       <button type="button" class="retry" :disabled="mode === 'checking' || loading" @click="refreshPlanning">Refresh</button>
     </div>
     <slot v-if="mode === 'journey'" name="journey"><p class="journey-placeholder">This project is still using its journey.</p></slot>
     <template v-if="overview">
-      <div class="release-columns" aria-hidden="true"><span>Release</span><span>Status</span><span>Open</span><span>Progress</span><span>Outlook</span><span>Agents</span><span /></div>
-      <h2 class="release-section">Upcoming</h2>
+      <div class="release-group"><h2 class="group-label"><span>{{ overview.active.length }}{{ overview.active_next_cursor ? ' +' : '' }} upcoming releases</span></h2><div class="release-card upcoming-card">
+      <div class="release-columns"><span class="release-column-name"><button type="button" class="expand-toggle" :disabled="stale" :aria-label="expanded.size ? 'Collapse all' : 'Expand all'" @click="toggleAll"><AppIcon :name="expanded.size ? 'collapse-all' : 'expand-all'" :size="14" /></button>Release</span><span>Status</span><span>Open</span><span>Progress</span><span>Outlook</span><span>Agents</span><span /></div>
+      <div class="phone-group"><span>Upcoming</span><button type="button" class="expand-toggle" :disabled="stale" :aria-label="expanded.size ? 'Collapse all' : 'Expand all'" @click="toggleAll"><AppIcon :name="expanded.size ? 'collapse-all' : 'expand-all'" :size="14" /></button></div>
       <div v-for="release in overview.active" :key="release.release_id" :data-planning-block="release.release_id" class="release-block" :class="{ 'move-target': moveHighlight === release.release_id, 'move-refused': moveHighlight === release.release_id && moveRefused }">
         <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" :actions-available="true" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => menu(release.release_id, anchor)">
           <template #handle><button type="button" class="release-drag-handle" data-move-handle :aria-label="`Reorder ${releaseName(release)}`" :aria-disabled="release.visibility === 'published' || release.state === 'released'" :data-tip="release.visibility === 'published' ? 'Published releases keep their order.' : 'Reorder upcoming release'" @click.stop="moves.open({ kind: 'release', record: { ...release } })"><AppIcon name="grip" :size="14" /></button></template>
@@ -213,6 +213,8 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
       </div>
       <p v-if="!overview.active.length" class="empty">{{ filters.q ? 'No upcoming releases match' : 'No upcoming releases' }}</p>
       <span data-insertion="active" class="insertion" />
+      </div></div>
+      <div class="release-group"><div class="release-card backlog-card">
       <div v-if="backlogVisible" data-planning-block="backlog" class="release-block" :class="{ 'move-target': moveHighlight === 'backlog', 'move-refused': moveHighlight === 'backlog' && moveRefused }">
         <div class="backlog-row" :class="{ scoped: scoped('backlog') }">
           <button type="button" class="chevron" :disabled="stale" :aria-expanded="expanded.has('backlog')" aria-controls="release-work-backlog" :aria-label="`${expanded.has('backlog') ? 'Collapse' : 'Expand'} Backlog`" @click="toggle('backlog')"><AppIcon name="chevron-right" :size="14" /></button>
@@ -226,7 +228,9 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
         </div>
       </div>
       <div class="abandoned-row"><AppIcon name="archive" :size="14" /><button type="button" class="abandoned-open" @click="abandonedSheet($event.currentTarget as HTMLElement)">Abandoned</button><span class="mono">{{ overview.abandoned }}{{ overview.counts_incomplete ? '+' : '' }}</span><span class="quiet">Names stay reserved</span></div>
-      <h2 class="release-section">Released <span>Internal work reads Done</span></h2>
+      </div></div>
+      <div class="release-group"><h2 class="group-label"><span>{{ overview.released.matches?.matched_count ?? overview.released.items.length }}{{ overview.released.next_cursor && !overview.released.matches || overview.released.matches?.incomplete ? ' +' : '' }} shipped releases</span></h2><div class="release-card shipped-card">
+      <h2 class="phone-group">Shipped</h2>
       <div v-for="release in overview.released.items" :key="release.release_id" :data-planning-block="release.release_id" class="release-block" :class="{ 'move-target': moveHighlight === release.release_id, 'move-refused': moveHighlight === release.release_id && moveRefused }">
         <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" :actions-available="true" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => menu(release.release_id, anchor)">
           <template #handle><button type="button" class="release-drag-handle" data-move-handle :aria-label="`Reorder ${releaseName(release)}`" :aria-disabled="release.visibility === 'published' || release.state === 'released'" :data-tip="release.visibility === 'published' ? 'Published releases keep their order.' : 'Reorder upcoming release'" @click.stop="moves.open({ kind: 'release', record: { ...release } })"><AppIcon name="grip" :size="14" /></button></template>
@@ -235,7 +239,8 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
         <span v-else :data-insertion="`release:${release.release_id}`" class="insertion" />
       </div>
       <span data-insertion="released" class="insertion" />
-      <p class="empty">{{ overview.released.next_cursor ? 'More released releases are available with Load more above.' : overview.counts_incomplete ? 'Loaded release pages exhausted; counts remain incomplete.' : filters.q ? 'End of the loaded matching release pages' : 'All released releases loaded' }}</p>
+      <p class="empty">{{ overview.released.next_cursor ? 'Showing loaded shipped releases · Load more above.' : overview.counts_incomplete ? 'Loaded release pages exhausted; counts remain incomplete.' : filters.q ? 'End of the loaded matching release pages' : 'All shipped releases loaded' }}</p>
+      </div></div>
     </template>
     <Teleport to="body">
       <div v-if="moving" class="move-ghost" aria-hidden="true" :style="{ left: `${Math.min(movePoint.x + 12, Math.max(8, (root?.clientWidth ?? 320) - 220))}px`, top: `${Math.max(144, movePoint.y - 16)}px` }"><span>{{ moving.record.title }}</span><p>{{ moveFeedback }}</p></div>
@@ -258,7 +263,7 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
 .move-ghost p { margin: 6px 0 0; font-size: 11px; line-height: 1.4; }
 .move-line { position: fixed; height: 2px; background: var(--ink-2); z-index: 999; pointer-events: none; }
 .release-planning { container: releases / inline-size; min-width: 0; }
-.planning-controls { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; padding: 8px 0; }
+.planning-controls { display: grid; grid-template-columns: 1fr; align-items: center; gap: 8px; padding: 8px 0; }
 .expansion-controls, .release-continuation, .work-continuation { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .release-continuation { justify-content: flex-end; }
 .work-continuation { grid-column: 1 / -1; }
@@ -267,7 +272,7 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
 .planning-feedback > span { min-width: 0; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .error { color: var(--danger); }
 .retry { padding: 0 8px; height: 36px; border: 0; background: transparent; color: var(--teal-ink); flex-shrink: 0; }
-.release-columns { display: grid; grid-template-columns: minmax(0, 1fr) 7rem 4.5rem 8rem 8rem 10rem 44px; gap: 8px; padding: 10px 8px 10px 44px; border-bottom: 1px solid var(--line); font: 10.5px/1 var(--mono); color: var(--ink-3); text-transform: uppercase; }
+.release-columns { display: grid; grid-template-columns: minmax(0, 1fr) 7rem 4.5rem 8rem 8rem 10rem 44px; gap: 8px; padding: 0 8px 0 12px; min-height: 44px; align-items: center; border-bottom: 1px solid var(--line); font: 10.5px/1 var(--mono); color: var(--ink-3); text-transform: uppercase; }
 .release-section { display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 12px; font: 600 11px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); border-bottom: 1px solid var(--line); }
 .release-section span { font-weight: 400; font-size: 10px; }
 .backlog-row { display: flex; align-items: center; min-height: 64px; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
@@ -294,4 +299,14 @@ button:focus-visible, select:focus-visible { outline: none; box-shadow: var(--fo
   .abandoned-row { flex-wrap: wrap; }
 }
 @media (pointer: coarse) { .planning-controls .btn, .retry, .work-continuation select { min-height: 44px; } .chevron { min-width: 44px; } }
+
+.release-group { position: relative; margin: 0 0 12px 28px; }
+.release-card { overflow: clip; border: 1px solid var(--glass-edge); border-radius: var(--radius, 12px); background: var(--surface-raised); box-shadow: var(--shadow); }
+.group-label { position: absolute; top: 0; bottom: 0; left: -28px; width: 16px; margin: 0; }
+.group-label > span { position: sticky; top: calc(var(--toolbar-h, 52px) + 14px); display: block; padding-top: 14px; writing-mode: vertical-rl; transform: rotate(180deg); font: 500 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.release-column-name { display: flex; align-items: center; gap: 4px; }
+.expand-toggle { display: grid; place-items: center; flex: none; width: 32px; height: 44px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
+.phone-group { display: none; }
+@media (max-width: 600px) { .release-group { margin-left: 0; } .group-label { display: none; } .phone-group { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding: 0 12px; margin: 0; font: 500 11px/1.4 var(--mono); color: var(--ink-3); } }
+@container releases (max-width: 760px) { .upcoming-card .phone-group { display: flex; justify-content: space-between; align-items: center; padding: 0 12px; min-height: 44px; } }
 </style>

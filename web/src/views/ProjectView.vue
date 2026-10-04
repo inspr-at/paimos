@@ -62,6 +62,7 @@ import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
+import FloatingPanel from '../components/work/FloatingPanel.vue'
 import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
 import ListFreshness from '../components/work/ListFreshness.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
@@ -199,12 +200,31 @@ const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
 const section = computed(() => projectSection(route))
 const { headerDensity } = useProjectHeader()
-const ticketsHeader = computed(() => section.value === 'tickets')
+const ticketsHeader = computed(() => ['tickets', 'releases', 'knowledge'].includes(section.value))
+const headerFold = ref<HTMLElement>()
+let headerAnimation: Animation | null = null
+watch(headerDensity, async (value, before) => {
+  const fold = headerFold.value
+  if (!fold || before === 'collapsed' || value === 'collapsed' || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  headerAnimation?.cancel()
+  const height = fold.offsetHeight
+  await nextTick()
+  if (!fold.isConnected || value !== headerDensity.value) return
+  fold.style.overflow = 'hidden'
+  headerAnimation = fold.animate([{ height: `${height}px` }, { height: `${fold.offsetHeight}px` }], { duration: 260, easing: 'cubic-bezier(.2,.7,.2,1)' })
+  headerAnimation.onfinish = headerAnimation.oncancel = () => { fold.style.overflow = '' }
+  fold.querySelector('header')?.animate([{ opacity: .25 }, { opacity: 1 }], { duration: 260, easing: 'ease-out' })
+})
+onBeforeUnmount(() => headerAnimation?.cancel())
+const sectionAnchor = ref<HTMLElement | null>(null)
+const currentSection = computed(() => PROJECT_SECTIONS.find(item => item.id === section.value) ?? PROJECT_SECTIONS[1])
+function closeSection(restore = false) { const anchor = sectionAnchor.value; sectionAnchor.value = null; if (restore) anchor?.focus() }
+watch([section, headerDensity], () => closeSection())
 const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
 const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
 const onKnowledge = () => section.value === 'knowledge'
 const releasesActive = computed(() => section.value === 'releases')
-const planningSummary = ref<{ total: number | null; loading: boolean; incomplete: boolean }>({ total: null, loading: false, incomplete: false })
+const planningSummary = ref<{ total: number | null; loading: boolean; incomplete: boolean; updatedAt?: number | null }>({ total: null, loading: false, incomplete: false })
 const scopeValues = computed(() => scopeValuesFromQuery(route.query.ships_in))
 const projectScope = computed(() => releaseScope(scopeValues.value))
 const scopeLabel = ref('All work')
@@ -1755,7 +1775,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
-      <div id="project-header-fold" v-show="!ticketsHeader || headerDensity !== 'collapsed'" class="project-fold">
+      <div ref="headerFold" id="project-header-fold" class="project-fold" :inert="ticketsHeader && headerDensity === 'collapsed' || undefined"><div class="project-fold-body">
       <header class="project-head" :class="{ 'glimpse-room': !ticketsHeader && glimpseActive && !showViewBar }">
         <div class="head-flex" :class="{ 'with-glimpse': !ticketsHeader && glimpseActive }">
         <div class="head-main">
@@ -1808,6 +1828,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <div v-if="ticketsHeader" id="project-view-settings" class="project-view-settings" />
       </div>
       </div>
+      </div>
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive && !settingsActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ReleaseScopePicker ref="scopePicker" :project-id="project.id" :person="scopeOwner" :values="scopeValues" :count-text="scopeCountText" :pending-changes="deliveryLive.pending.value" :pending-incomplete="deliveryLive.overflow.value" @apply-changes="deliveryLive.apply()" @choose="chooseScope" @label="scopeLabel = $event" />
@@ -1822,7 +1843,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
         >
-          <template #freshness><ListFreshness v-if="liveActive" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" inline /></template>
+          <template #section-switch><button type="button" class="btn sm section-switch" :tabindex="headerDensity === 'collapsed' ? 0 : -1" :aria-hidden="headerDensity !== 'collapsed' || undefined" :aria-label="`Section: ${currentSection.label}. Switch section`" :data-tip="currentSection.label" aria-haspopup="menu" :aria-expanded="!!sectionAnchor" @click="sectionAnchor = sectionAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon :name="currentSection.icon" :size="14" /><AppIcon name="chevron" :size="12" /></button></template>
         </ListToolbar>
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
@@ -1839,7 +1860,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <span v-clip-tip="deliveryLive.error.value">{{ deliveryLive.error.value || (deliveryLive.undo.value ? 'Move saved' : '') }}</span>
         <button type="button" class="btn sm" :disabled="!deliveryLive.undo.value || deliveryLive.undoBusy.value" @click="deliveryLive.undoLast()">Undo</button>
       </div>
-      <ReleasePlanning ref="planningView" :apply-version="deliveryLive.applied.value" v-if="releasesActive" :project-id="project.id" :project-key="project.routeKey" :person="`${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`" :filters="filters" :scroll-root="scrollRoot" :now="now" :density="density"
+      <ReleasePlanning ref="planningView" :apply-version="deliveryLive.applied.value" v-if="releasesActive" :project-id="project.id" :project-key="project.routeKey" :person="`${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`" :filters="filters" :hide-states="filters.hideStates" :scroll-root="scrollRoot" :now="now" :density="density"
         @summary="planningSummary = $event" @open="openKey" @copy="copyKey" @new-tab="newTab" @scope="id => chooseScope([id])" />
       <JourneyView
         v-else-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
@@ -1883,6 +1904,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       </template>
 
+      <p v-if="!journeyActive && !settingsActive && !knowledgeActive && !graphActive" class="list-count" role="status" aria-live="polite"><template v-if="releasesActive">{{ planningSummary.incomplete ? '≥ ' : '' }}{{ planningSummary.total === null ? (planningSummary.loading ? 'Counting releases…' : 'Release count unavailable') : `${planningSummary.total} releases` }}</template><template v-else-if="total !== null">{{ total }} {{ total === 1 ? 'ticket' : 'tickets' }}{{ projectScope.kind === 'all' ? '' : ` in ${scopeLabel}` }}</template></p>
+      <Teleport defer to="#project-footer-live"><ListFreshness v-if="liveActive || releasesActive" :updated-at="releasesActive ? planningSummary.updatedAt ?? null : liveUpdatedAt" :untrusted="releasesActive ? planningSummary.total === null : liveDataStale" /></Teleport>
+      <FloatingPanel v-if="sectionAnchor" :anchor="sectionAnchor" label="Switch project section" @close="closeSection">
+        <div class="section-menu" role="menu" aria-label="Project sections"><button v-for="item in PROJECT_SECTIONS.filter(item => ['releases', 'tickets', 'knowledge'].includes(item.id))" :key="item.id" type="button" role="menuitem" @click="closeSection(); setSection(item.id)"><AppIcon :name="item.icon" :size="14" />{{ item.label }}</button></div>
+      </FloatingPanel>
       <BulkBar ref="bulkBar"
         v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy || queue.busy" :can-queue="mayQueue" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
@@ -2167,4 +2193,23 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-navigation.legacy-navigation { display: block; border: 0; padding: 0; }
 .project-navigation.legacy-navigation :deep(.sections) { margin-top: 18px; }
 .project-navigation.legacy-navigation .view-bar { padding: 2px 0 6px; }
+
+.project-fold { display: grid; grid-template-rows: 1fr; }
+.project-fold-body { min-height: 0; }
+.header-collapsed .project-fold { grid-template-rows: 0fr; visibility: hidden; }
+.header-collapsed .project-fold-body { overflow: hidden; }
+.section-switch { flex: none; max-width: 0; padding: 0; margin-right: -8px; border-width: 0; opacity: 0; overflow: hidden; pointer-events: none; }
+.header-collapsed .section-switch { max-width: 72px; padding: 0 8px; margin-right: 0; opacity: 1; pointer-events: auto; }
+.section-menu { display: grid; }
+.section-menu button { display: flex; align-items: center; gap: 10px; min-height: 44px; border: 0; background: transparent; color: var(--ink); padding: 0 12px; }
+.section-menu button:hover, .section-menu button:focus-visible { background: var(--row-hover); }
+.list-count { margin: 10px 4px 0; text-align: right; font: 400 12px/1.5 var(--mono); color: var(--ink-3); }
+.toolbar-wrap.stuck::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 24px; background: inherit; backdrop-filter: inherit; }
+@media (prefers-reduced-motion: no-preference) {
+  .project-fold { transition: grid-template-rows .22s cubic-bezier(.2,.7,.2,1); }
+  .header-collapsed .project-fold { transition: grid-template-rows .22s cubic-bezier(.2,.7,.2,1), visibility 0s linear .22s; }
+  .section-switch { transition: max-width .22s ease, padding .22s ease, margin .22s ease, opacity .18s ease; }
+  .project-head, .title-line h1, .toolbar-wrap { transition: padding .26s ease, font-size .26s ease, background-color .2s ease; }
+  .description-block { transition: opacity .18s ease; }
+}
 </style>

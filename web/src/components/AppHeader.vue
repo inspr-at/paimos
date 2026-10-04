@@ -44,7 +44,7 @@ const router = useRouter()
 const palette = ref<InstanceType<typeof CommandPalette>>()
 const { headerDensity, toggleHeader } = useProjectHeader()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-const headerTickets = computed(() => !!projectKey.value && projectSection(route) === 'tickets' && !fullTicket.value && route.query.panel !== 'full')
+const headerTickets = computed(() => !!projectKey.value && ['tickets', 'releases', 'knowledge'].includes(projectSection(route)) && !fullTicket.value && route.query.panel !== 'full')
 function headerKeys(event: KeyboardEvent) {
   if (headerTickets.value && session.identity && !fatal.value && headerShortcut(event, mac)) { event.preventDefault(); toggleHeader() }
 }
