@@ -106,6 +106,11 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
 
 test('session setup and work context appear from the mocked harness API', async ({ page }) => {
   const { data } = await setup(page)
+  for (const item of data.sessions) Object.assign(item, { service_tier: 'default', service_tier_revision: 1 })
+  await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/tier$/, route => {
+    expect(route.request().method()).toBe('GET')
+    return route.fulfill({ json: { session_id: new URL(route.request().url()).pathname.split('/').at(-2), revision: 1, active_tier: 'default', pending: null, read_only: true, read_only_reason: 'This daemon does not support confirmed tier changes.', reports: [], requests: [] } })
+  })
   Object.assign(data.sessions[1]!, {
     model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro', harness_version: '1.2.3',
     brief: 'AEON-213', worktree: '/Code/aeon-worktrees/tm1-session-metadata', branch: 'tm1.session-metadata',
@@ -130,7 +135,9 @@ test('session setup and work context appear from the mocked harness API', async 
   await expect(workBlock.locator('.commits li')).toHaveText(['abc1234Store session setup', 'def5678Show work context'])
   await row(page, session(3)).locator('.agent-link').click()
   await expect(panel(page).locator('section[aria-labelledby="work-title"]')).toHaveCount(0)
+  await expect(panel(page).locator('.service-tier .tier-head strong')).toHaveText('Default')
   await expect(panel(page)).not.toContainText('Not reported')
+  await expect(panel(page)).not.toContainText('Unmocked route')
 })
 
 test('an approval from an agent with no session and no address shows its name', async ({ page }) => {
@@ -447,7 +454,7 @@ test('Settings lists limits set by hand as Set by you, never as a vendor percent
   const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
   await codex.getByRole('switch', { name: /Agents may use it/ }).click()
   await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
-  await expect(codex.locator('.state')).toHaveText('Paused')
+  await expect(codex.locator('.state')).toHaveText('Paused in Settings')
   expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })
 })
 

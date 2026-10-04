@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed } from 'vue'
 import type { AgentState } from '../../lib/agentSignals'
 import { useAgentAppearance } from '../../lib/agentAppearance'
@@ -42,7 +43,7 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
       <button v-if="paused" class="state-count" type="button" :style="appearance('paused')" @click="emit('jump', 'paused')"><AgentStateMark state="paused" :size="12" /><b>{{ paused }}</b>paused</button>
       <span v-if="trouble.length === 1" class="problem-chip" :style="appearance(trouble[0].status.state)" :data-tip="[trouble[0].name, trouble[0].ticket?.key, currentStep(trouble[0])].filter(Boolean).join(' · ')">
         <AgentStateMark :state="trouble[0].status.state" :size="12" />
-        <span class="who">{{ trouble[0].name }}</span><span class="what">{{ what(trouble[0]) }} · {{ since(trouble[0]) }}</span>
+        <span v-clip-tip class="who">{{ trouble[0].name }}</span><span class="what">{{ what(trouble[0]) }} · {{ since(trouble[0]) }}</span>
         <button type="button" class="btn open" :aria-label="`Open ${trouble[0].name}`" @click="emit('open', trouble[0].session.id)">Open</button>
       </span>
       <span v-else-if="trouble.length > 1" class="problem-chip" :style="appearance('problem')">
@@ -64,7 +65,7 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
 .state-count:focus-visible { box-shadow: var(--focus-ring); }
 /* The one session in trouble: a full soft tint and a hairline ring, never an edge bar. */
 .problem-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; height: 32px; margin-left: 10px; padding: 0 4px 0 11px; border-radius: 999px; background: color-mix(in srgb, var(--agent-state-color) 8%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-state-color) 30%, transparent); color: var(--ink); font-size: 13px; }
-.problem-chip .who { font-weight: 650; white-space: nowrap; }
+.problem-chip .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 650; white-space: nowrap; }
 .problem-chip .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .problem-chip .open { flex: none; height: 24px; padding: 0 10px; font-size: 12px; }
 @media (max-width: 720px) {
@@ -76,6 +77,7 @@ const what = (view: SessionView) => (view.status.reasons?.[0]?.detail || view.st
   .state-count { height: 44px; padding: 0 10px 0 0; }
   .state-count + .state-count { padding-left: 8px; }
   .problem-chip { width: 100%; height: 44px; margin: 6px 0 0; padding: 0 4px 0 12px; }
+  .problem-chip .who { flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; line-height: 16px; }
   .problem-chip .what { flex: 1; }
   .problem-chip .open { height: 34px; padding: 0 14px; }
 }

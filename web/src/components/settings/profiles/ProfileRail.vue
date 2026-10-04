@@ -32,7 +32,7 @@ const locale = (p: QuoteProfile) => p.definition.locale === 'en' ? 'English' : '
         <RouterLink class="item" :to="`/settings/business/profiles/${p.id}`" :aria-current="!creating && p.id === selectedId ? 'page' : undefined" @click="emit('select', p.id)">
           <ProfileThumb :definition="p.definition" :size="34" />
           <span class="item-text">
-            <span class="item-name">{{ p.name }}</span>
+            <span v-clip-tip="p.name" class="item-name">{{ p.name }}</span>
             <span class="item-meta"><span v-if="p.id === defaultId" class="default" data-tip="New quotes start with this profile">Default · </span>{{ variant(p) }} · {{ locale(p) }} · rev. {{ p.revision }}</span>
           </span>
         </RouterLink>
@@ -47,7 +47,7 @@ const locale = (p: QuoteProfile) => p.definition.locale === 'en' ? 'English' : '
         <li v-for="p in archived" :key="p.id" class="archived-row">
           <RouterLink class="item" :to="`/settings/business/profiles/${p.id}`" :aria-current="p.id === selectedId ? 'page' : undefined" @click="emit('select', p.id)">
             <ProfileThumb :definition="p.definition" :size="34" />
-            <span class="item-text"><span class="item-name">{{ p.name }}</span><span class="item-meta">Archived · rev. {{ p.revision }}</span></span>
+            <span class="item-text"><span v-clip-tip="p.name" class="item-name">{{ p.name }}</span><span class="item-meta">Archived · rev. {{ p.revision }}</span></span>
           </RouterLink>
           <button type="button" class="icon-btn sm flat" :aria-label="`Restore ${p.name}`" data-tip="Restore" @click="emit('restore', p)"><AppIcon name="rollback" :size="14" /></button>
         </li>
@@ -81,5 +81,9 @@ const locale = (p: QuoteProfile) => p.definition.locale === 'en' ? 'English' : '
 .archived-row { display: flex; align-items: center; gap: 2px; }
 .archived-row .item { flex: 1; min-width: 0; }
 .archived-row .item-name { color: var(--ink-2); }
+@media (max-width: 720px) {
+  .item { height: 76px; }
+  .item-name { height: 2.8em; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+}
 @media (prefers-reduced-motion: reduce) { .fold-chev { transition: none; } }
 </style>

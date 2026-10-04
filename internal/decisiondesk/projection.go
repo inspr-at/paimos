@@ -79,6 +79,13 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  FROM doctrine_proposals p
  WHERE p.tenant_id=$1 AND ($2='' OR $2='doctrine' AND p.id=$3::uuid) AND p.data->>'inbox'='true' AND p.data->>'state'='pending'
  AND coalesce((p.data->>'pr_number')::int,0)=0 AND p.created_at>(SELECT at FROM clock)-interval '30 days'
+), key_trims(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT t.id,'key_trim'::text,NULL::uuid,t.revision,'Trim key · '||k.name,t.created_at,t.expires_at,false,
+ '/api/key-trim-proposals'
+ FROM key_trim_proposals t JOIN agent_keys k ON k.tenant_id=t.tenant_id AND k.id=t.key_id
+ WHERE t.tenant_id=$1 AND t.state='pending' AND t.expires_at>(SELECT at FROM clock)
+ AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>(SELECT at FROM clock))
+ AND ($2='' OR $2='key_trim' AND t.id=$3::uuid)
 )`
 
 const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
@@ -91,6 +98,7 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
  AND NOT EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.tenant_id=a.tenant_id AND q.node_id=a.question_id
   WHERE a.tenant_id=$1 AND a.source_request_id=held_requests.id AND q.project_id=ANY($5::uuid[]))
  UNION ALL SELECT * FROM doctrine WHERE $9
+ UNION ALL SELECT * FROM key_trims WHERE $21
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -158,7 +166,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		c = *after
 	}
 	var raw []byte
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", "")).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -184,8 +192,11 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if i.Kind == "doctrine" {
 			i.Href = "/settings/agent-rules#doctrine-inbox"
 		} else {
-			prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:"}[i.Kind]
+			prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "key_trim": "k:"}[i.Kind]
 			i.Href = "/agents?needs=" + prefix + i.ID
+			if i.Kind == "key_trim" {
+				i.Href = "/decision-desk?needs=k:" + i.ID
+			}
 		}
 		page.Items = append(page.Items, i)
 	}

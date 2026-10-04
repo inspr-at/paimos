@@ -27,6 +27,7 @@ import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
@@ -72,6 +73,16 @@ watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   await nextTick()
   cursor.value = id
   focusRow(id)
+}, { immediate: true })
+// Provider-change notices link to the affected run's session or queued row.
+watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => agents.runs], async ([id, loaded]) => {
+  if (!loaded || typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return
+  const linked = agents.sessions.find(s => s.run_id === id)
+  if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
+  await nextTick()
+  if (route.query.run !== id) return
+  const queued = document.getElementById(`run-${id}`)
+  if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
@@ -363,6 +374,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('pause-all'))"><AppIcon name="pause" /><span>Pause all…<small>Choose one level, with per-agent overrides.</small></span></button>
             <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('resume-all'))"><AppIcon name="play" /><span>Resume all…<small>Continue from saved handovers, leads first.</small></span></button>
             <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.focusWindDown())"><AppIcon name="clock" /><span>Wind down…<small>Starts on confirm, done by the deadline.</small></span></button>
+            <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/decision-desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk</span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
