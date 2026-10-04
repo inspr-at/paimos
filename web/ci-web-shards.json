@@ -1193,6 +1193,12 @@
           "weightSeconds": 35.820513,
           "weightSource": "status-autopilot-ui-2",
           "listedTests": 11
+        },
+        {
+          "file": "tests/features.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
         }
       ]
     },

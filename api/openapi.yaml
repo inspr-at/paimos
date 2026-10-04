@@ -294,6 +294,14 @@ paths:
       description: chat-v1. Idempotently resolve the person's durable thread for an already authorized role. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No newest-session selection or principal-wide fallback.
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+  /settings/features/{key}:
+    parameters:
+      - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+      - {name: project_id, in: query, schema: {type: string, format: uuid}}
+    put:
+      operationId: setFeatureOverride
+      description: Person with workspace settings.manage only. Set ON/OFF, or null to inherit (tenant inheritance is OFF). expected_revision is required, zero for an untouched scope. Stale writes return 409. Changed overrides append feature.updated atomically with actor and before/after snapshots; identical writes produce no event. Reset retains its revision to prevent stale writes after reset. Only shipped feature keys are accepted.
+      security: [{session: []}]
       requestBody:
         required: true
         content:
@@ -351,6 +359,70 @@ paths:
         '400': {description: Invalid bounded request}
         '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unavailable proof/binding}
+              required: [enabled, expected_revision]
+              properties:
+                enabled: {type: [boolean, 'null']}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved override (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [feature, event_id]
+                properties:
+                  feature: {$ref: '#/components/schemas/FeatureSetting'}
+                  event_id: {type: [integer, 'null']}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /settings/features:
+    get:
+      operationId: listFeatureSettings
+      description: Person with settings.manage only. Lists the shipped catalog, effective state and override/revision in the selected tenant or visible project scope. No overrides are created by reading.
+      security: [{session: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Feature settings (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, items]
+                properties:
+                  project_id: {type: [string, 'null'], format: uuid}
+                  items: {type: array, items: {$ref: '#/components/schemas/FeatureSetting'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /features:
+    get:
+      operationId: evaluateFeatures
+      description: Evaluate shipped feature flags for the caller's tenant and optional visible project. Project override wins over tenant override; otherwise OFF. Flags never grant permissions. Read at request time, without a deployment or restart. Requires nodes.read in the selected project or any project for the tenant baseline.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Effective feature flags (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, items]
+                properties:
+                  project_id: {type: [string, 'null'], format: uuid}
+                  items: {type: array, items: {$ref: '#/components/schemas/FeatureEvaluation'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /themes:
     get:
       operationId: listThemes
@@ -10778,6 +10850,23 @@ components:
       properties:
         expected_revision: {$ref: '#/components/schemas/ChatPosition'}
         offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600}
+    FeatureSetting:
+      allOf:
+        - {$ref: '#/components/schemas/FeatureEvaluation'}
+        - type: object
+          required: [override, revision]
+          properties:
+            override: {type: [boolean, 'null'], description: Override in the selected scope; null means inherit.}
+            revision: {type: integer, minimum: 0}
+    FeatureEvaluation:
+      type: object
+      required: [key, label, description, enabled, source]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        description: {type: string}
+        enabled: {type: boolean}
+        source: {type: string, enum: [default, tenant, project]}
     ThemeAccent:
       type: object
       additionalProperties: false

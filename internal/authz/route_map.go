@@ -40,6 +40,9 @@ var RoutePermissions = map[string]string{
 	"POST /api/phone-approvals/{kind}/{requestId}/options":          "profile.write",
 	"POST /api/phone-approvals/{kind}/{requestId}/decision":         "profile.write",
 
+	"GET /api/features":                "nodes.read",
+	"GET /api/settings/features":       "settings.manage",
+	"PUT /api/settings/features/{key}": "settings.manage",
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",

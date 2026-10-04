@@ -38,6 +38,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"POST /api/phone-approvals/{kind}/{requestId}/options":          true,
 	"POST /api/phone-approvals/{kind}/{requestId}/decision":         true,
 
+	"GET /api/features":                    true,
 	"GET /api/themes":                      true,
 	"GET /api/themes/{themeId}":            true,
 	"GET /api/me/theme":                    true,

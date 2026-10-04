@@ -4,11 +4,14 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../../lib/api'
 import { brand } from '../../lib/brand'
 import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
+import { canFeature } from '../../lib/features'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import BrandCard from './BrandCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
+import FeatureFlagsCard from './FeatureFlagsCard.vue'
+import WorkspaceSummary from './WorkspaceSummary.vue'
 import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import StatusAutopilot from './StatusAutopilot.vue'
 import AgentActivityCard from './AgentActivityCard.vue'
@@ -67,6 +70,10 @@ async function saveInterval() {
         <div><dt>Name</dt><dd>{{ session.identity?.tenant.name }}</dd></div>
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
+    </SettingsCard>
+    <FeatureFlagsCard v-if="can('settings.manage')" />
+    <SettingsCard v-if="can('nodes.read') && canFeature('workspace-summary')" title="Workspace summary" icon="folder" anchor="workspace-summary">
+      <WorkspaceSummary />
     </SettingsCard>
     <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
