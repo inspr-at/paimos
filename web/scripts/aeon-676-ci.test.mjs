@@ -8,8 +8,8 @@ const requiredSpecs = ['clip-tip', 'aeon-632b-clip', 'key-trim', 'model-prefs']
 
 test('AEON-676 regressions retain hosted launch policy and full nightly coverage after tiering', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
-  const job = id => {
-    const match = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:|$(?![\\s\\S]))`, 'm').exec(workflow)
+  const job = (id, source = workflow) => {
+    const match = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:|$(?![\\s\\S]))`, 'm').exec(source)
     assert.ok(match, `Missing CI job ${id}`)
     return match[1]
   }
@@ -42,7 +42,12 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
   const tiers = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url)))
   for (const file of requiredSpecs) assert.ok(tiers.tests.some(row => row.file === file), `${file} must stay classified`)
   const nightly = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
-  assert.match(nightly, /cli\.mjs run web --full --shard/)
+  const nightlyShard = job('nightly-web-shard', nightly)
+  // Three-tier --full covers only ESSENTIAL + GATED-FULL; --all also runs
+  // NIGHTLY. Require the entire catalogue in the actual nightly shard job.
+  assert.match(nightlyShard, /^        run: node scripts\/test-tiers\/cli\.mjs run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\} --job web-shard-\$\{\{ matrix.shard \}\}$/m)
+  assert.match(nightlyShard, /runs-on: ubuntu-latest/)
+  assert.doesNotMatch(nightlyShard, /continue-on-error:\s*true/)
   const quarantine = JSON.parse(readFileSync(new URL('../../scripts/ci-quarantine.json', import.meta.url)))
   assert.ok(!quarantine.entries.some(entry => entry.owner === 'AEON-676' ||
     requiredSpecs.some(file => entry.id.includes(file.split('/').at(-1)))), 'AEON-676 specs must block CI on failure')
