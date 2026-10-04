@@ -337,8 +337,9 @@ export async function runGuard({ command, kind, env = process.env, quarantine, n
   const evidence = record => writeEvidence(record, { summary: env.GITHUB_STEP_SUMMARY, print, now });
   const childEnv = { ...env, PW_RETRIES: '0' };
   const result = await run(initialCommand(command), { env: childEnv });
-  if (result.interrupted || result.timedOut || result.error || result.overflow) {
-    evidence({ id: '<command>', kind: kind ?? 'unknown', attempt: 1, label: 'FAILED', reason: 'interrupted, timed out, output truncated, or launch failed' });
+  if (result.signal || result.interrupted || result.timedOut || result.error || result.overflow) {
+    evidence({ id: '<command>', kind: kind ?? 'unknown', attempt: 1, label: 'FAILED',
+      reason: result.signal ? `terminated by signal ${result.signal}` : 'interrupted, timed out, output truncated, or launch failed' });
     return result.code || 1;
   }
   const go = kind !== 'playwright' ? parseGo(result.output, module) : undefined;
@@ -375,6 +376,13 @@ export async function runGuard({ command, kind, env = process.env, quarantine, n
     }
     evidence({ id: failure.id, kind: failure.kind, attempt: 2, label: 'RETRIED' });
     const retry = await run(plan.command, { env: { ...childEnv, ...plan.env } });
+    // A child can be killed without the guard itself being interrupted. Its
+    // partial output cannot prove completion or be waived by quarantine.
+    if (retry.signal) {
+      evidence({ id: failure.id, kind: failure.kind, attempt: 2, label: 'FAILED AFTER RETRY',
+        reason: `terminated by signal ${retry.signal}` });
+      return 1;
+    }
     const parsed = failure.kind === 'go' ? parseGo(retry.output, module) : parsePlaywright(retry.output);
     let realFailures = false;
     for (const repeated of parsed.failures) {

@@ -277,6 +277,10 @@ on an unrelated revision does not establish hosted acceptance.
 
 A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
 reruns exactly one test in its original config group.
+Signal termination fails the guard before quarantine or test-output handling
+on either attempt; a terminated retry stops the remaining retries. Failure
+evidence records the signal, even when captured output reports passing or
+quarantined tests.
 
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
