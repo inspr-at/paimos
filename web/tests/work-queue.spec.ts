@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { expectStableControls } from './helpers/stable'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
@@ -132,10 +133,16 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   await expect(page).toHaveURL(/status=queued/)
   await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(2)
   expect(calls.filter(call => call.path === '/api/nodes').every(call => !call.query.get('state')?.includes('queued'))).toBe(true)
+  // Filtering leaves the queue open so it can be toggled back. Close it before
+  // acting on the list: its position may overlap the row in another header layout.
+  await expect(panel.getByRole('button', { name: 'Showing queued in the list' })).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
   await row(page, 'PHAROS-13').locator('.title-text').click()
   const drawer = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(drawer.getByRole('button', { name: 'Move to top', exact: true })).toBeDisabled()
   await drawer.getByRole('button', { name: 'Close ticket details' }).click()
+  await expect(drawer).toHaveCount(0)
   await row(page, 'PHAROS-14').locator('.title-text').click()
   await drawer.getByRole('button', { name: 'Move to top', exact: true }).click()
   expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
@@ -247,6 +254,44 @@ test('failed writes preserve membership and viewer shortcuts cannot dispatch', a
   expect(other.state.queueCalls.every(call => call.method === 'GET')).toBe(true)
   await viewer.close()
 })
+test('phone header retains the queue when the activity timestamp folds', async ({ page }) => {
+  await world(page)
+  // On the main-based package, reproduce the owning header's markup and phone
+  // folding rule using the real queue action and the real scoped product CSS.
+  // Once that package is merged, exercise its actual header without a fixture.
+  if (!(await page.locator('.header-activity').count())) {
+    await page.evaluate(() => {
+      const project = document.querySelector('.project-page')!
+      project.classList.add('header-compact')
+      const opener = project.querySelector('.q-stat')!
+      const activity = document.createElement('div')
+      activity.className = 'activity header-activity'
+      for (const attribute of opener.attributes) if (attribute.name.startsWith('data-v-')) activity.setAttribute(attribute.name, '')
+      const timestamp = document.createElement('span')
+      for (const attribute of activity.attributes) if (attribute.name.startsWith('data-v-')) timestamp.setAttribute(attribute.name, '')
+      timestamp.textContent = 'Active just now'
+      activity.append(timestamp, opener)
+      project.querySelector('.head-flex')!.append(activity)
+    })
+    await page.addStyleTag({ content: '@media (max-width:600px) { .header-activity { display:none } .project-page[class*="header-"] .head-flex { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"title progress" "stats stats" "description description" } }' })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  const activity = page.locator('.header-activity')
+  await expect(activity.locator(':scope > span')).toBeHidden()
+  const opener = activity.getByRole('button', { name: /queued\. Open the work queue/ })
+  const queue = page.getByRole('dialog', { name: 'Work queue', exact: true })
+  await expect(opener).toBeVisible()
+  const target = (await opener.boundingBox())!
+  expect(target.width, 'phone queue touch width').toBeGreaterThanOrEqual(44)
+  expect(target.height, 'phone queue touch height').toBeGreaterThanOrEqual(44)
+  await expectStableControls({
+    controls: { opener }, scrollAreas: { header: page.locator('.project-head'), page: page.locator('html') },
+    interactions: [
+      { name: 'open queue from folded activity', run: async () => { await opener.click(); await expect(queue).toBeVisible() } },
+      { name: 'close queue', run: async () => { await page.keyboard.press('Escape'); await expect(queue).toHaveCount(0) } },
+    ],
+  })
+})
 test('approved queue surfaces in light/dark and narrow layouts, with accessible dialogs and release evidence', async ({ page }) => {
   await world(page); mkdirSync(shots, { recursive: true })
   for (const theme of ['light', 'dark']) {
@@ -267,12 +312,61 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     await expect(page.getByRole('complementary', { name: 'Ticket details' }).locator('.q-card')).toBeVisible()
     await page.screenshot({ path: join(shots, `drawer-${theme}.png`) })
     await page.getByRole('button', { name: 'Close ticket details' }).click()
+    // Closing navigates asynchronously. Test the phone queue on the settled
+    // list, without a still-open ticket covering the header.
+    await expect(page.getByRole('complementary', { name: 'Ticket details' })).toHaveCount(0)
+    await expect(page).toHaveURL(/\/p\/PHAROS\/tickets(?:\?|$)/)
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390)
-    await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()
-    await expect(page.getByRole('dialog', { name: 'Work queue', exact: true })).toBeVisible()
+    const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
+    const queue = page.getByRole('dialog', { name: 'Work queue', exact: true })
+    await expectStableControls({
+      controls: { opener },
+      scrollAreas: { page: page.locator('html') },
+      interactions: [
+        { name: 'open phone queue', run: async () => { await opener.click(); await expect(queue).toBeVisible() } },
+        { name: 'dismiss phone queue', run: async () => { await page.keyboard.press('Escape'); await expect(queue).toHaveCount(0) } },
+        { name: 'reopen phone queue', run: async () => { await opener.click(); await expect(queue).toBeVisible() } },
+      ],
+    })
     await page.screenshot({ path: join(shots, `queue-phone-${theme}.png`) })
-    await page.keyboard.press('Escape'); await page.setViewportSize({ width: 1600, height: 1000 })
+    await page.keyboard.press('Escape')
+    // AEON-639's header is still a separate package. When it is integrated,
+    // exercise the real phone density controls and restoration after folding.
+    // The legacy header has no fold/density controls; its queue guard above
+    // remains mandatory in either layout.
+    const fold = page.locator('.phone-header-fold')
+    if (await fold.count()) {
+      for (const density of ['Comfortable', 'Compact']) {
+        await page.getByRole('button', { name: 'Filters', exact: true }).click()
+        const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+        const group = sheet.getByRole('radiogroup', { name: 'Project header density', exact: true })
+        const choice = group.getByRole('radio', { name: density, exact: true })
+        await expectStableControls({
+          controls: { sheet, group, choice, apply: sheet.locator('footer button') },
+          scrollAreas: { body: sheet.locator('.sheet-scroll') },
+          interactions: [{ name: `${density} header`, run: async () => { await choice.click(); await expect(choice).toHaveAttribute('aria-checked', 'true') } }],
+        })
+        await sheet.locator('footer button').click()
+        await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density.toLowerCase()}`))
+        await expectStableControls({
+          controls: { opener }, scrollAreas: { page: page.locator('html'), header: page.locator('.project-head') },
+          interactions: [
+            { name: `open ${density} phone queue`, run: async () => { await opener.click(); await expect(queue).toBeVisible() } },
+            { name: `dismiss ${density} phone queue`, run: async () => { await page.keyboard.press('Escape'); await expect(queue).toHaveCount(0) } },
+          ],
+        })
+        await expectStableControls({
+          controls: { fold, appbar: page.locator('.app-header') },
+          interactions: [
+            { name: 'fold project header', run: async () => { await fold.click(); await expect(page.locator('#project-header-fold')).toBeHidden() } },
+            { name: `restore ${density} header`, run: async () => { await fold.click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density.toLowerCase()}`)); await expect(opener).toBeVisible() } },
+          ],
+        })
+        await page.screenshot({ path: join(shots, `queue-phone-${theme}-${density.toLowerCase()}.png`) })
+      }
+    }
+    await page.setViewportSize({ width: 1600, height: 1000 })
   }
   const fragment = process.env.WORK_QUEUE_FRAGMENT
   if (fragment && existsSync(fragment)) {
