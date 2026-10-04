@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "ticket": "AEON-681",
+  "sourceCommit": "d6e22c76e64df0bcee6ed0ec2ff96de84c5e2b17",
+  "sourceMainCommit": "3ea1efea477c7d068c54974eeda74dc9e6c815fe",
+  "platform": "darwin",
+  "inventory": {
+    "go": {
+      "ESSENTIAL": 332,
+      "NIGHTLY": 3161,
+      "total": 3493,
+      "active": 3472
+    },
+    "web": {
+      "ESSENTIAL": 215,
+      "NIGHTLY": 4779,
+      "total": 4994,
+      "browser": 3434,
+      "unit": 1560
+    }
+  },
+  "scenarios": [
+    {
+      "label": "docs",
+      "event": "pull_request",
+      "paths": [
+        "README.md"
+      ],
+      "full": false,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 0
+      },
+      "browser": 60,
+      "unit": 155,
+      "goReason": "essential plus changed area and reverse dependencies",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "one-package",
+      "event": "pull_request",
+      "paths": [
+        "internal/scopecode/code.go"
+      ],
+      "full": false,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 1
+      },
+      "browser": 60,
+      "unit": 155,
+      "goReason": "essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (2921)",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "uncertain",
+      "event": "pull_request",
+      "paths": [
+        "go.mod"
+      ],
+      "full": true,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 3157
+      },
+      "browser": 3434,
+      "unit": 1560,
+      "goReason": "full event or uncertain impact",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "queue-docs",
+      "event": "merge_group",
+      "paths": [
+        "README.md"
+      ],
+      "full": false,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 0
+      },
+      "browser": 60,
+      "unit": 155,
+      "goReason": "essential plus changed area and reverse dependencies",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "nightly",
+      "event": "schedule",
+      "paths": [],
+      "full": true,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 3157
+      },
+      "browser": 3434,
+      "unit": 1560,
+      "goReason": "full event or uncertain impact",
+      "isolatedTimingCases": 4
+    }
+  ],
+  "evidence": {
+    "go": "AST inventory, current-platform activity from go list; native all-package -list and full DB suite deferred to hosted CI after the approved remote runner refused on presence.",
+    "web": "Native Node/Vitest registration collection and exact Playwright list selection, including all 3434 full-suite browser IDs; browsers were not executed.",
+    "checks": {
+      "webBuild": "passed",
+      "webTypecheck": "passed",
+      "fullNodeUnit": {
+        "passed": 710
+      },
+      "fullVitestUnit": {
+        "passed": 850
+      },
+      "selectorRoutingReuse": {
+        "passed": 89
+      },
+      "webShardAndNativeSelection": {
+        "passed": 23
+      },
+      "browserSafety": {
+        "passed": 55,
+        "skipped": 4
+      },
+      "goPackages": "test-tier-go and ci-runner-guard passed; targeted ci-go-shards and releaseworkflow contracts passed"
+    },
+    "remote": "Presence guard refused: Mailina is the console user.",
+    "runnerMinutes": null,
+    "runnerMinutesNote": "Actions instrumentation records complete job durations. Local collection does not establish runner-minute savings."
+  }
+}

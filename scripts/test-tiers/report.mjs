@@ -48,6 +48,7 @@ export function browserOutcomes(report, rows) {
         if(!row) throw new Error(`Unexpected browser result: ${spec.title}`)
         const attempts=test.results??[]
         if(attempts.length>1) throw new Error(`Automatic retries forbidden: ${spec.title}`)
+        if(!attempts.length) continue // registration blocked before execution: report as notRun
         const status=attempts[0]?.status
         outcomes.push({key:key(row),started:!!status && status!=='skipped',status:status==='passed'?'passed':status==='skipped'?'skipped':'failed'})
       }

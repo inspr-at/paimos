@@ -187,3 +187,12 @@ test('full-execution proof binds actual complete outcomes to this run, attempt a
   assert.equal(checkFull(report,env),true)
   for(const change of [{full:false},{exitCode:1},{attempt:'1'},{sha:'b'},{classes:{...report.classes,NIGHTLY:{...report.classes.NIGHTLY,notRun:1}}}])assert.throws(()=>checkFull({...report,...change},env),/Full execution/)
 })
+
+test('browser registrations blocked before execution remain notRun rather than counted as failed runs',()=>{
+  const row={kind:'browser',file:'tests/a.spec.ts',name:'action',tier:'ESSENTIAL',id:'id',project:''}
+  const outcomes=browserOutcomes({suites:[{specs:[{id:'id',tests:[{results:[]}]}]}]},[row])
+  const report=reportCases([row],outcomes,1,'web-shard-1')
+  assert.equal(report.classes.ESSENTIAL.notRun,1)
+  assert.equal(report.classes.ESSENTIAL.run,0)
+  assert.equal(report.classes.ESSENTIAL.failed,0)
+})

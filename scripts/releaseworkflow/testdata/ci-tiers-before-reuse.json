@@ -1,10 +1,11 @@
 {
+  "SPDX-License-Identifier": "AGPL-3.0-only",
   "sha256": {
     "go-static": "fe8a1795e02e4ec94d0172669d4fd312d52edbca27fe0688f9830e1df12cca62",
-    "go-test": "fb2169db75a710ceee589de061110d12054784532ffbe8ae0a4492a900615316",
+    "go-test": "c050bdb77ccf952e5644e029bc0e05890c4639bb193cd35be53ef353be101a1c",
     "go-timing": "289820424aa1e423099fc1ace82e19c8eedd6f63994b3a7679a1e8fd5c4eafdd",
-    "web-setup": "29b3ce640f8e5583a1c7909f3fde4aad2f5264321232b92a8836437f7207e166",
-    "web-shard": "95e112b062a1555fdd27aed51f43a1227c3c0dfe9c28a3d08f2f47c5549decce"
+    "web-setup": "4e36f06e32c92a4bd9d65b458dda239d540c3f7ebf393a06b57cd4d9fec7724a",
+    "web-shard": "5cdf77d4a3d35abc66035435840ce0993a431940def90e1df91f9f9e0eac0187"
   },
-  "source_main_sha": "0c54e8c425d99313ca0e969b672c5743d183259e"
+  "source_main_sha": "d6e22c76e64df0bcee6ed0ec2ff96de84c5e2b17"
 }

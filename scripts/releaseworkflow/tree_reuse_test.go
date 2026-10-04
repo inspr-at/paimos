@@ -308,7 +308,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	w := treeWorkflow(t, "ci.yml")
 	jobs := treeMap(w["jobs"])
 	// Tier selection intentionally changes five execution jobs. Pin those to
-	// AEON-681's pre-reuse implementation; keep the original reviewed hashes
+	// AEON-681's normalized tier implementation; keep the original reviewed hashes
 	// for every unaffected job, including migration compatibility.
 	tierBody, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-tiers-before-reuse.json"))
 	if err != nil {
