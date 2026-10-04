@@ -5,13 +5,16 @@ import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { uncertain, reverseDependants, webGraph } from './core.mjs'
 
-export function changedPaths(event, env=process.env) {
+export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
   if (!['pull_request','merge_group'].includes(event)) return undefined
   try {
     const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
     const base=payload.pull_request?.base?.sha ?? payload.merge_group?.base_sha
     if (!/^[a-f0-9]{40}$/.test(base??'')) return undefined
-    return command('git',['diff','--name-only','-z','--no-renames',base,'HEAD'],{timeout:30_000}).split('\0').filter(Boolean)
+    // The small planner checkout needs only HEAD and the exact event base, not
+    // the complete repository history. Other jobs retain their own checkout.
+    if (fetchBase) exec('git',['fetch','--no-tags','--depth=1','origin',base],{timeout:30_000})
+    return exec('git',['diff','--name-only','-z','--no-renames',base,'HEAD'],{timeout:30_000}).split('\0').filter(Boolean)
   } catch { return undefined }
 }
 
@@ -36,7 +39,7 @@ export function schedulingMode(event,paths,exists=path=>existsSync(resolve(root,
 }
 
 export function main(env=process.env) {
-  const paths=changedPaths(env.GITHUB_EVENT_NAME,env)
+  const paths=changedPaths(env.GITHUB_EVENT_NAME,env,{fetchBase:true})
   const mode=schedulingMode(env.GITHUB_EVENT_NAME,paths)
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
   writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\n`,{flag:'a'})

@@ -136,18 +136,23 @@ jobs:
 
   tier-plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     outputs:
       mode: ${{ steps.tiers.outputs.mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: contains(fromJSON('["pull_request","merge_group"]'), github.event_name)
         with:
           persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
+          fetch-depth: 1
+      # Hosted Ubuntu's Node runs this dependency-free planner. Fetch only the
+      # exact event base; skip checkout entirely when this event runs full.
       - id: tiers
-        run: node scripts/test-tiers/diff.mjs
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request|merge_group) node scripts/test-tiers/diff.mjs ;;
+            *) echo 'mode=full' >> "$GITHUB_OUTPUT" ;;
+          esac
 
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml

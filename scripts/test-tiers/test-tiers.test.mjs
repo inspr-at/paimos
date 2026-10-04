@@ -8,7 +8,7 @@ import { validate, select, shard, key, exactPattern, webGraph } from './core.mjs
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
-import { schedulingMode } from './diff.mjs'
+import { changedPaths, schedulingMode } from './diff.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -27,6 +27,49 @@ test('unknown and stale registrations fail; tagging never removes a nightly test
   assert.ok(full.tests.find(row=>row.name==='TestRotation').tags.includes('delete-candidate'))
   manifest.tests[0].tags=['delete-candidate']
   assert.throws(()=>validate(manifest,cases),/Invalid classification/)
+})
+
+test('known-flaky cases cannot enter ESSENTIAL, but remain in changed-area and nightly execution',()=>{
+  for (const row of [g('internal/importer','TestSourceRequestCapAndDelay'),
+    {kind:'browser',file:'tests/clip-tip.spec.ts',name:'touch disclosure',config:'playwright.ui.config.ts',project:'',tier:'NIGHTLY'}]) {
+    const manifest={version:1,tests:[{...row,tier:'ESSENTIAL'}]}
+    const known={version:1,entries:[{key:key(row),owner:row.kind==='go'?'AEON-675':'AEON-676'}]}
+    assert.throws(()=>validate(manifest,[row],known),error=>
+      error.message===`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${known.entries[0].owner})`)
+    manifest.tests[0].tier='NIGHTLY'
+    const retained=validate(manifest,[row],known)
+    assert.deepEqual(select(retained,{event:'pull_request',paths:['README.md']}).tests,[])
+    assert.deepEqual(select(retained,{event:'schedule',paths:[]}).tests,retained)
+    const paths=row.kind==='go'?['internal/importer/source.go']:[`web/${row.file}`]
+    assert.deepEqual(select(retained,{event:'merge_group',paths,webImports:{[row.file]:[]}}).tests,retained)
+  }
+})
+
+test('known-flaky registry fails closed on missing ownership and duplicate case keys',()=>{
+  for(const entry of [{key:key(cases[0])},{key:'',owner:'AEON-675'},{key:key(cases[0]),owner:'675'}])
+    assert.throws(()=>validate(fixture(),cases,{version:1,entries:[entry]}),/case key and owner ticket/)
+  const entry={key:key(cases[1]),owner:'AEON-675'}
+  assert.throws(()=>validate(fixture(),cases,{version:1,entries:[entry,entry]}),/Duplicate known-flaky entry/)
+  assert.throws(()=>validate(fixture(),cases,{version:2,entries:[]}),/registry version 1/)
+})
+
+test('known-flaky committed cases retain exact owners and cannot be promoted by the CLI default validator',()=>{
+  const known=JSON.parse(readFileSync(new URL('../ci/known-flaky.json',import.meta.url)))
+  const manifests=['go','web'].map(kind=>JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))))
+  assert.equal(known.entries.length,9)
+  assert.deepEqual(Object.fromEntries(['AEON-675','AEON-676','AEON-683'].map(owner=>
+    [owner,known.entries.filter(entry=>entry.owner===owner).length])),{'AEON-675':1,'AEON-676':1,'AEON-683':7})
+  for(const entry of known.entries) {
+    const manifest=manifests.find(manifest=>manifest.tests.some(row=>key(row)===entry.key))
+    assert.ok(manifest,`Stale known-flaky case: ${entry.key}`)
+    const row=manifest.tests.find(row=>key(row)===entry.key)
+    assert.equal(row.tier,'NIGHTLY',entry.key)
+    assert.ok(select(manifest.tests,{event:'schedule',paths:[]}).tests.some(row=>key(row)===entry.key))
+    const promoted=structuredClone(manifest)
+    promoted.tests.find(row=>key(row)===entry.key).tier='ESSENTIAL'
+    assert.throws(()=>validate(promoted,manifest.tests),error=>
+      error.message===`Known-flaky case cannot be ESSENTIAL: ${entry.key} (${entry.owner})`)
+  }
 })
 
 test('PR and merge group take essential union changed package and reverse dependencies; docs retain core',()=>{
@@ -70,6 +113,36 @@ test('fan-out chooses full shard counts for uncertain and deleted paths, small c
     assert.equal(schedulingMode(event,undefined),'full')
   }
   assert.equal(schedulingMode('schedule',['README.md']),'full')
+})
+
+test('lean planner fetches only the exact event base before diffing and widens on fetch failure',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-tier-planner-'))
+  const eventPath=resolve(directory,'event.json'),base='a'.repeat(40)
+  for(const event of ['pull_request','merge_group']) {
+    writeFileSync(eventPath,JSON.stringify(event==='pull_request'?{pull_request:{base:{sha:base}}}:{merge_group:{base_sha:base}}))
+    const calls=[]
+    const exec=(bin,args,options)=>{calls.push({bin,args,options});return args[0]==='diff'?'README.md\0internal/auth/key.go\0':''}
+    assert.deepEqual(changedPaths(event,{GITHUB_EVENT_PATH:eventPath},{fetchBase:true,exec}),['README.md','internal/auth/key.go'])
+    assert.deepEqual(calls,[
+      {bin:'git',args:['fetch','--no-tags','--depth=1','origin',base],options:{timeout:30_000}},
+      {bin:'git',args:['diff','--name-only','-z','--no-renames',base,'HEAD'],options:{timeout:30_000}}])
+    const failed=changedPaths(event,{GITHUB_EVENT_PATH:eventPath},{fetchBase:true,exec:()=>{throw new Error('fetch refused')}})
+    assert.equal(failed,undefined)
+    assert.equal(schedulingMode(event,failed),'full')
+  }
+  writeFileSync(eventPath,JSON.stringify({pull_request:{base:{sha:'--invalid'}}}))
+  assert.equal(changedPaths('pull_request',{GITHUB_EVENT_PATH:eventPath},{fetchBase:true,exec:()=>assert.fail('Invalid base must never be fetched')}),undefined)
+})
+
+test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',()=>{
+  const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  const planner=ci.slice(ci.indexOf('\n  tier-plan:'),ci.indexOf('\n  runner-route:'))
+  assert.match(planner,/timeout-minutes: 2/)
+  assert.match(planner,/fetch-depth: 1\n/)
+  assert.doesNotMatch(planner,/setup-node|setup-go|npm ci|fetch-depth: 0/)
+  assert.match(planner,/if: contains\(fromJSON\('\["pull_request","merge_group"\]'\), github.event_name\)/)
+  assert.match(planner,/pull_request\|merge_group\) node scripts\/test-tiers\/diff.mjs/)
+  assert.match(planner,/\*\) echo 'mode=full' >> "\$GITHUB_OUTPUT"/)
 })
 
 test('changed modules select dependent specs/units; equal file basenames do not broaden impact',()=>{
@@ -155,14 +228,20 @@ test('exact-SHA reuse records provenance and current costs without fabricating f
   assert.throws(()=>aggregate([{}],jobs,{reusedFrom:'123'}),/must not report fresh test passes/)
 })
 
-test('committed allowlists preserve 332/60/155, helpers, and AEON-541 behavioral guards',()=>{
+test('committed allowlists retain every case and AEON-541 guard with the reviewed nine nightly demotions',()=>{
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
-  assert.equal(go.tests.filter(row=>row.tier==='ESSENTIAL').length,332)
-  assert.equal(web.tests.filter(row=>row.tier==='ESSENTIAL'&&row.kind==='browser').length,60)
+  assert.equal(go.tests.filter(row=>row.tier==='ESSENTIAL').length,331)
+  assert.equal(web.tests.filter(row=>row.tier==='ESSENTIAL'&&row.kind==='browser').length,52)
   assert.equal(web.tests.filter(row=>row.tier==='ESSENTIAL'&&row.kind!=='browser').length,155)
   for(const helper of ['TestFakeVendorProcess','TestNoOutboundServerHelper'])assert.equal(go.tests.find(row=>row.name===helper).tier,'ESSENTIAL')
-  assert.equal(web.tests.filter(row=>row.tier==='ESSENTIAL'&&row.file==='tests/no-shift.spec.ts').length,5)
+  const known=JSON.parse(readFileSync(new URL('../ci/known-flaky.json',import.meta.url)))
+  const guards=web.tests.filter(row=>row.file==='tests/no-shift.spec.ts'&&known.entries.some(entry=>entry.key===key(row)))
+  assert.equal(guards.length,5)
+  assert.ok(guards.every(row=>row.tier==='NIGHTLY'))
+  assert.equal(go.tests.length,3493)
+  assert.equal(web.tests.filter(row=>row.kind==='browser').length,3434)
+  assert.equal(web.tests.filter(row=>row.kind!=='browser').length,1560)
   assert.equal(go.tests.filter(row=>row.tags?.includes('delete-candidate')).length,158)
   assert.equal(go.tests.filter(row=>row.lane==='timing').length,4)
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='NIGHTLY'))

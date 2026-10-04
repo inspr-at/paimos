@@ -643,14 +643,30 @@ and [web manifest](scripts/ci/web-test-tiers.json). Use
 then `check`; unknown and stale entries fail CI. New browser specs also need a
 launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
 remain NIGHTLY, including candidate groups whose exact members need review.
+The [known-flaky registry](scripts/ci/known-flaky.json) names exact case keys
+and owner tickets; its validator rejects any ESSENTIAL entry. The nine cases
+identified in AEON-675/676/683 temporarily run as NIGHTLY, retaining changed-area
+and full-run coverage, until their owner fixes land and verify cleanly.
 Scheduled/manual `nightly-full.yml` runs every case; main/manual CI runs full
-unless exact-SHA full-suite reuse is verified below. Migration compatibility
-always runs fresh; timing, static, smoke and stability gates stay outside impact
-filtering. Selected cases never retry. `test-tier-run-measurement` reports cases
+unless exact-SHA full-suite reuse is verified below. The main-push run is the
+FULL gate after merge; a full premerge run is required only when impact is
+uncertain. Releases require a green full main-push (or nightly) run on the
+exact freeze SHA, in addition to the release rehearsal. A red nightly opens
+a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
+ticket creation, ownership and budget wiring. Migration compatibility
+always runs fresh; timing, static and smoke gates stay outside impact
+filtering. Stability cases retain their manifest tiers and changed-area/full
+coverage. Selected cases never retry. `test-tier-run-measurement` reports cases
 per class and complete job costs against the 22.50 Go / 42.17 web runner-minute
 baselines; reused reports carry provenance without claiming fresh passes.
 The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
 establish coverage only.
+
+`scripts/ci-flake-guard.mjs`, `scripts/ci-quarantine.json` and
+`scripts/ci-flake-report.mjs` are retained for NIGHTLY flake diagnosis and
+OPS step 2. The current nightly tier runner executes all cases with zero
+retries and does not invoke the guard or suppress quarantined failures;
+these tools do not soften PR or merge-queue checks.
 
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for

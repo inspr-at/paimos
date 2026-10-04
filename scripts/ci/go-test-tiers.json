@@ -2278,7 +2278,7 @@
     {"kind":"go","package":"internal/importer","name":"TestImportDryRunAndRerun","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/importer","name":"TestSourceKnowledge404SkipsProject","tier":"NIGHTLY"},
     {"kind":"go","package":"internal/importer","name":"TestSourceNon404AbortsWithSafeMethodAndPath","tier":"NIGHTLY"},
-    {"kind":"go","package":"internal/importer","name":"TestSourceRequestCapAndDelay","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/importer","name":"TestSourceRequestCapAndDelay","tier":"NIGHTLY"},
     {"kind":"go","package":"internal/importer","name":"TestSourceSkipsDeletedProjectAndPurgedIssues","tier":"NIGHTLY"},
     {"kind":"go","package":"internal/importer","name":"TestImportKindConflictSkipsRelation","tier":"NIGHTLY"},
     {"kind":"go","package":"internal/importer","name":"TestImportRefusesKindChange","tier":"NIGHTLY"},

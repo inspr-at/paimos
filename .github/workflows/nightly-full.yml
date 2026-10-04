@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 name: Nightly full
+# A red nightly opens a ticket with the failing case and exact tested SHA.
+# Automated ticket creation, ownership and budget wiring belong to OPS step 2.
 
 on:
   schedule:

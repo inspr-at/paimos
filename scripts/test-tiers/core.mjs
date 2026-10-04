@@ -6,8 +6,15 @@ export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export const exactPattern = names => `^(?:${names.map(escapeRE).join('|')})$`
 
-export function validate(manifest, discovered) {
+export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8'))) {
   if (manifest.version !== 1 || !Array.isArray(manifest.tests) || !manifest.tests.length) throw new Error('Expected nonempty tier manifest version 1')
+  if (knownFlaky.version !== 1 || !Array.isArray(knownFlaky.entries)) throw new Error('Expected known-flaky registry version 1')
+  const flaky = new Map()
+  for (const entry of knownFlaky.entries) {
+    if (typeof entry.key !== 'string' || !entry.key || !/^AEON-\d+$/.test(entry.owner ?? '')) throw new Error('Known-flaky entries need a case key and owner ticket')
+    if (flaky.has(entry.key)) throw new Error(`Duplicate known-flaky entry: ${entry.key}`)
+    flaky.set(entry.key, entry.owner)
+  }
   const declared = new Map()
   for(const group of manifest.deleteCandidateGroups??[]) {
     if(group.tag!=='delete-candidate'||!manifest.tests.some(row=>row.file===group.file&&row.tier==='NIGHTLY'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
@@ -22,6 +29,7 @@ export function validate(manifest, discovered) {
     if(row.occurrence!==undefined && (!Number.isInteger(row.occurrence)||row.occurrence<1)) throw new Error(`Invalid occurrence: ${key(row)}`)
     if(row.lane!==undefined&&(row.kind!=='go'||row.lane!=='timing'))throw new Error(`Invalid execution lane: ${key(row)}`)
     if (declared.has(key(row))) throw new Error(`Duplicate manifest entry: ${key(row)}`)
+    if (row.tier === 'ESSENTIAL' && flaky.has(key(row))) throw new Error(`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${flaky.get(key(row))})`)
     declared.set(key(row), row)
   }
   const found = new Map()

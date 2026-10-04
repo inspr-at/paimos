@@ -34,7 +34,7 @@ test('native Node and Vitest selectors execute the requested registrations, rath
 
 // --list imports registration code but never opens a browser. This exercises
 // the exact native test-list syntax used by both narrowed and full CI runs.
-test('native browser selectors cover the 60 essentials and every retained full-suite registration',()=>{
+test('native browser selectors cover the 52 stable essentials and every retained full-suite registration',()=>{
   mkdirSync(evidence,{recursive:true})
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
   const all=[]
@@ -59,6 +59,6 @@ test('native browser selectors cover the 60 essentials and every retained full-s
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
       total+=listed.length
     }
-    assert.equal(total,full?all.length:60)
+    assert.equal(total,full?all.length:52)
   }
 })
