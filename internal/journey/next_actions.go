@@ -124,8 +124,8 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  LEFT JOIN LATERAL (SELECT jr.release_node_id FROM journey_releases jr JOIN nodes n ON n.tenant_id=jr.tenant_id AND n.id=jr.release_node_id WHERE jr.project_node_id=p.id AND n.deleted_at IS NULL ORDER BY n.created_at DESC,n.id DESC LIMIT 1) latest ON p.imported AND p.current_release_node_id IS NULL
  CROSS JOIN LATERAL (SELECT count(*) AS total,coalesce(bool_and(n.state='done'),false) AS all_done FROM journey_releases jr JOIN nodes n ON n.tenant_id=jr.tenant_id AND n.id=jr.release_node_id WHERE jr.project_node_id=p.id) rc
  CROSS JOIN LATERAL (SELECT
-  (SELECT count(*) FROM typed t WHERE t.root=p.id AND t.slug='ticket')+(SELECT count(*) FROM journey_tickets jt WHERE jt.project_node_id=p.id) AS total,
-  (SELECT count(*) FROM typed t WHERE t.root=p.id AND t.slug='ticket' AND t.state<>'done')+(SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id AND n.deleted_at IS NULL AND n.state<>'done') AS open) tc)
+  (SELECT count(*) FROM typed t WHERE t.root=p.id AND t.slug='ticket')+(SELECT count(*) FROM journey_tickets jt WHERE jt.project_node_id=p.id AND aeon_work_is_release_leaf(jt.tenant_id,jt.ticket_node_id)) AS total,
+  (SELECT count(*) FROM typed t WHERE t.root=p.id AND t.slug='ticket' AND t.state<>'done')+(SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id AND n.deleted_at IS NULL AND n.state<>'done' AND aeon_work_is_release_leaf(n.tenant_id,n.id)) AS open) tc)
  SELECT jsonb_build_object(
  'Facts',jsonb_build_object(
  'ProjectID',p.id,'NodeKey',p.key,'ProjectKey',p.project_key,'Profile',p.profile,'Revision',p.revision,
@@ -198,7 +198,7 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  count(*) FILTER(WHERE jt.release_node_id=r.release_node_id AND jt.access_change) AS access,
  coalesce(bool_or(jt.release_node_id=r.release_node_id AND jt.estimated_hours IS NULL),false) AS missing,
  coalesce(sum(jt.estimated_hours) FILTER(WHERE jt.release_node_id=r.release_node_id AND jt.estimated_hours IS NOT NULL),0)*100 AS plan
- FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id) stats
+ FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id AND aeon_work_is_release_leaf(n.tenant_id,n.id)) stats
  CROSS JOIN LATERAL (SELECT max(at) FILTER(WHERE type IN ('journey.candidate_approved','journey.deploy_retried')) AS deploy,
  max(at) FILTER(WHERE type='journey.permit_approved') AS access,
  coalesce(max((after->>'revision')::bigint) FILTER(WHERE type IN ('journey.candidate_renewed','journey.deploy_renewed')),0) AS renewal

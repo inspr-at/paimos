@@ -45,7 +45,7 @@ func setup(t *testing.T) *fixture {
 		return err
 	})
 	f.project = f.node("project", nil, "Project")
-	f.parent = f.node("epic", &f.project, "Code health")
+	f.parent = f.node("work", &f.project, "Code health")
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"project_key":"REC"}'::jsonb WHERE id=$1`, f.project)
 		return err
@@ -469,7 +469,7 @@ func TestProjectOnlyGrantAndIDOR(t *testing.T) {
 	f := setup(t)
 	r := f.create(f.input())
 	other := f.node("project", nil, "Other")
-	parent := f.node("epic", &other, "Other epic")
+	parent := f.node("work", &other, "Other epic")
 	in := f.input()
 	in.ProjectID = other
 	in.ParentID = parent
@@ -539,7 +539,7 @@ func TestQueueFailureRollsBackOccurrenceAndAudit(t *testing.T) {
 	// A tenant kind rule refuses the work-order child after the ticket has been
 	// inserted. The entire composite occurrence, receipt and audit must roll back.
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY[]::text[] WHERE slug='ticket'`)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY['work']::text[] WHERE slug='work'`)
 		return err
 	})
 	f.call(f.p, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "queue-failed"}, 400)
@@ -555,7 +555,7 @@ func TestQueueFailureRollsBackOccurrenceAndAudit(t *testing.T) {
 		return err
 	})
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=NULL WHERE slug='ticket'`)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=NULL WHERE slug='work'`)
 		return err
 	})
 	if got := f.manual(r.ID, "queue-failed"); got.Outcome != "created" || got.Number != 1 {
@@ -698,7 +698,7 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 			if writer == "node write" {
 				// The normal node INSERT takes a tenant FK key-share lock.
 				_, err = other.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position)
- SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Concurrent node',$2,4096 FROM node_kinds k WHERE slug='ticket'`, f.p.TenantID, f.parent)
+ SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Concurrent node',$2,4096 FROM node_kinds k WHERE slug='work'`, f.p.TenantID, f.parent)
 			} else {
 				// The tenant fence was taken before the tree, as by access writers.
 				_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
@@ -740,7 +740,7 @@ func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 			}
 			if failure == "invalid publication" {
 				in.ProjectID = f.node("project", nil, "Other project")
-				in.ParentID = f.node("epic", &in.ProjectID, "Other parent")
+				in.ParentID = f.node("work", &in.ProjectID, "Other parent")
 			}
 			good := f.create(in)
 			f.now = timestamp(t, "2026-10-19T12:00:00Z")
@@ -781,7 +781,7 @@ func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 					return err
 				}
 				if failure == "queue rollback" {
-					_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY[]::text[] WHERE slug='ticket'`)
+					_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY['work']::text[] WHERE slug='work'`)
 					return err
 				}
 				return nil

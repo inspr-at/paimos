@@ -107,21 +107,41 @@
     },
     {
       "file": "1225_work_parent_status.sql",
-      "sha256": "16d756ce3a7a67ee04d53cf8fedf76c478db08c149d41a803d1ffd5f219ec952",
+      "sha256": "fa72c0a233b93bfc3c34b6d8ffff24d0aec5ce5b0b8db71f8301eb7157ab8c5d",
+      "sourceCommit": "6d08470789386cb4eb5c7e34112364544174d505",
       "ticket": "AEON-650",
-      "reason": "Work-parent status engine adds bounded guarded trigger/functions and expands only the derived/retained/causal-undo event visibility names, retaining existing tenant, project and referenced-node restrictions. The classifier conservatively rejects function replacement and ALTER POLICY. Activation defaults OFF and belongs to AEON-429; no permanent table or column is added and existing data is not backfilled. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval. Rollout uses AEON-649 maintenance, drained queues, stopped writers and instance-specific verified backup/restore; this exception does not waive previous-binary compatibility probes or grant release authority."
+      "reason": "AEON-648 owner-accepted Q5-Q7 and Q17, with the lead's concept review recorded on that ticket, require canonical derived parent status behind AEON-429. The classifier flags bounded dynamic feature lookup and transaction-local work buffers in function bodies, plus ALTER POLICY admitting only status_autopilot.derived, status_autopilot.retained and status_autopilot.causal_undo. Existing target and referenced-node visibility predicates stay intact; permanent rows, historical sessions and existing schema are not rewritten. The engine defaults OFF, does not backfill or activate flags, and requires System provisioning while OFF plus capacity/activation integration. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed."
     },
     {
       "file": "1230_work_leaf_aggregates.sql",
-      "sha256": "14621b13bd555c1bfc1f8feded19c6db656e3d7d2cff148173384811a9dcb920",
+      "sha256": "5e31e85fec353b1161e93d69569f7b8e5e8ff6eb887ae44422175c6dc030ca88",
+      "sourceCommit": "d287210667acd0a6375febd3da0a146dc99fcc4a",
       "ticket": "AEON-651",
-      "reason": "Invoker-rights bounded leaf aggregation functions replace the published ETA function bodies while preserving their names, return signatures and optional depth argument. Existing nodes, estimates, sessions, usage and Decision Desk identities are not rewritten; no permanent table or column is added. The classifier conservatively rejects CREATE OR REPLACE FUNCTION. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval, under AEON-649 maintenance and instance-specific verified backup/restore. This exception does not waive previous-binary compatibility probes or grant release authority."
+      "reason": "AEON-648 owner-accepted Q10-Q12 and Q17, with the lead's concept review recorded on that ticket, require bounded leaf aggregates, planned estimates and latest open-leaf ETA. The classifier flags CREATE OR REPLACE of aeon_node_eta_progress, aeon_node_eta and aeon_release_note_snapshot, plus ALTER POLICY admitting status_autopilot.undone. Both historical ETA signatures retain the optional depth argument; invoker tenant/project RLS, the existing public-note whitelist, immutable frozen snapshots and target/referenced-node visibility predicates stay intact. No stored spend, session or Decision Desk identity is rewritten. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it does not make the incompatible AEON-649 kind retirement safe for older binaries and grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed."
+    },
+    {
+      "file": "1233_work_parent_releases.sql",
+      "sha256": "2f844411751cb98a95579b79f4dcd18c392f185e00a3c1b3eda69e4c8f6d86fe",
+      "ticket": "AEON-653",
+      "reason": "Additive parent placement metadata, FORCE tenant/project RLS, bounded work-edge scope and ordinary-create inheritance. The classifier conservatively flags replacement of the existing release-note capture helper to admit work leaves; all already-frozen snapshots remain immutable and unchanged. Exact bytes require coordinator consolidated review and whole-chain previous-binary/backup gates before merge or deployment; this worker grants no acceptance or release authority."
+    },
+    {
+      "file": "1234_recurrence_work_templates.sql",
+      "sha256": "c201abb265fddb5f5bf42c967a3073043f43d998dad8dcb58763db586a074929",
+      "ticket": "AEON-653",
+      "reason": "Owner-accepted AEON-648 Q14 migrates stored epic/ticket/task template kind references to work under per-tenant FORCE RLS. The classifier conservatively flags the tenant-loop DO block. Definitions retain content, schedules and identity; receipts and historical sessions are unchanged. Exact bytes require coordinator consolidated review under the AEON-649 verified-backup and downstream integration gates; no deployment approval is claimed."
     },
     {
       "file": "1235_agent_appearance_themes.sql",
       "sha256": "7af6fafd5c777ac98de0767d756589b5f26d2bab5c5b978027f9df07b0fe7e2c",
       "ticket": "AEON-643",
       "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Snapshots existing explicit choices across linked identities before backfill, preserving effective themes/defaults and selection generations. Legacy-only physical identities in explicitly selected groups, and every linked alias, retain lower-priority selections via the existing unsaved-revision marker; a canonical account without a selection row records its absence so no alias backfill wins while linked; unlink restores each alias's own appearance without displacing linked explicit choices or what the canonical account showed. Selection audit snapshots retain that marker for undo. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
+    },
+    {
+      "file": "1237_work_release_leaf_lifecycle.sql",
+      "sha256": "cae59d099482b126fe367639074a468025b59a3b350ba53d00bb6d130ea0fd43",
+      "ticket": "AEON-653",
+      "reason": "Reconcile planning/backlog members when live leaf shape changes; retain the complete bounded membership projection and synchronize explicit placement changes including Undo. Future-child inheritance prefers current parent intent, including explicit backlog, over preserved historical membership; without intent it falls back to membership. Add live leaf filtering and coverage while preserving frozen membership rows, published snapshots and historical identities. Replacement helpers, nullable backlog intent and the tenant-scoped repair block are conservatively outside the expansion allowlist. These unshipped branch bytes require coordinator consolidated review, paused structural writers and the existing whole-chain backup/previous-binary gates; this local worker grants no release approval."
     }
   ]
 }

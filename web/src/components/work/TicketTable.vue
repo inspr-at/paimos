@@ -177,7 +177,6 @@ const layoutWidth = computed(() => layout.value.customised ? Math.max(width.valu
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value))
 function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
-  if (row.kind_slug === 'epic') return releaseCell({ status: 'none' })
   return releaseCell(props.nativeReleases?.get(row.id))
 }
 const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
@@ -753,11 +752,11 @@ defineExpose({
               <td v-else-if="column.id === 'release'" class="c-release" :data-column-label="column.label">
                 <div class="cell">
                   <button
-                    v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
+                    v-if="canAssignRelease" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
                     :aria-label="nativeRelease(entry.row).kind === 'member' ? `${nativeRelease(entry.row).label}. Change release of ${entry.row.key}` : nativeRelease(entry.row).kind === 'none' ? `No release. Add ${entry.row.key} to a release` : `Release unknown. Add ${entry.row.key} to a release`"
                     @click.stop="emit('release', entry.row, $event.currentTarget as HTMLElement)"
-                  >{{ nativeRelease(entry.row).text }}</button>
-                  <span v-else-if="nativeRelease(entry.row).kind === 'member'" class="release-chip mono">{{ nativeRelease(entry.row).text }}</span>
+                  ><span v-clip-tip class="release-text">{{ nativeRelease(entry.row).text }}</span></button>
+                  <span v-else-if="nativeRelease(entry.row).kind === 'member'" v-clip-tip class="release-chip mono">{{ nativeRelease(entry.row).text }}</span>
                   <span v-else class="empty" :aria-label="nativeRelease(entry.row).label">{{ nativeRelease(entry.row).text }}</span>
                 </div>
               </td>
@@ -1062,7 +1061,8 @@ th.c-progress .th-sort, th.c-eta .th-sort, th.c-tokens .th-sort, th.c-list-cost 
 .cost-name { overflow: hidden; text-overflow: ellipsis; }
 .group-dot { width: 8px; height: 8px; margin: 0 3px; }
 .release-chip { overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: 2px 7px; border: 0; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: inherit; font-size: 11.5px; font-variant-ligatures: none; cursor: pointer; }
-button.release-chip { display: inline-flex; align-items: center; height: 22px; }
+button.release-chip { display: inline-flex; align-items: center; height: 22px; width: 100%; }
+.release-text { min-width: 0; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.release-chip.bare { background: transparent; box-shadow: none; color: var(--ink-3); }
 button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .tag-cell { gap: 4px; overflow: hidden; }

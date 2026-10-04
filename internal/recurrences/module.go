@@ -126,6 +126,23 @@ func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 // rows, then event counter. A non-key fence permits tenant FK KEY SHARE locks.
 // The worker uses try-locks to yield to foreground work.
 func lock(ctx context.Context, tx pgx.Tx, tenantID string, try bool) (bool, error) {
+	if try {
+		var got bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, tenantID).Scan(&got); err != nil || !got {
+			return false, err
+		}
+	} else if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, tenantID); err != nil {
+		return false, err
+	}
+
+	if try {
+		var got bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, tenantID).Scan(&got); err != nil || !got {
+			return false, err
+		}
+	} else if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID); err != nil {
+		return false, err
+	}
 	var id string
 	query := `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`
 	if try {

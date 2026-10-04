@@ -20,6 +20,8 @@ import type { SaveResult } from '../../lib/useTicket'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 
+defineOptions({ inheritAttrs: false })
+
 // Status, priority, assignee and release (editable popovers), type (read-only),
 // the parent epic, and estimate and dates only when they have values.
 const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; queueEntry?: QueuedTicket | null; queueEditable?: boolean; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult>; savePlacement?: (fields: Record<string, unknown>) => Promise<SaveResult> }>()
@@ -48,7 +50,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 </script>
 
 <template>
-  <dl class="props" :class="layout">
+  <dl v-bind="$attrs" class="props" :class="layout">
     <div class="prop">
       <dt>Status</dt>
       <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" /><span>{{ statusMeta(item.state).label }}</span><span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button><QueueStaleHint :row="item" /></dd>
@@ -87,10 +89,10 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <TicketEstimate :item="item" :editable="editable" :save="saveEstimate" />
     <div v-if="start" class="prop"><dt>Start</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Start</span>{{ start }}</span></dd></div>
     <div v-if="due" class="prop"><dt>Due</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Due</span>{{ due }}</span></dd></div>
-    <div v-if="item.kind_slug !== 'epic' && (releaseEditable || releaseInfo.kind === 'member')" class="prop">
+    <div v-if="releaseEditable || releaseInfo.kind === 'member'" class="prop release-prop">
       <dt>Release</dt>
       <dd>
-        <button v-if="releaseEditable" type="button" class="prop-btn" :class="{ ghost: releaseInfo.kind !== 'member' }" aria-haspopup="menu" aria-keyshortcuts="g" :aria-label="releaseInfo.kind === 'unknown' ? 'Release unknown. Change release' : `Release: ${release || 'none'}. Change release`" @click="emit('release', target($event))"><AppIcon name="layers" :size="13" /><span :class="{ unset: releaseInfo.kind !== 'member' }">{{ releaseInfo.kind === 'unknown' ? 'Release' : (release || 'No release') }}</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+        <button v-if="releaseEditable" type="button" class="prop-btn" :class="{ ghost: releaseInfo.kind !== 'member' }" aria-haspopup="menu" aria-keyshortcuts="g" :aria-label="releaseInfo.kind === 'unknown' ? 'Release unknown. Change release' : `Release: ${release || 'none'}. Change release`" @click="emit('release', target($event))"><AppIcon name="layers" :size="13" /><span v-clip-tip :class="{ unset: releaseInfo.kind !== 'member' }">{{ releaseInfo.kind === 'unknown' ? 'Release' : (release || 'No release') }}</span><AppIcon name="chevron" :size="12" class="chev" /></button>
         <span v-else class="prop-static" :class="{ faint: releaseInfo.kind !== 'member' }"><span v-if="layout === 'row'" class="inline-label">Release</span><AppIcon name="layers" :size="13" class="faint" /><span class="mono">{{ release }}</span></span>
       </dd>
     </div>
@@ -100,10 +102,18 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
     <TicketPlacement :item="item" :editable="editable" :save="savePlacement" />
   </dl>
+  <p v-if="item.fields.release_inheritance_note === 'parent_release_closed'" class="inheritance-note">This leaf started in the backlog because the parent release was frozen or released.</p>
 </template>
 
 <style scoped>
 .props { margin: 0; }
+.inheritance-note { margin: 8px 0 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+.row .release-prop { flex-basis: 100%; }
+.release-prop .prop-btn { width: 100%; justify-content: flex-start; }
+.column .release-prop .prop-btn { width: calc(100% + 9px); }
+.release-prop .prop-btn > span { min-width: 0; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.release-prop .prop-btn > svg { flex: none; }
+@media (pointer: coarse) { .release-prop .prop-btn { min-height: 44px; } }
 /* The panel reserves this row's height (hours arrive late); the chips keep together at its top rather than spreading over it. */
 .props.row { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; }
 @media (max-width: 600px) { .props.row { gap: 12px; } }

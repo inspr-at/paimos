@@ -188,6 +188,40 @@ func TestCreateReleaseTickets(t *testing.T) {
 	}
 }
 
+func TestQuickCreateUnderPlacedParentHonorsExplicitInclusion(t *testing.T) {
+	for _, included := range []bool{false, true} {
+		t.Run(fmt.Sprint(included), func(t *testing.T) {
+			f := ticketSetup(t)
+			leaf := f.existing("work", f.feature, "Existing leaf", "open")
+			placed := membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+			before := f.counts()
+			body := f.body(int(placed.Walker.Revision), "explicit-inclusion", included, f.feature)
+			out := ticketPlan(t, f.call(f.person, body))
+			var created *Ticket
+			for i := range out.Tickets {
+				if out.Tickets[i].NodeID != leaf {
+					created = &out.Tickets[i]
+				}
+			}
+			if created == nil || created.Included != included {
+				t.Fatalf("explicit inclusion=%v ignored: %+v", included, out.Tickets)
+			}
+			after := f.counts()
+			if after != [5]int64{before[0] + 1, before[1] + 2, before[2] + 1, before[3] + 1, before[4] + 1} {
+				t.Fatalf("quick create revised more than once: %v -> %v", before, after)
+			}
+			retry := ticketPlan(t, f.call(f.person, body))
+			if retry.Revision != out.Revision || f.counts() != after {
+				t.Fatal("replay changed membership or revision")
+			}
+			row := f.readMembership(created.NodeID)[0]
+			if (row.ReleaseID != nil) != included {
+				t.Fatalf("persisted inclusion=%v: %+v", included, row)
+			}
+		})
+	}
+}
+
 func TestCreateReleaseTicketFailures(t *testing.T) {
 	f := ticketSetup(t)
 	body := f.body(1, "create", true, "")

@@ -308,6 +308,62 @@ func TestAgreementGeneratesOnlyAcceptedWork(t *testing.T) {
 	}
 }
 
+func TestReagreementDoesNotRegenerateWorkThatBecameParent(t *testing.T) {
+	f := setup(t)
+	accepted := f.add("functional", "Accepted breakdown")
+	f.suggestions(accepted, true)
+	items := f.agreement(f.approve())
+	if len(items) != 1 || len(items[0].TicketIDs) != 2 {
+		t.Fatalf("initial generation: %+v", items)
+	}
+	var former, child string
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT ticket_node_id::text FROM journey_tickets WHERE source='requirements' AND release_node_id=$1`, f.release).Scan(&former); err != nil {
+			return err
+		}
+		// Creation-event lineage must survive editable fields and a missing live
+		// membership. This child changes the generated leaf into a parent.
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{}' WHERE id=$1`, former); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title)
+ SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Child of generated work' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, former).Scan(&child)
+	})
+	assertGeneration := func() {
+		t.Helper()
+		f.tx(func(tx pgx.Tx) error {
+			var generated int
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='journey.ticket_generated'`).Scan(&generated); err != nil {
+				return err
+			}
+			if generated != 2 {
+				t.Fatalf("re-agreement duplicated accepted work after leaf transition: generated=%d, want 2", generated)
+			}
+			return nil
+		})
+	}
+	f.agreement(f.approve())
+	assertGeneration()
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, child)
+		return err
+	})
+	f.agreement(f.approve())
+	assertGeneration()
+	f.tx(func(tx pgx.Tx) error {
+		var source string
+		var hours float64
+		var access bool
+		if err := tx.QueryRow(t.Context(), `SELECT source,estimated_hours::float8,access_change FROM journey_tickets WHERE ticket_node_id=$1`, former).Scan(&source, &hours, &access); err != nil {
+			return err
+		}
+		if source != "requirements" || hours != 2 || !access {
+			t.Fatalf("restored generated work lost provenance: source=%s hours=%v access=%v", source, hours, access)
+		}
+		return nil
+	})
+}
+
 func TestAgreementRejectsStaleAndRevokedAuthority(t *testing.T) {
 	for _, mode := range []string{"content", "revision", "revoked", "expired", "wrong_actor", "not_ready", "building"} {
 		t.Run(mode, func(t *testing.T) {

@@ -141,6 +141,27 @@ for (const scenario of [
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))
+    // Report staleness is the subject here; keep the connection healthy so
+    // reconnect rendering cannot replace the relative ETA or its tooltip.
+    await page.addInitScript(() => {
+      class HealthySource extends EventTarget {
+        readyState = 1
+        onopen: (() => void) | null = null
+        onerror: (() => void) | null = null
+        private heartbeat: ReturnType<typeof setInterval>
+        constructor(readonly url: string) {
+          super()
+          queueMicrotask(() => {
+            if (this.readyState === 2) return
+            this.onopen?.()
+            this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 700, resumed: false }), lastEventId: '700' }))
+          })
+          this.heartbeat = setInterval(() => this.dispatchEvent(new MessageEvent('stream.ping', { data: '{}' })), 10_000)
+        }
+        close() { this.readyState = 2; clearInterval(this.heartbeat) }
+      }
+      Object.assign(window, { EventSource: HealthySource })
+    })
     const data = fixtures()
     for (const node of data.nodes) node.kind_slug = 'work'
     data.preferences.theme = { choice: theme }

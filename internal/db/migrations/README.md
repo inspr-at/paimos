@@ -490,3 +490,74 @@ ticket status change or model review ran.
 Migration 1230 also admits `status_autopilot.undone` to project-visible events,
 under the same target and referenced-node visibility checks. This lets another
 person's leaf Undo refresh aggregates when the parent status is unchanged.
+
+The exact-byte policy records for 1225 and 1230 pin their owning tickets and
+source commits in `scripts/migration-policy-exceptions.json`. They expose the
+non-allowlisted function bodies, helper replacements and event-policy widening
+for the coordinator's consolidated review; they are not evidence that byte
+approval or previous-binary compatibility has passed. The owner-accepted
+AEON-648 concept and Q17 rollout remain binding: release 122 first, drained
+queues, stopped writers and an instance-specific verified backup/restore under
+AEON-649, plus AEON-429 activation integration and whole-chain validation.
+The static guard passing grants no merge, activation or deployment approval.
+
+## AEON-653 release placement and recurring leaves
+
+Coordinator-reserved **1233–1234** belong only to AEON-653. The coordinator
+records their individual purposes in its shared ledger; workers author only in
+their own worktree. Migration 1233 adds `work_parent_releases`: tenant, parent,
+project and release UUIDs are metadata, located by `(tenant_id,parent_node_id)`.
+The DSAR inventory does not exist in this stack or its local origin/main;
+classify these four columns and 1237's retained membership projection when
+integrating AEON-490's inventory. The retained object stores journey UUIDs,
+source, position, estimate and scope/access flags as metadata at the same locator.
+
+`ticket_node_ids` accepts parents and leaves. Placement expands work edges in
+the same project and deduplicates overlapping roots, with at most 100 roots,
+1000 resulting leaves and a separate 50,000-node traversal bound; intermediate
+parents do not count against the leaf limit. Excess rolls back. Parent
+intent is separate from release membership. Future leaves inherit the nearest
+placed ancestor's release only while it is planning. Otherwise they remain
+unassigned, become Backlog and carry `release_inheritance_note=parent_release_closed`.
+A fresh inherited leaf advances project/release revisions, invalidating stale
+plans and Undo. Undo restores both leaf membership and parent intent, only while
+its fenced result is current. Membership reads report actual distinct leaf
+releases, not intent, and return bounded leaf identities for honest client counts.
+Scopes stop at non-work children and nested projects; caller RLS stays active.
+
+Migration 1234 normalizes stored recurrence template references to work and
+increments definition revisions without rewriting occurrence receipts or prior
+sessions. REST keeps epic/ticket/task template aliases. Each occurrence creates
+a work leaf; the existing AEON-650 engine reopens its parent when
+`work-parent-status` is enabled through AEON-429. Parent Done is never a
+recurrence trigger. Historical sessions and Decision Desk IDs are untouched.
+
+Migration 1237 (AEON-653 fix2) reconciles current planning membership on work
+creation, moves, restoration and deletion. A leaf becoming a parent keeps its
+placement and the complete bounded membership projection as intent and leaves
+the live member set. Returning to leaf restores feature, position, source,
+estimate and scope/access flags; Undo follows the same reconciliation path.
+Explicit membership changes synchronize retained intent, including plan
+removal to backlog and compensating Undo, so subsequent children follow the
+latest choice. A current parent intent row, including explicit backlog, takes
+precedence over historical membership when future children inherit placement.
+Undo restores the previous intent or removes it; without intent, inheritance
+falls back to the preserved membership and its release-open check.
+Changing parent placement invalidates its retained scope approval,
+including an ordinary move back to the original release. Membership events capture that
+flag so compensating Undo can restore the prior approval; restoration also
+requires fresh scope review when older retained metadata names another release.
+Other retained planning metadata stays intact. Released/frozen member rows
+and stored note snapshots remain unchanged. Live walkers, current-release journey
+calculations and new note captures exclude parents. Quick-create applies explicit inclusion
+even after automatic inheritance and advances each revision once. Membership
+reads additionally return `assigned_leaf_count`; clients compare it with current
+leaf identities before confirming that a replay placed the entire subtree.
+
+Integration seams: the existing release-note capture helper and manifest
+backfill accept work leaves (AEON-596 P3/P6); immutable published snapshots stay
+unchanged. System recurrence queue entry explicitly checks leaf shape before
+using the legacy readiness helper (AEON-652), pending its consolidated lifecycle
+changes. Review both seams when merging siblings. Neither migration enables the
+rollout flag. Whole-chain acceptance, verified backup/rollback, push and deployment
+remain the coordinator's gates; this worker performs local checks and commits.
