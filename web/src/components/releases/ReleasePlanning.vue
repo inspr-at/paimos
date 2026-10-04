@@ -6,6 +6,8 @@ import { usePlanningMoves } from '../../lib/usePlanningMoves'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
 import DeliveryMoveSheet from './DeliveryMoveSheet.vue'
+import ReleaseActionSheet from './ReleaseActionSheet.vue'
+import type { ReleaseRecord } from '../../lib/releaseActions'
 import { api } from '../../lib/api'
 import { planningQuery, releaseName, type MatchCounts, type PlanningSource } from '../../lib/deliveryPlanning'
 import { readPreference, writePreference } from '../../lib/preferences'
@@ -47,6 +49,25 @@ const query = computed(() => parsedQuery.value.query)
 const queryError = computed(() => parsedQuery.value.error)
 const identity = computed(() => JSON.stringify([owner.value, releaseScope(props.filters.ships_in), query.value, mode.value]))
 const session = useSession()
+const deliveryActions = inject(DELIVERY_ACTIONS, undefined)
+const sheet = ref<{ release: ReleaseRecord; identity: string; screen: 'menu' | 'plan' | 'abandoned'; anchor?: HTMLElement } | null>(null)
+const sheetFeedback = ref(''), lifecycleRefresh = ref(false)
+const sheetRights = computed(() => ({ person: session.identity?.principal.kind === 'person', read: can('releases.read', props.projectId), write: can('releases.write', props.projectId), deploy: can('releases.deploy', props.projectId), product: props.projectKey.toUpperCase() === 'AEON' }))
+function menu(id: string, anchor: HTMLElement) {
+  const release = [...overview.value?.active ?? [], ...overview.value?.released.items ?? []].find(row => row.release_id === id)
+  if (release && !stale.value) sheet.value = { release: { ...release, rollup: { ...release.rollup }, build_summary: { ...release.build_summary } }, identity: identity.value, screen: 'menu', anchor }
+}
+function planRelease() {
+  if (mode.value !== 'releases' || stale.value) return
+  sheet.value = { release: { project_id: props.projectId, release_id: '', title: '', state: 'planned', visibility: 'published', rank: '', revision: 1, rollup: { units: 0, completed: 0, open_hours: 0 }, build_summary: {} }, identity: identity.value, screen: 'plan' }
+}
+function abandonedSheet(anchor: HTMLElement) {
+  sheet.value = { release: { project_id: props.projectId, release_id: '', title: '', state: 'abandoned', visibility: 'internal', rank: '', revision: 1, rollup: { units: 0, completed: 0, open_hours: 0 }, build_summary: {} }, identity: identity.value, screen: 'abandoned', anchor }
+}
+function closeSheet() { const anchor = sheet.value?.anchor; sheet.value = null; void nextTick(() => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }) }) }
+function menuMove(action: 'top' | 'after') { const release = sheet.value?.release; sheet.value = null; if (release) moves.open({ kind: 'release', record: { ...release } }, action) }
+function savedRelease(release: ReleaseRecord) { if (!deliveryActions) committed({ kind: 'lifecycle', result: release }) }
+function refreshPlanning() { lifecycleRefresh.value = false; sheetFeedback.value = ''; void loadMode(true) }
 const moves = usePlanningMoves({ root, identity: () => identity.value, releases: () => [...overview.value?.active ?? [], ...overview.value?.released.items ?? []], items: () => Object.values(work).flatMap(s => s.items), scroll: () => props.scrollRoot, agent: () => session.identity?.principal.kind === 'agent', allowed: () => can('releases.write', props.projectId), stale: () => stale.value, actions: inject(DELIVERY_ACTIONS, undefined) })
 const { draft: moveDraft, initial: moveInitial, drag: moving, feedback: moveFeedback, point: movePoint, line: moveLine, highlight: moveHighlight, refused: moveRefused } = moves
 let statusAbort: AbortController | null = null, touched = false, savedIds: string[] = [], readyOwner = '', disposed = false
@@ -80,8 +101,9 @@ async function loadMode(preserve = false) {
 }
 watch(owner, () => { void loadMode() }, { immediate: true })
 watch(() => props.applyVersion, () => { void loadMode(true) })
-function committed(change: DeliveryCommit) { planning.committed(change) }
+function committed(change: DeliveryCommit) { planning.committed(change); if (change.kind === 'lifecycle') lifecycleRefresh.value = true }
 watch(identity, () => {
+  sheet.value = null; sheetFeedback.value = ''; lifecycleRefresh.value = false
   if (mode.value !== 'releases' || !query.value) { planning.reset(null); return }
   planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value })
 }, { immediate: true })
@@ -144,7 +166,7 @@ function workProps(source: PlanningSource, matches?: MatchCounts) {
 }
 watch([overview, loading, stale], () => emit('summary', { total: stale.value ? null : overview.value?.matches?.shown_count ?? null, loading: loading.value || mode.value === 'checking', incomplete: overview.value?.counts_incomplete ?? false }), { immediate: true })
 onBeforeUnmount(() => { disposed = true; statusAbort?.abort(); planning.dispose() })
-defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value }) })
+defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? loadMode() : planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value }) })
 </script>
 
 <template>
@@ -164,7 +186,7 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
         <button type="button" class="btn sm ghost" :disabled="!pending" @click="flush(true)">Show loaded</button>
       </div>
     </div>
-    <div class="move-feedback" role="status" aria-live="polite">{{ moveFeedback }}</div>
+    <div class="move-feedback" role="status" aria-live="polite">{{ sheetFeedback || moveFeedback }}{{ lifecycleRefresh ? ' Refresh to update rollover destinations and counts.' : '' }}</div>
     <div class="planning-feedback" role="status" aria-live="polite">
       <span v-if="queryError || modeError || error || pageError || preferenceError" class="error">{{ queryError || modeError || error || pageError || preferenceError }}{{ stale ? ' · showing previous data' : '' }}</span>
       <span v-else-if="pending">{{ pending }} {{ pendingExpansion ? 'updates' : 'pages' }} ready · Show loaded to insert them now{{ stale ? ' · previous query still shown' : '' }}</span>
@@ -174,14 +196,14 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
       <span v-else-if="queued || inFlight">{{ inFlight }} reads running · {{ queued }} pages waiting</span>
       <span v-else-if="overview?.counts_incomplete">Counts are a lower bound; more matches may exist.</span>
       <span v-else-if="overview">{{ overview.active.length }} upcoming · {{ overview.released.items.length }} released loaded</span>
-      <button type="button" class="retry" :disabled="!(modeError || error || pageError)" @click="modeError ? loadMode() : planning.reset({ project: projectId, person, scope: releaseScope(filters.ships_in), query })">Retry</button>
+      <button type="button" class="retry" :disabled="!(modeError || error || pageError || lifecycleRefresh)" @click="refreshPlanning">Refresh</button>
     </div>
     <slot v-if="mode === 'journey'" name="journey"><p class="journey-placeholder">This project is still using its journey.</p></slot>
     <template v-if="overview">
       <div class="release-columns" aria-hidden="true"><span>Release</span><span>Status</span><span>Open</span><span>Progress</span><span>Outlook</span><span>Agents</span><span /></div>
       <h2 class="release-section">Upcoming</h2>
       <div v-for="release in overview.active" :key="release.release_id" :data-planning-block="release.release_id" class="release-block" :class="{ 'move-target': moveHighlight === release.release_id, 'move-refused': moveHighlight === release.release_id && moveRefused }">
-        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => emit('menu', release.release_id, anchor)">
+        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" :actions-available="true" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => menu(release.release_id, anchor)">
           <template #handle><button type="button" class="release-drag-handle" data-move-handle :aria-label="`Reorder ${releaseName(release)}`" :aria-disabled="release.visibility === 'published' || release.state === 'released'" :data-tip="release.visibility === 'published' ? 'Published releases keep their order.' : 'Reorder upcoming release'" @click.stop="moves.open({ kind: 'release', record: { ...release } })"><AppIcon name="grip" :size="14" /></button></template>
         </PlanningReleaseRow>
         <div v-if="expanded.has(release.release_id)" :id="`release-work-${release.release_id}`"><PlanningWork v-bind="workProps(`release:${release.release_id}`, release.matches)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" /></div>
@@ -201,10 +223,10 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
           <PlanningWork v-bind="workProps('backlog:tail', overview.backlog_matches?.tail)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" />
         </div>
       </div>
-      <div class="abandoned-row"><AppIcon name="archive" :size="14" /><span>Abandoned</span><span class="mono">{{ overview.abandoned }}{{ overview.counts_incomplete ? '+' : '' }}</span><span class="quiet">Names stay reserved</span></div>
+      <div class="abandoned-row"><AppIcon name="archive" :size="14" /><button type="button" class="abandoned-open" @click="abandonedSheet($event.currentTarget as HTMLElement)">Abandoned</button><span class="mono">{{ overview.abandoned }}{{ overview.counts_incomplete ? '+' : '' }}</span><span class="quiet">Names stay reserved</span></div>
       <h2 class="release-section">Released <span>Internal work reads Done</span></h2>
       <div v-for="release in overview.released.items" :key="release.release_id" :data-planning-block="release.release_id" class="release-block" :class="{ 'move-target': moveHighlight === release.release_id, 'move-refused': moveHighlight === release.release_id && moveRefused }">
-        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => emit('menu', release.release_id, anchor)">
+        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" :actions-available="true" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => menu(release.release_id, anchor)">
           <template #handle><button type="button" class="release-drag-handle" data-move-handle :aria-label="`Reorder ${releaseName(release)}`" :aria-disabled="release.visibility === 'published' || release.state === 'released'" :data-tip="release.visibility === 'published' ? 'Published releases keep their order.' : 'Reorder upcoming release'" @click.stop="moves.open({ kind: 'release', record: { ...release } })"><AppIcon name="grip" :size="14" /></button></template>
         </PlanningReleaseRow>
         <div v-if="expanded.has(release.release_id)" :id="`release-work-${release.release_id}`"><PlanningWork v-bind="workProps(`release:${release.release_id}`, release.matches)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" /></div>
@@ -217,6 +239,7 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
       <div v-if="moving" class="move-ghost" aria-hidden="true" :style="{ left: `${Math.min(movePoint.x + 12, Math.max(8, (root?.clientWidth ?? 320) - 220))}px`, top: `${Math.max(144, movePoint.y - 16)}px` }"><span>{{ moving.record.title }}</span><p>{{ moveFeedback }}</p></div>
       <div v-if="moveLine" class="move-line" :style="{ left: `${moveLine.x}px`, top: `${moveLine.y}px`, width: `${moveLine.width}px` }" />
       <DeliveryMoveSheet v-if="moveDraft" :subject="moveDraft" :initial="moveInitial" :person="person" :releases="overview?.active ?? []" :visible-items="Object.values(work).flatMap(s => s.items)" :advice="moves.advice" @close="moveDraft = null" @confirm="moves.confirm" />
+      <ReleaseActionSheet v-if="sheet" :release="sheet.release" :screen="sheet.screen" :identity="sheet.identity" :current-identity="() => identity" :rights="sheetRights" :releases="overview?.active ?? []" @close="closeSheet" @move="menuMove" @saved="savedRelease" @feedback="sheetFeedback = $event" />
     </Teleport>
   </section>
 </template>
@@ -254,6 +277,7 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
 button:hover:not(:disabled) { background: var(--row-hover); }
 button:focus-visible, select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .abandoned-row { display: flex; align-items: center; min-height: 48px; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.abandoned-open { min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink); }
 .quiet { color: var(--ink-3); font-size: 12px; }
 .tail-heading { margin: 0; padding: 10px 44px; border-bottom: 1px solid var(--line); font: 10.5px/1.4 var(--mono); text-transform: uppercase; color: var(--ink-3); }
 .insertion { display: block; height: 0; }

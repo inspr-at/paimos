@@ -167,7 +167,25 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
     if (!overview.value || !context) return
     // Lifecycle owners apply their authoritative result separately; a blanket
     // refresh here would also expose still-held foreign structural changes.
-    if (change.kind === 'lifecycle') return
+    if (change.kind === 'lifecycle') {
+      const result = change.result
+      if (!result || result.project_id !== context.project) return
+      invalidate(); loading.value = false
+      const before = rows().find(row => row.release_id === result.release_id)
+      const updated = { ...before, ...result }
+      const active = overview.value.active.filter(row => row.release_id !== result.release_id)
+      const released = overview.value.released.items.filter(row => row.release_id !== result.release_id)
+      if (['planned','building','frozen'].includes(updated.state)) active.push(updated)
+      else if (updated.state === 'released') released.unshift(updated)
+      active.sort((a, b) => compare(a.rank, b.rank) || compare(a.release_id, b.release_id))
+      // The transition row is authoritative. Rollover also changes other
+      // containers; keep their held snapshot and disclose that a refresh is
+      // needed instead of inventing their new counts or reading foreign edits.
+      const rollover = updated.state === 'abandoned' || updated.state === 'released' || !before?.version && !!updated.version
+      if (rollover) { delete work[`release:${updated.release_id}`]; overview.value.counts_incomplete = true }
+      overview.value = { ...overview.value, active, released: { ...overview.value.released, items: released }, abandoned: overview.value.abandoned + Number(updated.state === 'abandoned' && before?.state !== 'abandoned') }
+      return
+    }
     // Cancel pre-commit reads without replacing the visible snapshot: a late
     // continuation must never overwrite or reinsert the old placement.
     invalidate()

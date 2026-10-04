@@ -880,6 +880,7 @@ function openEpic(epic: EpicRef) { openKey(epic.key) }
 
 // ---------- Create and remove ----------
 async function startCreate(under: ListItem | null = null) {
+  if (releasesActive.value) { planningView.value?.planRelease(); return }
   if (fullView.value) collapse()
   if (under && outlineActive.value) {
     creating.value = false

@@ -8,7 +8,7 @@ export interface PlacementReceipt {
   items: { item_id: string; project_id: string; release_id?: string; rank?: string; revision: number; expedite: boolean; due_on: string | null }[]
   release_revision?: number; release_ranks?: Record<string, string>; release_revisions?: Record<string, number>; undo_event_id: number | null
 }
-export type DeliveryCommit = { kind: 'placement'; result: PlacementReceipt } | { kind: 'rank'; result: Pick<PlanningRelease, 'release_id' | 'project_id' | 'revision' | 'rank'> & Partial<PlanningRelease> & { undo_event_id: number | null } } | { kind: 'lifecycle' }
+export type DeliveryCommit = { kind: 'placement'; result: PlacementReceipt; undoable?: boolean } | { kind: 'rank'; result: Pick<PlanningRelease, 'release_id' | 'project_id' | 'revision' | 'rank'> & Partial<PlanningRelease> & { undo_event_id: number | null } } | { kind: 'lifecycle'; result?: PlanningRelease }
 export interface DeliveryActions {
   identity(): string
   begin(): string
@@ -104,7 +104,7 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
         const result = change.result
         if ('items' in result ? result.items.some(it => it.project_id !== project.value) : result.project_id !== project.value) { error.value = 'The committed action belongs to another project'; return false }
         remember(result.undo_event_id)
-        undo.value = result.undo_event_id ? { id: result.undo_event_id, identity: captured } : null
+        undo.value = result.undo_event_id && !(change.kind === 'placement' && change.undoable === false) ? { id: result.undo_event_id, identity: captured } : null
       } else undo.value = null
       inFlight = Math.max(0, inFlight - 1); flushBuffered()
       options.committed?.(change); version.value++; return true
