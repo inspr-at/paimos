@@ -967,6 +967,31 @@
       ]
     },
     {
+      "id": "recurrences",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {
+        "AEON_RECURRENCE_SHOTS": "${RUNNER_TEMP}/aeon-recurrence-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/recurrences.spec.ts",
+          "weightSeconds": 45.0,
+          "weightSource": "estimate"
+        },
+        {
+          "file": "tests/recurrence-marker.spec.ts",
+          "weightSeconds": 45.0,
+          "weightSource": "estimate"
+        }
+      ]
+    },
+    {
       "id": "decision-desk",
       "config": "playwright.ui.config.ts",
       "project": null,

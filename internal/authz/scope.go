@@ -106,6 +106,8 @@ var ProjectDecidedRoutes = map[string]bool{
 	"PATCH /api/work-kinds/{kindId}":                             true,
 	"DELETE /api/work-kinds/{kindId}":                            true,
 	"POST /api/work-kinds/{kindId}/restore":                      true,
+	"POST /api/recurrences":                                      true,
+	"POST /api/recurrences/preview":                              true,
 	"POST /api/queue":                                            true,
 	"POST /api/queue/reset":                                      true,
 	"POST /api/queue/next":                                       true,
@@ -131,7 +133,6 @@ var ProjectDecidedRoutes = map[string]bool{
 	"POST /api/outcomes":                                         true,
 	"POST /api/relations":                                        true,
 	"POST /api/knowledge":                                        true,
-	"POST /api/recurrences":                                      true,
 }
 
 // Product release notes are the same for everyone; they are not tenant data.

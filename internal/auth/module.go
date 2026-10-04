@@ -296,6 +296,23 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "recurrences":
+		// This is an explicit agent allowlist. Every recurrence handler also
+		// checks the custom role and recurrences.manage key scope in its tenant.
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 2 && parts[1] == "preview" && r.Method == http.MethodPost {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 2 && parts[1] != "" && parts[1] != "preview" && (read || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 3 && parts[1] != "" {
+			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
+				return "recurrences.manage", true
+			}
+		}
 	case "agent-keys":
 		if len(parts) == 3 && parts[2] == "trim-proposals" && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
 			return "approvals.request", true

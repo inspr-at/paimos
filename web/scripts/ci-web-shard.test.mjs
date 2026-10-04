@@ -358,7 +358,7 @@ test('runtime reconciliation leaves new specs ungated, drops removed specs and r
   // The real manifest includes all four newly gated specs and main's key-layout gate.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 54)
+  assert.equal(JSON.parse(out.pop()).specs, loadManifest().groups.filter(group => group.gate !== false).reduce((count, group) => count + group.specs.length, 0))
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {

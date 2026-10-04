@@ -31,7 +31,7 @@ test('section tabs separate Tickets views, Journey and Knowledge views; each kee
   await page.setViewportSize({ width: 1600, height: 1000 })
   const errors = await setup(page)
   await page.goto('/p/PHAROS/tickets')
-  await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Journey', 'Knowledge'])
+  await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Journey', 'Knowledge', 'Settings'])
   await expect(ticketViews(page).getByRole('tab')).toHaveText(['List', 'Outline', 'Graph'])
   await expect(ticketViews(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: 'Display: Display' })).toBeVisible()
