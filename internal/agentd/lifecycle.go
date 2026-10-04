@@ -92,7 +92,7 @@ func (s *Supervisor) readFence(account string) (bool, error) {
 
 func (s *Supervisor) dispatchAllowed(account string) bool {
 	s.mu.Lock()
-	closing := s.closing
+	closing := s.closing || s.pairingFailure != ""
 	s.mu.Unlock()
 	if closing {
 		return false
@@ -105,6 +105,14 @@ func (s *Supervisor) dispatchAllowed(account string) bool {
 		fenced, err = s.readFence(account)
 	}
 	return err == nil && !fenced
+}
+
+func (s *Supervisor) probeAllowed() bool {
+	s.mu.Lock()
+	closing := s.closing
+	s.mu.Unlock()
+	fenced, err := s.readFence("")
+	return !closing && err == nil && !fenced
 }
 
 func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
@@ -139,6 +147,23 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	return s.lifecycleAt(accountID, time.Now())
+}
+
+// SetPairingFailure reports a skipped poll without overwriting per-harness
+// holds or durable fences. Recovery gives unprobed accounts a fresh wait.
+func (s *Supervisor) SetPairingFailure(detail string) {
+	detail = agentsetup.SafePairingDetail(detail)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if detail == "" && s.pairingFailure != "" {
+		now := s.capacityNow()
+		for _, a := range s.accounts {
+			if !s.probedAccounts[a.ID] {
+				s.probePendingSince[a.ID] = now
+			}
+		}
+	}
+	s.pairingFailure = detail
 }
 
 func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatus {
@@ -180,7 +205,9 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 				issue = s.dependencyErrors[a.ID]
 				reason = s.dependencyReasons[a.ID]
 			}
-			if issue != "" {
+			if s.pairingFailure != "" {
+				status, reason = "blocked", agentsetup.PairingSyncFailed
+			} else if issue != "" {
 				v.HarnessErrors[a.Harness] = issue
 				status = "blocked"
 				if reason == "" {
@@ -225,6 +252,9 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 		}
 		v.AccountStatuses[a.ID], _ = agentsetup.HarnessReport(a.Harness, status, reason)
 		v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.probeReasonDetails[a.ID])
+		if reason == agentsetup.PairingSyncFailed {
+			v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.pairingFailure)
+		}
 		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason, detail: v.AccountStatuses[a.ID].ReasonDetail})
 	}
 	assignHarnessReports(&v, perHarness)

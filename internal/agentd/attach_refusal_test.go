@@ -29,8 +29,8 @@ func TestAttachRefusalInventory(t *testing.T) {
 		{409, attachwatch.RefusalTicket, "ticket_not_visible", "Check the ticket", []string{"project, ticket or harness enrollment changed"}},
 		{409, attachwatch.RefusalVersion, "version_mismatch", "Update Aeon", []string{"ignored"}},
 		{410, attachwatch.RefusalExpired, "code_expired", "approve the new code", []string{"watch ended; new approval required"}},
-		{409, attachwatch.RefusalDraining, "draining", "aeon-agentd add-harness", []string{"project, ticket or harness enrollment changed"}},
-		{403, attachwatch.RefusalDraining, "draining", "aeon-agentd add-harness", []string{"computer proof rejected"}},
+		{409, attachwatch.RefusalDraining, "draining", "let owned work finish", []string{"project, ticket or harness enrollment changed"}},
+		{403, attachwatch.RefusalDraining, "draining", "let owned work finish", []string{"computer proof rejected"}},
 		{409, attachwatch.RefusalEnrollment, "enrollment_unavailable", "aeon-agentd add-harness", []string{"project, ticket or harness enrollment changed"}},
 		{403, "", "live_limit", "approve or decline", []string{attachwatch.LiveLimitMessage}},
 		{429, "", "live_limit", "approve or decline", []string{attachwatch.LiveLimitMessage}},
@@ -39,12 +39,13 @@ func TestAttachRefusalInventory(t *testing.T) {
 		{429, "", "registration_limit", "Ask the Aeon administrator", []string{"daemon registration capacity reached"}},
 		{429, "", "poll_limit", "Update paimos-agentd", []string{"poll at most once per second"}},
 		{429, "", "rate_limit", "Wait before retrying", []string{"unrecognized"}},
+		{403, attachwatch.RefusalPollKeyUnknown, "poll_key_unknown", "Run attach again in a few seconds", []string{"daemon poll key rejected"}},
 		{403, "", "registration_lost", "restart agentd", []string{"daemon poll key rejected", "fresh daemon poll key required"}},
 		{403, "", "pairing_unavailable", "Check the computer", []string{"paired daemon required", "computer proof rejected", "owner delegation no longer valid", "agent key scope required", "outside this computer's runtime authority", "permission denied", "forbidden"}},
 		{403, "", "snapshot_changed", "Check the running process", []string{"attach proof rejected", "attach approval binding changed"}},
 		{403, "", "consent_required", "complete fresh browser approval", []string{"boolean local confirmation is refused; upgrade agentd and re-pair", "local confirmation challenge already consumed or unavailable", "signed local confirmation required", "signed local confirmation rejected"}},
 		{409, "", "version_mismatch", "Update Aeon", []string{"update agentd to attach protocol 2", "upgrade paimos-agentd to local consent proof v2", "update agentd to attach protocol 2; fresh approval required", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required"}},
-		{409, "", "draining", "aeon-agentd add-harness", []string{"enrollment is draining; no new work"}},
+		{409, "", "draining", "let owned work finish", []string{"enrollment is draining; no new work"}},
 		{409, "", "scope_changed", "Check the ticket", []string{"project, ticket or harness enrollment changed"}},
 		{409, "", "snapshot_changed", "Check the running process", []string{"snapshot digest required", "attach snapshot is immutable", "process or approval snapshot changed", "snapshot platform does not match the paired computer"}},
 		{409, "", "consent_required", "complete fresh browser approval", []string{"consent binding required or mismatched; update agentd and attach again", "consent binding mismatch"}},
@@ -75,6 +76,9 @@ func TestAttachRefusalInventory(t *testing.T) {
 					return detail
 				}
 				got := check(message)
+				if tc.code == "draining" && !strings.Contains(got.Hint, "aeon-agentd add-harness") {
+					t.Fatal("drain lost harness repair guidance")
+				}
 				if tc.cause != "" {
 					if replacement := check("private response\x1b[31m"); replacement.Hint != got.Hint {
 						t.Fatal("server text changed a typed hint")

@@ -460,6 +460,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 		if computer != nil {
 			p.WorkstationComputerID = *computer
 		}
+		p.AuthKeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}

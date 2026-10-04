@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +57,7 @@ type StatusError struct {
 	Message       string
 	AttachRefusal string
 	ReasonCode    string
+	RetryAfter    time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -218,7 +220,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 				ReasonCode    string `json:"reason_code"`
 			}
 			_ = json.Unmarshal(payload, &detail)
-			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode}
+			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
 		}
 		if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
 			return nil
@@ -229,6 +231,28 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 		return nil
 	}
 	return fmt.Errorf("Touch ID retry exhausted")
+}
+
+// Bound untrusted delay values to one day. Both HTTP forms are supported;
+// malformed, past or excessive values provide no retry instruction.
+func retryAfter(value string, now time.Time) time.Duration {
+	if len(value) > 128 {
+		return 0
+	}
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		if seconds <= 86400 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	if until, err := http.ParseTime(value); err == nil {
+		delay := until.Sub(now)
+		if delay > 0 && delay <= 24*time.Hour {
+			return delay
+		}
+	}
+	return 0
 }
 
 func errorMessage(payload []byte) string {

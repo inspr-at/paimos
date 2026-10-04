@@ -14,6 +14,9 @@ func TestClaudeAccountEnvironmentProbeAndRun(t *testing.T) {
 		t.Run(fmt.Sprintf("default=%t", defaultAccount), func(t *testing.T) {
 			userHome := privateHome(t)
 			t.Setenv("HOME", userHome)
+			t.Setenv("USER", "fixture-user")
+			t.Setenv("LOGNAME", "fixture-user")
+			t.Setenv("TMPDIR", privateHome(t))
 			for _, name := range []string{"CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "NODE_OPTIONS"} {
 				t.Setenv(name, "inherited-fixture-value")
 			}
@@ -33,7 +36,9 @@ func TestClaudeAccountEnvironmentProbeAndRun(t *testing.T) {
 			// The stand-in only confirms authentication under the intended
 			// environment. It prints no environment or inherited value.
 			path := fakeScript(t, fmt.Sprintf(`[ "$HOME" = %q ] && %s && [ "${ANTHROPIC_API_KEY+x}" != x ] && [ "${ANTHROPIC_BASE_URL+x}" != x ] && [ "${CLAUDE_CODE_USE_BEDROCK+x}" != x ] && [ "${NODE_OPTIONS+x}" != x ] || exit 2
-printf '%%s\n' '{"loggedIn":true,"email":"fixture@example.test","authMethod":"claude.ai"}'`, wantHome, configCheck))
+[ "$USER" = fixture-user ] && [ "$LOGNAME" = fixture-user ] && [ "$TMPDIR" = %q ] || { printf '%%s\n' '{"loggedIn":false}'; exit 1; }
+[ "$1 $2 $3" = 'auth status --json' ] || exit 3
+printf '%%s\n' '{"loggedIn":true,"email":"fixture@example.test","authMethod":"claude.ai"}'`, wantHome, configCheck, os.Getenv("TMPDIR")))
 			node, sdk := claudeAdapterDependencies(t, path)
 			a := NewClaudeAdapter(node, sdk, path, map[string]string{"account": home})
 			a.SetExpectedEmails(map[string]string{"account": "fixture@example.test"})
@@ -63,9 +68,12 @@ printf '%%s\n' '{"loggedIn":true,"email":"fixture@example.test","authMethod":"cl
 			if defaultAccount && present || !defaultAccount && (!present || config != home) {
 				t.Fatal("run used the wrong config directory policy")
 			}
-			wantCount := 5
+			if values["USER"] != "fixture-user" || values["LOGNAME"] != "fixture-user" || values["TMPDIR"] != os.Getenv("TMPDIR") {
+				t.Fatal("run lost the OS login session environment")
+			}
+			wantCount := 8
 			if defaultAccount {
-				wantCount = 4
+				wantCount = 7
 			}
 			if len(values) != wantCount || values["PATH"] != strings.Join([]string{filepath.Dir(node), filepath.Dir(path), "/usr/bin", "/bin"}, string(os.PathListSeparator)) || values["LANG"] != "C" || values["LC_ALL"] != "C" {
 				t.Fatal("run environment was not minimal and pinned")

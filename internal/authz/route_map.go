@@ -24,9 +24,20 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"GET /api/agentd/step-ups/{challenge_id}":            "harness.worker",
-	"PUT /api/agent-keys/{id}/owner-workstation":         "keys.manage",
-	"GET /api/model-preferences":                         "models.read",
+	"GET /api/agentd/step-ups/{challenge_id}":    "harness.worker",
+	"PUT /api/agent-keys/{id}/owner-workstation": "keys.manage",
+	"GET /api/model-preferences":                 "models.read",
+	// Theme handlers decide person ownership or workspace settings authority
+	// again inside the final fenced mutation transaction.
+	"GET /api/themes":                      "profile.read|profile.portal_read",
+	"GET /api/themes/{themeId}":            "profile.read|profile.portal_read",
+	"GET /api/me/theme":                    "profile.read|profile.portal_read",
+	"POST /api/themes":                     "profile.write|profile.portal_write|settings.manage",
+	"PATCH /api/themes/{themeId}":          "profile.write|profile.portal_write|settings.manage",
+	"DELETE /api/themes/{themeId}":         "profile.write|profile.portal_write|settings.manage",
+	"POST /api/themes/{themeId}/duplicate": "profile.write|profile.portal_write|settings.manage",
+	"PUT /api/me/theme":                    "profile.write|profile.portal_write",
+
 	"POST /api/agent-keys/{id}/trim-proposals":           "approvals.request",
 	"GET /api/key-trim-proposals":                        "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",

@@ -56,6 +56,24 @@
       "sourceCommit": "f37d0ee39fb63b3fbf352d6c6fdc918488eea2c4",
       "ticket": "AEON-580",
       "reason": "Existing AEON-580 migration bytes are unchanged. The classifier flags the validated CHECK and separately added foreign key on agent_keys, plus CREATE OR REPLACE of aeon_guard_approval. Existing keys retain false/NULL/0 defaults. The approval guard preserves valid person decisions and agent self-proposals, fails closed on missing or expired authority, and permits another agent to decide only with the exact transaction-bound marked key and connected pairing. Self-approval remains refused; server permission, signer and step-up fences remain required. This exact-byte exception requires coordinator review before merge/release; workers only measure draft CI. It does not make the SQL expand-safe, grant rollout acceptance or skip previous-binary migration compatibility."
+    },
+    {
+      "file": "1206_themes.sql",
+      "sha256": "5b289f99f660914f99861c22ba126dc09983d48c2811e735aa08af66a956ecc6",
+      "ticket": "AEON-641",
+      "reason": "Additive tenant themes and owner-only selections, with a fixed Porcelain seed for existing and future tenants. The classifier conservatively flags the tenant-loop DO backfill, ON CONFLICT DO NOTHING in the seed function, and REVOKE EXECUTE on fixed SECURITY DEFINER seed helpers. The events SELECT policy restricts only the new theme.* namespace; existing event types and previous-binary writes are unchanged. No existing table, column, route or constraint is removed. Exact bytes require coordinator review before merge/release and do not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
+      "file": "1207_theme_principal_links.sql",
+      "sha256": "6ca9500eecd6ccf7804921b275b0e6f51d101edbcae61af75799bfec36428a40",
+      "ticket": "AEON-641",
+      "reason": "Preserve immutable theme owners, choice rows and append-only audit through current principal links. Only theme-specific policies and guards change; no existing data, non-theme policy, route or column is removed. ALTER POLICY and CREATE OR REPLACE FUNCTION require this exact-byte coordinator-reviewed exception before merge/release, plus normal previous-binary compatibility probes. It grants no approval or release authority."
+    },
+    {
+      "file": "1208_theme_selection_generation.sql",
+      "sha256": "601ae9ff9206769a92e77704e27f0d361f11d24be373b2e7ce0d3af31cef41c5",
+      "ticket": "AEON-641",
+      "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
     }
   ]
 }

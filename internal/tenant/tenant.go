@@ -25,10 +25,11 @@ type Principal struct {
 	Roles                 []string // e.g. "admin", "member"
 	Scopes                []string // authenticated agent key's outer permission ceiling
 	KeyCreatorID          string   // creator's live binding further narrows an agent key
-	KeyID                 string   // authenticated key identity, never the bearer secret
+	KeyID                 string   `json:"-"` // authenticating key metadata ID; never a prefix or credential
 	OwnerWorkstation      bool     // explicit designation; authz rechecks live binding
 	WorkstationComputerID string
 	WorkstationGeneration int64
+	AuthKeyID             string `json:"-"` // authenticated key row for write-time revalidation; never part of public projections
 }
 
 type ctxKey struct{}
