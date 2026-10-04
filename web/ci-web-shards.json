@@ -983,7 +983,9 @@
         "AEON_RECURRENCE_SHOTS": "${RUNNER_TEMP}/aeon-recurrence-shots"
       },
       "hostedOnly": true,
-      "sourceSteps": [],
+      "sourceSteps": [
+        "AEON-573 recurring work and anchored-control regressions"
+      ],
       "specs": [
         {
           "file": "tests/recurrences.spec.ts",

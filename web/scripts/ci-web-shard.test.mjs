@@ -158,6 +158,12 @@ test('real manifest covers every non-excluded UI spec once for 1, 12 and 256 sha
   assert.equal(manifest.groups.find(g => g.id === 'performance').config, 'playwright.perf.config.ts')
   const release = manifest.groups.find(g => g.id === 'release')
   assert.equal(release.env.RELEASE_LIST_SHOTS, '${RUNNER_TEMP}/aeon-release-list-shots')
+  const recurrence = manifest.groups.find(g => g.id === 'recurrences')
+  assert.notEqual(recurrence.gate, false)
+  assert.deepEqual(recurrence.flags, ['--workers=1'])
+  assert.equal(recurrence.env.AEON_RECURRENCE_SHOTS, 'test-results/recurrences')
+  assert.deepEqual(recurrence.specs.map(s => s.file), ['tests/recurrences.spec.ts'])
+  assert.equal(balanceShards(manifest, 12).flatMap(s => s.specs).filter(s => s.file === 'tests/recurrences.spec.ts').length, 1)
   assert.equal(files(manifest).filter(file => file === 'tests/access.spec.ts').length, 1)
   for (const e of manifest.ciInventory.filter(e => e.kind === 'browser-test' && e.config === 'playwright.ui.config.ts' && !e.revision)) {
     for (const file of e.specs) assert.ok(files(manifest).includes(file), `${e.id}: ${file}`)
