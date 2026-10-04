@@ -25,7 +25,7 @@
 //    returns a display object only while it may show), their values (show,
 //    optimistic), their projections (amend, for one revision and parent;
 //    child, once per child) and whether a node is gone (isDeleted).
-import { reactive, toRaw } from 'vue'
+import { reactive, shallowReactive, toRaw } from 'vue'
 import type { Kind, ListItem, ListParent, WorkNode } from './api.ts'
 import { compareRevision } from './liveUpdates.ts'
 import { positionOf } from './position.ts'
@@ -156,7 +156,7 @@ export class RowStore {
   private clock = 0
   private gapAt = 0
   private names = new Map<string, string>()
-  private kinds = new Map<string, Pick<Kind, 'slug' | 'label'>>()
+  private kinds = shallowReactive(new Map<string, Pick<Kind, 'slug' | 'label'> & Partial<Pick<Kind, 'field_schema'>>>())
   // Parents as list copies and moves named them (their chip), for node reads after a move.
   private parents = new Map<string, ListParent>()
   private holders = new Set<() => Iterable<string>>()
@@ -511,9 +511,10 @@ export class RowStore {
 
   // ---------- Names ----------
   // Kind labels belong to the kind id, so a converted node never keeps its old label.
-  learnKinds(kinds: readonly Pick<Kind, 'id' | 'slug' | 'label'>[]) {
-    for (const kind of kinds) this.kinds.set(kind.id, { slug: kind.slug, label: kind.label })
+  learnKinds(kinds: readonly (Pick<Kind, 'id' | 'slug' | 'label'> & Partial<Pick<Kind, 'field_schema'>>)[]) {
+    for (const kind of kinds) this.kinds.set(kind.id, { slug: kind.slug, label: kind.label, field_schema: kind.field_schema ?? this.kinds.get(kind.id)?.field_schema })
   }
+  kindSchema(id: string | undefined): Record<string, unknown> | undefined { return id ? this.kinds.get(id)?.field_schema : undefined }
   learnName(id: string, name: string) { if (id && name) this.names.set(id, name) }
   learnParent(parent: ListParent) { if (parent.id) this.parents.set(parent.id, { id: parent.id, key: parent.key, title: parent.title, kind_slug: parent.kind_slug }) }
   name(id: string): string | undefined { return this.names.get(id) }

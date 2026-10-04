@@ -2,6 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { APIError } from '../src/lib/api.ts'
+import { rowStore } from '../src/lib/rowStore.ts'
 import { pillWords } from '../src/lib/ticketBenefits.ts'
 import { benefitGateError, benefitRequiredCode, benefitRetryFields, benefitSkip, benefitStepSummary, completionFields, gateAction, gateProgress, gateTitle, needsBenefitPrompt, skippedStatusLabel } from '../src/lib/doneGate.ts'
 
@@ -112,4 +113,23 @@ test('work leaves retain completion prompts while parents never wait for benefit
     assert.equal(needsBenefitPrompt({ ...work, estimate: { is_parent: true } }, next), false)
     assert.equal(needsBenefitPrompt({ ...work, fields: text }, next), false)
   }
+})
+
+test('custom Done categories gate leaves, retain historical edits and honor category overrides', () => {
+  const kind_id = 'custom-work-kind'
+  rowStore.learnKinds([{ id: kind_id, slug: 'work', label: 'Work', field_schema: { states: [
+    { state: 'custom-complete', category: 'done' },
+    { state: 'done', category: 'open' },
+    { state: 'abandoned', category: 'cancelled' },
+  ] } }])
+  const work = { kind_id, kind_slug: 'work', state: 'open', fields: {} }
+  assert.equal(needsBenefitPrompt(work, 'custom-complete'), true)
+  assert.equal(needsBenefitPrompt(work, ' CUSTOM--COMPLETE '), true)
+  assert.equal(needsBenefitPrompt({ ...work, state: 'custom-complete' }, 'accepted'), false)
+  assert.equal(needsBenefitPrompt(work, 'done'), false)
+  assert.equal(needsBenefitPrompt(work, 'abandoned'), false)
+  assert.equal(needsBenefitPrompt({ ...work, fields: text }, 'custom-complete'), false)
+  assert.equal(needsBenefitPrompt({ ...work, estimate: { is_parent: true } }, 'custom-complete'), false)
+  rowStore.clear()
+  assert.equal(needsBenefitPrompt(work, 'custom-complete'), false)
 })

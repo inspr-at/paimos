@@ -21,10 +21,11 @@ import (
 const benefitFields = `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`
 
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
-	for _, state := range []string{"done", "accepted", "delivered"} {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits")
 			k := kindBySlug(t, p, "work")
+			setBenefitStateCatalog(t, p.TenantID, k.ID)
 			for _, key := range []string{"pill_en", "pill_de", "benefit_en", "benefit_de", "hide_from_release_notes"} {
 				if !strings.Contains(string(k.FieldSchema), key) {
 					t.Fatalf("seed missing %s", key)
@@ -63,7 +64,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 			// Already-completed imports/history are not retroactively blocked or translated.
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{},"title":"Historical edit"}`)
 			decode[nodeJSON](t, code, raw, 200)
-			for _, after := range []string{"done", "accepted", "delivered"} {
+			for _, after := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 				code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"title":"Completed historical edit"}`, after))
 				historical := decode[nodeJSON](t, code, raw, 200)
 				if historical.State != after || historical.Title != "Completed historical edit" || string(historical.Fields) != "{}" {
@@ -85,10 +86,11 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 	}
 }
 func TestTicketBenefitsBulkAndUndo(t *testing.T) {
-	for _, state := range []string{"done", "accepted", "delivered"} {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", "CUSTOM--COMPLETE"} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits-bulk")
 			k := kindBySlug(t, p, "work")
+			setBenefitStateCatalog(t, p.TenantID, k.ID)
 			pk := kindBySlug(t, p, "project")
 			a := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"One"}`)
 			b := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"Two"}`)
@@ -171,5 +173,33 @@ func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
 	}
 	if counts[200] != 1 || counts[412] != 1 {
 		t.Fatal(counts)
+	}
+}
+
+// The same catalog drives parent derivation and successful leaf completion.
+func setBenefitStateCatalog(t *testing.T, tenantID, kindID string) {
+	t.Helper()
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}', '[{"state":"custom-complete","category":"done"},{"state":"done","category":"done"}]') WHERE id=$1`, kindID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBenefitCompletionCategoryOverridesLiteralNames(t *testing.T) {
+	p := newPrincipal(t, "benefit-overrides")
+	k := kindBySlug(t, p, "work")
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}','[{"state":"done","category":"open"},{"state":"ready","category":"done"}]') WHERE id=$1`, k.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A configured Open category on a literal completion name is not completion.
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Open category","state":"done"}`, k.ID))
+	code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"ready"}`)
+	if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) {
+		t.Fatalf("category override bypassed leaf gate: %d %s", code, raw)
 	}
 }

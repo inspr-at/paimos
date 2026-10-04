@@ -130,3 +130,24 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.screenshot({ path: `test-results/aeon-654-wn/settings-${width}-${theme}.png` })
   })
 }
+
+for (const [state, category, completed] of [['custom-complete', 'done', true], ['done', 'open', false]] as const) {
+  test(`leaf benefit guidance resolves ${state} as ${category}`, async ({ page }) => {
+    const data = fixtures()
+    const node = data.nodes.find(n => n.key === 'PHAROS-12')!
+    node.kind_slug = 'work'; node.state = state
+    node.estimate = { is_parent: false, hours: null, estimated_children: 0, open_children: 0 }
+    const child = data.nodes.find(n => n.parent_id === node.id)!
+    child.parent_id = node.parent_id
+    const errors = watchErrors(page)
+    await mockWork(page, data)
+    await page.route('**/api/kinds', route => route.fulfill({ json: { items: [{ id: 'k-work', slug: 'work', label: 'Work', short_prefix: 'WRK', icon: 'work', allowed_child_kinds: null, field_schema: { states: [{ state, category }] } }] } }))
+    await page.goto('/p/PHAROS/PHAROS-12')
+    const region = page.getByRole('region', { name: 'User benefit' })
+    const guidance = completed ? 'This completed ticket has incomplete benefit fields.' : 'Before Done'
+    await expect(region).toContainText(guidance)
+    await page.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(region).toContainText(guidance)
+    expect(errors).toEqual([])
+  })
+}

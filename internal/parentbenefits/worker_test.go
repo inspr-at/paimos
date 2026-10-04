@@ -289,14 +289,61 @@ func TestPublishedSnapshotAndUnrelatedFieldsSurvive(t *testing.T) {
 	f := setup(t)
 	var project string
 	var original string
+	// Historical published parents may have incomplete benefits; this parent
+	// must still need generation when its leaf completes.
+	parentTexts := Texts{}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title,key) SELECT $1,id,'Published project','PRJ-1' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.p.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot) VALUES($1::uuid,$2::uuid,'frozen-fixture',jsonb_build_object('schema','aeon.release-note-snapshot.v1','membership_source','release-manifest-tickets','label','backfilled','backfilled',true,'tenant_id',$1::uuid::text,'project_node_id',$2::uuid::text,'version','frozen-fixture','items',jsonb_build_array($3::jsonb))) RETURNING snapshot::text`, f.p.TenantID, project, `{"pill_en":"Published leaf benefits","pill_de":"Veröffentlichter Nutzen bleibt","benefit_en":"Previously published text.","benefit_de":"Bereits veröffentlichter Text."}`).Scan(&original)
+
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.parent, project); err != nil {
+			return err
+		}
+		var linked int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE id=ANY($1::uuid[]) AND project_id=$2`, []string{f.parent, f.leaf}, project).Scan(&linked); err != nil {
+			return err
+		}
+		if linked != 2 {
+			t.Fatal("snapshot fixtures are not in their published project", linked)
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot)
+        SELECT $1::uuid,$2::uuid,'frozen-fixture',jsonb_build_object(
+          'schema','aeon.release-note-snapshot.v1','membership_source','release-manifest-tickets',
+          'label','backfilled','backfilled',true,'frozen',true,
+          'tenant_id',$1::uuid::text,'project_node_id',$2::uuid::text,'version','frozen-fixture',
+          'items',(SELECT jsonb_agg(jsonb_build_object('id',id,'key',key,'fields',aeon_benefit_texts(fields)) ORDER BY key)
+                   FROM nodes WHERE id=ANY($3::uuid[]) AND project_id=$2))
+        RETURNING snapshot::text`, f.p.TenantID, project, []string{f.parent, f.leaf}).Scan(&original)
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Assert exact source identities and frozen text before exercising writes.
+	var snapshot struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Fields Texts  `json:"fields"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(original), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Items) != 2 || snapshot.Items[0].ID != f.parent || snapshot.Items[1].ID != f.leaf || snapshot.Items[0].Fields != parentTexts || snapshot.Items[1].Fields != sample {
+		t.Fatal("snapshot does not contain the edited records", original)
+	}
+	assertFrozen := func(stage string) {
+		t.Helper()
+		var current string
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT snapshot::text FROM release_manifest_note_snapshots WHERE project_node_id=$1 AND version='frozen-fixture'`, project).Scan(&current)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if current != original {
+			t.Fatal(stage + ": published note snapshot rewritten")
+		}
 	}
 	f.done(t)
 	j, err := f.m.claim(t.Context(), f.p.TenantID)
@@ -312,19 +359,42 @@ func TestPublishedSnapshotAndUnrelatedFieldsSurvive(t *testing.T) {
 	if fields["priority"] != "high" || fields["hide_from_release_notes"] != true || fields["benefit_en"] != summary.BenefitEN {
 		t.Fatal("unrelated fields lost", fields)
 	}
+
+	assertFrozen("generation")
+	// A subsequent completion fails visibly; retry must preserve the same notes.
+	f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"state": "open"}, 200)
+	f.done(t)
+	chat := f.m.chat
+	f.m.chat = func(context.Context, string, string, int64, []modelprovider.Message) (modelprovider.Completion, error) {
+		return modelprovider.Completion{}, errors.New("provider unavailable")
+	}
+	if ran, err := f.m.Once(t.Context(), f.p.TenantID); err != nil || !ran {
+		t.Fatal("failure attempt did not run", ran, err)
+	}
+	failed := f.status(t)
+	if failed.State != "failed" || failed.Error != failureProvider {
+		t.Fatal("wrong failure before retry", failed)
+	}
+	assertFrozen("failed generation")
+	f.m.chat = chat
+	f.call(t, f.p, "POST", "/api/nodes/"+f.parent+"/benefit-generation/retry", map[string]any{"expected_generation": failed.Generation, "expected_revision": failed.Revision}, 202)
+	assertFrozen("retry queued")
+	if ran, err := f.m.Once(t.Context(), f.p.TenantID); err != nil || !ran {
+		t.Fatal("retry did not run", ran, err)
+	}
+	if status := f.status(t); status.State != "generated" || !status.Generated {
+		t.Fatal("retry did not regenerate", status)
+	}
+	assertFrozen("retry generated")
 	f.call(t, f.p, "PATCH", "/api/nodes/"+f.parent, map[string]any{"fields": sample}, 200)
 	if f.status(t).Generated {
 		t.Fatal("edited text still marked generated")
 	}
-	var current string
-	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT snapshot::text FROM release_manifest_note_snapshots WHERE project_node_id=$1`, project).Scan(&current)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if current != original {
-		t.Fatal("published note snapshot rewritten")
-	}
+	assertFrozen("manual parent edit")
+	editedLeaf := sample
+	editedLeaf.BenefitDE = "Der manuell bearbeitete Nutzen verändert keine veröffentlichten Notizen."
+	f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"fields": editedLeaf}, 200)
+	assertFrozen("manual leaf edit")
 }
 func TestNestedLeafSourcesAndExplicitLimits(t *testing.T) {
 	f := setup(t)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { APIError } from './api.ts'
 import { benefitIssues, benefitTextKeys, completedTicketState } from './ticketBenefits.ts'
+import { rowStore } from './rowStore.ts'
 import { statusMeta } from './work.ts'
 
 export const benefitRequiredCode = 'benefit_required'
@@ -15,8 +16,9 @@ export interface BenefitText {
 
 // True only when a ticket is about to enter done, accepted or delivered without
 // the four texts. Hidden tickets are not exempt. Already-completed tickets are.
-export function needsBenefitPrompt(node: { kind_slug?: string; estimate?: { is_parent?: boolean }; state: string; fields?: Record<string, unknown> | null }, next: string): boolean {
-  if ((node.kind_slug !== 'ticket' && node.kind_slug !== 'work') || node.estimate?.is_parent === true || completedTicketState(node.state) || !completedTicketState(next)) return false
+export function needsBenefitPrompt(node: { kind_id?: string; kind_slug?: string; estimate?: { is_parent?: boolean }; state: string; fields?: Record<string, unknown> | null }, next: string): boolean {
+  const schema = rowStore.kindSchema(node.kind_id)
+  if ((node.kind_slug !== 'ticket' && node.kind_slug !== 'work') || node.estimate?.is_parent === true || completedTicketState(node.state, schema) || !completedTicketState(next, schema)) return false
   return benefitIssues(node.fields ?? {}).length > 0
 }
 
