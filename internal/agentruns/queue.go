@@ -72,8 +72,7 @@ func (e *queueError) ErrorCode() string { return e.Code }
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
-	return err
+	return db.LockWorkTreeTx(ctx, tx)
 }
 func (m *module) mountQueue(mux *http.ServeMux) {
 	for _, route := range []struct {

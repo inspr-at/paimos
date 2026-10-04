@@ -85,7 +85,7 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var result any
 		err := db.InTenant(r.Context(), pool, p.TenantID, func(tx pgx.Tx) error {
-			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if workBindingMutation(r) {
 				if err := db.LockWorkTreeTx(r.Context(), tx); err != nil {
 					return err
 				}
@@ -120,6 +120,19 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		}
 		httpapi.WriteJSON(w, status, result)
 	}
+}
+
+// Only admission/binding needs the tree fence. Heartbeats, telemetry and reads
+// keep their existing pairing-only path and remain usable while the tree is busy.
+func workBindingMutation(r *http.Request) bool {
+	switch r.Pattern {
+	case "POST /api/work-orders", "PATCH /api/work-orders/{workOrderId}",
+		"POST /api/work-orders/{workOrderId}/runs", "POST /api/runs/{runId}/claim",
+		"POST /api/projects/{projectId}/harness-sessions",
+		"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding":
+		return true
+	}
+	return false
 }
 
 func authorizeKey(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string) error {

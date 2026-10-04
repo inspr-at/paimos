@@ -25,8 +25,8 @@ export interface QueueTarget {
 }
 export type ReadyGap = 'estimate' | 'criteria' | 'blocker'
 export const QUEUE_STATES = ['new', 'open', 'backlog', 'blocked']
-export function queueable(row: Pick<ListItem, 'kind_slug' | 'state'>): boolean {
-  return (row.kind_slug === 'ticket' || row.kind_slug === 'task') && QUEUE_STATES.includes(normaliseState(row.state))
+export function queueable(row: Pick<ListItem, 'kind_slug' | 'state'> & { estimate?: ListItem['estimate']; is_leaf?: boolean }): boolean {
+  return (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? (row.estimate?.is_parent === false))) && QUEUE_STATES.includes(normaliseState(row.state))
 }
 export function readyGaps(row: Pick<ListItem, 'fields' | 'state'>): ReadyGap[] {
   const out: ReadyGap[] = []

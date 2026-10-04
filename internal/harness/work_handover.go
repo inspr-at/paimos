@@ -82,7 +82,10 @@ func RequireHandoverDelivery(ctx context.Context, tx pgx.Tx, ids []string) error
 	var missing bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
  WHERE (r.queue_node_id=ANY($1::uuid[]) OR o.parent_id=ANY($1::uuid[])) AND r.status IN ('starting','running','waiting')
- AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE s.run_id=r.id AND s.stopped_at IS NULL))`, ids).Scan(&missing)
+ AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE s.run_id=r.id AND s.stopped_at IS NULL))
+ OR EXISTS(SELECT 1 FROM work_orders w JOIN nodes o ON o.id=w.node_id WHERE o.parent_id=ANY($1::uuid[]) AND o.deleted_at IS NULL AND w.status='running'
+ AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.work_order_id=w.node_id)
+ AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.work_order_id=w.node_id OR s.ticket_node_id=o.parent_id OR s.ticket_node_id=o.id) AND s.stopped_at IS NULL))`, ids).Scan(&missing)
 	if err != nil {
 		return err
 	}

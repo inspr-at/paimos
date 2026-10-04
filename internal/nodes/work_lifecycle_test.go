@@ -2,15 +2,18 @@
 package nodes
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -142,23 +145,24 @@ func TestWorkLifecycleCancelOpenLeavesAfterStop(t *testing.T) {
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
 	parent := workNodeTest(t, p, project.ID, "open")
 	idle := workNodeTest(t, p, parent.ID, "open")
+	blocked := workNodeTest(t, p, parent.ID, "blocked")
 	busy := workNodeTest(t, p, parent.ID, "in_progress")
 	done := workNodeTest(t, p, parent.ID, "done")
 	sid := lifecycleSession(t, p, project.ID, busy.ID, false)
 	enableWorkStatusTest(t, p)
 	request, status, raw := lifecycleRequest(t, p, parent.ID, "cancel", nil)
 	a := decode[workAction](t, status, raw, 200)
-	if a.State != "waiting" || a.TargetCount != 2 || a.WaitingCount != 1 || len(a.Result) != 1 {
+	if a.State != "waiting" || a.TargetCount != 3 || a.WaitingCount != 1 || len(a.Result) != 2 {
 		t.Fatalf("wrong partial cancellation %s", raw)
 	}
-	if currentWorkTest(t, p, idle.ID).State != "cancelled" || currentWorkTest(t, p, busy.ID).State != "in_progress" || currentWorkTest(t, p, done.ID).State != "done" {
+	if currentWorkTest(t, p, idle.ID).State != "cancelled" || currentWorkTest(t, p, blocked.ID).State != "cancelled" || currentWorkTest(t, p, busy.ID).State != "in_progress" || currentWorkTest(t, p, done.ID).State != "done" {
 		t.Fatal("cancel changed a running or finished leaf")
 	}
 	stopLifecycleSession(t, p, sid)
 	path := "/api/nodes/" + parent.ID + "/work-lifecycle/" + request + "/continue"
 	status, raw = call(t, &p, "POST", path, "")
 	a = decode[workAction](t, status, raw, 200)
-	if a.State != "completed" || len(a.Result) != 2 {
+	if a.State != "completed" || len(a.Result) != 3 {
 		t.Fatalf("cancel completion %s", raw)
 	}
 	if currentWorkTest(t, p, busy.ID).State != "cancelled" || currentWorkTest(t, p, parent.ID).State != "done" {
@@ -199,5 +203,184 @@ func TestWorkLifecycleStalePreviewAndAbandon(t *testing.T) {
 	a = decode[workAction](t, status, raw, 200)
 	if a.State != "completed" {
 		t.Fatalf("new split failed %s", raw)
+	}
+}
+
+func TestWorkLifecycleBackgroundCompletionAndRevocation(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		t.Run(fmt.Sprint(revoked), func(t *testing.T) {
+			p := newPrincipal(t, "lifecycle-background")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			sid := lifecycleSession(t, p, project.ID, leaf.ID, false)
+			request, status, raw := lifecycleRequest(t, p, leaf.ID, "split", []splitChild{{Title: "Saved child"}})
+			a := decode[workAction](t, status, raw, 200)
+			if a.State != "waiting" {
+				t.Fatal("split bypassed live worker")
+			}
+			stopLifecycleSession(t, p, sid)
+			if revoked {
+				if _, err := adminPool.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := &Module{pool: appPool, events: SQLWriter{}}
+			if err := m.sweepWorkLifecycleTenant(t.Context(), p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			var state string
+			var results []byte
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT state,result FROM work_lifecycle_actions WHERE id=$1`, request).Scan(&state, &results)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if revoked {
+				if state != "waiting" || string(results) != "[]" {
+					t.Fatal("background job bypassed revoked permission")
+				}
+			} else {
+				if state != "completed" || string(results) == "[]" {
+					t.Fatal("closing the sheet stranded the action")
+				}
+			}
+		})
+	}
+}
+
+func TestWorkLifecycleBindingSerializesChildCreation(t *testing.T) {
+	for _, bindingFirst := range []bool{true, false} {
+		t.Run(fmt.Sprint(bindingFirst), func(t *testing.T) {
+			p := newPrincipal(t, "lifecycle-race")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			agent := ""
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Race worker') RETURNING id::text`, p.TenantID).Scan(&agent)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 15*time.Second)
+			defer cancel()
+			held, err := appPool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer held.Rollback(context.Background())
+			if err = enterLifecycleTenant(ctx, held, p); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.LockWorkTreeTx(ctx, held); err != nil {
+				t.Fatal(err)
+			}
+			bind := func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',decode(replace(gen_random_uuid()::text,'-',''),'hex'),decode(replace(gen_random_uuid()::text,'-',''),'hex'))`, p.TenantID, project.ID, agent, leaf.ID)
+				return err
+			}
+			child := func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id) VALUES($1,'RACE-1',$2,'Racing child',$3)`, p.TenantID, leaf.KindID, leaf.ID)
+				return err
+			}
+			first, next := bind, child
+			if !bindingFirst {
+				first, next = child, bind
+			}
+			if err = first(held); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				done <- db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+					if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+						return err
+					}
+					return next(tx)
+				})
+			}()
+			waitAccessMoveBlock(t, ctx, held.Conn().PgConn().PID(), done)
+			if err = held.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			err = <-done
+			var pg *pgconn.PgError
+			want := "busy_work_leaf"
+			if !bindingFirst {
+				want = "work_leaf_required"
+			}
+			if !errors.As(err, &pg) || pg.ConstraintName != want {
+				t.Fatalf("wrong racing failure: %v", err)
+			}
+		})
+	}
+}
+func enterLifecycleTenant(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`, p.TenantID)
+	return err
+}
+
+func TestWorkLifecycleWorkOrderAndDispatchBindings(t *testing.T) {
+	p := newPrincipal(t, "lifecycle-order")
+	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+	leaf := workNodeTest(t, p, project.ID, "open")
+	var order string
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		o, err := workorders.Create(t.Context(), tx, p, workorders.CreateInput{Title: "Bound order", Parent: &leaf.ID, Criteria: []string{"Done"}})
+		order = o.NodeID
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = workNodeTest(t, p, leaf.ID, "open")
+	// A non-running order may remain as history. Dispatch/re-ready cannot revive
+	// that historical binding after the former leaf becomes a parent.
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_orders SET status='ready' WHERE node_id=$1`, order)
+		return err
+	})
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.ConstraintName != "work_leaf_required" {
+		t.Fatalf("order binding bypass: %v", err)
+	}
+	status, raw := callAs(t, workorders.New(appPool), &p, "POST", "/api/work-orders", fmt.Sprintf(`{"title":"Forbidden parent order","parent_id":%q,"criteria":["Done"]}`, leaf.ID))
+	if status != 409 || !containsBytes(raw, "work_leaf_required") {
+		t.Fatalf("parent order %d %s", status, raw)
+	}
+}
+
+func TestWorkLifecycleCancelSettlesOrderWithAudit(t *testing.T) {
+	p := newPrincipal(t, "lifecycle-order-cancel")
+	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+	leaf := workNodeTest(t, p, project.ID, "open")
+	var order string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		o, err := workorders.Create(t.Context(), tx, p, workorders.CreateInput{Title: "Idle order", Parent: &leaf.ID, Criteria: []string{"Done"}})
+		order = o.NodeID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request, status, raw := lifecycleRequest(t, p, leaf.ID, "cancel", nil)
+	a := decode[workAction](t, status, raw, 200)
+	if a.State != "completed" || len(a.Result) != 1 {
+		t.Fatalf("idle cancel incomplete: %s", raw)
+	}
+	status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+	decode[workAction](t, status, raw, 200)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		var state string
+		var audits int
+		if err := tx.QueryRow(t.Context(), `SELECT status FROM work_orders WHERE node_id=$1`, order).Scan(&state); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type='work_order.cancelled'`, order).Scan(&audits); err != nil {
+			return err
+		}
+		if state != "cancelled" || audits != 1 {
+			t.Fatalf("order status=%s, cancellation events=%d", state, audits)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

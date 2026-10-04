@@ -90,7 +90,7 @@ func openWorkTargets(ctx context.Context, tx pgx.Tx, id string) ([]workTarget, e
 	if !complete {
 		return nil, authz.ErrForbidden
 	}
-	rows, err := tx.Query(ctx, `SELECT s.id::text,n.updated_at FROM aeon_work_scope(ARRAY[$1::uuid]) s JOIN nodes n ON n.id=s.id WHERE s.is_leaf AND s.bucket IN ('open','in_progress') ORDER BY s.id LIMIT 101`, id)
+	rows, err := tx.Query(ctx, `SELECT s.id::text,n.updated_at FROM aeon_work_scope(ARRAY[$1::uuid]) s JOIN nodes n ON n.id=s.id WHERE s.is_leaf AND s.bucket IN ('open','in_progress','blocked') ORDER BY s.id LIMIT 101`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func (m *Module) handleWorkLifecycle(w http.ResponseWriter, r *http.Request) {
 				}
 				a.State = "abandoned"
 				out = a
-				return nil
+				return m.record(ctx, tx, p.ID, &id, "work.lifecycle_abandoned", nil, a)
 			}
 			if _, err = tx.Exec(ctx, `SELECT set_config('aeon.work_lifecycle_action',$1,true)`, a.ID); err != nil {
 				return err
@@ -424,8 +424,42 @@ func (m *Module) finishWorkAction(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			a.WaitingCount++
 			continue
 		}
-		if _, err = tx.Exec(ctx, `UPDATE work_orders SET status='cancelled',revision=revision+1,updated_at=clock_timestamp() WHERE node_id IN(SELECT id FROM nodes WHERE parent_id=$1 AND deleted_at IS NULL) AND status NOT IN('done','cancelled')`, target.ID); err != nil {
+		orders, err := tx.Query(ctx, `SELECT w.node_id::text,to_jsonb(w)-'tenant_id',coalesce(n.project_id::text,'') FROM work_orders w JOIN nodes n ON n.id=w.node_id WHERE n.parent_id=$1 AND n.deleted_at IS NULL AND w.status NOT IN('done','cancelled') ORDER BY w.node_id LIMIT 101 FOR UPDATE OF w`, target.ID)
+		if err != nil {
 			return err
+		}
+		type orderStop struct {
+			id, project string
+			before      json.RawMessage
+		}
+		stops := []orderStop{}
+		for orders.Next() {
+			var stop orderStop
+			if err = orders.Scan(&stop.id, &stop.before, &stop.project); err != nil {
+				orders.Close()
+				return err
+			}
+			stops = append(stops, stop)
+		}
+		err = orders.Err()
+		orders.Close()
+		if err != nil {
+			return err
+		}
+		if len(stops) > 100 {
+			return badRequest("work-order scope exceeds 100 per leaf")
+		}
+		for _, stop := range stops {
+			if err = authz.RequireTx(ctx, tx, p, "work_orders.write", authz.Scope{ProjectID: stop.project}); err != nil {
+				return err
+			}
+			var after json.RawMessage
+			if err = tx.QueryRow(ctx, `UPDATE work_orders w SET status='cancelled',revision=revision+1,updated_at=clock_timestamp() WHERE node_id=$1 RETURNING to_jsonb(w)-'tenant_id'`, stop.id).Scan(&after); err != nil {
+				return err
+			}
+			if err = m.record(ctx, tx, p.ID, &stop.id, "work_order.cancelled", stop.before, after); err != nil {
+				return err
+			}
 		}
 		if a.Kind == "split" {
 			if !current.UpdatedAt.Equal(target.UpdatedAt) {

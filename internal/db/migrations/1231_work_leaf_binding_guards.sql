@@ -47,36 +47,51 @@ END;
 $$;
 
 CREATE FUNCTION aeon_guard_work_binding() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE target uuid;
+DECLARE target uuid; targets uuid[] := ARRAY[]::uuid[];
 BEGIN
  -- The endpoint holds pairing -> tree -> tenant before any resource rows.
  -- SQL writers use the same tree advisory key; old/stopped bindings stay put.
  IF TG_TABLE_NAME='harness_sessions' THEN
   IF NEW.stopped_at IS NOT NULL THEN RETURN NEW; END IF;
-  IF TG_OP='UPDATE' AND NEW.ticket_node_id IS NOT DISTINCT FROM OLD.ticket_node_id THEN RETURN NEW; END IF;
+  IF TG_OP='UPDATE' AND NEW.ticket_node_id IS NOT DISTINCT FROM OLD.ticket_node_id
+   AND NEW.work_order_id IS NOT DISTINCT FROM OLD.work_order_id AND NEW.run_id IS NOT DISTINCT FROM OLD.run_id AND OLD.stopped_at IS NULL THEN RETURN NEW; END IF;
+  targets:=array_append(targets,NEW.ticket_node_id);
+  IF NEW.work_order_id IS NOT NULL THEN SELECT array_append(targets,parent_id) INTO targets FROM nodes WHERE id=NEW.work_order_id; END IF;
+  IF NEW.run_id IS NOT NULL THEN
+   SELECT targets || ARRAY[r.queue_node_id,o.parent_id] INTO targets FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE r.id=NEW.run_id;
+  END IF;
   target:=NEW.ticket_node_id;
+  IF target IS NULL AND NEW.work_order_id IS NOT NULL THEN SELECT parent_id INTO target FROM nodes WHERE id=NEW.work_order_id; END IF;
+  IF target IS NULL AND NEW.run_id IS NOT NULL THEN
+   SELECT coalesce(r.queue_node_id,o.parent_id) INTO target FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE r.id=NEW.run_id;
+  END IF;
  ELSIF TG_TABLE_NAME='agent_runs' THEN
   IF NEW.status NOT IN ('queued','starting','running','waiting') THEN RETURN NEW; END IF;
   IF TG_OP='UPDATE' AND (NEW.status=OLD.status OR OLD.status IN ('starting','running','waiting')) AND NEW.queue_node_id IS NOT DISTINCT FROM OLD.queue_node_id
     AND NEW.work_order_id=OLD.work_order_id THEN RETURN NEW; END IF;
+  targets:=array_append(targets,NEW.queue_node_id);
+  SELECT array_append(targets,parent_id) INTO targets FROM nodes WHERE id=NEW.work_order_id;
   target:=NEW.queue_node_id;
   IF target IS NULL THEN SELECT parent_id INTO target FROM nodes WHERE id=NEW.work_order_id; END IF;
  ELSE
-  IF TG_OP='UPDATE' AND NEW.status=OLD.status THEN RETURN NEW; END IF;
+  IF TG_OP='UPDATE' AND (NEW.status=OLD.status OR NEW.status NOT IN('ready','running')) THEN RETURN NEW; END IF;
   IF NEW.status IN ('done','cancelled') THEN RETURN NEW; END IF;
   SELECT parent_id INTO target FROM nodes WHERE id=NEW.node_id;
  END IF;
+ targets:=array_append(targets,target);
+ PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0));
+ FOREACH target IN ARRAY targets LOOP
  -- Work-order session bindings resolve to the work item, while standalone
  -- non-work orders remain supported for pairing verification and coordinators.
  IF EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=target AND k.slug='work_order') THEN
   SELECT parent_id INTO target FROM nodes WHERE id=target;
  END IF;
- PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0));
  PERFORM aeon_require_work_leaf(target);
+ END LOOP;
  RETURN NEW;
 END;
 $$;
-CREATE TRIGGER harness_work_leaf BEFORE INSERT OR UPDATE OF ticket_node_id ON harness_sessions FOR EACH ROW EXECUTE FUNCTION aeon_guard_work_binding();
+CREATE TRIGGER harness_work_leaf BEFORE INSERT OR UPDATE OF ticket_node_id,work_order_id,run_id,stopped_at ON harness_sessions FOR EACH ROW EXECUTE FUNCTION aeon_guard_work_binding();
 CREATE TRIGGER runs_work_leaf BEFORE INSERT OR UPDATE OF status,queue_node_id,work_order_id ON agent_runs FOR EACH ROW EXECUTE FUNCTION aeon_guard_work_binding();
 CREATE TRIGGER orders_work_leaf BEFORE INSERT OR UPDATE OF status ON work_orders FOR EACH ROW EXECUTE FUNCTION aeon_guard_work_binding();
 

@@ -55,7 +55,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
         '400': {description: Invalid request or bounded scope exceeded}
-        '403': {description: Person with current nodes.write and any required harness.control/run.create permissions}
+        '403': {description: Person with current nodes.write and any required harness.control/run.create/work_orders.write permissions}
         '409': {description: Stale preview, another pending intent, or a run without cooperative handover delivery}
   /nodes/{nodeId}/work-lifecycle/{actionId}:
     parameters:

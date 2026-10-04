@@ -275,7 +275,7 @@ func expirePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) 
 	next := *s.Pause
 	next.State = "cancelled"
 	s, err = savePause(ctx, tx, p, s, next, "pause_cancelled")
-	if err != nil || next.Level == "" || s.StoppedAt != nil || s.ArchivedAt != nil {
+	if err != nil || next.Level == "" || workHandover(&next) || s.StoppedAt != nil || s.ArchivedAt != nil {
 		return s, err
 	}
 	return stopPausedWork(ctx, tx, p, s, "pause_deadline")

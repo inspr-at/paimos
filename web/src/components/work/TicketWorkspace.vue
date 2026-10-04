@@ -47,6 +47,7 @@ import { openedMembershipMessage, type NativeReleaseView } from '../../lib/relea
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import QueueAction from './QueueAction.vue'
+import WorkLifecycleSheet from './WorkLifecycleSheet.vue'
 import QueueDetails from './QueueDetails.vue'
 import QueueView from './QueueView.vue'
 import AssigneeMenu from './AssigneeMenu.vue'
@@ -92,6 +93,9 @@ const ticket = useTicket(item, {
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
 const convertOpen = ref(false)
+const workActionsOpen = ref(false)
+watch(() => [props.item?.id, props.me?.id], () => { workActionsOpen.value = false })
+function workLifecycleCompleted() { void ticket.refresh(); activity.load() }
 const header = ref<{ focusMore: () => void } | null>(null)
 function finishConvert() {
   convertOpen.value = false
@@ -534,9 +538,10 @@ defineExpose({
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @convert="convertOpen = true" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
     >
-      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
+      <template #queue><button v-if="item?.kind_slug === 'work' && editable && humanCheckPerson" type="button" class="btn sm" @click="workActionsOpen = true">Work actions</button><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
+    <WorkLifecycleSheet v-if="workActionsOpen && item && me" :node-id="item.id" :node-key="item.key" :person-id="me.id" @close="workActionsOpen = false" @completed="workLifecycleCompleted" />
     <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">

@@ -24,6 +24,11 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/nodes/{nodeId}/work-lifecycle":                      "nodes.read",
+	"POST /api/nodes/{nodeId}/work-lifecycle":                     "nodes.write",
+	"POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue": "nodes.write",
+	"DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}":        "nodes.write",
+
 	"POST /api/agent-keys/{id}/trim-proposals":           "approvals.request",
 	"GET /api/key-trim-proposals":                        "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",

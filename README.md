@@ -10,6 +10,40 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Work leaves and graceful lifecycle actions
+
+Agents bind to work leaves: only live work children make a parent. New dispatch,
+claims, session registration/binding and work-order placement share the tree
+fence with child creation. A busy leaf cannot gain work children; historical
+sessions keep their original IDs and bindings.
+
+In a work item's **Work actions** sheet, **Split into children** saves up to
+20 child titles and requests an AEON-479 cooperative handover before creating
+them. **Cancel with its open children** previews up to 100 open leaves, cancels
+idle leaves, and waits for running leaves to report stopped. Finished leaves
+stay finished. These requests never send process signals or treat heartbeat loss
+as a confirmed stop. The saved action continues after closing the sheet or
+restarting the server, with the original person's current permissions checked
+inside every write. A changed split target requires abandoning the saved request
+and reviewing a fresh preview; abandoning keeps earlier completed writes and
+handover requests intact.
+
+The additive API is `GET/POST /api/nodes/{id}/work-lifecycle`,
+`POST /api/nodes/{id}/work-lifecycle/{action}/continue`, and
+`DELETE /api/nodes/{id}/work-lifecycle/{action}`. Requests bind a UUID, the node
+revision and the preview's scope digest. Waiting and completed responses are
+explicit; replaying a request creates no extra children or cancellation events.
+Work-order cancellation rechecks `work_orders.write` and queued reservation
+release rechecks `run.create`, alongside `nodes.write` and session control.
+
+Integration seams: AEON-655's work surfaces can supply `is_leaf` to the shared
+queue helper; this package also accepts the existing estimate's `is_parent`
+projection and otherwise fails closed. The AEON-429 `work-parent-status` rollout
+continues to govern derived parent states from AEON-650. No sibling package is
+required for the lifecycle API or sheet. When the DSAR inventory lands, classify
+`work_lifecycle_actions.children` as personal drafts and targets/results/requester
+as tenant identifiers; that inventory is absent from this stacked checkout.
+
 ## Code health audits
 
 AEON-571 defines the ongoing code-health workflow. Each run belongs to a child

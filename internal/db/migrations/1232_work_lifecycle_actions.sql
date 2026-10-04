@@ -11,9 +11,10 @@ CREATE TABLE work_lifecycle_actions (
  state text NOT NULL DEFAULT 'waiting' CHECK(state IN ('waiting','completed','abandoned')),
  targets jsonb NOT NULL CHECK(jsonb_typeof(targets)='array' AND jsonb_array_length(targets)<=100),
  children jsonb NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(children)='array' AND jsonb_array_length(children)<=20),
- result jsonb NOT NULL DEFAULT '[]',
+ result jsonb NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(result)='array' AND jsonb_array_length(result)<=100),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  completed_at timestamptz,
+ next_attempt_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(tenant_id,id),
  FOREIGN KEY(tenant_id,node_id) REFERENCES nodes(tenant_id,id),
  FOREIGN KEY(tenant_id,requested_by) REFERENCES principals(tenant_id,id)
@@ -23,7 +24,7 @@ ALTER TABLE work_lifecycle_actions FORCE ROW LEVEL SECURITY;
 CREATE POLICY work_lifecycle_tenant ON work_lifecycle_actions USING (
  tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND EXISTS (
  SELECT 1 FROM nodes n WHERE n.id=node_id AND n.tenant_id=work_lifecycle_actions.tenant_id));
-CREATE INDEX work_lifecycle_waiting_tenant ON work_lifecycle_actions(tenant_id) WHERE state='waiting';
+CREATE INDEX work_lifecycle_waiting_tenant ON work_lifecycle_actions(tenant_id,next_attempt_at,id) WHERE state='waiting';
 CREATE UNIQUE INDEX work_lifecycle_pending ON work_lifecycle_actions(tenant_id,node_id) WHERE state='waiting';
 
 -- Fence new bindings and regrouping while the original person's intent waits.

@@ -274,6 +274,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
 	go harness.RunLostContactSweeper(ctx, pool)
+	go nodes.RunWorkLifecycle(ctx, pool)
 	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
 	go modelMod.Run(ctx)
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
