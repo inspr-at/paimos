@@ -170,26 +170,22 @@ func ApplyProfileBundleRefreshingDrafts(ctx context.Context, pool *pgxpool.Pool,
 	return applyProfileBundle(ctx, pool, tenantID, actorID, filesDir, sourceInstance, bundle, makeDefault, true, apply)
 }
 
-func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, refreshDrafts, apply bool) (profileBundleReport, error) {
-	report := profileBundleReport{Applied: apply, SourceInstance: sourceInstance, RefreshDrafts: refreshDrafts}
-	if pool == nil || !uuidRe.MatchString(tenantID) || (actorID != "" && !uuidRe.MatchString(actorID)) || (sourceInstance != "" && !profileSourceInstance.MatchString(sourceInstance)) {
-		return report, errors.New("invalid tenant, actor or source instance")
-	}
-	var in profileWrite
+// prepareProfileBundle validates and addresses every referenced asset without
+// writing files or taking locks. It is also used by composite transactions.
+func prepareProfileBundle(bundle ProfileBundle) (in profileWrite, assets map[string]*bundleAsset, paths []string, err error) {
 	decoder := json.NewDecoder(bytes.NewReader(bundle.Profile))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&in); err != nil {
-		return report, fmt.Errorf("profile.json: %w", err)
+		return in, nil, nil, fmt.Errorf("profile.json: %w", err)
 	}
 	if decoder.Decode(new(any)) != io.EOF || in.ExpectedRevision != 0 {
-		return report, errors.New("profile.json must contain one creation payload without expected_revision")
+		return in, nil, nil, errors.New("profile.json must contain one creation payload without expected_revision")
 	}
 	in.Name = strings.TrimSpace(in.Name)
 	if len(in.Name) < 1 || len(in.Name) > 100 {
-		return report, errors.New("invalid profile name")
+		return in, nil, nil, errors.New("invalid profile name")
 	}
-	report.Name = in.Name
-	assets := map[string]*bundleAsset{}
+	assets = map[string]*bundleAsset{}
 	use := func(ref *string) error {
 		if *ref == "" {
 			return nil
@@ -215,25 +211,79 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 	}
 	for i := range in.Definition.Fonts {
 		if err := use(&in.Definition.Fonts[i].AssetID); err != nil {
-			return report, err
+			return in, nil, nil, err
 		}
 	}
 	for _, ref := range []string{in.Definition.Cover["brand_asset_id"], in.Definition.Footer.AssetID, in.Definition.Footer.DotsAssetID} {
 		if err := use(&ref); err != nil {
-			return report, err
+			return in, nil, nil, err
 		}
 	}
-	paths := make([]string, 0, len(assets))
+	paths = make([]string, 0, len(assets))
 	for p := range assets {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
-	err := db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
+	return in, assets, paths, nil
+}
+
+// LockProfileBundles reserves every profile's domain and blob locks before a
+// composite apply. Call inside db.InTransaction, before the first profile apply
+// or event append, and pass the same transaction context to subsequent applies.
+func LockProfileBundles(ctx context.Context, pool *pgxpool.Pool, tenantID string, bundles ...ProfileBundle) error {
+	var names, hashes []string
+	for _, bundle := range bundles {
+		in, assets, _, err := prepareProfileBundle(bundle)
+		if err != nil {
+			return err
+		}
+		names = append(names, in.Name)
+		for _, asset := range assets {
+			hashes = append(hashes, asset.hash)
+		}
+	}
+	sort.Strings(names)
+	return db.InTenant(db.AllProjects(ctx, "quote profile bundle locks"), pool, tenantID, func(tx pgx.Tx) error {
+		// Every apply takes the tenant lock before profile and blob locks.
+		// NO KEY UPDATE still serializes settings/applies, but permits the
+		// tenant FK checks of publishers that may already hold a blob lock.
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
+			return err
+		}
+		for _, name := range names {
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-profile:"+name); err != nil {
+				return err
+			}
+		}
+		return attachments.LockBlobs(ctx, tx, tenantID, hashes...)
+	})
+}
+
+func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, refreshDrafts, apply bool) (profileBundleReport, error) {
+	report := profileBundleReport{Applied: apply, SourceInstance: sourceInstance, RefreshDrafts: refreshDrafts}
+	if pool == nil || !uuidRe.MatchString(tenantID) || (actorID != "" && !uuidRe.MatchString(actorID)) || (sourceInstance != "" && !profileSourceInstance.MatchString(sourceInstance)) {
+		return report, errors.New("invalid tenant, actor or source instance")
+	}
+	in, assets, paths, err := prepareProfileBundle(bundle)
+	if err != nil {
+		return report, err
+	}
+	report.Name = in.Name
+	err = db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
+		// Append only after every profile/settings/draft mutation has acquired
+		// its resource locks. The tenant event counter is always last.
+		type pendingEvent struct {
+			nodeID, kind  string
+			before, after map[string]any
+		}
+		var pending []pendingEvent
 		if apply {
 			// Settings PATCH takes this same tenant lock. It also serializes
 			// this command's default change with concurrent profile applies.
+			// Permit concurrent publishers' tenant FK checks (KEY SHARE).
 			var locked string
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-profile:"+in.Name); err != nil {
@@ -268,6 +318,15 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				actor.Kind = tenant.Agent
 			}
 		}
+		if apply {
+			hashes := make([]string, 0, len(assets))
+			for _, asset := range assets {
+				hashes = append(hashes, asset.hash)
+			}
+			if err := attachments.LockBlobs(ctx, tx, tenantID, hashes...); err != nil {
+				return err
+			}
+		}
 		for _, p := range paths {
 			a := assets[p]
 			err := tx.QueryRow(ctx, `SELECT id::text FROM quote_document_profile_assets WHERE sha256=$1 AND content_type=$2 ORDER BY created_at,id LIMIT 1`, a.hash, a.kind).Scan(&a.id)
@@ -277,7 +336,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 			if errors.Is(err, pgx.ErrNoRows) {
 				report.AssetsCreated++
 				if apply {
-					prepared, err := putProfileAsset(ctx, tenantID, a.raw, a.kind, filesDir)
+					prepared, err := putProfileAsset(ctx, tx, tenantID, a.raw, a.kind, filesDir)
 					if err != nil {
 						return fmt.Errorf("store asset %q: %w", p, err)
 					}
@@ -287,15 +346,13 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 					if err := tx.QueryRow(ctx, `INSERT INTO quote_document_profile_assets(tenant_id,sha256,content_type,size,created_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5::uuid) RETURNING id::text`, tenantID, a.hash, a.kind, len(a.raw), actorID).Scan(&a.id); err != nil {
 						return err
 					}
-					if err := appendEvent(ctx, tx, actor, "", "quote.profile_asset_uploaded", nil, map[string]any{"asset_id": a.id, "sha256": a.hash, "content_type": a.kind}); err != nil {
-						return err
-					}
+					pending = append(pending, pendingEvent{"", "quote.profile_asset_uploaded", nil, map[string]any{"asset_id": a.id, "sha256": a.hash, "content_type": a.kind}})
 				} else {
 					a.id = syntheticAssetID(a.hash)
 				}
 			} else if apply {
 				if file, err := (attachments.Store{FilesDir: filesDir}).Open(tenantID, a.hash, "original"); err != nil {
-					if _, err = putProfileAsset(ctx, tenantID, a.raw, a.kind, filesDir); err != nil {
+					if _, err = putProfileAsset(ctx, tx, tenantID, a.raw, a.kind, filesDir); err != nil {
 						return err
 					}
 				} else if err := file.Close(); err != nil {
@@ -401,9 +458,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 			if _, err := tx.Exec(ctx, `INSERT INTO quote_document_profile_revisions(tenant_id,profile_id,revision,name,definition,created_by_principal_id) VALUES($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6::uuid)`, tenantID, report.ProfileID, report.Revision, in.Name, string(newRaw), actorID); err != nil {
 				return err
 			}
-			if err := appendEvent(ctx, tx, actor, "", "quote.profile_saved", map[string]any{"profile_id": report.ProfileID, "revision": currentRev}, map[string]any{"profile_id": report.ProfileID, "revision": report.Revision}); err != nil {
-				return err
-			}
+			pending = append(pending, pendingEvent{"", "quote.profile_saved", map[string]any{"profile_id": report.ProfileID, "revision": currentRev}, map[string]any{"profile_id": report.ProfileID, "revision": report.Revision}})
 		}
 		if makeDefault {
 			settings, err := readSettings(ctx, tx)
@@ -419,9 +474,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				if err != nil {
 					return err
 				}
-				if err := appendEvent(ctx, tx, actor, "", "quote.settings_updated", map[string]any{"default_profile_id": settings.DefaultProfileID, "revision": settings.Revision}, map[string]any{"default_profile_id": report.ProfileID, "revision": settings.Revision + 1}); err != nil {
-					return err
-				}
+				pending = append(pending, pendingEvent{"", "quote.settings_updated", map[string]any{"default_profile_id": settings.DefaultProfileID, "revision": settings.Revision}, map[string]any{"default_profile_id": report.ProfileID, "revision": settings.Revision + 1}})
 			}
 		}
 		if sourceInstance != "" || (refreshDrafts && report.ProfileID != "") {
@@ -484,9 +537,12 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				if _, err := tx.Exec(ctx, `UPDATE business_quotes SET revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
 					return err
 				}
-				if err := appendEvent(ctx, tx, actor, id, "quote.profile_selected", map[string]any{"profile": before, "draft_revision": draft.DraftRevision}, map[string]any{"profile_id": report.ProfileID, "profile_revision": report.Revision, "draft_revision": draft.DraftRevision + 1}); err != nil {
-					return err
-				}
+				pending = append(pending, pendingEvent{id, "quote.profile_selected", map[string]any{"profile": before, "draft_revision": draft.DraftRevision}, map[string]any{"profile_id": report.ProfileID, "profile_revision": report.Revision, "draft_revision": draft.DraftRevision + 1}})
+			}
+		}
+		for _, e := range pending {
+			if err := appendEvent(ctx, tx, actor, e.nodeID, e.kind, e.before, e.after); err != nil {
+				return err
 			}
 		}
 		return nil

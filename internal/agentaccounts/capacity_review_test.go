@@ -32,6 +32,7 @@ func capacityWorld(t *testing.T, slug string, harnesses ...string) (tenant.Princ
 	for _, h := range harnesses {
 		var a Account
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"`+h+`","harness":"`+h+`","daemon_id":"daemon-a","label":"`+h+`"}`, 201, &a)
+		ownFixtureAccount(t, admin, &a)
 		r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 30, ResetsAt: now.Add(80 * time.Hour), ReadAt: now.Add(-time.Minute), Source: "harness"}
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
 		out[h] = a

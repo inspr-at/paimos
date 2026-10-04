@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261002081219.0.0",
+  "version": "261003095616.0.0",
   "release_channel": "stable",
-  "release_sequence": 119,
-  "codename": "Sunlit Sonde",
-  "reserved_at": "2026-10-02T08:12:19Z",
-  "ticket": "AEON-538",
+  "release_sequence": 122,
+  "codename": "Benign Byte",
+  "reserved_at": "2026-10-03T09:56:16Z",
+  "ticket": "AEON-627",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",

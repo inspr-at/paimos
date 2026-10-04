@@ -111,7 +111,7 @@ watch(() => pending.value.map(r => r.work_order_id), async ids => {
       <h2 ref="heading" tabindex="-1">Queued</h2><span class="count mono">{{ pending.length }}</span>
     </header>
     <ul ref="list">
-      <li v-for="run in pending" :key="run.id">
+      <li v-for="run in pending" :id="`run-${run.id}`" :key="run.id" tabindex="-1">
         <AppIcon :name="run.status === 'queued' || run.wait ? 'clock' : 'check'" :size="14" class="run-icon" />
         <strong class="run-title" :title="titles[run.work_order_id] || `Run ${run.id}`">{{ titles[run.work_order_id] || 'Run' }}</strong>
         <time class="run-when" :datetime="run.created_at">{{ relativeTime(run.created_at, { now: agents.now }) }}</time>

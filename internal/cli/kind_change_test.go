@@ -189,7 +189,7 @@ func TestIssueConvert(t *testing.T) {
 
 func TestKindChangeAcrossSurfaces(t *testing.T) {
 	isolate(t)
-	ticket := apiNode{ID: "11111111-1111-4111-8111-111111111111", Key: "AEON-1", KindID: "ticket-kind", Title: "Stay", State: "open"}
+	ticket := apiNode{ID: "11111111-1111-4111-8111-111111111111", Key: "AEON-1", KindID: "ticket-kind", Title: "Stay", State: "open", UpdatedAt: time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+testKey {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -202,6 +202,18 @@ func TestKindChangeAcrossSurfaces(t *testing.T) {
 			json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "ticket-kind", Slug: "ticket"}, {ID: "epic-kind", Slug: "epic"}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/nodes/"+ticket.ID:
+			var patch map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				t.Error(err)
+			}
+			if r.Header.Get("If-Unmodified-Since") == "" {
+				t.Error("revision precondition missing")
+			}
+			if title, ok := patch["title"].(string); ok {
+				ticket.Title = title
+			}
+			json.NewEncoder(w).Encode(ticket)
 		default:
 			http.NotFound(w, r)
 		}
@@ -279,7 +291,7 @@ func TestKindChangeAcrossSurfaces(t *testing.T) {
 					t.Fatalf("error %v text %q", res.IsError, text)
 				}
 			case tc.plain:
-				if !res.IsError || !strings.Contains(text, "issue_update arrives in R1") || strings.Contains(text, "kind_change_not_allowed") {
+				if res.IsError || !strings.Contains(text, `"title":"x"`) || strings.Contains(text, "kind_change_not_allowed") {
 					t.Fatalf("text %q", text)
 				}
 			}

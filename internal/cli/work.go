@@ -3,11 +3,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -86,7 +87,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 	}
 	hidden, _ := fields["hide_from_release_notes"].(bool)
 	var estimate *float64
-	if h, ok := fields["estimate_hours"].(float64); ok && validEstimate(h) {
+	if h, ok := fieldNumber(fields["estimate_hours"]); ok && validEstimate(h) {
 		estimate = &h
 	}
 	return issueView{
@@ -166,17 +167,25 @@ func (rt *runtime) printIssueList(items []issueView, total int) error {
 	return nil
 }
 
-func (rt *runtime) listIssues(project, status, typ, priority, assignee string, limit, offset int) error {
+type issueListResult struct {
+	Issues []issueView `json:"issues"`
+	Total  int         `json:"total"`
+}
+
+func (rt *runtime) listIssuesResult(project, status, typ, priority, assignee string, limit, offset int) (issueListResult, error) {
+	if offset < 0 || limit > 10000 {
+		return issueListResult{}, usagef("offset must be nonnegative and limit at most 10000")
+	}
 	if typ != "" && !issueKinds[typ] {
-		return usagef("unknown issue type %q", typ)
+		return issueListResult{}, usagef("unknown issue type %q", typ)
 	}
 	proj, err := rt.projectNode(project)
 	if err != nil {
-		return err
+		return issueListResult{}, err
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return issueListResult{}, err
 	}
 	q := url.Values{"parent_id": {proj.ID}, "include_descendants": {"true"}}
 	if status != "" {
@@ -185,13 +194,13 @@ func (rt *runtime) listIssues(project, status, typ, priority, assignee string, l
 	if typ != "" {
 		k, ok := kinds.bySlug[typ]
 		if !ok {
-			return rt.fail(fmt.Errorf("node kind %q is not configured", typ), "")
+			return issueListResult{}, rt.fail(fmt.Errorf("node kind %q is not configured", typ), "")
 		}
 		q.Set("kind_id", k.ID)
 	}
 	nodes, err := rt.walkNodes(q, nil)
 	if err != nil {
-		return err
+		return issueListResult{}, err
 	}
 	var matched []issueView
 	for _, n := range nodes {
@@ -218,30 +227,46 @@ func (rt *runtime) listIssues(project, status, typ, priority, assignee string, l
 	if end > len(matched) {
 		end = len(matched)
 	}
-	return rt.printIssueList(matched[offset:end], len(matched))
+	return issueListResult{matched[offset:end], len(matched)}, nil
 }
 
-func (rt *runtime) getIssue(ref string) error {
+func (rt *runtime) listIssues(project, status, typ, priority, assignee string, limit, offset int) error {
+	result, err := rt.listIssuesResult(project, status, typ, priority, assignee, limit, offset)
+	if err != nil {
+		return err
+	}
+	return rt.printIssueList(result.Issues, result.Total)
+}
+
+func (rt *runtime) getIssueResult(ref string) (issueView, error) {
 	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
-		return usagef("id:<n> is a classic numeric id; pass the issue key")
+		return issueView{}, usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
 	n, err := rt.nodeByKey(ref)
 	if err != nil {
-		return err
+		return issueView{}, err
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return issueView{}, err
 	}
 	if !issueKinds[kinds.slug(n.KindID)] {
-		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
+		return issueView{}, rt.fail(fmt.Errorf("issue %q not found", ref), "")
 	}
 	view := rt.viewIssue(n, kinds)
 	comments, err := rt.issueComments(n.ID)
 	if err != nil {
-		return err
+		return issueView{}, err
 	}
 	view.Comments = append(view.Comments, comments...)
+	return view, nil
+}
+
+func (rt *runtime) getIssue(ref string) error {
+	view, err := rt.getIssueResult(ref)
+	if err != nil {
+		return err
+	}
 	return rt.printIssue(view)
 }
 
@@ -279,38 +304,38 @@ func (rt *runtime) issueComments(nodeID string) ([]string, error) {
 	return nil, rt.fail(fmt.Errorf("issue activity exceeds 10000 entries"), "")
 }
 
-func (rt *runtime) createIssue(in issueInput) error {
+func (rt *runtime) createIssueResult(in issueInput) (issueView, error) {
 	kindName := strings.TrimSpace(in.Type)
 	if kindName == "" {
 		kindName = "ticket"
 	}
 	if !issueKinds[kindName] {
-		return usagef("unknown issue type %q", kindName)
+		return issueView{}, usagef("unknown issue type %q", kindName)
 	}
 	prefix := strings.TrimSpace(in.Project)
 	if !validKeyPrefix(prefix) {
-		return usagef("project key %q cannot allocate issue keys", prefix)
+		return issueView{}, usagef("project key %q cannot allocate issue keys", prefix)
 	}
 	proj, err := rt.projectNode(prefix)
 	if err != nil {
-		return err
+		return issueView{}, err
 	}
 	kind, err := rt.kind(kindName)
 	if err != nil {
-		return err
+		return issueView{}, err
 	}
 	parentID := proj.ID
 	if strings.TrimSpace(in.Parent) != "" {
 		if strings.HasPrefix(strings.TrimSpace(in.Parent), "id:") {
-			return usagef("id:<n> is a classic numeric id; pass the issue key")
+			return issueView{}, usagef("id:<n> is a classic numeric id; pass the issue key")
 		}
 		parentRef, err := normalizeIssueRef(in.Parent)
 		if err != nil {
-			return err
+			return issueView{}, err
 		}
 		parent, err := rt.nodeByKey(parentRef)
 		if err != nil {
-			return err
+			return issueView{}, err
 		}
 		parentID = parent.ID
 	}
@@ -318,12 +343,12 @@ func (rt *runtime) createIssue(in issueInput) error {
 	if in.Estimate != "" {
 		hours, err := parseEstimate(in.Estimate)
 		if err != nil {
-			return err
+			return issueView{}, err
 		}
 		estimateFields(fields, hours, "")
 	}
 	if _, err := in.Benefits.apply(fields); err != nil {
-		return err
+		return issueView{}, err
 	}
 	if p := strings.TrimSpace(in.Priority); p != "" {
 		fields["priority"] = p
@@ -353,7 +378,7 @@ func (rt *runtime) createIssue(in issueInput) error {
 	}
 	var created apiNode
 	if err := rt.do(http.MethodPost, "/api/nodes", body, &created); err != nil {
-		return err
+		return issueView{}, err
 	}
 	if (kindName == "ticket" || kindName == "task") && in.Estimate == "" && !validEstimate(fieldMap(created.Fields)["estimate_hours"]) {
 		found := false
@@ -367,10 +392,18 @@ func (rt *runtime) createIssue(in issueInput) error {
 	created.Warnings = withEstimateHints(created.Warnings)
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return issueView{}, err
 	}
 	view := rt.viewIssue(created, kinds)
-	for _, warning := range created.Warnings {
+	return view, nil
+}
+
+func (rt *runtime) createIssue(in issueInput) error {
+	view, err := rt.createIssueResult(in)
+	if err != nil {
+		return err
+	}
+	for _, warning := range view.Warnings {
 		fmt.Fprintln(rt.stderr, "warning:", warning)
 	}
 	if rt.jsonOut {
@@ -403,9 +436,9 @@ type issuePatch struct {
 	Complexity     string
 }
 
-// noteKindUpdate refuses a different kind before any write. The same kind is a
-// no-op and is reported; the caller must not send the kind to the API.
-func (rt *runtime) noteKindUpdate(ref, requested string) error {
+// checkIssueKind refuses a different kind before any write. The same kind is
+// a no-op; the caller must not send the kind to the API.
+func (rt *runtime) checkIssueKind(ref, requested string) error {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
 		return nil
@@ -420,33 +453,47 @@ func (rt *runtime) noteKindUpdate(ref, requested string) error {
 	}
 	current := kinds.slug(n.KindID)
 	if current == requested {
-		fmt.Fprintf(rt.stdout, "kind is already %s\n", current)
 		return nil
 	}
 	return rt.fail(fmt.Errorf("kind_change_not_allowed: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
 }
 
-func (rt *runtime) updateIssue(in issuePatch) error {
-	if strings.HasPrefix(strings.TrimSpace(in.Ref), "id:") {
-		return usagef("id:<n> is a classic numeric id; pass the issue key")
-	}
-	if err := rt.noteKindUpdate(in.Ref, in.Type); err != nil {
+func (rt *runtime) noteKindUpdate(ref, requested string) error {
+	if err := rt.checkIssueKind(ref, requested); err != nil {
 		return err
+	}
+	if strings.TrimSpace(requested) != "" {
+		fmt.Fprintf(rt.stdout, "kind is already %s\n", strings.TrimSpace(requested))
+	}
+	return nil
+}
+
+type issueUpdateResult struct {
+	Issue         issueView
+	PreviousState string
+}
+
+func (rt *runtime) updateIssueResult(in issuePatch) (issueUpdateResult, error) {
+	if strings.HasPrefix(strings.TrimSpace(in.Ref), "id:") {
+		return issueUpdateResult{}, usagef("id:<n> is a classic numeric id; pass the issue key")
+	}
+	if err := rt.checkIssueKind(in.Ref, in.Type); err != nil {
+		return issueUpdateResult{}, err
 	}
 	n, err := rt.nodeByKey(in.Ref)
 	if err != nil {
-		return err
+		return issueUpdateResult{}, err
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return issueUpdateResult{}, err
 	}
 	if !issueKinds[kinds.slug(n.KindID)] {
-		return rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
+		return issueUpdateResult{}, rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
 	}
 	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
 		if slug := kinds.slug(n.KindID); slug != "ticket" && slug != "task" {
-			return usagef("--role, --area and --complexity apply to tickets and tasks")
+			return issueUpdateResult{}, usagef("--role, --area and --complexity apply to tickets and tasks")
 		}
 	}
 	fields := fieldMap(n.Fields)
@@ -454,13 +501,13 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	if in.Estimate != "" {
 		hours, parseErr := parseEstimate(in.Estimate)
 		if parseErr != nil {
-			return parseErr
+			return issueUpdateResult{}, parseErr
 		}
 		estimateFields(fields, hours, in.EstimateSource)
 		changedFields = true
 	}
 	if err != nil {
-		return err
+		return issueUpdateResult{}, err
 	}
 	if p := strings.TrimSpace(in.Priority); p != "" {
 		fields["priority"] = p
@@ -526,53 +573,59 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		if n.UpdatedAt.IsZero() {
-			return usagef("%s has no revision timestamp; nothing was written", n.Key)
-		}
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
-			if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
-				stale.msg += "; nothing was written"
-			}
-			return err
+		if err := rt.patchNode(n, patch, &n); err != nil {
+			return issueUpdateResult{}, err
 		}
 	}
 	if project := strings.TrimSpace(in.Project); project != "" {
 		proj, err := rt.projectNode(project)
 		if err != nil {
-			return err
+			return issueUpdateResult{}, err
 		}
 		var moved movedIssue
 		if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/project-move", map[string]any{"project_id": proj.ID}, &moved); err != nil {
-			return err
+			return issueUpdateResult{}, err
 		}
 		if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(n.ID), nil, &n); err != nil {
-			return err
+			return issueUpdateResult{}, err
 		}
 	}
 	if parent := strings.TrimSpace(in.Parent); parent != "" {
 		if strings.HasPrefix(parent, "id:") {
-			return usagef("id:<n> is a classic numeric id; pass the issue key")
+			return issueUpdateResult{}, usagef("id:<n> is a classic numeric id; pass the issue key")
 		}
 		ref, err := normalizeIssueRef(parent)
 		if err != nil {
-			return err
+			return issueUpdateResult{}, err
 		}
 		target, err := rt.nodeByKey(ref)
 		if err != nil {
-			return err
+			return issueUpdateResult{}, err
 		}
 		if n.ParentID == nil || *n.ParentID != target.ID {
 			if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/move", map[string]any{"parent_id": target.ID}, &n); err != nil {
-				return err
+				return issueUpdateResult{}, err
 			}
 		}
 	}
 	view := rt.viewIssue(n, kinds)
+	return issueUpdateResult{view, oldStatus}, nil
+}
+
+func (rt *runtime) updateIssue(in issuePatch) error {
+	if err := rt.noteKindUpdate(in.Ref, in.Type); err != nil {
+		return err
+	}
+	result, err := rt.updateIssueResult(in)
+	if err != nil {
+		return err
+	}
+	view := result.Issue
 	if rt.jsonOut {
 		return rt.printJSON(view)
 	}
 	if strings.TrimSpace(in.Status) != "" && strings.TrimSpace(in.Title+in.Description+in.Priority+in.Assignee+in.Project+in.Parent+in.AC+in.Notes+in.CloseNote+in.RouteRole+in.Area) == "" && len(in.AddTag) == 0 && len(in.RemoveTag) == 0 {
-		fmt.Fprintf(rt.stdout, "✓ %s: %s → %s\n", view.IssueKey, oldStatus, view.Status)
+		fmt.Fprintf(rt.stdout, "✓ %s: %s → %s\n", view.IssueKey, result.PreviousState, view.Status)
 		return nil
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s\n", view.IssueKey)
@@ -608,29 +661,42 @@ func requireIssueFamilyTarget(kinds kindTable, to string) error {
 	return nil
 }
 
-func (rt *runtime) commentIssue(ref, body string) error {
+type issueCommentResult struct {
+	Comment  map[string]any
+	IssueKey string
+}
+
+func (rt *runtime) commentIssueResult(ref, body string) (issueCommentResult, error) {
 	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
-		return usagef("id:<n> is a classic numeric id; pass the issue key")
+		return issueCommentResult{}, usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
 	n, err := rt.nodeByKey(ref)
 	if err != nil {
-		return err
+		return issueCommentResult{}, err
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return issueCommentResult{}, err
 	}
 	if !issueKinds[kinds.slug(n.KindID)] {
-		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
+		return issueCommentResult{}, rt.fail(fmt.Errorf("issue %q not found", ref), "")
 	}
 	var comment map[string]any
 	if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/comments", map[string]any{"body_markdown": body}, &comment); err != nil {
+		return issueCommentResult{}, err
+	}
+	return issueCommentResult{comment, n.Key}, nil
+}
+
+func (rt *runtime) commentIssue(ref, body string) error {
+	result, err := rt.commentIssueResult(ref, body)
+	if err != nil {
 		return err
 	}
 	if rt.jsonOut {
-		return rt.printJSON(comment)
+		return rt.printJSON(result.Comment)
 	}
-	fmt.Fprintf(rt.stdout, "✓ commented on %s\n", n.Key)
+	fmt.Fprintf(rt.stdout, "✓ commented on %s\n", result.IssueKey)
 	return nil
 }
 
@@ -806,24 +872,24 @@ func (rt *runtime) getKnowledge(typ, slug, project string) error {
 	return rt.fail(fmt.Errorf("knowledge %s/%s not found", typ, slug), "")
 }
 
-func (rt *runtime) createKnowledge(project, typ, slug, title, body, status string) error {
+func (rt *runtime) createKnowledgeResult(project, typ, slug, title, body, status string) (knowledgeView, error) {
 	if err := rt.rejectKnowledgeKind(typ); err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	proj, err := rt.projectNode(project)
 	if err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	kindSlug, ok := knowledgeKindSlug(typ)
 	if !ok {
-		return rt.rejectKnowledgeKind(typ)
+		return knowledgeView{}, rt.rejectKnowledgeKind(typ)
 	}
 	if err := rt.ensureKnowledgeKind(kindSlug); err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	kind, err := rt.kind(kindSlug)
 	if err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	req := map[string]any{
 		"kind_id":   kind.ID,
@@ -837,13 +903,21 @@ func (rt *runtime) createKnowledge(project, typ, slug, title, body, status strin
 	}
 	var created apiNode
 	if err := rt.do(http.MethodPost, "/api/nodes", req, &created); err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	view := viewKnowledge(created, kinds)
+	return view, nil
+}
+
+func (rt *runtime) createKnowledge(project, typ, slug, title, body, status string) error {
+	view, err := rt.createKnowledgeResult(project, typ, slug, title, body, status)
+	if err != nil {
+		return err
+	}
 	if rt.jsonOut {
 		return rt.printJSON(view)
 	}
@@ -851,10 +925,10 @@ func (rt *runtime) createKnowledge(project, typ, slug, title, body, status strin
 	return nil
 }
 
-func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newSlug, metadata string) error {
+func (rt *runtime) updateKnowledgeResult(typ, slug, project, title, body, status, newSlug, metadata string) (knowledgeView, error) {
 	kinds, nodes, err := rt.knowledgeNodes(project, typ)
 	if err != nil {
-		return err
+		return knowledgeView{}, err
 	}
 	var n apiNode
 	found := false
@@ -866,7 +940,7 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 		}
 	}
 	if !found {
-		return rt.fail(fmt.Errorf("knowledge %s/%s not found", typ, slug), "")
+		return knowledgeView{}, rt.fail(fmt.Errorf("knowledge %s/%s not found", typ, slug), "")
 	}
 	fields := fieldMap(n.Fields)
 	patch := map[string]any{}
@@ -885,19 +959,27 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	}
 	if metadata != "" {
 		var meta map[string]any
-		if err := json.Unmarshal([]byte(metadata), &meta); err != nil || meta == nil {
-			return usagef("--metadata must be a JSON object")
+		if err := decodeExactJSON([]byte(metadata), &meta); err != nil || meta == nil {
+			return knowledgeView{}, usagef("--metadata must be a JSON object")
 		}
 		fields["metadata"] = meta
 		patch["fields"] = fields
 	}
 	if len(patch) == 0 {
-		return usagef("nothing to update")
+		return knowledgeView{}, usagef("nothing to update")
 	}
-	if err := rt.do(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n); err != nil {
-		return err
+	if err := rt.patchNode(n, patch, &n); err != nil {
+		return knowledgeView{}, err
 	}
 	view := viewKnowledge(n, kinds)
+	return view, nil
+}
+
+func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newSlug, metadata string) error {
+	view, err := rt.updateKnowledgeResult(typ, slug, project, title, body, status, newSlug, metadata)
+	if err != nil {
+		return err
+	}
 	if rt.jsonOut {
 		return rt.printJSON(view)
 	}
@@ -905,65 +987,166 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	return nil
 }
 
-func (rt *runtime) searchIssues(query, project, typ string, limit int) error {
-	if typ != "" && !issueKinds[typ] {
-		return usagef("unknown issue type %q", typ)
+// patchNode guards every read/merge/write with the exact snapshot revision.
+// Callers that already created other records must report that partial result.
+func (rt *runtime) patchNode(n apiNode, patch map[string]any, out any) error {
+	if n.UpdatedAt.IsZero() {
+		return usagef("%s has no revision timestamp; nothing was written", n.Key)
 	}
-	var parent string
+	err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, out, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)})
+	if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
+		stale.msg += "; nothing was written by this patch"
+	}
+	return err
+}
+
+type issueSearchResult struct {
+	Issues  []issueView `json:"issues"`
+	HasMore bool        `json:"has_more"`
+}
+
+func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (issueSearchResult, error) {
+	if typ != "" && !issueKinds[typ] {
+		return issueSearchResult{}, usagef("unknown issue type %q", typ)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		return issueSearchResult{}, usagef("limit must be from 1 to 200")
+	}
+	ctx, cancel := context.WithTimeout(rt.context(), 2*time.Minute)
+	defer cancel()
+	rt = rt.workRuntime(ctx)
+	var root string
 	if strings.TrimSpace(project) != "" {
 		proj, err := rt.projectNode(project)
 		if err != nil {
-			return err
+			return issueSearchResult{}, err
 		}
-		parent = proj.ID
+		root = proj.ID
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return err
+		return issueSearchResult{}, err
 	}
-	q := url.Values{"q": {query}}
+	q := url.Values{"q": {query}, "limit": {"200"}}
 	if typ != "" {
 		k, ok := kinds.bySlug[typ]
 		if !ok {
-			return usagef("unknown issue type %q", typ)
+			return issueSearchResult{}, usagef("unknown issue type %q", typ)
 		}
 		q.Set("kind_id", k.ID)
 	}
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
+	// Resolve ancestry with a bounded, per-request cache. Search currently has
+	// no project filter, so continue its pages until the scoped limit is met.
+	scope := map[string]bool{root: true}
+	lookups := 0
+	within := func(n apiNode) (bool, error) {
+		if root == "" {
+			return true, nil
+		}
+		path := []string{}
+		seen := map[string]bool{}
+		for depth := 0; depth < 128; depth++ {
+			if n.ParentID == nil {
+				for _, id := range path {
+					scope[id] = false
+				}
+				return false, nil
+			}
+			id := *n.ParentID
+			if matched, ok := scope[id]; ok {
+				for _, id := range path {
+					scope[id] = matched
+				}
+				return matched, nil
+			}
+			if seen[id] {
+				return false, fmt.Errorf("search ancestry contains a cycle")
+			}
+			seen[id] = true
+			path = append(path, id)
+			if lookups == 10000 {
+				return false, fmt.Errorf("incomplete search: ancestry lookup bound exceeded")
+			}
+			lookups++
+			var ancestor apiNode
+			if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(id), nil, &ancestor); err != nil {
+				var exit *exitError
+				if errors.As(err, &exit) && exit.apiStatus == http.StatusNotFound {
+					// Hidden ancestors are outside the visible descendant set.
+					for _, id := range path {
+						scope[id] = false
+					}
+					return false, nil
+				}
+				return false, err
+			}
+			n = ancestor
+		}
+		return false, fmt.Errorf("incomplete search: ancestry depth exceeded")
 	}
-	var page struct {
-		Items []struct {
-			Node apiNode `json:"node"`
-		} `json:"items"`
-		NextCursor *string `json:"next_cursor"`
+	result := issueSearchResult{Issues: []issueView{}}
+	seenCursors := map[string]bool{"": true}
+	for count := 0; count < 50; count++ {
+		var page struct {
+			Items []struct {
+				Node apiNode `json:"node"`
+			} `json:"items"`
+			NextCursor *string `json:"next_cursor"`
+		}
+		if err := rt.do(http.MethodGet, "/api/search?"+q.Encode(), nil, &page); err != nil {
+			return issueSearchResult{}, err
+		}
+		if page.NextCursor != nil && *page.NextCursor != "" {
+			if seenCursors[*page.NextCursor] {
+				return issueSearchResult{}, fmt.Errorf("incomplete search: repeated cursor")
+			}
+			seenCursors[*page.NextCursor] = true
+		}
+		for _, hit := range page.Items {
+			if !issueKinds[kinds.slug(hit.Node.KindID)] {
+				continue
+			}
+			matched, err := within(hit.Node)
+			if err != nil {
+				return issueSearchResult{}, err
+			}
+			if !matched {
+				continue
+			}
+			if len(result.Issues) == limit {
+				result.HasMore = true
+				return result, nil
+			}
+			result.Issues = append(result.Issues, rt.viewIssue(hit.Node, kinds))
+		}
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			return result, nil
+		}
+		q.Set("cursor", *page.NextCursor)
 	}
-	if err := rt.do(http.MethodGet, "/api/search?"+q.Encode(), nil, &page); err != nil {
+	return issueSearchResult{}, fmt.Errorf("incomplete search: exceeds 50 pages")
+}
+
+func (rt *runtime) searchIssues(query, project, typ string, limit int) error {
+	result, err := rt.searchIssuesResult(query, project, typ, limit)
+	if err != nil {
 		return err
 	}
-	var items []issueView
-	for _, hit := range page.Items {
-		slug := kinds.slug(hit.Node.KindID)
-		if !issueKinds[slug] {
-			continue
-		}
-		if parent != "" && (hit.Node.ParentID == nil || *hit.Node.ParentID != parent) {
-			continue
-		}
-		items = append(items, rt.viewIssue(hit.Node, kinds))
-	}
 	if rt.jsonOut {
-		return rt.printJSON(map[string]any{"issues": items, "has_more": page.NextCursor != nil && *page.NextCursor != ""})
+		return rt.printJSON(result)
 	}
-	if len(items) == 0 {
+	if len(result.Issues) == 0 {
 		fmt.Fprintln(rt.stdout, "(no issues)")
 		return nil
 	}
 	fmt.Fprintln(rt.stdout, "KEY           TYPE     STATUS         TITLE")
-	for _, item := range items {
+	for _, item := range result.Issues {
 		fmt.Fprintf(rt.stdout, "%-13s %-8s %-14s %s\n", item.IssueKey, item.Type, item.Status, clipRunes(item.Title, 57, "..."))
 	}
-	if page.NextCursor != nil && *page.NextCursor != "" {
+	if result.HasMore {
 		fmt.Fprintln(rt.stdout, "\n(more issues available; raise --limit or use --json for has_more)")
 	}
 	return nil

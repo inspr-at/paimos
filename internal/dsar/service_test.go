@@ -139,6 +139,89 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 			VALUES($1,$2,'PRIVATE_ACTIVITY_HISTORY','agent',now())`, tid, session); err != nil {
 			return err
 		}
+		// Main added account resources, quota receipts and service-tier history.
+		// Verify their existing ownership chains, including alias-owned accounts
+		// with another actor, and exclude an unrelated person's resource entirely.
+		for _, person := range []string{alias, other} {
+			ownedAccount := account
+			if person == other {
+				if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at)
+					VALUES($1,'dsar-unrelated-account','codex','dsar-other-daemon',$2,'other',$3,now()) RETURNING id::text`, tid, agent, other).Scan(&ownedAccount); err != nil {
+					return err
+				}
+			}
+			var resource, check string
+			if err := tx.QueryRow(ctx, `SELECT resource_id::text FROM account_readiness_memberships WHERE account_id=$1`, ownedAccount).Scan(&resource); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO agent_account_residency_evidence(tenant_id,account_id,evidence,binding,recorded_by,recorded_at)
+				VALUES($1,$2,'{"note":"PRIVATE_RESIDENCY"}','{"note":"PRIVATE_BINDING"}',$3,now())`, tid, ownedAccount, other); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext)
+				VALUES($1,$2,'openai','PRIVATE_DISCOVERY_CREDENTIAL')`, tid, ownedAccount); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_facts(tenant_id,resource_id,window_key,reported_by_account_id,binding_revision,source,observed_at)
+				VALUES($1,$2,'fixture-window',$3,0,'agentd',now())`, tid, resource, ownedAccount); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO account_readiness_checks(tenant_id,account_id,actor_principal_id,binding_revision)
+				VALUES($1,$2,$3,0) RETURNING id::text`, tid, ownedAccount, other).Scan(&check); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_check_keys(tenant_id,account_id,idempotency_key,binding_revision,check_id,actor_principal_id,created_at)
+				VALUES($1,$2,'PRIVATE_CHECK_KEY',0,$3,$4,now())`, tid, ownedAccount, check, other); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_check_waits(tenant_id,check_id,resource_id,window_key,wait_id)
+				VALUES($1,$2,$3,'fixture-window',gen_random_uuid())`, tid, check, resource); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_quota_warnings(tenant_id,resource_id,quota_key,window_key,reset_key,threshold_percent,severity,reading_at,remaining_percent)
+				VALUES($1,$2,'fixture-quota','fixture-window',$3,10,'early',now(),5)`, tid, resource, person); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_quota_warning_observations(tenant_id,resource_id,quota_key,window_key,reset_key,reading_at,remaining_percent)
+				VALUES($1,$2,$3,'fixture-window','fixture-reset',now(),5)`, tid, resource, "quota-"+person); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO harness_tier_requests(tenant_id,id,session_id,tier,reason,requested_by_principal_id)
+			VALUES($1,gen_random_uuid(),$2,'fast','PRIVATE_TIER_REASON',$3)`, tid, session, other); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO harness_tier_history(tenant_id,session_id,action,to_tier,actor_id)
+			VALUES($1,$2,'requested','fast',$3)`, tid, session, other); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_report_receipts(tenant_id,principal_id,report_id,content)
+			VALUES($1,$2,gen_random_uuid(),'{"note":"PRIVATE_MODEL_REPORT"}'),($1,$3,gen_random_uuid(),'{"note":"OTHER_MODEL_REPORT"}')`, tid, alias, other); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_key_scope_usage(tenant_id,key_id,scope,last_used_at)
+			SELECT tenant_id,id,'nodes.read',now() FROM agent_keys WHERE principal_id=$1`, subject); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO key_trim_proposals(tenant_id,key_id,created_by,request_id,request_digest,previous_scopes,snapshot_digest,candidate_scopes,candidate_digest,evidence,usage,created_at,expires_at)
+			SELECT tenant_id,id,$2,gen_random_uuid(),'PRIVATE_TRIM_DIGEST',ARRAY['nodes.read','nodes.write'],'PRIVATE_SNAPSHOT_DIGEST',ARRAY['nodes.read'],'PRIVATE_CANDIDATE_DIGEST','{"note":"PRIVATE_TRIM_EVIDENCE"}','{"note":"PRIVATE_TRIM_USAGE"}',now(),now()+interval '1 day' FROM agent_keys WHERE principal_id=$1`, subject, other); err != nil {
+			return err
+		}
+		for _, person := range []string{alias, other} {
+			var recurrence string
+			if err := tx.QueryRow(ctx, `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,created_by_principal_id)
+				VALUES($1,$2,$2,'{"note":"PRIVATE_RECURRENCE"}','{"kind":"event"}',$3) RETURNING id::text`, tid, visibleProject, person).Scan(&recurrence); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO recurrence_occurrences(tenant_id,recurrence_id,occurrence_key,number,scheduled_at,outcome,reason)
+				VALUES($1,$2,'fixture-occurrence',1,now(),'skipped','PRIVATE_OCCURRENCE_REASON')`, tid, recurrence); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO desk_notification_claims(tenant_id,kind,item_id,revision,recipient_id)
+				VALUES($1,'question',gen_random_uuid(),1,$2)`, tid, person); err != nil {
+				return err
+			}
+		}
 		// Preferences inherit the person's scope even when another person last
 		// edited a row. An unrelated person's scope must stay out of the packet.
 		for _, person := range []string{subject, other} {
@@ -271,6 +354,11 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if questions := section(report, "desk_questions"); len(questions.Records) != 1 || questions.Records[0].Match != "subject-reference" {
 		t.Fatal("question must inherit its asker/session ownership without a text mention")
 	}
+	for _, table := range []string{"agent_account_residency_evidence", "model_discovery_credentials", "account_readiness_memberships", "account_readiness_resources", "account_readiness_facts", "account_readiness_checks", "account_readiness_check_keys", "account_readiness_check_waits", "account_quota_warnings", "account_quota_warning_observations", "harness_tier_requests", "harness_tier_history", "model_report_receipts", "agent_key_scope_usage", "key_trim_proposals", "recurrences", "recurrence_occurrences", "desk_notification_claims"} {
+		if records := section(report, table).Records; len(records) != 1 || records[0].Match != "subject-reference" {
+			t.Fatalf("merged domain must select the alias-owned row and exclude unrelated rows: %s", table)
+		}
+	}
 	if !strings.Contains(string(section(report, "person_pause_settings").Records[0].Data), "wrap_up") {
 		t.Fatal("alias pause preference missing from export")
 	}
@@ -286,6 +374,11 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	raw, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, private := range []string{"PRIVATE_RESIDENCY", "PRIVATE_BINDING", "PRIVATE_DISCOVERY_CREDENTIAL", "PRIVATE_CHECK_KEY", "PRIVATE_TIER_REASON", "PRIVATE_MODEL_REPORT", "OTHER_MODEL_REPORT", "PRIVATE_TRIM_DIGEST", "PRIVATE_SNAPSHOT_DIGEST", "PRIVATE_CANDIDATE_DIGEST", "PRIVATE_TRIM_EVIDENCE", "PRIVATE_TRIM_USAGE", "PRIVATE_RECURRENCE", "PRIVATE_OCCURRENCE_REASON"} {
+		if bytes.Contains(raw, []byte(private)) {
+			t.Fatalf("merged domain disclosed an excluded value: %s", private)
+		}
 	}
 	for _, private := range []string{"OTHER_PERSON_PRIVATE", "OTHER_PROFILE_PRIVATE", "FOREIGN_PRIVATE_NAME", foreign, "SECRET_IN_ARBITRARY_JSON", "THIRD_PARTY_MESSAGE_SECRET", "PRIVATE_FREE_TEXT", "PRIVATE_ACTIVITY_TEXT", "PRIVATE_TOOL_TEXT", "PRIVATE_ACTIVITY_HISTORY", "PRIVATE_AUTH_BYTES", "PRIVATE_RECORD_BYTES", "PRIVATE_DOCUMENT_BYTES", "PRIVATE_RECORD_CHUNK_BYTES", "PRIVATE_UPLOAD_CHUNK_BYTES", "PRIVATE_PAUSE_HOST", "OTHER_PAUSE_HOST", "PRIVATE_PAUSE_RECORD", "PRIVATE_HANDOVER", "PRIVATE_PLACEMENT", "PRIVATE_PAUSE_PROGRESS", "private-pref-line", "PRIVATE_DESK_INPUT", "PRIVATE_ASKER_INPUT", "PRIVATE_DESK_ANSWER", "PRIVATE_DESK_REASON", "PRIVATE_DECISION_EFFECT", "PRIVATE_PENDING_EFFECT", "PRIVATE_PENDING_ERROR", strings.Repeat("c", 64), strings.Repeat("d", 64), strings.Repeat("e", 64), strings.Repeat("g", 64), strings.Repeat("h", 64), hiddenNode} {
 		if bytes.Contains(raw, []byte(private)) {
@@ -314,6 +407,11 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}
 	if section(plan, "desk_answers").Hold != "audit-review" || !contains(strings.Join(section(plan, "person_pause_settings").TouchColumns, " "), "leaving_scope") {
 		t.Fatal("desk immutability or private leaving scope missing from erase review")
+	}
+	for _, table := range []string{"harness_tier_history", "key_trim_proposals", "recurrence_occurrences", "desk_notification_claims", "account_readiness_checks"} {
+		if section(plan, table).Hold != "audit-review" || len(section(plan, table).Records) != 1 {
+			t.Fatalf("merged receipt missing its hold or exact ownership in erase review: %s", table)
+		}
 	}
 	if section(plan, "time_periods").Hold != "financial-review" || section(plan, "events").Hold != "audit-review" || !contains(strings.Join(section(plan, "personal_profiles").TouchColumns, " "), "first_name") {
 		t.Fatal("erase columns or hold review missing")
