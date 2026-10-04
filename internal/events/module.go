@@ -400,9 +400,13 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		// Every Undo handler may acquire the tree/access fence. Take it before
-		// the per-event lock regardless of the flag, including ordinary Undo,
-		// so requests overlapping activation cannot invert these locks.
+		// Match handlers that enter pairing before tree/access, including
+		// Knowledge Undo. Take the whole prefix before the per-event lock in
+		// both flag states, so ordinary writes and activation cannot invert it.
+		// Use the shared SQL key here: agentpairing itself depends on events.
+		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`); err != nil {
+			return err
+		}
 		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}

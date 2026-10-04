@@ -3144,8 +3144,9 @@ and affected children, then POST `/api/events/{id}/undo` with
 decodes its bounded confirmation before taking any transaction locks, then
 re-checks permissions and original child revisions under access-change fences
 even if the flag was disabled, and reverses the cause once. Parents are derived
-again while the feature is enabled. Ordinary Undo also takes its tree/access
-fence before its event fence in both flag states, including across activation.
+again while the feature is enabled. Ordinary Undo also takes pairing, tree and
+tenant access fences before its event fence in both flag states, including
+across activation and concurrent knowledge writes.
 Later child edits, hidden/ambiguous causes, active work and unsupported reverse
 operations refuse the action atomically.
 
