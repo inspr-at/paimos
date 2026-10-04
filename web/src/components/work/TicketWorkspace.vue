@@ -654,7 +654,7 @@ defineExpose({
           <TicketReviews v-if="item.kind_slug === 'ticket' || item.kind_slug === 'task'" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
-            :child-label="item.kind_slug === 'work' ? 'work item' : item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
+            :child-label="item.kind_slug === 'work' ? 'work item' : item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"
             @open="openLinked"
           />
           <!-- Relations, then activity: both wait for the relations, so neither jumps. -->

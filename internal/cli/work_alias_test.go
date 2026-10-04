@@ -11,10 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/fieldschema"
 )
 
 func TestWorkTypeAliasesUseCanonicalIDAndExposeShape(t *testing.T) {
 	isolate(t)
+	schema, err := fieldschema.Compile(json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	leaf := true
 	writes := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +45,14 @@ func TestWorkTypeAliasesUseCanonicalIDAndExposeShape(t *testing.T) {
 			if string(body["kind_id"]) != `"wk"` {
 				t.Errorf("alias write: %s", body["kind_id"])
 			}
+			value, err := fieldschema.Decode(body["fields"])
+			if err == nil {
+				err = schema.Validate(value)
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
 			writes++
 			json.NewEncoder(w).Encode(apiNode{ID: transcriptEntryID, Key: "AEON-655", KindID: "wk", Title: "Work", IsLeaf: &leaf, Depth: 2, LevelName: "Step", Fields: body["fields"]})
 		default:
@@ -48,8 +62,12 @@ func TestWorkTypeAliasesUseCanonicalIDAndExposeShape(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
-	for _, alias := range []string{"work", "epic", "ticket", "task"} {
-		for _, args := range [][]string{{"issue", "create", "--project", "AEON", "--title", "Work", "--type", alias}, {"issue", "list", "--project", "AEON", "--type", alias}} {
+	for _, alias := range []string{"work", "epic", "ticket", "task", ""} {
+		commands := [][]string{{"issue", "create", "--project", "AEON", "--title", "Work", "--type", alias}, {"issue", "list", "--project", "AEON", "--type", alias}}
+		if alias == "" {
+			commands = [][]string{{"issue", "create", "--project", "AEON", "--title", "Default work"}}
+		}
+		for _, args := range commands {
 			argv := append([]string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json"}, args...)
 			code, out, stderr := runCLI(argv, "")
 			if code != 0 {
@@ -71,7 +89,7 @@ func TestWorkTypeAliasesUseCanonicalIDAndExposeShape(t *testing.T) {
 	if err != nil || result.IsError || !strings.Contains(strings.ReplaceAll(toolText(result), " ", ""), `"is_leaf":true`) {
 		t.Fatalf("MCP list: %v %+v", err, result)
 	}
-	if writes != 5 {
+	if writes != 6 {
 		t.Fatalf("writes %d", writes)
 	}
 }

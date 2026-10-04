@@ -11,7 +11,7 @@ import StatusIcon from './StatusIcon.vue'
 
 // The children of an epic (tickets) or a ticket (tasks), with progress and an
 // inline add row that stays open for the next title.
-const props = defineProps<{ children: ListItem[]; loading: boolean; editable: boolean; childLabel: 'work item' | 'ticket' | 'task'; progress: { done: number; total: number; percent: number }; add: (title: string) => Promise<ListItem | null> }>()
+const props = defineProps<{ children: ListItem[]; loading: boolean; editable: boolean; childLabel: 'work item' | 'ticket' | 'task'; progress: { done: number; total: number; percent: number } | null; progressError?: string; add: (title: string) => Promise<ListItem | null> }>()
 const emit = defineEmits<{ open: [key: string] }>()
 const adding = ref(false)
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -39,7 +39,8 @@ defineExpose({ startAdd })
   <section class="children" :aria-label="childLabel === 'work item' ? 'Child work items' : `${childLabel === 'ticket' ? 'Tickets' : 'Tasks'} in this ${childLabel === 'ticket' ? 'epic' : 'ticket'}`">
     <header class="children-head">
       <h3 class="eyebrow">{{ childLabel === 'work item' ? 'Children' : childLabel === 'ticket' ? 'Tickets' : 'Tasks' }} <span class="count">{{ children.length }}</span></h3>
-      <span v-if="progress.total" class="progress" :data-tip="`${progress.done} of ${progress.total} done`"><span class="bar"><i :style="{ width: `${progress.percent}%` }" /></span><span class="mono pct">{{ progress.done }}/{{ progress.total }}</span></span>
+      <span v-if="progress?.total" class="progress" :data-tip="`${progress.done} of ${progress.total} leaves done`"><span class="bar"><i :style="{ width: `${progress.percent}%` }" /></span><span class="mono pct">{{ progress.done }}/{{ progress.total }}</span></span>
+      <span v-else-if="!progress" class="progress" role="status" :aria-label="progressError || 'Loading leaf progress…'"><span class="progress-status" :data-tip="progressError || 'Loading leaf progress…'">{{ progressError ? 'Leaf progress unavailable' : 'Loading leaf progress…' }}</span></span>
     </header>
     <div v-if="editable" class="add-row">
       <label v-if="adding" class="add-field">
@@ -70,6 +71,7 @@ defineExpose({ startAdd })
 .children-head .eyebrow { margin: 0; }
 .count { margin-left: 4px; color: var(--ink-2); letter-spacing: 0; }
 .progress { display: inline-flex; align-items: center; gap: 8px; width: 160px; }
+.progress-status { font-size: 11px; white-space: nowrap; color: var(--ink-2); }
 .progress .bar { flex: 1; height: 5px; }
 .pct { font-size: 11px; color: var(--ink-2); }
 .child-list { margin: 0; padding: 4px; list-style: none; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }

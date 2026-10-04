@@ -323,9 +323,6 @@ func (rt *runtime) createIssue(in issueInput) error {
 		parentID = parent.ID
 	}
 	fields := map[string]any{}
-	if kind.Slug == "work" && kindName != "work" {
-		fields["legacy_kind_slug"] = kindName
-	}
 	if in.Estimate != "" {
 		hours, err := parseEstimate(in.Estimate)
 		if err != nil {

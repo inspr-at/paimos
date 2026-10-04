@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
-import { fixtures, mockWork, watchErrors, type Call } from './work-fixtures'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockBusiness, businessData } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 const shots = 'test-results/aeon-655-wn'
 const sizes = [390, 1024, 1440]
 async function world(page: Page, theme: string) {
-  const data = fixtures(), calls: Call[] = []
+  const data = fixtures()
   data.preferences.theme = { choice: theme }
   for (const n of data.nodes) n.kind_slug = 'work'
   for (const n of data.nodes) {
@@ -19,7 +19,7 @@ async function world(page: Page, theme: string) {
     n.depth = depth; n.level_name = n.is_leaf ? 'Arbeitsschritt' : depth === 1 ? 'Vorhaben' : 'Geschichte'; n.level_icon = n.is_leaf ? 'check' : 'tree'; n.status_derived = !n.is_leaf
   }
   data.nodes.find(n => n.id === 'n-epic')!.title = 'Arbeitsvorhaben mit ausführlicher Beschreibung für die gemeinsame Umsetzung'
-  await mockWork(page, data, { admin: true }, calls)
+  const calls = await mockWork(page, data, { admin: true })
   await mockBusiness(page, businessData({ role: 'admin' }), { role: 'admin' })
   await mockSettings(page, settingsData())
   // Business fixtures freeze Date.now; Vue's event fence needs advancing time.
@@ -68,6 +68,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await outlineGuard.check(() => outline.getByRole('button', { name: 'Expand PHAROS-10', exact: true }).click()); outlineGuard.done()
     await expect(outline.getByText('PHAROS-11', { exact: true })).toBeVisible()
     const rootReads = w.calls.filter(c => c.path === '/api/nodes' && c.method === 'GET' && c.query.get('parent_id') === 'p-pharos')
+    expect(rootReads.length).toBeGreaterThan(0)
     expect(rootReads.some(c => c.query.get('kind') === 'epic')).toBe(false)
     await screenshot('outline')
     const create = page.getByRole('button', { name: 'New work item', exact: true })

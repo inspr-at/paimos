@@ -665,7 +665,15 @@ async function runOutline(seed: number): Promise<string[]> {
     }
     fail('requests did not settle')
   }
-  async function reload() { outline.reload(); await settle(); observe(); await drain() }
+  // Root pages are now explicit in the UI. Admit all fixture roots before
+  // choosing destinations; keep every delayed-page assertion unchanged.
+  async function loadRootPages() {
+    while (outline.hasMoreRoot.value) {
+      const loading = outline.loadMoreRoot()
+      await drain(); await loading; observe()
+    }
+  }
+  async function reload() { outline.reload(); await settle(); observe(); await drain(); await loadRootPages() }
   async function move(id: string, to: string) {
     const row = outline.node(id)
     if (!row) { fail(`${id} was not available for a local move`); return }
@@ -679,7 +687,7 @@ async function runOutline(seed: number): Promise<string[]> {
     }
   }
   try {
-    gap(); await drain()
+    gap(); await drain(); await loadRootPages()
     // A collapsed destination can start reading before or after the event.
     // Keep its answer separate from live reads, and reopen it while it waits.
     for (const timing of ['page before move', 'page after move']) {

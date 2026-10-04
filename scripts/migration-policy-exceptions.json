@@ -55,6 +55,18 @@
       "sha256": "3c2353cc11a31d0a26c7465fe12f4e562ec5fdd0f695d62ba720520d0a75713b",
       "ticket": "AEON-649",
       "reason": "Owner-accepted AEON-648 concept Q4 explicitly retires epic/ticket/task in one atomic migration, with verified pre-migration backup as the only rollback. The starter, schema-extension and historical journey kind guards switch to work; the same-file Go hook reconciles schemas, refuses busy parents, rewrites allowed-child references, preserves node IDs/content and historical sessions/Decision Desk identities, then deletes legacy definitions and appends provenance events. This is a contract change and is incompatible with older binaries that assume retired kinds. Exact bytes are prepared for the coordinator consolidated review, not a package-worker approval or release waiver. Deployment requires release 122 published, drained merge/work queues, stopped writers, instance-specific verified backup/restore and the completed downstream work-node packages; it precedes AEON-596 ship adoption. No production backup, push or deployment is claimed by this local fixture drill."
+    },
+    {
+      "file": "1225_work_parent_status.sql",
+      "sha256": "16d756ce3a7a67ee04d53cf8fedf76c478db08c149d41a803d1ffd5f219ec952",
+      "ticket": "AEON-650",
+      "reason": "Work-parent status engine adds bounded guarded trigger/functions and expands only the derived/retained/causal-undo event visibility names, retaining existing tenant, project and referenced-node restrictions. The classifier conservatively rejects function replacement and ALTER POLICY. Activation defaults OFF and belongs to AEON-429; no permanent table or column is added and existing data is not backfilled. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval. Rollout uses AEON-649 maintenance, drained queues, stopped writers and instance-specific verified backup/restore; this exception does not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
+      "file": "1230_work_leaf_aggregates.sql",
+      "sha256": "14621b13bd555c1bfc1f8feded19c6db656e3d7d2cff148173384811a9dcb920",
+      "ticket": "AEON-651",
+      "reason": "Invoker-rights bounded leaf aggregation functions replace the published ETA function bodies while preserving their names, return signatures and optional depth argument. Existing nodes, estimates, sessions, usage and Decision Desk identities are not rewritten; no permanent table or column is added. The classifier conservatively rejects CREATE OR REPLACE FUNCTION. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval, under AEON-649 maintenance and instance-specific verified backup/restore. This exception does not waive previous-binary compatibility probes or grant release authority."
     }
   ]
 }

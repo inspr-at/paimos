@@ -20,6 +20,8 @@ watch(() => `${session.identity?.tenant.id}:${session.identity?.principal.id}`, 
   await load(run)
 }, { immediate: true })
 async function load(run = generation) {
+  if (busy.value) return
+  busy.value = true; message.value = ''; error.value = false
   try {
     const response = await api('/settings/work-vocabulary')
     if (!response.ok) throw new Error('Vocabulary could not be read.')
@@ -28,6 +30,7 @@ async function load(run = generation) {
     draft.value = { ...value, levels: value.levels.length ? value.levels : [{ name: '', icon: '' }, { name: '', icon: '' }] }
     loaded.value = true
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Vocabulary could not be read.' } }
+  finally { if (run === generation) busy.value = false }
 }
 async function save() {
   if (!loaded.value || busy.value) return

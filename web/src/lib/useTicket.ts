@@ -9,6 +9,7 @@ import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type Relatio
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
 import { statusMeta } from './work'
+import { epicStats } from './outline'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong' }
 
@@ -96,6 +97,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   const readOnly = ref(false)
   const children = ref<ListItem[]>([])
   const childrenLoading = ref(false)
+  const leafProgress = ref<{ done: number; total: number; percent: number } | null>(null)
+  const progressError = ref('')
+  let progressRun = 0
   const related = ref<RelatedNode[]>([])
   // Whether this ticket's relations have been read (or failed): the blocks below them
   // wait for it, so relations never push activity down after it shows.
@@ -231,10 +235,30 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // The children as the row store has them: its newest copy of each, none it
   // knows deleted. A page read before a gap is read again, like any other.
   // again: after a gap, the children shown stay until the new page lands.
+  async function loadLeafProgress() {
+    const target = item.value, request = ++progressRun, identity = generation
+    leafProgress.value = null; progressError.value = ''
+    if (!target) return
+    const current = () => request === progressRun && identity === generation && item.value?.id === target.id
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const sent = rows.mark()
+        const page = await listNodes({ within: target.id, kind: ['work', 'epic', 'ticket', 'task'], shape: ['leaf'], facets: ['state'], limit: 1 })
+        if (!current()) return
+        if (rows.gapSince(sent)) continue
+        if (!page.facets?.state) throw new Error('Leaf progress is unavailable.')
+        const stats = epicStats(page.facets.state, s => statusMeta(s).closed, s => ['done', 'delivered', 'accepted'].includes(statusMeta(s).key), s => statusMeta(s).key === 'cancelled')
+        leafProgress.value = { done: stats.done, total: stats.scope, percent: stats.scope ? Math.round(stats.done / stats.scope * 100) : 0 }
+        return
+      }
+      throw new Error('Leaf progress was interrupted by live updates.')
+    } catch (e) { if (current()) progressError.value = message(e) }
+  }
   async function loadChildren(again = false) {
     const target = item.value
     if (!again) children.value = []
-    if (!target || (target.is_leaf !== false && target.kind_slug !== 'epic' && !target.children_count)) return
+    if (!target || (target.is_leaf !== false && target.kind_slug !== 'epic' && !target.children_count)) { progressRun++; leafProgress.value = null; progressError.value = ''; return }
+    void loadLeafProgress()
     if (!again) childrenLoading.value = true
     try {
       for (;;) {
@@ -276,7 +300,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     // The open ticket changed: a retry or an editor for the previous one must not land here.
     gapRetry.clear()
     release()
-    gone.value = false; error.value = ''
+    gone.value = false; error.value = ''; progressRun++; leafProgress.value = null; progressError.value = ''
     away = false; heldFields = []; seen = item.value?.updated_at ?? null; seenParent = item.value?.parent_id ?? null
     liveHeld.value = null; liveFields.value = []; liveMessage.value = ''
     if (!id) return
@@ -472,6 +496,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       // The child and the parent's count go through the row store: the count
       // follows once for this child, however many views report it.
       if (rows.adopt(created, sent, { full: false }) && item.value?.id === target.id) children.value = [...children.value, rows.latest(node.id)!]
+      if (item.value?.id === target.id) void loadLeafProgress()
       rows.child(target.id, node.id, true)
       context.onCreated(created)
       return created
@@ -513,9 +538,11 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         const at = children.value.findIndex(entry => entry.id === change.id)
         const copy = at >= 0 && node && !rows.isDeleted(change.id) ? rows.latest(change.id) : undefined
         if (copy && copy.parent_id === target.id && (compareRevision(copy.updated_at, children.value[at].updated_at) > 0 || change.type === 'status_autopilot.derived')) children.value = children.value.map((child, i) => i === at ? copy : child)
+        void loadLeafProgress()
         return
       }
       sync(target, change)
+      if (target.is_leaf === false || target.kind_slug === 'epic' || target.children_count) void loadLeafProgress()
     },
     // After a gap nothing is known to have changed: read the ticket again.
     // While the viewer edits the answer waits like a live change. A failed
@@ -527,6 +554,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // The open ticket stays in the store while the panel shows it.
   onScopeDispose(rows.hold(() => item.value ? [item.value.id] : []))
   onScopeDispose(() => {
+    progressRun++
     gapRetry.clear()
     clearTimeout(flashTimer)
     release()
@@ -541,12 +569,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     sync(target, null)
   })
 
-  function childProgress() {
-    const list = children.value
-    const scope = list.filter(child => statusMeta(child.state).key !== 'cancelled')
-    const done = scope.filter(child => ['done', 'delivered', 'accepted'].includes(statusMeta(child.state).key)).length
-    return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
-  }
+  function childProgress() { return leafProgress.value }
 
   async function convert(toKind: string) {
     const target = item.value
@@ -561,5 +584,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (item.value?.id === target.id) await loadChildren()
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, hold, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
+  return { loading, error, gone, readOnly, children, childrenLoading, progressError, related, relationsReady, refresh, patch, hold, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
 }

@@ -473,7 +473,9 @@ function scrollToRow(id: string) {
 
 function observe() {
   observer?.disconnect()
-  if (!sentinel.value) return
+  // Outline exposes a Show more row; an intersecting sentinel must not drain
+  // every root page merely because the first page is short.
+  if (!sentinel.value || props.outline) return
   observer = new IntersectionObserver(entries => {
     if (entries.some(entry => entry.isIntersecting) && props.hasMore && !props.loadingMore && !props.moreError) emit('more')
   }, { root: props.scrollRoot, rootMargin: '0px 0px 800px 0px' })
@@ -481,7 +483,7 @@ function observe() {
 }
 let stopLive: (() => void) | undefined
 onMounted(() => { stopLive = live.watch(); observe() })
-watch(() => [props.scrollRoot, props.hasMore, props.loadingMore], observe)
+watch(() => [props.scrollRoot, props.hasMore, props.loadingMore, !!props.outline], observe)
 onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer) })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
