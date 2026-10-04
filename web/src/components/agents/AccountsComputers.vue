@@ -50,8 +50,15 @@ const layoutPref = usePreference<{ setupFolded?: boolean }>('agents-page')
 // The stored choice decides before the cards first show: no flash of a folded panel.
 const layoutReady = ref(false)
 void layoutPref.ready.then(() => { layoutReady.value = true })
-const folded = computed(() => !!layoutPref.value.value?.setupFolded && !route.query.verify_account)
-function toggleFold() { layoutPref.save({ ...(layoutPref.value.value ?? {}), setupFolded: !folded.value }, 0) }
+// Reveal each new approval link once; an explicit Fold wins while it stays open.
+const revealVerification = ref(!!route.query.verify_account)
+watch(() => route.query.verify_account, account => { revealVerification.value = !!account })
+const folded = computed(() => !!layoutPref.value.value?.setupFolded && !revealVerification.value)
+function toggleFold() {
+  const setupFolded = !folded.value
+  revealVerification.value = false
+  layoutPref.save({ ...(layoutPref.value.value ?? {}), setupFolded }, 0)
+}
 
 // ---------- Cards ----------
 const rows = computed(() => (props.showAccounts ? capacity.rows : []))
@@ -64,7 +71,7 @@ const shown = (line: AccountLine) => middleEllipsis(line.identity, 48)
 // Owner-approved checks retain the row identity through both the write and refresh.
 const verifying = ref('')
 const identityKey = computed(() => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`)
-watch(identityKey, () => { verifying.value = '' })
+watch(identityKey, () => { verifying.value = ''; revealVerification.value = !!route.query.verify_account })
 const enrollmentOf = (line: AccountLine, card: ComputerCard) => card.computer?.enrollments.find(e => e.account_id === line.id)
 function canVerify(line: AccountLine, card: ComputerCard) {
   const e = enrollmentOf(line, card)

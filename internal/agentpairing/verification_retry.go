@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -48,7 +49,12 @@ func (m *Module) verifyAgain(w http.ResponseWriter, r *http.Request, p tenant.Pr
 		return
 	}
 	var out verificationRetry
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	// Verification work orders are internal account-management work. Both the
+	// old run transition and new node creation need service project visibility,
+	// independent of the owner's nodes.read grants. Tenant RLS remains enforced;
+	// RequireTx and the current ownership check precede every mutation below.
+	// This transaction returns only the bound verification, never project data.
+	err := m.in(db.AllProjects(ctx, "owner-authorized account verification"), p.TenantID, func(tx pgx.Tx) error {
 		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) != nil {
 			return fail(403, "forbidden", "person account management required")
 		}

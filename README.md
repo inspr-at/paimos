@@ -2441,16 +2441,19 @@ when that enrollment has a fresh successful probe; it does not revoke separately
 approved ongoing use. A sibling's readiness never qualifies it. The account row's
 **Verify again** button authorizes one fresh read-only check for the signed-in
 account owner with `account.manage` (the original approver owns an unlinked
-account). The server checks the computer revision and prior run again under the
-mutation lock, cancels only that account's unclaimed queued check, releases its
-holds and creates one new run with a thirty-minute, one-request allowance.
+account). Visibility into the internal verification project is not required,
+and requesting a check grants no project access. The server checks the computer
+revision and prior run again under the mutation lock, cancels only that account's
+unclaimed queued check, releases its holds and creates one new run with a
+thirty-minute, one-request allowance.
 Claimed nonterminal checks must be reconciled first. Account identity, runtime
 key, daemon generation, pairing approval and cleanup remain intact.
 `aeon-agentd verify --account ID` opens the existing account's owner approval
 screen; `--no-browser` prints its link. It uses read-only pairing state and neither
 contacts nor restarts the daemon. The link grants no allowance: the signed-in
 owner must choose **Verify again**. Use `--state-root PATH` for a fixture or a
-non-default pairing root.
+non-default pairing root. The approval link initially expands Accounts and
+computers; its Fold control still honors the person's choice.
 
 Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval

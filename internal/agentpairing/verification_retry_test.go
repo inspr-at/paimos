@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 func retryErrorCode(t *testing.T, w *httptest.ResponseRecorder, want string) {
@@ -25,6 +29,90 @@ func retryPath(v agentpairing.View, account string) string {
 }
 func retryBody(v agentpairing.View, e agentpairing.Enrollment) map[string]any {
 	return map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": e.VerificationRunID}
+}
+
+func TestVerifyAgainOwnerWithoutProjectVisibility(t *testing.T) {
+	for _, mode := range []string{"connect_only", "one_per_harness"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, mode)
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			var role string
+			err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'verification_owner','Account manager only') RETURNING id::text`, f.tenantID).Scan(&role); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'account.manage')`, f.tenantID, role); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.person, role)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Read through the restricted application role, never the admin pool:
+			// the owner cannot see any project before or after the internal write.
+			assertHidden := func() {
+				t.Helper()
+				actor := tenant.Principal{ID: f.person, TenantID: f.tenantID, Kind: tenant.Person}
+				err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+					var visible int
+					if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&visible); err != nil {
+						return err
+					}
+					if visible != 0 {
+						t.Fatalf("account-only owner sees %d nodes", visible)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertHidden()
+			var out struct {
+				AccountID string `json:"account_id"`
+				RunID     string `json:"run_id"`
+			}
+			decodeResult(t, f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 200), &out)
+			if out.AccountID != e.AccountID || out.RunID == "" || e.VerificationRunID != nil && out.RunID == *e.VerificationRunID {
+				t.Fatal("limited-role owner did not create a fresh bound verification")
+			}
+			var complete bool
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT EXISTS(
+			 SELECT 1 FROM agent_runs r JOIN work_orders w ON w.tenant_id=r.tenant_id AND w.node_id=r.work_order_id
+			 JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
+			 JOIN agent_pairing_computers c ON c.tenant_id=n.tenant_id AND c.verification_project_id=n.parent_id
+			 JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id AND e.verification_run_id=r.id
+			 WHERE r.id=$1 AND r.tenant_id=$2 AND r.requested_account_id=$3 AND r.purpose='pairing_verification'
+			 AND r.status='queued' AND w.requested_by_principal_id=$4 AND w.assignee_principal_id=c.principal_id
+			 AND EXISTS(SELECT 1 FROM work_criteria WHERE work_order_id=w.node_id)
+			 AND EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id=e.account_id AND pairing_verification AND allowance=1 AND ends_at>clock_timestamp())
+			 AND EXISTS(SELECT 1 FROM events WHERE tenant_id=r.tenant_id AND type='agent_pairing.verification_created' AND actor_principal_id=$4 AND after->>'run_id'=r.id::text))`, out.RunID, f.tenantID, e.AccountID, f.person).Scan(&complete); err != nil {
+				t.Fatal(err)
+			}
+			if !complete {
+				t.Fatal("verification lacks its tenant-bound work order, requester, criteria, allowance or audit")
+			}
+			if e.VerificationRunID != nil {
+				var status string
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT status FROM agent_runs WHERE id=$1`, *e.VerificationRunID).Scan(&status); err != nil || status != "cancelled" {
+					t.Fatalf("old queued run was not cancelled: %s, %v", status, err)
+				}
+			}
+			assertHidden()
+			// The internal step must not create lasting grants or bypass a later
+			// revocation of the permission that authorized it.
+			if _, err := f.db.Admin.Exec(t.Context(), `DELETE FROM role_permissions WHERE tenant_id=$1 AND role_id=$2 AND permission='account.manage'`, f.tenantID, role); err != nil {
+				t.Fatal(err)
+			}
+			e.VerificationRunID = &out.RunID
+			retryErrorCode(t, f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 403), "forbidden")
+		})
+	}
 }
 
 func TestVerifyAgainRequiresExplicitReviewedRun(t *testing.T) {

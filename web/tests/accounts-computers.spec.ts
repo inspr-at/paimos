@@ -362,6 +362,45 @@ test('AEON-685: tablet verification control is independent of the status label w
   })
 })
 
+test('AEON-685: approval link expands once and honors folding', async ({ page }) => {
+  const { work } = await setup(page)
+  work.preferences['agents-page'] = { setupFolded: true }
+  await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
+  const fold = panel(page).getByRole('button', { name: 'Accounts and computers', exact: true })
+  await expect(fold).toHaveAttribute('aria-expanded', 'true')
+  await expect(computer(page, 'mbp2607')).toBeVisible()
+  await expectStableControls({
+    controls: { fold, modelPreferences: panel(page).getByRole('button', { name: 'Account model preferences', exact: true }) },
+    interactions: [
+      { name: 'fold with approval query still present', run: async () => {
+        await fold.click()
+        await expect(fold).toHaveAttribute('aria-expanded', 'false')
+        await expect(computer(page, 'mbp2607')).toHaveCount(0)
+        await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: true })
+        expect(new URL(page.url()).searchParams.get('verify_account')).toBe(ACCOUNTS.claude)
+      } },
+      { name: 'explicitly expand again', run: async () => {
+        await fold.click()
+        await expect(fold).toHaveAttribute('aria-expanded', 'true')
+        await expect(computer(page, 'mbp2607')).toBeVisible()
+        await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: false })
+      } },
+      { name: 'remember folded choice', run: async () => {
+        await fold.click()
+        await expect(fold).toHaveAttribute('aria-expanded', 'false')
+        await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: true })
+      } },
+    ],
+  })
+  await page.goto('/agents')
+  await expect(fold).toHaveAttribute('aria-expanded', 'false')
+  await expect(computer(page, 'mbp2607')).toHaveCount(0)
+  // A later approval link is a new request to reveal its account.
+  await page.goto(`/agents?verify_account=${ACCOUNTS.spare}`)
+  await expect(fold).toHaveAttribute('aria-expanded', 'true')
+  await expect(computer(page, 'mbp2607')).toBeVisible()
+})
+
 test('AEON-685: queued verification reports a failed pairing refresh', async ({ page }) => {
   const { capacity } = await setup(page)
   const c = capacity.computers[0] as unknown as PairingView
