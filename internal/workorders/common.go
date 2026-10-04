@@ -87,7 +87,7 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		// Finish network reads before InTenant can acquire admission, tree or
 		// tenant locks. Handlers still decode and authorize in the transaction,
 		// but their body is now bounded memory, never a stalled client socket.
-		if err := bufferBody(w, r); err != nil {
+		if err := BufferBody(w, r); err != nil {
 			WriteError(w, err)
 			return
 		}
@@ -130,7 +130,10 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 	}
 }
 
-func bufferBody(w http.ResponseWriter, r *http.Request) error {
+// BufferBody reads at most 1 MiB under a ten-second connection deadline before
+// transaction admission. Failed reads retain the deadline for net/http's drain;
+// successful reads replace the body with memory and clear the deadline.
+func BufferBody(w http.ResponseWriter, r *http.Request) error {
 	if r.Body == nil || r.Body == http.NoBody {
 		r.Body = http.NoBody
 		return nil

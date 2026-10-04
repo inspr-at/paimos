@@ -47,8 +47,9 @@ with its exact worker lease and current `harness.worker` authority. Only
 releases the work fence, records `harness.stop_confirmed` once and preserves
 closure timestamps, archive receipts and historical bindings. Archived servicing
 remains revoked; the administrative recovery observation stays unchanged.
-Work-order and harness endpoints buffer request bodies up to 1 MiB under a
+Work-order, harness and lifecycle action requests buffer bodies up to 1 MiB under a
 ten-second network read deadline before opening their tenant transaction.
+Failed reads retain the deadline so draining the body cannot stall indefinitely.
 Stalled uploads cannot hold the work-tree or tenant fences; key scopes and
 target permissions are still checked inside the final mutation transaction.
 Coordinator registration and resume adopt up to 1000 direct live/paused children
@@ -60,6 +61,9 @@ The additive API is `GET/POST /api/nodes/{id}/work-lifecycle`,
 `DELETE /api/nodes/{id}/work-lifecycle/{action}`. Requests bind a UUID, the node
 revision and the preview's scope digest. Waiting and completed responses are
 explicit; replaying a request creates no extra children or cancellation events.
+Builder completion with a review range still commits during pending handover:
+automatic review records `review.unavailable` and leaves the review gate closed,
+without starting new work or preventing the original generation from finishing.
 Work-order cancellation rechecks `work_orders.write` and queued reservation
 release rechecks `run.create`, alongside `nodes.write` and session control.
 

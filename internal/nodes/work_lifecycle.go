@@ -158,6 +158,10 @@ func (m *Module) handleWorkLifecycle(w http.ResponseWriter, r *http.Request) {
 	}
 	var in workRequest
 	if r.Method == http.MethodPost && r.PathValue("actionId") == "" {
+		if err := workorders.BufferBody(w, r); err != nil {
+			workorders.WriteError(w, err)
+			return
+		}
 		raw, ok := readBody(w, r)
 		if !ok {
 			return

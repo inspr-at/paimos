@@ -325,6 +325,12 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 // no additional permissions. Missing permissions leave an auditable closed gate
 // without preventing the builder from reporting its completion.
 func (m *Module) RequestForRun(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID string, commitRange reviewgate.CommitRange) error {
+	// Telemetry already holds this fence before locking its run. Re-enter it
+	// for direct callers too: lifecycle intents take the same fence before
+	// changing the tree, so the pending check stays valid through review creation.
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return err
+	}
 	var ticket string
 	var project *string
 	err := tx.QueryRow(ctx, `SELECT parent.id::text,parent.project_id::text FROM agent_runs r
@@ -351,6 +357,16 @@ func (m *Module) RequestForRun(ctx context.Context, tx pgx.Tx, p tenant.Principa
 			}
 			return err
 		}
+	}
+	var pending bool
+	if err = tx.QueryRow(ctx, `SELECT aeon_work_pending($1::uuid) IS NOT NULL`, ticket).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		// The database rejects new work bindings while a split/cancel waits.
+		// Avoid that SQL error: it would abort the terminal telemetry write and
+		// leave the handover waiting forever for this otherwise completed run.
+		return workorders.Record(ctx, tx, p, ticket, "review.unavailable", nil, map[string]string{"author_run_id": runID, "reason": "Work is waiting for graceful handover; automatic review is unavailable and the gate remains closed."})
 	}
 	raw, _ := json.Marshal(CreateInput{RequestID: runID, Repository: commitRange.Repository, BaseSHA: commitRange.BaseSHA, HeadSHA: commitRange.HeadSHA, AuthorRunID: &runID})
 	r, _ := http.NewRequestWithContext(ctx, "POST", "/api/nodes/"+ticket+"/reviews", bytes.NewReader(raw))

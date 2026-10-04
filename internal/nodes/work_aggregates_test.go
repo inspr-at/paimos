@@ -99,7 +99,13 @@ func TestWorkAggregatesCoverageRegroupingCountsAndSort(t *testing.T) {
 		t.Fatal("unreported leaf invented progress")
 	}
 	// The same leaves in a different grouping give the same progress and sum.
-	if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, group.ID, doing.ID); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, group.ID, doing.ID)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	after, ev := aggregateRead(t, w.admin, top.ID, w.root.ID)

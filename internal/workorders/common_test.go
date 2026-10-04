@@ -46,7 +46,7 @@ func TestBufferBodyBoundsAndDecode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest("POST", "/", strings.NewReader(tc.body))
 			w := &bodyDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-			err := bufferBody(w, r)
+			err := BufferBody(w, r)
 			if tc.tooLarge {
 				var failure *Error
 				if !errors.As(err, &failure) || failure.Status != 400 || failure.Message != "invalid JSON" {
