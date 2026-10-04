@@ -237,6 +237,34 @@ router and small Go/Node checks. Go tests use four pool shards when routing
 admits the batch, otherwise the existing seven hosted shards. Timing budgets,
 static checks and the required `go` aggregate always run hosted.
 
+**Web CI (OPS-257):** hosted `web-setup` runs typecheck, lint, unit tests and
+browser-runner safety once, builds the current web, and shares its dependencies
+and build through the run's `web-runtime` artifact. Dependency and Chromium
+caches are keyed by the lockfile hash and resolved Playwright version; each of
+12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+system libraries. The shard command is `npm --prefix web run ci:web:shard --
+i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
+screenshots are retained in `web-shard-i-evidence` for seven days. The required
+check remains exactly `web`: its unconditional aggregate rejects failed,
+cancelled or skipped setup/shards. The shards select 53 gated specs: the original
+49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
+weights are scheduling estimates. `clip-tip` uses its complete local serial
+runtime plus a 20 percent margin; the other three use listed test counts.
+These are not hosted runtime measurements. The 164 specs of the
+`remaining-ui` group are declared in
+`web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
+follow-up ticket measures them. Unit CI checks the source manifest before
+reconciliation: every spec (including nested files) must belong to a group or
+an explicit exclusion with a ticket key and reason. AEON-676 fixes the touch
+name-width shift and gates all four additions in `clipped-names-and-preferences`,
+with no `clip-tip` exclusion. Browser-free regression checks verify the hosted
+workflow wiring, exact-once default selection and propagation of each spec's
+failure. The layout fix passed six variants × 20 locally; hosted execution of
+the integrated revision must still be verified by the coordinator. Inspect drift
+without browsers using `npm --prefix web run ci:web:shard -- --check --strict`.
+A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
+reruns exactly one test in its original config group.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
