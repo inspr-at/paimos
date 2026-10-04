@@ -142,7 +142,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
 
 export async function main(args) {
   const [mode,kind,...flags]=args
-  if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full] [--unit] [--shard i/N] [--paths JSON]')
+  if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
   const options={unit:false,full:process.env.AEON_TEST_TIER_MODE!==undefined&&process.env.AEON_TEST_TIER_MODE!=='essential',job:`${kind}-tiers`}
   for(let i=0;i<flags.length;i++) {
     const flag=flags[i]
@@ -151,6 +151,7 @@ export async function main(args) {
     else if(flag==='--event') options.event=flags[++i]
     else if(flag==='--job') options.job=flags[++i]
     else if(flag==='--timing') options.timing=true
+    else if(flag==='--strict'&&mode==='check') options.strict=true
     else if(flag==='--shard') {
       const match=/^(\d+)\/(\d+)$/.exec(flags[++i]??'')
       if(!match) throw new Error('Expected shard i/N')
@@ -158,8 +159,9 @@ export async function main(args) {
     } else throw new Error(`Unknown flag: ${flag}`)
   }
   if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
-  if(mode==='check'&&kind==='go') {
-    const all=validate(load(kind),collectGo().tests)
+  if(mode==='check') {
+    const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
+    if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
     const output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
     const listed=[]
     for(const line of output.split('\n').filter(Boolean)) {
@@ -176,7 +178,7 @@ export async function main(args) {
       const {leaf,line,id,active,file,...entry}=row
       manifest.tests.push({...entry,...(kind==='web'?{file}:{}),tier:'NIGHTLY'})
     }
-    validate(manifest,inventory.tests) // stale entries require an explicit edit
+    validate(manifest,inventory.tests,undefined,{strict:true}) // stale entries require an explicit edit
     saveManifest(manifestFile(kind),manifest);return 0
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})

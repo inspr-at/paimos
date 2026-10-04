@@ -16,10 +16,46 @@ const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','Tes
   g('internal/nodes','TestCRUD','ESSENTIAL'),g('internal/nodes','TestUndo'),g('cmd/aeon','TestRoutes'),
   w('tests/scope.test.ts','ceiling','ESSENTIAL'),w('tests/scope.test.ts','revoked'),w('tests/tree.test.ts','tree')]
 const fixture=()=>({version:1,tests:structuredClone(cases)})
+const noFlaky={version:1,entries:[]}
 
-test('unknown and stale registrations fail; tagging never removes a nightly test',()=>{
-  assert.throws(()=>validate(fixture(),[...cases,g('internal/auth','TestNew')]),/Unclassified test.*TestNew/)
-  assert.throws(()=>validate(fixture(),cases.slice(1)),/Stale manifest entry.*TestCeiling/)
+test('runtime reconciliation defaults new cases to NIGHTLY and drops stale cases with named warnings',()=>{
+  const stale=cases[0],added={kind:'go',package:'internal/auth',name:'TestNew',active:false}
+  const discovered=[...cases.slice(1),added],warnings=[],manifest=fixture(),before=structuredClone(manifest)
+  const rows=validate(manifest,discovered,noFlaky,{warn:message=>warnings.push(message)})
+  assert.deepEqual(rows.map(key),discovered.map(key))
+  assert.deepEqual(rows.at(-1),{...added,tier:'NIGHTLY'})
+  assert.equal(rows.find(row=>row.name==='TestCRUD').tier,'ESSENTIAL')
+  assert.deepEqual(warnings,[`::warning::Unclassified test (defaults to NIGHTLY; classify these): ${key(added)}`,
+    `::warning::Stale manifest entry (dropped): ${key(stale)}`])
+  for(const event of ['pull_request','merge_group']) {
+    assert.ok(select(rows,{event,paths:['internal/auth/key.go']}).tests.some(row=>key(row)===key(added)))
+    assert.ok(!select(rows,{event,paths:['README.md']}).tests.some(row=>key(row)===key(added)))
+  }
+  assert.deepEqual(select(rows,{event:'schedule',paths:[]}).tests,rows)
+  assert.deepEqual(manifest,before, 'Reconciliation must leave the stored manifest unchanged')
+})
+
+test('runtime reconciliation escapes warning titles and retains browser configuration validation',()=>{
+  const row={kind:'browser',file:'tests/new.spec.ts',name:'new\ncase%',config:'playwright.ui.config.ts',project:'',line:12,id:'native'}
+  const warnings=[]
+  const rows=validate(fixture(),[...cases,row],noFlaky,{warn:message=>warnings.push(message)})
+  assert.deepEqual(rows.at(-1),{...row,tier:'NIGHTLY',active:true})
+  assert.deepEqual(warnings,[`::warning::Unclassified test (defaults to NIGHTLY; classify these): ${key(row).replaceAll('%','%25').replaceAll('\n','%0A')}`])
+  for(const strict of [false,true]) assert.throws(()=>validate({version:1,tests:[{...row,config:'old.config.ts',tier:'ESSENTIAL'}]},[row],noFlaky,{strict}),/Changed browser configuration/)
+})
+
+test('reconciliation never hides malformed, duplicate or known-flaky ESSENTIAL classifications',()=>{
+  for(const strict of [false,true]) {
+    assert.throws(()=>validate({...fixture(),tests:[{...cases[0],tier:'UNKNOWN'}]},[],noFlaky,{strict}),/Invalid classification/)
+    assert.throws(()=>validate({...fixture(),tests:[cases[0],cases[0]]},[],noFlaky,{strict}),/Duplicate manifest entry/)
+    assert.throws(()=>validate(fixture(),[cases[0],cases[0]],noFlaky,{strict}),/Duplicate collected identity/)
+    assert.throws(()=>validate(fixture(),[],{version:1,entries:[{key:key(cases[0]),owner:'AEON-675'}]},{strict}),/Known-flaky case cannot be ESSENTIAL/)
+  }
+})
+
+test('strict checks reject unknown and stale registrations; tagging never removes a nightly test',()=>{
+  assert.throws(()=>validate(fixture(),[...cases,g('internal/auth','TestNew')],noFlaky,{strict:true}),/Unclassified test.*TestNew/)
+  assert.throws(()=>validate(fixture(),cases.slice(1),noFlaky,{strict:true}),/Stale manifest entry.*TestCeiling/)
   const manifest=fixture();manifest.tests[1].tags=['delete-candidate']
   const rows=validate(manifest,cases)
   const full=select(rows,{event:'schedule',paths:[]})
@@ -230,23 +266,34 @@ test('exact-SHA reuse records provenance and current costs without fabricating f
   assert.throws(()=>aggregate([{}],jobs,{reusedFrom:'123'}),/must not report fresh test passes/)
 })
 
-test('committed allowlists retain every case and AEON-541 guard with the reviewed nine nightly demotions',()=>{
+test('committed allowlists preserve classifications, helpers and reviewed AEON-541 demotions without fixed inventory sizes',()=>{
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
-  assert.equal(go.tests.filter(row=>row.tier==='ESSENTIAL').length,331)
-  assert.equal(web.tests.filter(row=>row.tier==='ESSENTIAL'&&row.kind==='browser').length,52)
-  assert.equal(web.tests.filter(row=>row.tier==='ESSENTIAL'&&row.kind!=='browser').length,155)
+  for(const manifest of [go,web]) {
+    const reconciled=validate(manifest,manifest.tests)
+    assert.deepEqual(reconciled.map(key).sort(),manifest.tests.map(key).sort())
+    for(const tier of ['ESSENTIAL','NIGHTLY']) assert.ok(reconciled.some(row=>row.tier===tier),tier)
+  }
   for(const helper of ['TestFakeVendorProcess','TestNoOutboundServerHelper'])assert.equal(go.tests.find(row=>row.name===helper).tier,'ESSENTIAL')
   const known=JSON.parse(readFileSync(new URL('../ci/known-flaky.json',import.meta.url)))
   const guards=web.tests.filter(row=>row.file==='tests/no-shift.spec.ts'&&known.entries.some(entry=>entry.key===key(row)))
-  assert.equal(guards.length,5)
+  assert.deepEqual(guards.map(key).sort(),known.entries.filter(entry=>entry.key.startsWith('browser:tests/no-shift.spec.ts:')).map(entry=>entry.key).sort())
   assert.ok(guards.every(row=>row.tier==='NIGHTLY'))
-  assert.equal(go.tests.length,3526)
-  assert.equal(web.tests.filter(row=>row.kind==='browser').length,3434)
-  assert.equal(web.tests.filter(row=>row.kind!=='browser').length,1560)
-  assert.equal(go.tests.filter(row=>row.tags?.includes('delete-candidate')).length,158)
-  assert.equal(go.tests.filter(row=>row.lane==='timing').length,4)
+  assert.ok(go.tests.some(row=>row.tags?.includes('delete-candidate')))
+  assert.ok(go.tests.some(row=>row.lane==='timing'))
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='NIGHTLY'))
+})
+
+test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
+  const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
+  const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  const job=nightly.slice(nightly.indexOf('\n  nightly-tier-classification:'),nightly.indexOf('\n  nightly-web-shard:'))
+  assert.match(job,/if: github.event_name == 'schedule'/)
+  assert.match(job,/cli\.mjs check go --strict/)
+  assert.match(job,/cli\.mjs check web --strict/)
+  assert.match(job,/Report web cases needing classification\n\s+if: always\(\)/)
+  assert.doesNotMatch(ci,/--strict/)
+  assert.doesNotMatch(nightly,/needs:.*nightly-tier-classification/)
 })
 
 test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility remain',()=>{

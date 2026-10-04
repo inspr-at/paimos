@@ -675,7 +675,14 @@ cases; Go reverse dependencies add at most 300 extra cases. Shared inputs or
 uncertain impact select full. Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
 and [web manifest](scripts/ci/web-test-tiers.json). Use
 `node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
-then `check`; unknown and stale entries fail CI. New browser specs also need a
+then `check`. CI reconciles manifests at runtime: unlisted cases default to
+NIGHTLY, stale entries are dropped, and named Actions warnings report the drift.
+New cases retain changed-area and full/nightly coverage without requiring
+manifest edits in each PR. A separate scheduled classification check runs
+`check go --strict` and `check web --strict` to report cases needing classification;
+it does not gate PRs or the nightly test jobs. Remove stale entries when updating
+the stored manifests. Malformed entries and known-flaky ESSENTIAL cases still
+fail validation. New browser specs also need a
 launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
 remain NIGHTLY, including candidate groups whose exact members need review.
 The [known-flaky registry](scripts/ci/known-flaky.json) names exact case keys

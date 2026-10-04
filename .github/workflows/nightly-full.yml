@@ -297,6 +297,38 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
+  # Classification maintenance is scheduled and separate from executing tests.
+  # Manifest drift never blocks a PR or prevents the full suite from running.
+  nightly-tier-classification:
+    if: github.event_name == 'schedule'
+    needs: nightly-web-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime
+      - name: Restore web runtime
+        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Report Go cases needing classification
+        run: node scripts/test-tiers/cli.mjs check go --strict
+      - name: Report web cases needing classification
+        if: always()
+        run: node scripts/test-tiers/cli.mjs check web --strict
+
   nightly-web-shard:
     needs: nightly-web-setup
     runs-on: ubuntu-latest

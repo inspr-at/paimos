@@ -6,7 +6,7 @@ export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export const exactPattern = names => `^(?:${names.map(escapeRE).join('|')})$`
 
-export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8'))) {
+export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8')), { strict = false, warn = console.warn } = {}) {
   if (manifest.version !== 1 || !Array.isArray(manifest.tests) || !manifest.tests.length) throw new Error('Expected nonempty tier manifest version 1')
   if (knownFlaky.version !== 1 || !Array.isArray(knownFlaky.entries)) throw new Error('Expected known-flaky registry version 1')
   const flaky = new Map()
@@ -33,15 +33,23 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
     declared.set(key(row), row)
   }
   const found = new Map()
+  const drift = []
   for (const row of discovered) {
     if (found.has(key(row))) throw new Error(`Duplicate collected identity: ${key(row)}`)
     found.set(key(row), row)
-    if (!declared.has(key(row))) throw new Error(`Unclassified test (classify as NIGHTLY): ${key(row)}`)
+    if (!declared.has(key(row))) {
+      drift.push(`Unclassified test (defaults to NIGHTLY; classify these): ${key(row)}`)
+      continue
+    }
     const stored = declared.get(key(row))
     if (row.kind === 'browser' && (stored.config !== row.config || stored.project !== row.project)) throw new Error(`Changed browser configuration: ${key(row)}`)
   }
-  for (const id of declared.keys()) if (!found.has(id)) throw new Error(`Stale manifest entry: ${id}`)
-  return discovered.map(row => ({ ...row, ...declared.get(key(row)), active: row.active ?? true }))
+  for (const id of declared.keys()) if (!found.has(id)) drift.push(`Stale manifest entry (dropped): ${id}`)
+  if (strict && drift.length) throw new Error(`Tier manifest drift; classify these:\n${drift.join('\n')}`)
+  // Reconcile in memory: unrelated PRs must not edit the large allowlists.
+  // Escape Actions command data so parameterized titles stay one warning each.
+  for (const message of drift) warn(`::warning::${message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`)
+  return discovered.map(row => ({ ...row, ...(declared.get(key(row)) ?? { tier: 'NIGHTLY' }), active: row.active ?? true }))
 }
 
 export function uncertain(path) {

@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { run, browserList } from '../../scripts/test-tiers/cli.mjs'
 import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
+import { validate, key } from '../../scripts/test-tiers/core.mjs'
 
 test('native Node and Vitest selectors execute the requested registrations, rather than skip them', async () => {
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
@@ -15,7 +16,8 @@ test('native Node and Vitest selectors execute the requested registrations, rath
   // Collection must evaluate parameter registrations without executing bodies.
   const collected=JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
     resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,node.file)],{cwd:web}))
-  assert.equal(collected.length,manifest.tests.filter(row=>row.file===node.file).length)
+  const reconciled=validate({version:1,tests:manifest.tests.filter(row=>row.file===node.file)},collected.map(row=>({...row,kind:'node',file:node.file})))
+  assert.deepEqual(reconciled.map(key).sort(),collected.map(row=>key({...row,kind:'node',file:node.file})).sort())
   assert.ok(collected.some(row=>row.name===node.name))
   const rows=[node,vitest,nested]
   const job='native-selection-regression'
@@ -34,7 +36,7 @@ test('native Node and Vitest selectors execute the requested registrations, rath
 
 // --list imports registration code but never opens a browser. This exercises
 // the exact native test-list syntax used by both narrowed and full CI runs.
-test('native browser selectors cover the 52 stable essentials and every retained full-suite registration',()=>{
+test('native browser selectors cover reconciled essentials and every collected full-suite registration',()=>{
   mkdirSync(evidence,{recursive:true})
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
   const all=[]
@@ -42,14 +44,16 @@ test('native browser selectors cover the 52 stable essentials and every retained
     const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
     all.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
   }
-  const tiers=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[`${row.file}:${row.name}`,row.tier]))
-  assert.equal(all.length,tiers.size)
-  for(const row of all) assert.ok(tiers.has(`${row.file}:${row.name}`),`Unclassified ${row.name}`)
+  const reconciled=validate({version:1,tests:manifest.tests.filter(row=>row.kind==='browser')},all)
+  assert.deepEqual(reconciled.map(key).sort(),all.map(key).sort())
+  const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
+  const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
+  for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
   for(const full of [false,true]) {
     let total=0
     for(const group of groups) {
-      const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&(full||tiers.get(`${row.file}:${row.name}`)==='ESSENTIAL'))
+      const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&(full||tiers.get(key(row))==='ESSENTIAL'))
       if(!rows.length) continue
       const list=resolve(evidence,`regression-${full?'full':'essential'}-${group.id}.txt`)
       writeFileSync(list,browserList(rows,all).join('\n')+'\n')
@@ -59,6 +63,6 @@ test('native browser selectors cover the 52 stable essentials and every retained
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
       total+=listed.length
     }
-    assert.equal(total,full?all.length:52)
+    assert.equal(total,full?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL').length)
   }
 })
