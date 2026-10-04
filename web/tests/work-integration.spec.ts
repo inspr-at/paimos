@@ -60,6 +60,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
     const data = migrated(), row = data.nodes.find(n => n.id === 'n-1')!
     Object.assign(row.fields, { area: 'backend', area_source: 'suggested', complexity: 'M', complexity_source: 'suggested' })
+    row.title = 'Hetzner Cloud: Verwaltungszugang und nachvollziehbare Bereitstellung für besonders umfangreiche Projektanforderungen prüfen'
     const revision = row.updated_at, calls = await mockWork(page, data)
     await page.route('**/api/work-kinds?**', route => route.fulfill({ json: { items: ['backend', 'security'].map(slug => ({ id: slug, slug, label: slug, position: 0 })), next_cursor: null } }))
     await page.goto('/p/PHAROS/PHAROS-11')
@@ -84,7 +85,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
   test(`canonical project journey shows leaves and parent groups at ${width}px ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
     const calls = await mockWork(page, migrated())
-    const world = journeyWorld('open', { derived: true }); world.projectBody = 'Ein übernommenes Projekt mit nachvollziehbaren Arbeitspaketen.'
+    const world = journeyWorld('open', { derived: true }); world.projectBody = 'Ein übernommenes Projekt mit nachvollziehbaren Arbeitspaketen und eindeutig zugeordneten Verantwortlichkeiten. Die Freigabe einer Bereitstellung setzt eine bestätigte Preisprüfung voraus; nach Abschluss bleiben überprüfbare Ergebnisse und keine unbemerkten Ressourcen zurück.'
     await mockJourney(page, world)
     for (const stage of ['inspire', 'requirements', 'plan', 'build']) {
       await page.goto(`/p/PHAROS?view=journey&stage=${stage}`)
