@@ -64,6 +64,16 @@ kinds refuse honestly without retrying the old draft. Unknown outcomes require
 reconciliation; an equal value alone never certifies success. Provider Undo does
 not lower requirements already stamped on existing runs. Navigation discards
 local drafts and Undo; it does not promise to roll back an in-flight server write.
+For preferences, a focus permission refresh keeps drafts, confirmed Undo and
+pending-write handling when authority remains unchanged. Identity and relevant
+permission changes invalidate them. Local work-kind and editor-mode changes
+discard mutations while retaining the same source document during the next
+preview read, so picker options and preference rows remain on screen.
+
+Queue routes finish buffering request bodies before opening their transaction
+or retaining tenant/tree/pairing locks. Input is capped at 1 MiB and shares a
+30-second request deadline with the transaction; interrupted input returns 408,
+and oversized input returns 413 before queue work starts.
 
 Editors reserve useful read/help space above the previews and keep long content
 inside scrolling bodies. Phone editors use full-height sheets with safe-area

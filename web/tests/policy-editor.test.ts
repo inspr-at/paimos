@@ -139,3 +139,23 @@ test('managed order drafts preserve holds and Undo restores rows plus captured m
  assert.throws(()=>ladderDraft({...before,managed_fallback_order:['strong','strong']}),/managed order snapshot/)
  }finally{globalThis.fetch=original}
 })
+
+test('local picker invalidation keeps its document while dropping drafts, Undo and late writes',async()=>{
+ const f=fixture();await f.editor.load();const before=f.editor.snapshot.value
+ f.editor.edit('old choice');const held=f.hold(),saving=f.editor.submit();await f.started
+ try {
+  f.setContext('tenant/person/other-kind');f.editor.reset({retainSnapshot:true})
+  assert.equal(f.editor.snapshot.value,before);assert.equal(f.editor.draft.value,null);assert.equal(f.editor.undo.value,null);assert.equal(f.editor.busy.value,false)
+ } finally { held.resolve({person:'first',revision:4,value:'late saved choice'});await saving }
+ assert.equal(f.editor.snapshot.value,before);assert.equal(f.editor.undo.value,null);assert.equal(f.editor.message.value,'')
+ f.editor.reset();assert.equal(f.editor.snapshot.value,null)
+})
+
+test('same-identity preview refresh keeps the captured draft baseline and confirmed Undo revision',async()=>{
+ const f=fixture();await f.editor.load();f.editor.edit('desired');f.setServer({person:'first',revision:9,value:'elsewhere'})
+ await f.editor.load();assert.equal(f.editor.draft.value,'desired');assert.equal(f.editor.snapshot.value?.revision,9)
+ await f.editor.submit();assert.equal(f.writes[0]!.before.revision,3)
+ const confirmed=f.editor.undo.value!.confirmed;f.setServer({person:'first',revision:12,value:'newer elsewhere'})
+ await f.editor.load();assert.equal(f.editor.undo.value!.confirmed,confirmed);await f.editor.submit(true)
+ assert.equal(f.writes[1]!.before.revision,confirmed.revision)
+})

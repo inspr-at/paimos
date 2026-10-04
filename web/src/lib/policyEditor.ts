@@ -73,8 +73,11 @@ export function createPolicyEditor<T, D>(owner: () => string, wire: EditorWire<T
   const message = ref(''), phase = ref<'idle' | 'saving' | 'saved' | 'refused' | 'unknown'>('idle')
   const undo = shallowRef<{ before: T; confirmed: T; desired: D; owner: string } | null>(null)
   let baseline: T | null = null
-  function reset() {
-    scope.reset(); snapshot.value = null; draft.value = null; undo.value = null; baseline = null
+  function reset({ retainSnapshot = false } = {}) {
+    // A local picker may invalidate mutations while the same document continues
+    // to back its controls. Identity, source and access changes clear it too.
+    scope.reset(); if (!retainSnapshot) snapshot.value = null
+    draft.value = null; undo.value = null; baseline = null
     busy.value = false; loading.value = false; needsReload.value = false; message.value = ''; phase.value = 'idle'
   }
   async function load() {

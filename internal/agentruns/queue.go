@@ -101,7 +101,15 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			r = r.WithContext(ctx)
+			// Decode only buffered memory inside the write, never transport
+			// input while retaining tenant/tree/pairing fences.
+			if err := workorders.BufferEndpointBody(w, r); err != nil {
+				workorders.WriteError(w, err)
+				return
+			}
 			var out any
 			err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 				if err := authz.RequireTx(r.Context(), tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {

@@ -33,6 +33,7 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
  catalog[0]!.display_name='Sehr lange Modellbezeichnung für nachvollziehbare normale und komplexe Reviewaufgaben'
  const state={document:preferenceDocument(),ladders:new Map<PolicyRole,EditableLadder>(),writes:[] as {path:string;method:string;body:Record<string,unknown>|ModelRoute[]|null;headers:Record<string,string>}[],refusal:null as null|{status:number;code:string},failReads:false,malformed:false,unknown:false}
  let next:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>}|null=null
+ let nextRead:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>}|null=null
  await page.route('**/api/models',route=>route.fulfill({json:catalog}))
  await page.route(/\/api\/models\/routes(\?|$)/,async route=>{
   const req=route.request(),url=new URL(req.url()),role=url.searchParams.get('role') as PolicyRole
@@ -51,6 +52,7 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
  await page.route(/\/api\/model-preferences(\/|\?|$)/,async route=>{
   const req=route.request(),url=new URL(req.url())
   if(req.method()==='GET'){
+   const held=nextRead;nextRead=null;held?.started.release();if(held)await held.until.promise
    if(state.failReads)return route.fulfill({status:503,json:{error:'read refused'}})
    return route.fulfill({json:refreshViews(structuredClone(state.document))})
   }
@@ -70,5 +72,5 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
   if(state.unknown)return route.abort('connectionreset')
   return route.fulfill({json:state.malformed?{person_id:'wrong-person'}:{person_id:state.document.person_id,revision:value.revision,level:value,running_outside:[],residency:state.document.views[name]!.residency}})
  })
- return {state,base,holdNext(){const held={started:barrier(),until:barrier()};next=held;return {started:held.started.promise,release:held.until.release}}}
+ return {state,base,holdRead(){const held={started:barrier(),until:barrier()};nextRead=held;return {started:held.started.promise,release:held.until.release}},holdNext(){const held={started:barrier(),until:barrier()};next=held;return {started:held.started.promise,release:held.until.release}}}
 }

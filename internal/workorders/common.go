@@ -97,7 +97,7 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 		r = r.WithContext(ctx)
 		// Ordinary handlers decode inside fn; replay bounded memory there,
 		// never transport input while holding tenant/tree/resource fences.
-		if err := bufferEndpointBody(w, r); err != nil {
+		if err := BufferEndpointBody(w, r); err != nil {
 			WriteError(w, err)
 			return
 		}
@@ -160,10 +160,11 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 	}
 }
 
-// bufferEndpointBody finishes all network reads before preparation or a database
+// BufferEndpointBody finishes all network reads before preparation or a database
 // transaction. A transport deadline interrupts HTTP reads; the context bound
 // also protects callers whose ResponseWriter cannot set transport deadlines.
-func bufferEndpointBody(w http.ResponseWriter, r *http.Request) error {
+// Callers must install a bounded request context before entering this helper.
+func BufferEndpointBody(w http.ResponseWriter, r *http.Request) error {
 	if r.Body == nil || r.Body == http.NoBody {
 		return nil
 	}

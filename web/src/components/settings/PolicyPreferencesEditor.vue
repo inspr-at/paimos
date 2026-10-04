@@ -27,7 +27,8 @@ const currentLevel = computed(() => document.value?.levels[level.value]), view =
 const currentKind = computed(() => document.value?.kinds.find(row => row.id === kind.value))
 const effectiveRow = computed(() => view.value?.rows.find(row => row.kind_id === kind.value))
 const lockedAbove = computed(() => !!effectiveRow.value?.locked_by && effectiveRow.value.locked_by !== level.value)
-const editable = computed(() => props.person && !!document.value?.person_id && !!document.value.can[`edit_${level.value}`] && (mode.value !== 'row' || !!currentKind.value && currentKind.value.slug !== 'security' && !lockedAbove.value))
+const authority = computed(() => props.person && can('models.read') && (level.value === 'person' || can('model_prefs.manage', level.value === 'project' ? project.value : undefined)))
+const editable = computed(() => authority.value && !!document.value?.person_id && !!document.value.can[`edit_${level.value}`] && (mode.value !== 'row' || !!currentKind.value && currentKind.value.slug !== 'security' && !lockedAbove.value))
 const rowDraft = computed(() => draft.value?.unit === 'row' ? draft.value.value : null)
 const rowForDisplay = computed(() => rowDraft.value ?? currentLevel.value?.rows.find(row => row.kind_id === kind.value) ?? { kind_id: kind.value, normal: effectiveRow.value?.normal.selector ?? { mode: 'auto' as const }, complex: effectiveRow.value?.complex.selector ?? { mode: 'auto' as const }, locked: false })
 const scalarDraft = computed(() => draft.value?.unit === 'scalars' ? draft.value.value : null)
@@ -35,14 +36,15 @@ const displayScalars = computed(() => scalarDraft.value ?? currentLevel.value)
 const contextReady = computed(() => level.value !== 'project' || !!project.value && permissionsKnown(project.value) && can('nodes.read', project.value))
 const opened = ref(false)
 function cancel() { if (!busy.value) { editor.cancel(); opened.value = false } }
-async function load() {
-  opened.value = false; editor.reset()
+async function load(retainSnapshot = false) {
+  opened.value = false; editor.reset({ retainSnapshot })
   if (!contextReady.value) return
   await editor.load()
   // The initial row is chosen by an explicit picker; no watch can apply a
   // previous draft to a newly loaded kind/person.
 }
-watch(() => [props.owner, level.value, project.value, kind.value, mode.value, contextReady.value], () => { void load() }, { immediate: true, flush: 'sync' })
+watch(() => [props.owner, props.person, level.value, project.value, contextReady.value, authority.value], () => { void load() }, { immediate: true, flush: 'sync' })
+watch(() => [kind.value, mode.value], () => { void load(true) }, { flush: 'sync' })
 watch(() => props.owner, () => {
   scope.reset(); projects.value = []; projectError.value = ''; project.value = ''; kind.value = ''
   if (props.owner && props.person) void scope.run(({ after, signal }) => after(policyRequest('/projects', { signal }).then(r => policyJSON<{ items: { id: string; title: string; key: string }[] }>(r)), result => {
@@ -50,7 +52,12 @@ watch(() => props.owner, () => {
     projects.value = result.items
   }), { failed: () => { projectError.value = 'Visible projects could not be loaded. Default and You remain available.' } })
 }, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(() => { editor.reset(); scope.reset(); void load() })
+const stopAccess = onAccessChange(change => {
+  if (change === 'reset') { scope.reset(); void load(); return }
+  // Focus refresh is the same identity. Reads preserve the captured baseline
+  // and confirmed Undo; an in-flight write owns its confirmation/reconciliation.
+  void editor.load()
+})
 onBeforeUnmount(() => { stopAccess(); editor.dispose(); scope.dispose() })
 function selectKind(id: string) { kind.value = id }
 function edit() {

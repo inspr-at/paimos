@@ -266,6 +266,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     post:
       operationId: addWorkQueue
       description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
@@ -286,6 +288,8 @@ paths:
       responses:
         '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Active run or changed target conflicts}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
   /queue/{nodeId}/readiness:
@@ -298,6 +302,8 @@ paths:
       responses:
         '200': {description: Readiness, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}/estimate:
     post:
       operationId: applyWorkQueueEstimate
@@ -313,6 +319,8 @@ paths:
       responses:
         '200': {description: Readiness after estimate, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -323,6 +331,8 @@ paths:
       responses:
         '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Run has already started}
   /queue/{nodeId}/move:
     parameters:
@@ -339,6 +349,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Targeted entry cannot be reordered}
   /queue/reset:
     post:
@@ -348,6 +360,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/next:
     post:
       operationId: nextWorkQueue
@@ -361,6 +375,8 @@ paths:
       responses:
         '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot

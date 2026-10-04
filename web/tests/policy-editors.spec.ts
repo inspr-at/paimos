@@ -175,3 +175,79 @@ test('managed mode-only change refuses captured Undo without overwriting the new
  await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','true')
  await expect(status(frame)).not.toContainText('Order restored.')
 })
+
+async function focusRefresh(page: Page) {
+ const answer=page.waitForResponse(response=>response.url().includes('/api/me/permissions')&&response.request().method()==='GET')
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')))
+ await answer
+ // Let the permission replacement and Vue's watchers settle; no timed sleep.
+ await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))))
+}
+
+test('focus refresh preserves preference drafts, confirmed Undo and an in-flight save',async({page})=>{
+ const mock=await mockPolicyEditors(page);await page.goto('/settings/policies');const frame=await preferences(page)
+ await frame.getByTestId('policy-edit').click();await page.getByLabel('normal preference mode').selectOption('auto')
+ await focusRefresh(page)
+ await expect(page.getByLabel('normal preference mode')).toBeEnabled();await expect(page.getByLabel('normal preference mode')).toHaveValue('auto')
+ await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','false')
+ const held=mock.holdNext();await frame.getByTestId('policy-save').click();await held.started
+ try {
+  await focusRefresh(page);await expect(status(frame)).toContainText('Saving…');await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','true')
+ } finally {held.release()}
+ await expect(status(frame)).toContainText('Saved.');await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false')
+ await focusRefresh(page);await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false')
+ await frame.getByTestId('policy-undo').click();await expect(status(frame)).toContainText('Work-kind setting restored.')
+ expect(mock.state.writes).toHaveLength(2);expect(mock.state.writes[1]!.body).toMatchObject({revision:2,normal:{mode:'pinned',profile_id:'profile-0'}})
+})
+
+for(const width of [390,1024,1440])for(const theme of ['light','dark'] as const)test(`pending preference selection keeps controls and rows ${width} ${theme}`,async({page})=>{
+ await page.setViewportSize({width,height:width===390?844:1000})
+ const mock=await mockPolicyEditors(page,theme);await page.goto('/settings/policies');const frame=await preferences(page),panel=page.locator('.policies')
+ const picker=page.getByLabel('Preference work kind'),rows=panel.getByTestId('preference-kind-row'),invokingRow=rows.nth(1)
+ const kinds=await picker.locator('option').allTextContents(),labels=await rows.allTextContents()
+ const held=mock.holdRead()
+ try {
+  await expectStableControls({controls:{navigation:panel.getByTestId('preference-navigation'),picker,invokingRow,...actions(frame),status:status(frame)},scrollAreas:{panel,body:frame.getByTestId('policy-editor-body')},interactions:[{name:'work-kind selection while the preview read is held',run:async()=>{
+   await invokingRow.click();await held.started;await expect(status(frame)).toContainText('Loading model preferences')
+   expect(await picker.locator('option').allTextContents()).toEqual(kinds);expect(await rows.allTextContents()).toEqual(labels)
+  }}]})
+  await shot(page,'pending-preference-kind',width,theme)
+ } finally {held.release()}
+ await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','false')
+ const modeRead=mock.holdRead()
+ try {
+  await expectStableControls({controls:{navigation:panel.getByTestId('preference-navigation'),picker,...actions(frame),status:status(frame)},scrollAreas:{panel},interactions:[{name:'editor mode selection while the preview read is held',run:async()=>{
+   await page.getByRole('group',{name:'Preference editor mode'}).getByRole('button',{name:'Providers & locks',exact:true}).click();await modeRead.started
+   await expect(page.getByLabel('Provider requirement',{exact:true})).toBeVisible();expect(await picker.locator('option').allTextContents()).toEqual(kinds);expect(await rows.allTextContents()).toEqual(labels)
+  }}]})
+  await shot(page,'pending-preference-mode',width,theme)
+ } finally {modeRead.release()}
+})
+
+for(const stage of ['draft','undo','saving'] as const)test(`permission loss during focus refresh invalidates preference ${stage}`,async({page})=>{
+ const mock=await mockPolicyEditors(page);await page.goto('/settings/policies');const frame=await preferences(page)
+ await page.getByRole('group',{name:'Preference level'}).getByRole('button',{name:'Default',exact:true}).click()
+ await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','false');await frame.getByTestId('policy-edit').click()
+ const held=stage==='saving'?mock.holdNext():null
+ if(stage!=='draft')await frame.getByTestId('policy-save').click()
+ if(held)await held.started
+ if(stage==='undo')await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false')
+ mock.base.data.grants=mock.base.data.grants.filter(permission=>permission!=='model_prefs.manage')
+ try {
+  await focusRefresh(page)
+  await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','true');await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','true');await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','true')
+  await expect(page.getByLabel('normal preference mode')).toBeDisabled()
+ } finally {held?.release()}
+ // The pointer action is disabled above; a dispatched event also cannot revive
+ // discarded Undo or issue a write after authority changes.
+ await frame.getByTestId('policy-undo').dispatchEvent('click');expect(mock.state.writes).toHaveLength(stage==='draft'?0:1)
+})
+
+test('canonical person change during focus refresh drops old preference drafts and Undo',async({page})=>{
+ const mock=await mockPolicyEditors(page);await page.goto('/settings/policies');const frame=await preferences(page)
+ await frame.getByTestId('policy-edit').click();await frame.getByTestId('policy-save').click();await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false')
+ mock.state.document.person_id='second-canonical-person';await focusRefresh(page);await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','true')
+ await frame.getByTestId('policy-edit').click();await page.getByLabel('normal preference mode').selectOption('auto')
+ mock.state.document.person_id='third-canonical-person';await focusRefresh(page);await expect(page.getByLabel('normal preference mode')).toBeDisabled();await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','true')
+ expect(mock.state.writes).toHaveLength(1)
+})
