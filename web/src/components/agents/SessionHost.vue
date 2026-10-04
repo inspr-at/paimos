@@ -54,7 +54,7 @@ async function save(reset = false) {
 </script>
 
 <template>
-  <span class="host-control">
+  <span class="host-control" :class="{ editable }">
     <button type="button" class="host-badge" :disabled="!editable" :title="`${label || host} · ${host}`" :aria-label="`Your name for this computer: ${label || host}`" @click.stop="open">
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="2.5" width="10" height="8" rx="1" /><path d="m3 10.5-1.5 2h13l-1.5-2" /></svg>
       <span class="host-name">{{ label || host }}</span>
@@ -72,12 +72,13 @@ async function save(reset = false) {
 </template>
 
 <style scoped>
-.host-control { position: relative; display: inline-flex; align-items: center; }
-.host-badge { display: inline-flex; align-items: center; gap: 5px; width: 104px; height: 24px; box-sizing: border-box; padding: 0 7px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ink-3) 8%, transparent); color: var(--ink-3); font: 11px/1 var(--mono); cursor: pointer; }
+.host-control { position: relative; display: inline-flex; align-items: center; max-width: 100%; box-sizing: border-box; }
+.host-control.editable { padding-right: 22px; }
+.host-badge { display: inline-flex; align-items: center; gap: 5px; width: auto; min-width: 0; max-width: 160px; height: 24px; box-sizing: border-box; padding: 0 7px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--ink-3) 8%, transparent); color: var(--ink-3); font: 11px/1 var(--mono); cursor: pointer; }
 .host-badge:disabled { opacity: 1; cursor: default; }
 .host-badge svg { flex: none; }
 .host-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.host-pencil { position: absolute; left: calc(100% + 2px); top: 0; display: grid; place-items: center; width: 20px; height: 24px; border: 0; background: transparent; color: var(--ink-3); opacity: 0; cursor: pointer; }
+.host-pencil { position: absolute; right: 0; top: 0; display: grid; place-items: center; width: 20px; height: 24px; border: 0; background: transparent; color: var(--ink-3); opacity: 0; cursor: pointer; }
 :global(.c-host:hover .host-pencil), .host-control:focus-within .host-pencil { opacity: 1; }
 .host-pencil:focus-visible, .host-badge:focus-visible { outline: 2px solid var(--ink-3); outline-offset: 2px; }
 .host-form { padding: 8px; }
