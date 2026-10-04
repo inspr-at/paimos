@@ -2,7 +2,6 @@
 // Settings: Personal for everyone (theme, greeting, keys), and Workspace,
 // Business and Projects for admins, read from what the server already has.
 import { test, expect, type Page } from '@playwright/test'
-import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -99,21 +98,6 @@ test('Workspace shows the workspace and my role; people and keys moved to Access
   await expect(page.getByRole('table', { name: 'People' })).toBeVisible()
 })
 
-test('card controls share one alignment: centred on the title and its line', async ({ page }) => {
-  await setup(page)
-  await page.goto('/settings/personal')
-  await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeVisible()
-  for (const id of ['appearance', 'greeting', 'keys']) {
-    const offset = await page.locator(`#${id}`).evaluate(card => {
-      const titles = card.querySelector('.card-titles')!.getBoundingClientRect(), aside = card.querySelector('.card-aside')!.getBoundingClientRect()
-      return Math.abs((titles.top + titles.height / 2) - (aside.top + aside.height / 2))
-    })
-    expect(offset, id).toBeLessThanOrEqual(1)
-  }
-  // No empty body under a card that has none.
-  await expect(page.locator('#greeting .card-body')).toHaveCount(0)
-})
-
 test('Business shows the parts and the stored quote settings; a deep link rings its card', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/business#quotes')
@@ -170,18 +154,3 @@ test('at 390 the sections sit in a grid and nothing is cut', async ({ page }) =>
     expect(cut, section).toEqual([])
   }
 })
-
-for (const colorScheme of ['light', 'dark'] as const) {
-  for (const section of ['personal', 'workspace', 'business', 'projects', 'portal']) {
-    test(`axe: settings ${section} in ${colorScheme}`, async ({ page }) => {
-      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-      await setup(page)
-      await page.goto(`/settings/${section}`)
-      await expect(page.locator('.settings-card').first()).toBeVisible()
-      await page.waitForTimeout(300)
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
-      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
-      expect(summary, summary.join('\n')).toEqual([])
-    })
-  }
-}

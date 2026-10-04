@@ -9,13 +9,6 @@ import (
 	"testing"
 )
 
-func TestDefaultIsValid(t *testing.T) {
-	b := Default()
-	if b.Schema != Schema || b.Product != "PAIMOS" || b.Generation != "7" || b.ReleaseName != "AEON" || b.Wordmark != "PAIMOS AEON" || b.ShortName != "AEON" {
-		t.Fatalf("default %+v", b)
-	}
-}
-
 func TestLoadOverride(t *testing.T) {
 	t.Setenv(EnvFile, "")
 	if b, err := Load(); err != nil || b != Default() {

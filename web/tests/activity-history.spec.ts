@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { expect, test, type Browser, type Page } from '@playwright/test'
+import { readFileSync, readdirSync } from 'node:fs'
+import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 
-const SHOTS = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-336-system-principal'
 const hour = (h: number) => new Date(Date.parse('2026-09-23T12:00:00Z') - h * 3_600_000).toISOString()
 
 function withHistory() {
@@ -57,7 +55,7 @@ test('automatic history is Aeon, and a person named System stays a person', asyn
   expect(errors).toEqual([])
 })
 
-async function shoot(browser: Browser, theme: 'light' | 'dark', width: number) {
+async function shoot(browser: Browser, testInfo: TestInfo, theme: 'light' | 'dark', width: number) {
   const context = await browser.newContext({
     viewport: { width, height: width === 390 ? 844 : 1000 },
     colorScheme: theme,
@@ -73,14 +71,20 @@ async function shoot(browser: Browser, theme: 'light' | 'dark', width: number) {
     return pageWide || regionWide ? `${root.scrollWidth}/${root.clientWidth} region ${region?.scrollWidth}/${region?.clientWidth}` : ''
   })
   expect(overflow, `${width} ${theme}`).toBe('')
-  mkdirSync(SHOTS, { recursive: true })
-  await activity.screenshot({ path: join(SHOTS, `history__${width}__${theme}.png`) })
-  await page.screenshot({ path: join(SHOTS, `ticket__${width}__${theme}.png`) })
+  await activity.screenshot({ path: testInfo.outputPath(`history__${width}__${theme}.png`) })
+  await page.screenshot({ path: testInfo.outputPath(`ticket__${width}__${theme}.png`) })
   await context.close()
 }
 
-test('history screenshots at 390 and 1600, light and dark', async ({ browser }) => {
+test('history screenshots at 390 and 1600, light and dark', async ({ browser }, testInfo) => {
   for (const theme of ['light', 'dark'] as const) {
-    for (const width of [1600, 390]) await shoot(browser, theme, width)
+    for (const width of [1600, 390]) await shoot(browser, testInfo, theme, width)
+  }
+  const expected = ['light', 'dark'].flatMap(theme =>
+    [1600, 390].flatMap(width => [`history__${width}__${theme}.png`, `ticket__${width}__${theme}.png`]),
+  )
+  expect(readdirSync(testInfo.outputDir).filter(name => name.endsWith('.png')).sort()).toEqual(expected.sort())
+  for (const name of expected) {
+    expect(readFileSync(testInfo.outputPath(name)).subarray(0, 8).toString('hex'), name).toBe('89504e470d0a1a0a')
   }
 })

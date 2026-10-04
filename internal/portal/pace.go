@@ -70,23 +70,34 @@ func nextPaceRevision(ctx context.Context, tx pgx.Tx) (int64, error) {
 	err := tx.QueryRow(ctx, `
 		INSERT INTO portal_pace_revision AS c (tenant_id, revision)
 		SELECT NULLIF(current_setting('aeon.tenant_id', true), '')::uuid,
-		       COALESCE((SELECT p.revision FROM portal_pace p), 0) + 1
+		       COALESCE((SELECT max(p.revision) FROM portal_product_pace p), 0) + 1
 		ON CONFLICT (tenant_id) DO UPDATE
-		SET revision = GREATEST(c.revision, COALESCE((SELECT p.revision FROM portal_pace p), 0)) + 1
+		SET revision = GREATEST(c.revision, COALESCE((SELECT max(p.revision) FROM portal_product_pace p), 0)) + 1
 		RETURNING revision`).Scan(&revision)
 	return revision, err
 }
 
 func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
-		in, err := decodePaceWrite(r)
+	var in paceWrite
+	if !m.decodeAdminInput(w, r, func() error {
+		var err error
+		in, err = decodePaceWrite(r)
 		if err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid pace"}
+			return statusError{http.StatusBadRequest, "invalid pace"}
+		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
+		productID, err := portalProductID(ctx, tx)
+		if err != nil {
+			return nil, err
 		}
 		history := false
 		switch {
 		case in.clear:
-			if _, err := tx.Exec(ctx, `DELETE FROM portal_pace`); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM portal_product_pace WHERE product_id=$1::uuid`, productID); err != nil {
 				return nil, err
 			}
 		case in.setHistory:
@@ -99,10 +110,10 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 				return nil, err
 			}
 			tag, err := tx.Exec(ctx, `
-				UPDATE portal_pace AS p
+				UPDATE portal_product_pace AS p
 				SET release_history = $1,
 				    revision = $4
-				WHERE p.project_node_id = $2::uuid
+				WHERE p.product_id=$5::uuid AND p.project_node_id = $2::uuid
 				  AND p.revision = $3
 				  AND $4 > p.revision
 				  AND EXISTS (
@@ -111,7 +122,7 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 					JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
 					WHERE n.tenant_id = p.tenant_id AND n.id = p.project_node_id
 					  AND n.deleted_at IS NULL AND k.slug = 'project'
-				)`, in.history, in.projectID, in.revision, revision)
+				)`, in.history, in.projectID, in.revision, revision, productID)
 			if err != nil {
 				return nil, err
 			}
@@ -137,7 +148,7 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 			}
 			var currentProject string
 			var currentHistory bool
-			err = tx.QueryRow(ctx, `SELECT project_node_id::text, release_history FROM portal_pace`).Scan(&currentProject, &currentHistory)
+			err = tx.QueryRow(ctx, `SELECT project_node_id::text, release_history FROM portal_product_pace WHERE product_id=$1::uuid`, productID).Scan(&currentProject, &currentHistory)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, err
 			}
@@ -149,14 +160,17 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 				return nil, err
 			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO portal_pace(tenant_id, project_node_id, release_history, revision)
-				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid, $2, $3)
-				ON CONFLICT (tenant_id) DO UPDATE
+				INSERT INTO portal_product_pace(tenant_id, project_node_id, release_history, revision,product_id)
+				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid, $2, $3,$4::uuid)
+				ON CONFLICT (tenant_id,product_id) DO UPDATE
 				SET project_node_id = EXCLUDED.project_node_id,
 				    release_history = EXCLUDED.release_history,
-				    revision = EXCLUDED.revision`, in.projectID, history, revision); err != nil {
+				    revision = EXCLUDED.revision`, in.projectID, history, revision, productID); err != nil {
 				return nil, err
 			}
+		}
+		if err := syncLegacyPace(ctx, tx, productID); err != nil {
+			return nil, err
 		}
 		if _, err := events.Append(ctx, tx, p, events.Change{
 			Type:  "portal.pace_updated",
@@ -169,13 +183,21 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) writeFulfillment(w http.ResponseWriter, r *http.Request) {
+	var featureID string
+	var clear bool
+	if !m.decodeAdminInput(w, r, func() error {
+		var err error
+		featureID, clear, err = decodeOptionalID(r, "feature_id")
+		if err != nil {
+			return statusError{http.StatusBadRequest, "invalid wish"}
+		}
+		return nil
+	}) {
+		return
+	}
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		wishID := r.PathValue("wishId")
 		if !uuidPattern.MatchString(wishID) {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid wish"}
-		}
-		featureID, clear, err := decodeOptionalID(r, "feature_id")
-		if err != nil {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid wish"}
 		}
 		productID, err := portalProductID(ctx, tx)
@@ -306,10 +328,10 @@ func loadPaceAdminFor(ctx context.Context, tx pgx.Tx, productID string) (paceAdm
 	var revision int64
 	err := tx.QueryRow(ctx, `
 		SELECT p.project_node_id::text, left(n.title, 300), p.release_history, p.revision
-		FROM portal_pace p
+		FROM portal_product_pace p
 		JOIN nodes n ON n.tenant_id = p.tenant_id AND n.id = p.project_node_id
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE n.deleted_at IS NULL AND k.slug = 'project'`).Scan(&projectID, &title, &history, &revision)
+		WHERE p.product_id=$1::uuid AND n.deleted_at IS NULL AND k.slug = 'project'`, productID).Scan(&projectID, &title, &history, &revision)
 	linked := err == nil && uuidPattern.MatchString(projectID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, paceSample{}, err

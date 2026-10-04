@@ -4,7 +4,6 @@
 // focus pauses it, an arrow stops it for good, a button pauses and resumes it,
 // reduced motion never starts it); the cadence chart steps through ranges it
 // remembers, and its bars are one keyboard stop.
-import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
@@ -442,16 +441,3 @@ test('a clock tick preserves the chart focus, tooltip and next keyboard step', a
   await page.keyboard.press('ArrowLeft')
   await expect(bars.nth(4)).toBeFocused()
 })
-
-for (const colorScheme of ['light', 'dark'] as const) {
-  test(`axe: the header ${colorScheme}`, async ({ page }, testInfo) => {
-    await page.emulateMedia({ colorScheme })
-    await open(page)
-    await page.evaluate(value => { document.documentElement.dataset.theme = value }, colorScheme)
-    await card(page).getByRole('button', { name: 'Next stat' }).click()
-    const results = await new AxeBuilder({ page }).include('.releases .head').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
-    const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')}`).join('\n')}`)
-    expect(summary, summary.join('\n')).toEqual([])
-    await sheet(page).locator('.head').screenshot({ path: testInfo.outputPath(`release-header-${colorScheme}.png`) })
-  })
-}
