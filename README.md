@@ -44,8 +44,20 @@ Planning item pages batch authorized parent/epic and stored assignee summaries
 plus reported progress/ETA for the selected rows in the same read snapshot;
 unknown estimates stay absent and no per-ticket HTTP read is added. Legacy
 item reads omit these additive summaries.
-Breadcrumb/picker, write actions, lifecycle sheets and the journey adoption
-card remain assigned to the other P6 packages.
+Drag handles and Move controls place a ticket directly in a release or ranked
+Backlog. The menu selects destination and append/top/before/after together and
+submits one write, with the exact event receipt offered for Undo. Visible gaps
+send one anchor; the server retains occupied hidden/tombstone ranks and validates
+direct anchors again inside the write fence. Explicit top is the physical top,
+including work omitted by filters or pages. Internal Upcoming releases can
+reorder; published order remains protected. Refused moves explain their reason
+in a reserved feedback slot without changing row layout. On phones, holding for
+500 ms picks up a row; quick swipes cancel pickup, and edge scrolling uses the
+existing list. Escape cancels pickup without a write. Single-letter g/t/m work
+outside fields; the header's g-place chord remains available through the move
+sheet. Save from a field uses the platform's Command/Ctrl+Enter.
+Lifecycle sheets and the journey adoption card remain assigned to other P6
+packages.
 
 `GET /api/knowledge?project_id=<project>&ships_in=none` reads deduplicated,
 one-hop visible `relates` context of effective Backlog work in either direction,

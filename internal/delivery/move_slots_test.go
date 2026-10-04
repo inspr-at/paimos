@@ -3,7 +3,13 @@ package delivery
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestExplicitPositionsValidateBeforeWork(t *testing.T) {
@@ -161,5 +167,82 @@ func TestTopInEmptyRankedBacklogDoesNotRankTheTail(t *testing.T) {
 	}
 	if result.Items[0].Rank == "" || f.placed(t, tail).Revision != 0 {
 		t.Fatalf("empty ranked portion must accept top without an invented anchor: %+v", result)
+	}
+}
+
+// The competing writer owns the canonical fence before placement starts. Real
+// pg_locks evidence proves overlap; no scheduling delay decides the outcome.
+func TestSingleAnchorRechecksAfterConcurrentChange(t *testing.T) {
+	for _, change := range []string{"deleted", "moved", "new_neighbour"} {
+		t.Run(change, func(t *testing.T) {
+			f := newStoreFixture(t)
+			anchor := f.item(t, "ticket", "TK-1", "open", f.next, "V")
+			f.item(t, "ticket", "TK-2", "open", f.next, "X")
+			subject := f.item(t, "ticket", "TK-3", "open", f.release, "V")
+			incoming := f.item(t, "ticket", "TK-4", "open", "", "")
+			before := f.scalar(t, `SELECT count(*) FROM events`)
+			pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
+				return strings.Contains(query, "pg_advisory_xact_lock")
+			})
+			changed := make(chan error, 1)
+			go func() {
+				changed <- db.InTenant(dbtest.Seed(ctx), pool, f.tenant, func(tx pgx.Tx) error {
+					if err := authz.LockProjectMutation(ctx, tx, f.tenant); err != nil {
+						return err
+					}
+					switch change {
+					case "deleted":
+						_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, anchor, f.clock)
+						return err
+					case "moved":
+						_, err := tx.Exec(ctx, `UPDATE ships_in SET release_node_id=$2,rank='W' WHERE item_node_id=$1`, anchor, f.release)
+						return err
+					default:
+						// This lower-level fixture intentionally leaves the captured destination
+						// revision unchanged so it proves physical neighbour resolution itself.
+						_, err := tx.Exec(ctx, `INSERT INTO ships_in(tenant_id,project_node_id,item_node_id,release_node_id,rank,source,placed_by) VALUES($1,$2,$3,$4,'W','person',$5)`, f.tenant, f.project, incoming, f.next, f.actor)
+						return err
+					}
+				})
+			}()
+			pid := barrier.Wait(t, ctx)
+			type outcome struct {
+				result PlacementResult
+				err    error
+			}
+			placed := make(chan outcome, 1)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				result, err := f.store.PlaceWithRevision(ctx, f.person, f.project, []PlacementRequest{{ItemID: subject, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1, Slot: Slot{AfterID: anchor}}})
+				placed <- outcome{result, err}
+			}()
+			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "advisory" {
+				t.Fatalf("placement bypassed anchor writer: %q", lock)
+			}
+			barrier.Release()
+			if err := dbtest.Await(t, ctx, changed); err != nil {
+				t.Fatal(err)
+			}
+			result := dbtest.Await(t, ctx, placed)
+			if change == "new_neighbour" {
+				if result.err != nil {
+					t.Fatal(result.err)
+				}
+				if rank := result.result.Items[0].Rank; rank <= "V" || rank >= "W" {
+					t.Fatalf("did not resolve the new physical neighbour: %s", rank)
+				}
+				if result.result.UndoEventID == nil || *result.result.UndoEventID != f.lastEvent(t, "ships_in.changed").ID || f.scalar(t, `SELECT count(*) FROM events`) != before+1 {
+					t.Fatal("single placement did not yield one event and exact receipt")
+				}
+			} else {
+				if !errors.Is(result.err, ErrNotFound) || result.result.UndoEventID != nil {
+					t.Fatalf("wrong anchor refusal: %+v %v", result.result, result.err)
+				}
+				if f.scalar(t, `SELECT count(*) FROM events`) != before || f.placed(t, subject).Revision != 1 {
+					t.Fatal("stale anchor committed effects")
+				}
+			}
+		})
 	}
 }

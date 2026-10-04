@@ -12,9 +12,9 @@ const agents = computed(() => typeof props.release.build_summary.agents === 'num
   ? `${props.release.build_summary.agents_incomplete ? '≥ ' : ''}${props.release.build_summary.agents} agents · ${props.release.build_summary.agents_incomplete ? '≥ ' : ''}${props.release.build_summary.waiting ?? 0} waiting` : '—')
 </script>
 <template>
-  <div class="release-row" :class="{ expanded, scoped }" :data-release-id="release.release_id">
+  <div :data-planning-release="release.release_id" class="release-row" :class="{ expanded, scoped }" :data-release-id="release.release_id">
     <div class="release-title">
-      <span class="handle-slot" aria-hidden="true" />
+      <span class="handle-slot"><slot name="handle" /></span>
       <button type="button" class="chevron" :disabled="disabled" :aria-expanded="expanded" :aria-controls="`release-work-${release.release_id}`" :aria-label="`${expanded ? 'Collapse' : 'Expand'} ${name}`" @click="emit('toggle')"><AppIcon name="chevron-right" :size="14" /></button>
       <button type="button" class="release-name" :disabled="disabled" :aria-label="`Scope to ${name}`" :data-tip="`${name}${release.version ? `\n${release.version}` : ''}`" @click="emit('scope')">
         <span class="name-line"><AppIcon :name="release.visibility === 'internal' ? 'tag' : 'box'" :size="14" /><span class="name-text">{{ name }}</span></span>
@@ -34,7 +34,7 @@ const agents = computed(() => typeof props.release.build_summary.agents === 'num
 .release-row.expanded { background: color-mix(in srgb, var(--surface-sunken) 55%, transparent); }
 .release-row.scoped { background: var(--row-selected); }
 .release-title { display: flex; min-width: 0; align-items: center; }
-.handle-slot { width: 12px; flex-shrink: 0; }
+.handle-slot { position: relative; width: 28px; flex-shrink: 0; }
 .chevron, .release-more { display: grid; place-items: center; min-width: 32px; height: 44px; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--ink-2); flex-shrink: 0; }
 .chevron[aria-expanded="true"] svg { transform: rotate(90deg); }
 button:hover:not(:disabled) { background: var(--row-hover); }
@@ -65,5 +65,5 @@ button:focus-visible { box-shadow: var(--focus-ring); outline: none; }
   .phone-word { display: inline; }
   .bar { display: inline-block; }
 }
-@media (pointer: coarse) { .chevron { min-width: 44px; } }
+@media (pointer: coarse) { .handle-slot { width: 44px; } .chevron { min-width: 44px; } }
 </style>

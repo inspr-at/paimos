@@ -1,7 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { DeliveryCommit } from '../../lib/deliveryChanges'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { DELIVERY_ACTIONS, type DeliveryCommit } from '../../lib/deliveryChanges'
+import { usePlanningMoves } from '../../lib/usePlanningMoves'
+import { useSession } from '../../stores/session'
+import { can } from '../../lib/authz'
+import DeliveryMoveSheet from './DeliveryMoveSheet.vue'
 import { api } from '../../lib/api'
 import { planningQuery, releaseName, type MatchCounts, type PlanningSource } from '../../lib/deliveryPlanning'
 import { readPreference, writePreference } from '../../lib/preferences'
@@ -21,6 +25,7 @@ function activeElements() {
 }
 function canInsert(source: PlanningSource) {
   const active = activeElements()
+  if (moves?.drag.value || moves?.draft.value) return false
   if (!active.length) return true
   if (source === 'overview') return false
   const point = [...(root.value?.querySelectorAll('[data-insertion]') ?? [])].find(el => el.getAttribute('data-insertion') === source)
@@ -41,6 +46,9 @@ const parsedQuery = computed(() => {
 const query = computed(() => parsedQuery.value.query)
 const queryError = computed(() => parsedQuery.value.error)
 const identity = computed(() => JSON.stringify([owner.value, releaseScope(props.filters.ships_in), query.value, mode.value]))
+const session = useSession()
+const moves = usePlanningMoves({ root, identity: () => identity.value, releases: () => [...overview.value?.active ?? [], ...overview.value?.released.items ?? []], items: () => Object.values(work).flatMap(s => s.items), scroll: () => props.scrollRoot, agent: () => session.identity?.principal.kind === 'agent', allowed: () => can('releases.write', props.projectId), stale: () => stale.value, actions: inject(DELIVERY_ACTIONS, undefined) })
+const { draft: moveDraft, initial: moveInitial, drag: moving, feedback: moveFeedback, point: movePoint, line: moveLine, highlight: moveHighlight, refused: moveRefused } = moves
 let statusAbort: AbortController | null = null, touched = false, savedIds: string[] = [], readyOwner = '', disposed = false
 const prefKey = () => `releases-expanded:${props.projectId}`
 async function loadMode(preserve = false) {
@@ -140,7 +148,7 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
 </script>
 
 <template>
-  <section ref="root" class="release-planning" aria-label="Release planning" @pointerover="pointer" @pointerleave="leave" @focusout="focusOut">
+  <section ref="root" class="release-planning" aria-label="Release planning" @pointerover="pointer" @pointerleave="leave" @focusout="focusOut" @pointerdown="moves.down" @click.capture="moves.click" @contextmenu="moves.context">
     <div class="planning-controls" role="toolbar" aria-label="Release expansion and continuation">
       <div class="expansion-controls">
         <button type="button" class="btn sm ghost" :disabled="!overview || stale" @click="expandAll"><AppIcon name="expand-all" :size="14" />Expand all</button>
@@ -156,6 +164,7 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
         <button type="button" class="btn sm ghost" :disabled="!pending" @click="flush(true)">Show loaded</button>
       </div>
     </div>
+    <div class="move-feedback" role="status" aria-live="polite">{{ moveFeedback }}</div>
     <div class="planning-feedback" role="status" aria-live="polite">
       <span v-if="queryError || modeError || error || pageError || preferenceError" class="error">{{ queryError || modeError || error || pageError || preferenceError }}{{ stale ? ' · showing previous data' : '' }}</span>
       <span v-else-if="pending">{{ pending }} {{ pendingExpansion ? 'updates' : 'pages' }} ready · Show loaded to insert them now{{ stale ? ' · previous query still shown' : '' }}</span>
@@ -171,38 +180,58 @@ defineExpose({ committed, reload: () => mode.value === 'error' ? loadMode() : pl
     <template v-if="overview">
       <div class="release-columns" aria-hidden="true"><span>Release</span><span>Status</span><span>Open</span><span>Progress</span><span>Outlook</span><span>Agents</span><span /></div>
       <h2 class="release-section">Upcoming</h2>
-      <div v-for="release in overview.active" :key="release.release_id" :data-planning-block="release.release_id" class="release-block">
-        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => emit('menu', release.release_id, anchor)" />
-        <div v-if="expanded.has(release.release_id)" :id="`release-work-${release.release_id}`"><PlanningWork v-bind="workProps(`release:${release.release_id}`, release.matches)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" /></div>
+      <div v-for="release in overview.active" :key="release.release_id" :data-planning-block="release.release_id" class="release-block" :class="{ 'move-target': moveHighlight === release.release_id, 'move-refused': moveHighlight === release.release_id && moveRefused }">
+        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => emit('menu', release.release_id, anchor)">
+          <template #handle><button type="button" class="release-drag-handle" data-move-handle :aria-label="`Reorder ${releaseName(release)}`" :aria-disabled="release.visibility === 'published' || release.state === 'released'" :data-tip="release.visibility === 'published' ? 'Published releases keep their order.' : 'Reorder upcoming release'" @click.stop="moves.open({ kind: 'release', record: { ...release } })"><AppIcon name="grip" :size="14" /></button></template>
+        </PlanningReleaseRow>
+        <div v-if="expanded.has(release.release_id)" :id="`release-work-${release.release_id}`"><PlanningWork v-bind="workProps(`release:${release.release_id}`, release.matches)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" /></div>
         <span v-else :data-insertion="`release:${release.release_id}`" class="insertion" />
       </div>
       <p v-if="!overview.active.length" class="empty">{{ filters.q ? 'No upcoming releases match' : 'No upcoming releases' }}</p>
       <span data-insertion="active" class="insertion" />
-      <div v-if="backlogVisible" data-planning-block="backlog" class="release-block">
+      <div v-if="backlogVisible" data-planning-block="backlog" class="release-block" :class="{ 'move-target': moveHighlight === 'backlog', 'move-refused': moveHighlight === 'backlog' && moveRefused }">
         <div class="backlog-row" :class="{ scoped: scoped('backlog') }">
           <button type="button" class="chevron" :disabled="stale" :aria-expanded="expanded.has('backlog')" aria-controls="release-work-backlog" :aria-label="`${expanded.has('backlog') ? 'Collapse' : 'Expand'} Backlog`" @click="toggle('backlog')"><AppIcon name="chevron-right" :size="14" /></button>
           <button type="button" class="backlog-name" :disabled="stale" @click="scope('backlog')"><AppIcon name="inbox" :size="14" />Backlog</button>
           <span class="backlog-count mono">{{ overview.backlog.ranked }} ranked · {{ overview.backlog.tail }} new</span>
         </div>
         <div v-if="expanded.has('backlog')" id="release-work-backlog">
-          <PlanningWork v-bind="workProps('backlog:ranked', overview.backlog_matches?.ranked)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" />
+          <PlanningWork v-bind="workProps('backlog:ranked', overview.backlog_matches?.ranked)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" />
           <h3 class="tail-heading">New · oldest first</h3>
-          <PlanningWork v-bind="workProps('backlog:tail', overview.backlog_matches?.tail)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" />
+          <PlanningWork v-bind="workProps('backlog:tail', overview.backlog_matches?.tail)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" />
         </div>
       </div>
       <div class="abandoned-row"><AppIcon name="archive" :size="14" /><span>Abandoned</span><span class="mono">{{ overview.abandoned }}{{ overview.counts_incomplete ? '+' : '' }}</span><span class="quiet">Names stay reserved</span></div>
       <h2 class="release-section">Released <span>Internal work reads Done</span></h2>
-      <div v-for="release in overview.released.items" :key="release.release_id" :data-planning-block="release.release_id" class="release-block">
-        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => emit('menu', release.release_id, anchor)" />
-        <div v-if="expanded.has(release.release_id)" :id="`release-work-${release.release_id}`"><PlanningWork v-bind="workProps(`release:${release.release_id}`, release.matches)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" /></div>
+      <div v-for="release in overview.released.items" :key="release.release_id" :data-planning-block="release.release_id" class="release-block" :class="{ 'move-target': moveHighlight === release.release_id, 'move-refused': moveHighlight === release.release_id && moveRefused }">
+        <PlanningReleaseRow :release="release" :expanded="expanded.has(release.release_id)" :scoped="scoped(release.release_id)" :disabled="stale" @toggle="toggle(release.release_id)" @scope="scope(release.release_id)" @menu="anchor => emit('menu', release.release_id, anchor)">
+          <template #handle><button type="button" class="release-drag-handle" data-move-handle :aria-label="`Reorder ${releaseName(release)}`" :aria-disabled="release.visibility === 'published' || release.state === 'released'" :data-tip="release.visibility === 'published' ? 'Published releases keep their order.' : 'Reorder upcoming release'" @click.stop="moves.open({ kind: 'release', record: { ...release } })"><AppIcon name="grip" :size="14" /></button></template>
+        </PlanningReleaseRow>
+        <div v-if="expanded.has(release.release_id)" :id="`release-work-${release.release_id}`"><PlanningWork v-bind="workProps(`release:${release.release_id}`, release.matches)" @open="key => emit('open', key)" @copy="key => emit('copy', key)" @new-tab="key => emit('newTab', key)" @move="moves.openItem" /></div>
         <span v-else :data-insertion="`release:${release.release_id}`" class="insertion" />
       </div>
       <span data-insertion="released" class="insertion" />
       <p class="empty">{{ overview.released.next_cursor ? 'More released releases are available with Load more above.' : overview.counts_incomplete ? 'Loaded release pages exhausted; counts remain incomplete.' : filters.q ? 'End of the loaded matching release pages' : 'All released releases loaded' }}</p>
     </template>
+    <Teleport to="body">
+      <div v-if="moving" class="move-ghost" aria-hidden="true" :style="{ left: `${Math.min(movePoint.x + 12, Math.max(8, (root?.clientWidth ?? 320) - 220))}px`, top: `${Math.max(144, movePoint.y - 16)}px` }"><span>{{ moving.record.title }}</span><p>{{ moveFeedback }}</p></div>
+      <div v-if="moveLine" class="move-line" :style="{ left: `${moveLine.x}px`, top: `${moveLine.y}px`, width: `${moveLine.width}px` }" />
+      <DeliveryMoveSheet v-if="moveDraft" :subject="moveDraft" :initial="moveInitial" :person="person" :releases="overview?.active ?? []" :visible-items="Object.values(work).flatMap(s => s.items)" :advice="moves.advice" @close="moveDraft = null" @confirm="moves.confirm" />
+    </Teleport>
   </section>
 </template>
 <style scoped>
+.move-feedback { height: 44px; display: flex; align-items: center; font-size: 12px; line-height: 18px; color: var(--ink-2); overflow: auto; }
+.move-target > :first-child { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--line-2); }
+.move-refused > :first-child { background: var(--danger-bg); }
+.release-drag-handle { display: grid; place-items: center; width: 28px; height: 44px; padding: 0; background: transparent; border: 0; color: var(--ink-3); cursor: grab; touch-action: none; }
+.release-drag-handle[aria-disabled="true"] { cursor: not-allowed; }
+@media(hover:hover) { .release-drag-handle { opacity: 0; } .release-block:hover .release-drag-handle, .release-block:focus-within .release-drag-handle { opacity: 1; } }
+@media(pointer:coarse) { .release-drag-handle { width: 44px; touch-action: pan-y; } }
+.move-ghost { position: fixed; transform: translateY(-100%); z-index: 1000; pointer-events: none; width: min(220px,calc(100vw - 32px)); padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-pop); font-size: 12px; }
+.move-ghost span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.move-ghost p { margin: 6px 0 0; font-size: 11px; line-height: 1.4; }
+.move-line { position: fixed; height: 2px; background: var(--ink-2); z-index: 999; pointer-events: none; }
 .release-planning { container: releases / inline-size; min-width: 0; }
 .planning-controls { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; padding: 8px 0; }
 .expansion-controls, .release-continuation, .work-continuation { display: flex; align-items: center; gap: 6px; min-width: 0; }

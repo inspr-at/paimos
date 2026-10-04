@@ -668,6 +668,7 @@ defineExpose({
               stale: !!liveLabels?.has(entry.row.id), 'live-flash': !!liveFlash?.has(entry.row.id),
             }"
             :style="entry.tree ? { '--depth': entry.tree.depth } : undefined"
+            :data-planning-item="embedded ? entry.row.id : undefined"
             :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
             :aria-describedby="planningDescribedBy(entry.row) || undefined"
             :aria-expanded="entry.tree?.hasChildren ? entry.tree.expanded : undefined"
@@ -687,6 +688,7 @@ defineExpose({
               </button>
             </td>
             <td class="c-key">
+              <slot v-if="embedded" name="planning-handle" :row="entry.row" />
               <div class="cell">
                 <input
                   v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1"
@@ -722,6 +724,7 @@ defineExpose({
                   <span class="mono">{{ entry.tree.stats.done }}/{{ entry.tree.stats.scope }}</span>
                 </span>
               </div>
+              <slot v-if="embedded" name="planning-menu" :row="entry.row" />
               <span v-if="!embedded" class="row-actions">
                 <QueueAction :row="entry.row" :project-id="projectId" />
                 <button type="button" class="icon-btn sm flat" :aria-label="`Open ${entry.row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', entry.row)"><AppIcon name="external" :size="13" /></button>
@@ -1223,4 +1226,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }
   .table-card.overflowing thead th { top: 0; }
 }
+</style>
+
+<style scoped>
+.embedded .c-key { position: relative; }
+.embedded .c-title { padding-right: 44px; }
+@media (pointer: coarse) { .embedded .ticket-row .c-key { padding-left: 48px; } }
 </style>
