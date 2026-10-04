@@ -162,10 +162,10 @@ void props
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .menu-item.danger:hover:not(:disabled) { background: var(--danger-bg); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
-/* A narrow panel with a trail keeps the last crumb (after an ellipsis) and drops the list position. */
+/* Narrow headers keep Back; breadcrumb text must not compete with the current
+   key and actions, even when the surrounding viewport is wide. */
 @container panel-bar (max-width: 640px) {
-  .has-trail .position, .crumb-item:not(:last-child) { display: none; }
-  .trail-more { display: inline; }
+  .has-trail .position, .trail { display: none; }
 }
 /* A narrow dock uses More for these actions, independently of viewport width. */
 @container panel-bar (max-width: 420px) {
