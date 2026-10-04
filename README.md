@@ -14,6 +14,39 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Agent conversation foundation
+
+AEON-618 R1 introduces a separate `chat-v1` identity contract in
+`api/openapi.yaml`. The server mounts it disabled by default; integration
+packages may opt in with `chat.New(pool, chat.Options{Enabled: true})`.
+This foundation does not enable chat delivery, wake, history migration or
+native process controls. Existing inbox, session and CLI contracts stay intact.
+History, read-marker, delivery, receipt, cancellation and stream definitions
+are reserved contracts marked `x-aeon-package` for R2/R3; R1 does not mount them.
+
+A person creates their own project role, resolves its lasting conversation,
+and selects an existing external inbox registration using the expected binding
+epoch. Lead identity is stored as `person_project`: one lead per person and
+project. Workers require distinct assignment slots. Handover preserves the
+conversation and prior binding records; a native session cannot be reused for
+another private role or person. Automation binding delegation is deferred.
+
+Workers use their scoped agent key and existing `X-Aeon-Worker-Lease` through
+`POST /api/chat-deliveries/binding/resolve`. The proof is checked against the
+exact live external registration (heartbeat or initial registration within two
+minutes), person, project, role and epoch. Public references and session IDs
+alone grant no access. Readiness omits account, quota, model, host and native
+reference metadata; no input/wake/receipt capability is advertised before
+receiver qualification. Registration and binding do not extend execution
+permissions or start an agent.
+
+New inbox rows have an internal `chat_thread_id` discriminator and restrictive
+participant RLS. Legacy reads, ACKs, replies, managed drains, streams, receipts,
+sweepers and notifications exclude that mode. The database rejects legacy
+transport projections of chat rows and cross-mode replies. Chat event hints
+are private, and nested legacy transactions clear verified chat context.
+Migration `1141_chat_identity.sql` preserves all existing rows without backfill.
+
 ## Theme API
 
 AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
@@ -1543,6 +1576,17 @@ A coordinator registered with the same principal, harness and native session
 reference automatically takes over its stopped or heartbeat-lost predecessor's
 live children. The transaction records one `harness.adopted` event per child and
 `harness.handed_over` on the old lead; stopped children remain historical.
+
+For opt-in chat, a native reference and every linked alias retain one person,
+chat role and project across registrations. Relationships persist even before
+first binding, so binding one reference claims the connected aliases without
+replaying older generations. Registration, replay, renaming and binding share
+one database store and table guards. Conflicting ownership rolls back the whole
+write; components larger than 1024 references fail closed. Ownership is never
+implicitly released by stopping, archiving or handing over a generation.
+Replacement claims precede stop-trigger reply-obligation events as well as
+registration events. This identity groundwork remains disabled by default.
+
 A healthy lead is never replaced. `harness run-heartbeat --role coordinator
 --source-session NATIVE_UUID` uses that stable native reference; use a fresh
 private state directory for the new process generation. After an unclean

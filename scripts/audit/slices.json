@@ -110,6 +110,7 @@
       "paths": [
         "internal/cli/**",
         "internal/inbox/**",
+        "internal/chat/**",
         "internal/client/**",
         "internal/plugins/**",
         "internal/events/**"
