@@ -59,6 +59,7 @@ import (
 	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -119,6 +120,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.read", false, 200, m.sessionUsage},
 		{"POST /api/model-prices", "models.manage", false, 201, m.createUsagePrice},
 		{"GET /api/model-prices", "harness.read", false, 200, m.listUsagePrices},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/model-reports", "harness.worker", true, 200, m.modelReports},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
 		{"GET /api/settings/eta-interval", "settings.manage", false, 200, m.getEtaInterval},
 		{"PUT /api/settings/eta-interval", "settings.manage", false, 200, m.putEtaInterval},
@@ -514,6 +516,9 @@ func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal)
 	return s, proof(s, r, p)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind string, before, after any) error {
+	if batch, ok := ctx.Value(controlEventKey{}).(*controlEventBatch); ok {
+		return batch.add(p, s, kind, before, after)
+	}
 	return workorders.Record(ctx, tx, p, s.ProjectID, "harness."+kind, before, after)
 }
 func validHarness(v string) bool { return runkind.Valid(v) }
@@ -618,9 +623,10 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
-	Generator  *string `json:"generator"`
-	Command    *string `json:"command"`
-	SucceedsID *string `json:"succeeds_session_id"`
+	ModelReports []modelregistry.Observation `json:"model_reports"`
+	Generator    *string                     `json:"generator"`
+	Command      *string                     `json:"command"`
+	SucceedsID   *string                     `json:"succeeds_session_id"`
 	rules.ClientReport
 	AgentPrincipalID string  `json:"agent_principal_id"`
 	RunID            *string `json:"run_id"`
@@ -857,7 +863,11 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command))
+	placement, err := registrationPlacement(ctx, tx, p, in.TicketNodeID, in.RunID)
+	if err != nil {
+		return nil, err
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,work_placement) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, placement))
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
 	}
@@ -869,6 +879,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
 			return nil, err
 		}
+	}
+	if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, in.ModelReports); err != nil {
+		return nil, modelEvidenceError(err)
 	}
 	if s.TicketNodeID != nil && m.planningStart != nil {
 		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
@@ -1142,13 +1155,25 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 	}
 	before := s
+	var placement json.RawMessage
+	if !same(s.TicketNodeID, in.TicketNodeID) {
+		starter := tenant.Principal{}
+		if s.ownerID != nil {
+			starter = tenant.Principal{ID: *s.ownerID, TenantID: p.TenantID, Kind: tenant.Person}
+		}
+		placement, err = registrationPlacement(ctx, tx, starter, in.TicketNodeID, s.RunID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,
+		work_placement=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN $5::jsonb ELSE work_placement END,
 		eta_ready_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_ready_at END,
 		eta_live_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_live_at END,
 		progress_pct=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE progress_pct END,
 		missing_progress_beats=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN 0 ELSE missing_progress_beats END,
 		eta_reported_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_reported_at END,
-		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
+		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape, placement))
 	if err != nil {
 		return nil, err
 	}
@@ -1161,6 +1186,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
+		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport
 		rules.ClientReport
 		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
@@ -1326,6 +1352,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
+	}
+	if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, in.ModelReports); err != nil {
+		return nil, modelEvidenceError(err)
 	}
 	if err = recordCurrentActivity(ctx, tx, p, s); err != nil {
 		return nil, err

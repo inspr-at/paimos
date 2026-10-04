@@ -75,8 +75,8 @@ defineExpose({ reveal })
       <ul v-if="others.length" class="j-rows src-rows" aria-label="Files, links and notes">
         <li v-for="source in others" :id="`source-${source.id}`" :key="source.id">
           <AppIcon :name="ICON[source.kind]" :size="13" class="faint" />
-          <a v-if="external(source)" class="grow" :href="source.locator" target="_blank" rel="noopener noreferrer">{{ source.label }}</a>
-          <span v-else class="grow">{{ source.label }}</span>
+          <a v-if="external(source)" v-clip-tip="source.label" class="grow clip-name" :href="source.locator" target="_blank" rel="noopener noreferrer">{{ source.label }}</a>
+          <span v-else v-clip-tip="source.label" class="grow clip-name">{{ source.label }}</span>
           <span class="j-chip">{{ source.kind === 'url' ? 'link' : source.kind }}</span>
           <time class="mono" :datetime="source.created_at" :data-tip="absoluteTime(source.created_at)">{{ relativeTime(source.created_at, { now }) }}</time>
         </li>

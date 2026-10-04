@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -144,6 +146,157 @@ func question(t *testing.T, w *httptest.ResponseRecorder, status int) Question {
 func (f *fixture) ask(t *testing.T, in Input) Question {
 	t.Helper()
 	return question(t, request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", in), 201)
+}
+
+func TestAnsweredNewestFirstIndex(t *testing.T) {
+	d := dbtest.Open(t)
+	var definition string
+	if err := d.Admin.QueryRow(t.Context(), `SELECT pg_get_indexdef(indexrelid) FROM pg_index
+ WHERE indexrelid=to_regclass('desk_answers_newest') AND indisvalid AND indisready`).Scan(&definition); err != nil {
+		t.Fatalf("newest-answer pagination needs a ready, valid index: %v", err)
+	}
+	if !strings.Contains(definition, "USING btree (tenant_id, project_id, created_at DESC, question_id DESC)") {
+		t.Fatalf("index must cover tenant/project scope and the descending timestamp/ID tie-break: %s", definition)
+	}
+}
+
+func TestAnsweredNewestFirstKeysetAndIsolation(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+	fresh := f.ask(t, input()) // An old question answered now must sort first.
+	questions := make([]Question, 0, 105)
+	for i := 0; i < 105; i++ {
+		in := input()
+		in.Question = fmt.Sprintf("History %03d", i)
+		questions = append(questions, f.ask(t, in))
+	}
+	// Seed valid immutable answer revisions with an explicit clock. Adjacent
+	// answers share a timestamp, including across the page boundary.
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	err := db.InTenant(dbtest.Seed(ctx), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if err := writeCapability(ctx, tx); err != nil {
+			return err
+		}
+		for i := range questions {
+			q := &questions[i]
+			at := base.Add(time.Duration(i/2) * time.Minute)
+			id, err := createNode(ctx, tx, f.person, q.ID, "decision")
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,outcome,created_at,deliver_after)
+ VALUES($1,$2,$3,$4,2,$5,'fixture',$6,'a','Use local storage.','once',$7,$7)`, f.person.TenantID, f.project, id, q.ID, uid(), f.person.ID, at)
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE desk_questions SET state='answered',revision=2 WHERE tenant_id=$1 AND node_id=$2`, f.person.TenantID, q.ID); err != nil {
+				return err
+			}
+			q.Answer = &Answer{CreatedAt: at}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(questions, func(i, j int) bool {
+		a, b := questions[i], questions[j]
+		if a.Answer.CreatedAt.Equal(b.Answer.CreatedAt) {
+			return a.ID > b.ID
+		}
+		return a.Answer.CreatedAt.After(b.Answer.CreatedAt)
+	})
+	page := func(p tenant.Principal, path string) Page {
+		t.Helper()
+		w := request(ctx, f.mux, p, "GET", path, nil)
+		if w.Code != 200 {
+			t.Fatalf("list=%d: %s", w.Code, w.Body.String())
+		}
+		var got Page
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	path := "/api/decision-desk?state=answered&order=desc&limit=100"
+	first := page(f.person, path)
+	if len(first.Items) != 100 || !first.HasMore || first.NextCursor == "" || len(first.NextCursor) > 512 {
+		t.Fatalf("invalid first page: count=%d more=%t cursor length=%d", len(first.Items), first.HasMore, len(first.NextCursor))
+	}
+	for i, q := range first.Items {
+		if q.ID != questions[i].ID {
+			t.Fatalf("first page %d: %s want %s", i, q.ID, questions[i].ID)
+		}
+	}
+	decide := DecisionInput{RequestID: uid(), ExpectedRevision: 1, OptionID: "a", Outcome: "once"}
+	answered := question(t, request(ctx, f.mux, f.person, "POST", "/api/questions/"+fresh.ID+"/decision", decide), 200)
+	second := page(f.person, path+"&cursor="+url.QueryEscape(first.NextCursor))
+	if len(second.Items) != 5 || second.HasMore || second.NextCursor != "" {
+		t.Fatalf("invalid final page: %+v", second)
+	}
+	for i, q := range second.Items {
+		if q.ID != questions[100+i].ID {
+			t.Fatalf("second page %d skipped or duplicated an answer", i)
+		}
+	}
+	refreshed := page(f.person, path)
+	if refreshed.Items[0].ID != fresh.ID || refreshed.Items[0].Revision != answered.Revision {
+		t.Fatal("fresh decision lost on refresh")
+	}
+	decide.RequestID, decide.ExpectedRevision, decide.OptionID = uid(), answered.Revision, "b"
+	corrected := question(t, request(ctx, f.mux, f.person, "POST", "/api/questions/"+fresh.ID+"/decision", decide), 200)
+	if corrected.Revision != 3 || corrected.Answer.OptionID != "b" {
+		t.Fatal("fresh decision no longer correctable")
+	}
+	if page(f.person, path).Items[0].Revision != 3 {
+		t.Fatal("correction lost on refresh")
+	}
+	if page(f.person, "/api/decision-desk?limit=1").Items[0].ID != fresh.ID {
+		t.Fatal("default creation order changed")
+	}
+	projectPath := "/api/projects/" + f.project + "/questions?state=answered&order=desc&limit=100"
+	if page(f.person, projectPath).Items[0].ID != fresh.ID {
+		t.Fatal("project descending list differs")
+	}
+	for _, invalid := range []string{path + "&cursor=" + first.NextCursor, projectPath + "&cursor=" + first.NextCursor} {
+		p := f.foreign
+		if strings.HasPrefix(invalid, projectPath) {
+			p = f.person
+		}
+		if w := request(ctx, f.mux, p, "GET", invalid, nil); w.Code != 400 {
+			t.Fatalf("cursor crossed scope: %d", w.Code)
+		}
+	}
+	for _, p := range []tenant.Principal{f.otherAgent, f.foreign} {
+		if got := page(p, path); len(got.Items) != 0 || got.HasMore {
+			t.Fatal("descending list leaked another asker or tenant")
+		}
+	}
+	if w := request(ctx, f.mux, f.agent, "GET", "/api/projects/"+f.hidden+"/questions?state=answered&order=desc", nil); w.Code != 404 {
+		t.Fatalf("inaccessible project=%d", w.Code)
+	}
+	agentPage := page(f.agent, path)
+	if len(agentPage.Items) != 100 || agentPage.NextCursor == "" {
+		t.Fatal("asker descending page missing")
+	}
+	if w := request(ctx, f.mux, f.otherAgent, "GET", path+"&cursor="+agentPage.NextCursor, nil); w.Code != 400 {
+		t.Fatal("cursor crossed principal")
+	}
+	if _, err := f.d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := page(f.agent, path+"&cursor="+agentPage.NextCursor); len(got.Items) != 0 || got.HasMore {
+		t.Fatal("cursor bypassed revoked permission")
+	}
+}
+
+func TestQuestionListRejectsInvalidOrderAndCursor(t *testing.T) {
+	f := newFixture(t)
+	for _, query := range []string{"order=desc", "state=open&order=desc", "state=answered&order=invalid", "state=answered&order=desc&offset=1", "state=answered&cursor=abc", "state=answered&order=desc&cursor=invalid", "state=answered&order=desc&cursor=" + strings.Repeat("a", 513), "state=answered&order=desc&limit=101"} {
+		if w := request(t.Context(), f.mux, f.person, "GET", "/api/decision-desk?"+query, nil); w.Code != 400 {
+			t.Fatalf("%s returned %d", query, w.Code)
+		}
+	}
 }
 
 func TestQuestionLifecycleAndIsolation(t *testing.T) {

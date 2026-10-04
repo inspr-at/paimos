@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api.ts'
+import type { KeyTrimProposal } from './keyTrim'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
-export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier'
+export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim'
 // Outside the server option-ID alphabet, so an agent option cannot collide.
 export const CUSTOM_ANSWER = '@custom'
 export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean }
@@ -12,13 +13,13 @@ export interface DeskItem {
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
-  unavailable?: string; prUrl?: string
+  unavailable?: string; prUrl?: string; keyTrim?: KeyTrimProposal
 }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
-export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request' }
+export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval' }
 export function draftFor(item: DeskItem): DeskDraft {
-  const protectedChoice = item.kind === 'approval' || item.kind === 'tier'
+  const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim'
   return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
 }
 export function answerFor(item: DeskItem, draft: DeskDraft): string {
@@ -56,7 +57,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine'; project_id?: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'key_trim'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; href: string; source: string
 }
 export interface DeskProjection {

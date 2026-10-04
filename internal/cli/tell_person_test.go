@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -22,6 +24,26 @@ import (
 	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestPersonAPIErrorPreservesStatusAndRedactsSession(t *testing.T) {
+	const cookie = "synthetic-person-session"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ck, err := r.Cookie("aeon_session"); err != nil || ck.Value != cookie {
+			t.Error("request must use the explicit person session")
+		}
+		http.Error(w, "missing record for "+cookie, http.StatusNotFound)
+	}))
+	defer srv.Close()
+	rt := &runtime{personClient: client.NewSession(srv.URL, cookie)}
+	err := rt.do(http.MethodGet, "/api/missing", nil, nil)
+	var exit *exitError
+	if !errors.As(err, &exit) || exit.apiStatus != http.StatusNotFound {
+		t.Fatal("person API error lost its HTTP status classification")
+	}
+	if strings.Contains(exit.msg, cookie) || !strings.Contains(exit.msg, "[redacted]") {
+		t.Fatal("person API error must redact the session")
+	}
+}
 
 func TestTellPersonHeldReplyUsesSessionCookie(t *testing.T) {
 	isolate(t)

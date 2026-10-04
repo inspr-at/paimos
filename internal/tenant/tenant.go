@@ -26,6 +26,7 @@ type Principal struct {
 	Scopes       []string // authenticated agent key's outer permission ceiling
 	KeyCreatorID string   // creator's live binding further narrows an agent key
 	AuthKeyID    string   `json:"-"` // authenticated key row for write-time revalidation; never part of public projections
+	KeyID        string   `json:"-"` // authenticating key metadata ID; never a prefix or credential
 }
 
 type ctxKey struct{}

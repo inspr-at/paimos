@@ -310,3 +310,42 @@ func TestPushPolicyAndHTTPBounds(t *testing.T) {
 		t.Fatal("agent received person projection")
 	}
 }
+
+func TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource(t *testing.T) {
+	f := setup(t)
+	ctx := dbtest.Seed(t.Context())
+	var id string
+	if err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		var key string
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Desk worker','desk-trim-fixture',decode(repeat('00',32),'hex'),ARRAY['nodes.read','nodes.write']) RETURNING id::text`, f.person.TenantID, f.agent.ID).Scan(&key); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO key_trim_proposals(tenant_id,key_id,created_by,request_id,request_digest,previous_scopes,snapshot_digest,candidate_scopes,candidate_digest,evidence,usage,created_at,expires_at)
+   VALUES($1,$2,$3,gen_random_uuid(),'request',ARRAY['nodes.read','nodes.write'],'snapshot',ARRAY['nodes.read'],'candidate','{}','[]',now(),now()+interval '1 hour') RETURNING id::text`, f.person.TenantID, key, f.person.ID).Scan(&id)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.m.Read(t.Context(), f.person, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *Item
+	for i := range page.Items {
+		if page.Items[i].Kind == "key_trim" {
+			found = &page.Items[i]
+		}
+	}
+	if found == nil || found.ID != id || found.Href != "/decision-desk?needs=k:"+id || found.Source != "/api/key-trim-proposals" || found.PushEligible(time.Now()) {
+		t.Fatal("trim source pointer missing, wrong or became a phone notice")
+	}
+	dbtest.BindRole(t, f.d, f.reader.TenantID, f.reader.ID, "member")
+	other, err := f.m.Read(t.Context(), f.reader, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range other.Items {
+		if item.Kind == "key_trim" {
+			t.Fatal("desk disclosed key trim to a non-manager")
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -33,6 +34,27 @@ func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorder
 	}
 	if !harnesslaunch.FamilyMatches(harness, model, family) {
 		return Run{}, workorders.Fail(409, "review profile family does not match its provider")
+	}
+	var placement modelregistry.WorkPlacement
+	if err := json.Unmarshal(trace, &placement.PreferenceTrace); err != nil {
+		return Run{}, err
+	}
+	placement.PlannedProfileID = &profileID
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(trace, &merged); err != nil {
+		return Run{}, err
+	}
+	if merged == nil {
+		merged = map[string]json.RawMessage{}
+	}
+	raw, err := placement.JSON()
+	if err != nil {
+		return Run{}, err
+	}
+	merged["work_placement"] = raw
+	trace, err = json.Marshal(merged)
+	if err != nil {
+		return Run{}, err
 	}
 	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,residency,prefs_person_id,trace)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+columns, p.TenantID, o.NodeID, agentID, profileID, model, accountID, modelprefs.Stamp(residency), personID, trace))

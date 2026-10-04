@@ -4,6 +4,7 @@ package questions
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -308,8 +309,29 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	q.Outcomes, err = m.availability(ctx, tx, p, q, q.Input.Doctrine, check)
 	return q, err
 }
-func (m *Module) list(ctx context.Context, p tenant.Principal, project, state string, limit, offset int) (Page, error) {
+
+// The cursor is a position, never an authority grant. Bind it to the read scope
+// and repeat all tenant, project and asker checks on every page.
+type answeredCursor struct {
+	Tenant    string    `json:"t"`
+	Principal string    `json:"p"`
+	Project   string    `json:"s"`
+	At        time.Time `json:"at"`
+	ID        string    `json:"id"`
+}
+
+func (m *Module) list(ctx context.Context, p tenant.Principal, project, state string, limit, offset int, order, cursor string) (Page, error) {
 	out := Page{Items: []Question{}}
+	var after answeredCursor
+	if cursor != "" {
+		if len(cursor) > 512 {
+			return out, fail(400, "invalid_request", "invalid cursor")
+		}
+		body, err := base64.RawURLEncoding.DecodeString(cursor)
+		if err != nil || json.Unmarshal(body, &after) != nil || after.Tenant != p.TenantID || after.Principal != p.ID || after.Project != project || after.At.IsZero() || !uuidRE.MatchString(after.ID) {
+			return out, fail(400, "invalid_request", "invalid cursor")
+		}
+	}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		check, err := authz.ProjectsTx(ctx, tx, p)
 		if err != nil {
@@ -342,17 +364,41 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, project, state st
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		rows, err = tx.Query(ctx, `SELECT q.node_id::text FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
+		query := `SELECT q.node_id::text FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  WHERE q.tenant_id=$1 AND q.project_id=ANY($2::uuid[]) AND n.deleted_at IS NULL AND ($3='' OR q.state=$3)
  AND ($4 OR EXISTS(SELECT 1 FROM desk_askers a WHERE a.tenant_id=q.tenant_id AND a.question_id=q.node_id AND a.principal_id=$5))
- ORDER BY q.created_at,q.node_id LIMIT $6 OFFSET $7`, p.TenantID, projects, state, p.Kind == tenant.Person, p.ID, limit+1, offset)
+ ORDER BY q.created_at,q.node_id LIMIT $6 OFFSET $7`
+		args := []any{p.TenantID, projects, state, p.Kind == tenant.Person, p.ID, limit + 1, offset}
+		if order == "desc" {
+			query = `SELECT q.node_id::text,a.created_at FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
+ JOIN desk_answers a ON a.tenant_id=q.tenant_id AND a.project_id=q.project_id AND a.question_id=q.node_id AND a.revision=q.revision
+ WHERE a.tenant_id=$1 AND a.project_id=ANY($2::uuid[]) AND n.deleted_at IS NULL AND q.state='answered'
+ AND ($3 OR EXISTS(SELECT 1 FROM desk_askers asker WHERE asker.tenant_id=q.tenant_id AND asker.question_id=q.node_id AND asker.principal_id=$4))
+ AND ($5::timestamptz IS NULL OR (a.created_at,a.question_id) < ($5::timestamptz,$6::uuid))
+ ORDER BY a.created_at DESC,a.question_id DESC LIMIT $7`
+			var at any
+			if cursor != "" {
+				at = after.At
+			}
+			args = []any{p.TenantID, projects, p.Kind == tenant.Person, p.ID, at, nullable(after.ID), limit + 1}
+		}
+		rows, err = tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}
 		ids := []string{}
+		positions := map[string]time.Time{}
 		for rows.Next() {
 			var id string
-			if err := rows.Scan(&id); err != nil {
+			var at time.Time
+			var err error
+			if order == "desc" {
+				err = rows.Scan(&id, &at)
+				positions[id] = at
+			} else {
+				err = rows.Scan(&id)
+			}
+			if err != nil {
 				rows.Close()
 				return err
 			}
@@ -372,6 +418,16 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, project, state st
 				return err
 			}
 			out.Items = append(out.Items, q)
+		}
+		if order == "desc" && out.HasMore {
+			last := out.Items[len(out.Items)-1]
+			// Keep the selected position even if an answer is corrected between
+			// selecting IDs and reading the current projection.
+			body, err := json.Marshal(answeredCursor{Tenant: p.TenantID, Principal: p.ID, Project: project, At: positions[last.ID], ID: last.ID})
+			if err != nil {
+				return err
+			}
+			out.NextCursor = base64.RawURLEncoding.EncodeToString(body)
 		}
 		return nil
 	})

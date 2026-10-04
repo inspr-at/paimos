@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { openModelPrefs } from '../../lib/modelPrefsCommand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import type { PairingPermissions, PairingView } from '../../lib/agentPairing'
 import { describeComputerStatus, touchIDConfirmation } from '../../lib/agentPairing'
 import {
-  clone, daysLabel, nightLabel, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, when, whenFull, workStart,
+  clone, daysLabel, nightLabel, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, unreportedCapacity, when, whenFull, workStart,
   type AccountRow, type CapacitySchedule, type Override, type PoolView,
 } from '../../lib/capacity'
 import { buildComputerCards, middleEllipsis, pacingSummary, readySummary, type AccountLine, type ComputerCard } from '../../lib/computerAccounts'
@@ -66,7 +67,8 @@ async function checkNow(line: AccountLine, host: string) {
     const outcome = await capacity.refreshCapacity()
     if (!outcome.ok) { toast(`Capacity could not be read${'error' in outcome ? `: ${outcome.error}` : '.'} Please try again.`, { tone: 'error' }); return }
     const fresh = capacity.rows.find(r => r.id === line.id)
-    toast(fresh?.primary ? `${line.vendor} on ${host}: reading updated.` : `No reading yet for ${line.vendor} on ${host}. It arrives with its next run.`)
+    if (!fresh) return
+    toast(fresh.primary ? `${line.vendor} on ${host}: reading updated.` : `${unreportedCapacity(line.harness)}.`)
   } catch { toast('Capacity could not be read. Please try again.', { tone: 'error' }) }
   finally { checking.value = '' }
 }
@@ -351,6 +353,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
           <AppIcon name="chevron-right" :size="14" class="chev" />
         </button>
         <h2 id="ac-title" tabindex="-1">Accounts and computers</h2>
+        <button type="button" class="icon-btn sm flat" aria-label="Account model preferences" data-tip="Which models do which work" @click="openModelPrefs()"><AppIcon name="gear" :size="15" /></button>
         <span v-if="summary" class="pill" :class="summary.tone">{{ summary.text }}</span>
         <span v-if="capacity.away" class="away-chip" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
           Away until {{ when(capacity.away, now) }}
@@ -623,7 +626,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .vendor-name .group { color: var(--ink-2); font-weight: 550; }
 .identity { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; font-weight: 500; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-ready { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.fix { height: 26px; margin-left: -4px; color: var(--ink-2); font: 500 12px/1 var(--mono); }
+.fix { min-height: 26px; height: auto; max-width: 100%; padding-block: 5px; margin-left: -4px; color: var(--ink-2); font: 500 12px/1.4 var(--mono); white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .acct-cap { min-width: 0; }
 .quiet { color: var(--ink-3); font-size: 13px; }
 .no-reading { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
