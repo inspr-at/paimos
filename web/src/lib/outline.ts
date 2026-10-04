@@ -18,6 +18,7 @@ export interface TreeMeta {
 }
 export type OutlineEntry =
   | { type: 'row'; key: string; row: ListItem; tree: TreeMeta }
+  | { type: 'root'; key: string; label: string; parentId: string }
   | { type: 'group'; key: string; label: string; count: number; collapsed: boolean }
   | { type: 'skeleton'; key: string; depth: number; guides: boolean[]; last: boolean }
   | { type: 'more'; key: string; depth: number; guides: boolean[]; parentId: string; loading: boolean }

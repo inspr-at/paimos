@@ -600,7 +600,23 @@ defineExpose({
             </th>
           </tr>
 
-          <!-- Outline "No epic" group: also a drop target to take a ticket out of its epic -->
+          <!-- Unified Outline: a destination above growing rows. -->
+          <template v-else-if="entry.type === 'root'">
+            <tr
+              v-if="canDrag" class="outline-root-drop" aria-label="Project root drop destination" :class="{ 'drop-target': dropTarget === 'no-epic' }"
+              @dragover="dragOver($event, null)" @dragleave="dragLeave($event, 'no-epic')" @drop="drop($event, null)"
+            >
+              <td :colspan="columns.length">
+                <div class="root-drop-head">
+                  <AppIcon name="folder" :size="14" />
+                  <span>{{ entry.label }}</span>
+                  <span class="root-drop-hint">Drop nested work here</span>
+                </div>
+              </td>
+            </tr>
+          </template>
+
+          <!-- Legacy Outline loose-work group also accepts project-root drops. -->
           <tr
             v-else-if="entry.type === 'group'" class="group-row outline-group" :class="{ collapsed: entry.collapsed, 'drop-target': dropTarget === 'no-epic' }"
             @dragover="dragOver($event, null)" @dragleave="dragLeave($event, 'no-epic')" @drop="drop($event, null)"
@@ -947,6 +963,10 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); }
 .ticket-row.drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
 .outline-group.drop-target th { box-shadow: inset 0 0 0 2px var(--teal); }
+.outline-root-drop td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
+.root-drop-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 36px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
+.root-drop-hint { margin-left: auto; }
+.outline-root-drop.drop-target td { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
 .drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px rgba(14, 111, 108, .8); }
 .outline-group th { top: calc(var(--toolbar-h, 0px) + 35px); }
 .more-row td { height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }

@@ -58,15 +58,15 @@
     },
     {
       "file": "1225_work_parent_status.sql",
-      "sha256": "16d756ce3a7a67ee04d53cf8fedf76c478db08c149d41a803d1ffd5f219ec952",
+      "sha256": "fa72c0a233b93bfc3c34b6d8ffff24d0aec5ce5b0b8db71f8301eb7157ab8c5d",
       "ticket": "AEON-650",
       "reason": "Work-parent status engine adds bounded guarded trigger/functions and expands only the derived/retained/causal-undo event visibility names, retaining existing tenant, project and referenced-node restrictions. The classifier conservatively rejects function replacement and ALTER POLICY. Activation defaults OFF and belongs to AEON-429; no permanent table or column is added and existing data is not backfilled. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval. Rollout uses AEON-649 maintenance, drained queues, stopped writers and instance-specific verified backup/restore; this exception does not waive previous-binary compatibility probes or grant release authority."
     },
     {
       "file": "1230_work_leaf_aggregates.sql",
-      "sha256": "14621b13bd555c1bfc1f8feded19c6db656e3d7d2cff148173384811a9dcb920",
+      "sha256": "ad93f34d4e7251231e52aa6f9ca2b7d9a5f0437a60b50a514649078769c07be8",
       "ticket": "AEON-651",
-      "reason": "Invoker-rights bounded leaf aggregation functions replace the published ETA function bodies while preserving their names, return signatures and optional depth argument. Existing nodes, estimates, sessions, usage and Decision Desk identities are not rewritten; no permanent table or column is added. The classifier conservatively rejects CREATE OR REPLACE FUNCTION. Exact bytes are prepared for coordinator consolidated review before merge/release, not worker approval, under AEON-649 maintenance and instance-specific verified backup/restore. This exception does not waive previous-binary compatibility probes or grant release authority."
+      "reason": "Invoker-rights bounded leaf aggregation functions replace the published ETA function bodies while preserving their names, return signatures and optional depth argument. Future release-note captures accept canonical work members through the unchanged public-field whitelist; historical snapshots stay immutable. Existing nodes, estimates, sessions, usage and Decision Desk identities are not rewritten; no permanent table or column is added. The classifier conservatively rejects CREATE OR REPLACE FUNCTION. Exact bytes from stacked parent 6608137403d436e50c10205efeac986fa655e0de are prepared for coordinator consolidated review before merge/release, not worker approval, under AEON-649 maintenance and instance-specific verified backup/restore. This exception does not waive previous-binary compatibility probes or grant release authority."
     }
   ]
 }

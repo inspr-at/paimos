@@ -173,7 +173,10 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     try {
       // Keep the same level and cursor when a gap makes an in-flight page
       // untrustworthy. It may contain a deletion the stream never delivered.
-      const query = { ...params, sort: sortParam.value, limit: Math.min(LEVEL, NODE_BUDGET - lazyNodes.size), cursor: more ? block.cursor ?? undefined : undefined }
+      // The server binds limit into the cursor. Inserts and child expansion
+      // consume retention capacity without changing this level's page size.
+      // Enforce NODE_BUDGET when adopting rows, independently of pagination.
+      const query = { ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined }
       let sent, page, gaps = 0
       do {
         sent = rowStore.mark()
@@ -317,6 +320,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       noEpicCollapsed: noEpicCollapsed.value,
       createUnder: createUnder.value,
     })
+    if (tree.length) tree.unshift({ type: 'root', key: 'project-root', label: 'Project root', parentId: projectId.value ?? '' })
     if (!matchMode.value && epicBlock.value.cursor) tree.push({ type: 'more', key: 'more-root', depth: 0, guides: [], parentId: projectId.value ?? '', loading: epicBlock.value.loading })
     return tree
   })
