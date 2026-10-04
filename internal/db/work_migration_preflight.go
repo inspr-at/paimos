@@ -85,7 +85,11 @@ func CheckWorkMigration(ctx context.Context, pool *pgxpool.Pool, emit func(BusyW
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanup)
+	}()
 	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout='10s'; SET LOCAL lock_timeout='1s'`); err != nil {
 		return err
 	}
