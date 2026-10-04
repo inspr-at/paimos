@@ -45,6 +45,7 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
@@ -274,6 +275,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
 	go harness.RunLostContactSweeper(ctx, pool)
+	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
+	go modelMod.Run(ctx)
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
@@ -331,6 +334,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		reviewPublisher = reviewApp
 	}
 	reviewMod := crossreview.New(pool, reviewPublisher)
+	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	go reviewMod.RunStatusReporter(ctx)
 	api := &httpapi.Server{
 		Pool:                    pool,
@@ -379,7 +383,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
 			questions.New(pool),
-			modelregistry.New(pool),
+			decisiondesk.New(pool),
+			modelMod,
 			agentaccounts.New(pool),
 			pairingMod,
 			// R3: journey

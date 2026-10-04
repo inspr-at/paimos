@@ -237,6 +237,21 @@ router and small Go/Node checks. Go tests use four pool shards when routing
 admits the batch, otherwise the existing seven hosted shards. Timing budgets,
 static checks and the required `go` aggregate always run hosted.
 
+**Web CI (OPS-257):** hosted `web-setup` runs typecheck, lint, unit tests and
+browser-runner safety once, builds the current web, and shares its dependencies
+and build through the run's `web-runtime` artifact. Dependency and Chromium
+caches are keyed by the lockfile hash and resolved Playwright version; each of
+12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+system libraries. The shard command is `npm --prefix web run ci:web:shard --
+i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
+screenshots are retained in `web-shard-i-evidence` for seven days. The required
+check remains exactly `web`: its unconditional aggregate rejects failed,
+cancelled or skipped setup/shards. The shards run today's measured gate scope
+(49 specs); the 164 specs of the `remaining-ui` group are declared in
+`web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
+follow-up ticket measures them. A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
+reruns exactly one test in its original config group.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
@@ -859,6 +874,25 @@ classification stays empty, so live pill and benefit text never reaches
 `linked_tickets` or Highlights. Tickets the capture already grouped are not
 read again. A shared commit still takes the strongest group. Compare follows
 that group.
+
+For images built before their release tag, run
+`go run ./internal/releasehistory/generate -repo . -repository inspr-at/paimos -offline -candidate VERSION`.
+The version must match committed `HEAD:version.json`, including its scheme,
+channel, sequence and reservation instant. The candidate uses HEAD's commit and
+captured notes: a matching committed `release-notes/VERSION.json`, otherwise the
+reviewed public projection in `product-notes.json`. Missing or mismatched captures
+fail the build; uncommitted edits do not supply candidate identity or notes.
+`GITHUB_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL` and `GITHUB_WORKFLOW`
+identify the building workflow when available. Its status is recorded as in
+progress, with no invented conclusion. Without those inputs CI evidence is pending.
+
+The candidate is visible in the release history, named by its codename, with
+Features/Fixes from its captured notes. Its tag, headline, tag/publication times,
+image digest and release-run link stay empty or null; `evidence.pending` names
+what remains to be established. A later tagged build fills those fields through
+the normal history generator; it neither rewrites the original manifest nor
+creates a second entry for the version. Existing published entries keep their
+normal tag-based generation. Candidate mode does not publish, tag, or deploy.
 
 `internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
 files **from their matching annotated Git tags**, including under `-offline`.

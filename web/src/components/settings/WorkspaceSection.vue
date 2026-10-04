@@ -12,8 +12,10 @@ import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import FeatureFlagsCard from './FeatureFlagsCard.vue'
 import WorkspaceSummary from './WorkspaceSummary.vue'
+import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import StatusAutopilot from './StatusAutopilot.vue'
 import AgentActivityCard from './AgentActivityCard.vue'
+import QuotaWarningCard from './QuotaWarningCard.vue'
 
 // The workspace itself: its name and my role in it. Who is in it, their roles,
 // invites and agent keys live under Access.
@@ -73,6 +75,7 @@ async function saveInterval() {
     <SettingsCard v-if="can('nodes.read') && canFeature('workspace-summary')" title="Workspace summary" icon="folder" anchor="workspace-summary">
       <WorkspaceSummary />
     </SettingsCard>
+    <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />
     <SettingsCard v-if="intervalReady" title="Estimates" icon="clock" anchor="estimates">
@@ -85,6 +88,7 @@ async function saveInterval() {
       <label class="interval" for="lost-minutes">Minutes without a heartbeat</label>
       <input id="lost-minutes" v-model.number="lostMinutes" class="minutes" type="number" min="5" max="1440" inputmode="numeric" @change="saveLost" />
     </SettingsCard>
+    <QuotaWarningCard v-if="can('settings.manage')" />
     <AgentActivityCard v-if="can('settings.manage')" />
     <StatusAutopilot v-if="can('settings.manage')" />
     <SettingsCard v-if="can('members.read')" title="People and agents" icon="users" anchor="members">

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -69,30 +70,38 @@ func (rt *runtime) onboard(project, agent, format, outPath string, check bool, r
 		}
 		return strings.Compare(fieldString(fieldMap(a.Fields), "slug"), fieldString(fieldMap(c.Fields), "slug"))
 	})
+	rendered := b.markdown(rt.program, readingLimit, includeLow)
+	if format == "html" {
+		rendered = "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>" + htmlEscape(b.project.Title) + "</title></head><body><pre>" + htmlEscape(rendered) + "</pre></body></html>\n"
+	}
 	raw, err := json.Marshal(struct {
-		Project apiNode   `json:"project"`
-		Agent   string    `json:"agent"`
-		Issues  []apiNode `json:"issues"`
-		Entries []apiNode `json:"entries"`
-	}{b.project, b.agent, b.issues, b.entries})
+		Project      apiNode            `json:"project"`
+		Agent        string             `json:"agent"`
+		Issues       []apiNode          `json:"issues"`
+		Entries      []apiNode          `json:"entries"`
+		Kinds        map[string]apiKind `json:"kinds"`
+		Program      string             `json:"program"`
+		Format       string             `json:"format"`
+		ReadingLimit int                `json:"reading_limit"`
+		IncludeLow   bool               `json:"include_low"`
+		Content      string             `json:"content"`
+	}{b.project, b.agent, b.issues, b.entries, b.kinds.byID, rt.program, format, readingLimit, includeLow, rendered})
 	if err != nil {
 		return err
 	}
 	sum := sha256.Sum256(raw)
 	rev := hex.EncodeToString(sum[:])[:12]
 	outPath = resolveOnboardOutPath(outPath, format)
-	if check {
-		return rt.checkOnboard(outPath, rev)
-	}
 	header := fmt.Sprintf("%s%s@%s", onboardHeaderPrefix, b.key, rev)
 	if b.agent != "" {
 		header += " [agent=" + b.agent + "]"
 	}
-	header += " at " + time.Now().UTC().Format(time.RFC3339) + " -->\n\n"
-	body := header + b.markdown(rt.program, readingLimit, includeLow)
-	if format == "html" {
-		body = header + "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>" + htmlEscape(b.project.Title) + "</title></head><body><pre>" + htmlEscape(strings.TrimPrefix(body, header)) + "</pre></body></html>\n"
+	header += " at " + onboardCanonicalTime + " -->\n\n"
+	body := header + rendered
+	if check {
+		return rt.checkOnboard(outPath, rev, body)
 	}
+	body = strings.Replace(body, " at "+onboardCanonicalTime+" -->", " at "+time.Now().UTC().Format(time.RFC3339)+" -->", 1)
 	if strings.TrimSpace(outPath) == "" {
 		_, err = fmt.Fprint(rt.stdout, body)
 		return err
@@ -120,21 +129,42 @@ func resolveOnboardOutPath(path, format string) string {
 	return clean
 }
 
-func (rt *runtime) checkOnboard(path, rev string) error {
-	raw, err := os.ReadFile(path)
+const onboardCanonicalTime = "1970-01-01T00:00:00Z"
+
+func (rt *runtime) checkOnboard(path, rev, expected string) error {
+	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+	}
+	var raw []byte
+	if err == nil {
+		raw, err = io.ReadAll(io.LimitReader(f, 4<<20+1))
+	}
 	if os.IsNotExist(err) {
 		return rt.fail(fmt.Errorf("%s does not exist (would be created on render)", path), "")
 	}
 	if err != nil {
 		return rt.fail(err, "")
 	}
-	line, _, _ := strings.Cut(strings.TrimLeft(string(raw), "\ufeff \t\r\n"), "\n")
-	if !strings.HasPrefix(line, onboardHeaderPrefix) {
-		return usagef("%s has no paimos-managed header", path)
+	if len(raw) > 4<<20 {
+		return usagef("%s is too large", path)
 	}
-	if !strings.Contains(line, "@"+rev+" ") {
+	line, rest, ok := strings.Cut(string(raw), "\n")
+	if !ok || !strings.HasPrefix(line, onboardHeaderPrefix) || !strings.HasSuffix(line, " -->") {
+		return usagef("%s has no valid paimos-managed header", path)
+	}
+	at := strings.LastIndex(line, " at ")
+	if at < 0 || at+4 > len(line)-4 {
+		return usagef("%s has no valid generation timestamp", path)
+	}
+	if _, err := time.Parse(time.RFC3339, line[at+4:len(line)-4]); err != nil {
+		return usagef("%s has no valid generation timestamp", path)
+	}
+	normalized := line[:at] + " at " + onboardCanonicalTime + " -->\n" + rest
+	if normalized != expected {
 		return rt.fail(fmt.Errorf("%s differs from canonical bundle (current rev=%s)", path, rev), "")
 	}
+
 	if rt.jsonOut {
 		return rt.printJSON(map[string]string{"check": "identical", "path": path, "rev": rev})
 	}

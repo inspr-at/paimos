@@ -183,7 +183,7 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
         <section v-for="group in groups" :key="group.id" class="kp-group glass-card" :aria-labelledby="`kp-${group.id}`">
           <header class="kp-group-head">
             <span v-if="group.routeKey" class="key-badge">{{ group.routeKey }}</span>
-            <h2 :id="`kp-${group.id}`">{{ group.title }}</h2>
+            <h2 :id="`kp-${group.id}`" v-clip-tip="group.title">{{ group.title }}</h2>
             <span class="kp-count mono">{{ group.items.length }}</span>
             <span class="spacer" />
             <RouterLink v-if="group.routeKey" class="btn sm ghost kp-open" :to="projectLink(group)" :aria-label="`Open the knowledge of ${group.title}`"><span class="kp-open-label">Open its Knowledge</span><AppIcon name="arrow" :size="13" /></RouterLink>
@@ -193,12 +193,12 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
               <RouterLink class="kp-row" :class="{ cursor: cursorId === item.id }" :to="itemLink(group, item)" :data-id="item.id" @focus="cursorId = item.id">
                 <span class="kp-kind-icon" :data-tip="typeMeta(item.type).label" :style="{ '--kind': `var(${kindToken(item.type)})` }"><AppIcon :name="typeMeta(item.type).icon" :size="14" /></span>
                 <span class="kp-text">
-                  <span class="kp-title"><template v-for="(part, i) in highlightWords(item.title, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+                  <span v-clip-tip="`${item.title}\n${item.type}/${item.slug}`" class="kp-title"><template v-for="(part, i) in highlightWords(item.title, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                   <span v-if="item.excerpt" class="kp-excerpt"><template v-for="(part, i) in highlightWords(item.excerpt, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                 </span>
                 <span class="kp-meta">
                   <span v-if="item.status !== 'active'" class="k-status" :class="item.status">{{ statusLabel(item.status) }}</span>
-                  <span class="kp-slug mono"><span class="kp-type">{{ item.type }}/</span>{{ item.slug }}</span>
+                  <span v-clip-tip="`${item.title}\n${item.type}/${item.slug}`" class="kp-slug mono"><span class="kp-type">{{ item.type }}/</span>{{ item.slug }}</span>
                   <time class="kp-time mono" :datetime="item.updated_at" :data-tip="`Updated ${absoluteTime(item.updated_at)}`">{{ relativeTime(item.updated_at, { now }) }}</time>
                 </span>
               </RouterLink>
@@ -234,7 +234,7 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
 .kp-kind.empty:not([aria-pressed="true"]) { color: var(--ink-3); }
 .kp-kind:focus-visible { box-shadow: var(--focus-ring); }
 .kp-archived { margin-left: auto; font-size: 12.5px; }
-.kp-results { display: grid; gap: 16px; }
+.kp-results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .kp-results.stale .kp-group { opacity: .62; }
 .kp-summary { font-size: 12px; color: var(--ink-3); }
 .kp-group { overflow: clip; }
@@ -256,7 +256,7 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
 .kp-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .kp-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .kp-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
-.kp-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.kp-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-width: 0; }
 .kp-slug { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink-2); font-variant-ligatures: none; }
 .kp-type { color: var(--ink-3); }
 .kp-time { width: 64px; text-align: right; font-size: 12px; color: var(--ink-2); }
@@ -291,6 +291,9 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
   .kp-archived { flex-shrink: 0; margin-left: 6px; }
   .kp-row { flex-wrap: wrap; align-items: flex-start; gap: 6px 12px; padding: 11px 10px; }
   .kp-text { flex: 1 1 calc(100% - 42px); }
+  .kp-group-head { align-items: flex-start; }
+  .kp-group-head h2 { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .kp-title, .kp-slug { overflow-wrap: anywhere; }
   .kp-title, .kp-excerpt { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .kp-meta { flex: 1 1 100%; padding-left: 42px; }
   .kp-slug { flex: 1; max-width: none; }

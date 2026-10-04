@@ -16,11 +16,13 @@ import { onAccessChange } from './authz.ts'
 export interface TicketRef { key: string; id: string; title: string; state: string; projectId: string }
 
 const BATCH = 100
-// Enough for a long browse through the history; the oldest answers go first.
+// Keep this many off-screen answers; mounted links must retain their answers.
 const KEEP = 200
 // upper-cased key asked for → the ticket, or null when this caller has none.
 const known = reactive(new Map<string, TicketRef | null>())
 const pending = new Map<string, Promise<void>>()
+// Multiple links may show the same key, including across different views.
+const shown = new Map<string, number>()
 // Answers asked for before an access change never land.
 let epoch = 0
 
@@ -45,7 +47,16 @@ async function answer(keys: string[]): Promise<Map<string, TicketRef | null>> {
 
 function remember(answers: Map<string, TicketRef | null>) {
   for (const [key, value] of answers) { known.delete(key); known.set(key, value) }
-  for (const key of known.keys()) { if (known.size <= KEEP) break; known.delete(key) }
+  trimOffscreenAnswers()
+}
+
+function trimOffscreenAnswers() {
+  let offscreen = 0
+  for (const key of known.keys()) if (!shown.has(key)) offscreen++
+  for (const key of known.keys()) {
+    if (offscreen <= KEEP) break
+    if (!shown.has(key)) { known.delete(key); offscreen-- }
+  }
 }
 
 export async function resolveTicketKeys(keys: string[]): Promise<void> {
@@ -73,9 +84,20 @@ export function wantTicketKey(key: string) {
   queued.push(wanted)
 }
 
-// Links on screen, so a refresh knows whether to ask again or just forget.
-let shown = 0
-export function showingTicketKeys(): () => void { shown++; return () => { shown-- } }
+// Pin each mounted key until its last link leaves or changes to another key.
+export function showingTicketKeys(key: string): () => void {
+  const wanted = normalKey(key)
+  if (!wanted) return () => {}
+  shown.set(wanted, (shown.get(wanted) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const remaining = shown.get(wanted)! - 1
+    if (remaining) shown.set(wanted, remaining)
+    else { shown.delete(wanted); trimOffscreenAnswers() }
+  }
+}
 
 export function forgetTicketKeys() { epoch++; known.clear(); pending.clear(); queued = [] }
 
@@ -99,6 +121,6 @@ async function reaskTicketKeys() {
 }
 
 onAccessChange(change => {
-  if (change === 'reset' || !shown) forgetTicketKeys()
+  if (change === 'reset' || !shown.size) forgetTicketKeys()
   else void reaskTicketKeys()
 })
