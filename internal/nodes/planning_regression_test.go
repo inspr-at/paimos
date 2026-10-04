@@ -463,6 +463,10 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 	if median >= budget {
 		t.Errorf("planning request exceeded %s: median %s", budget, median)
 	}
+	if median >= budget || os.Getenv("AEON_PLANNING_DIAGNOSTICS") == "1" {
+		tracePlanningListRequest(t, w.admin, path)
+	}
+	tracePlanningWorkScope(t, w.admin, w.root.ID)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		q, err := parseListQuery(httptest.NewRequest(http.MethodGet, path, nil))
 		if err != nil {

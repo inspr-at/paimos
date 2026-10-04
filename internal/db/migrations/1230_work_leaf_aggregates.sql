@@ -35,15 +35,22 @@ BEGIN
  RETURN QUERY
  WITH walk AS MATERIALIZED (
   SELECT p.root,p.id FROM unnest(scope_roots,scope_nodes) AS p(root,id)
+ ), work_parents AS MATERIALIZED (
+  -- Resolve visible direct work parents once for the bounded scope. A
+  -- correlated child-kind join can rescan nodes for each root when a newly
+  -- cloned or small tenant has no useful kind statistics.
+  SELECT DISTINCT c.parent_id FROM nodes c
+  JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+  WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid
+   AND c.parent_id=ANY(scope_nodes) AND c.deleted_at IS NULL
+   AND ck.slug IN ('work','epic','ticket','task')
  ), facts AS MATERIALIZED (
   SELECT n.id,k.slug,n.fields,n.project_id,
    CASE aeon_work_status_category(n.state,k.field_schema)
     WHEN 'delivered' THEN 'done' WHEN 'accepted' THEN 'done' WHEN 'blocked' THEN 'open'
     ELSE aeon_work_status_category(n.state,k.field_schema) END AS bucket,
    k.slug IN ('work','epic','ticket','task') AND NOT EXISTS (
-    SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
-    WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL
-     AND ck.slug IN ('work','epic','ticket','task')) AS is_leaf
+    SELECT 1 FROM work_parents p WHERE p.parent_id=n.id) AS is_leaf
   FROM (SELECT DISTINCT w.id FROM walk w) u CROSS JOIN LATERAL (
    SELECT n.id,n.tenant_id,n.kind_id,n.fields,n.state,n.project_id FROM nodes n WHERE n.id=u.id
     AND n.tenant_id=current_setting('aeon.tenant_id')::uuid OFFSET 0
