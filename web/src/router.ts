@@ -15,6 +15,7 @@ import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import { DOCK_MEDIA, isKnowledgeType, parseEntryParam } from './lib/knowledge'
 import { projectSection } from './components/work/projectNavigation'
+import { PEEK_QUERY } from './lib/ticketPeek'
 
 // Child records of the project page carry only the address; ProjectView renders
 // what they name, so they need a component that draws nothing.
@@ -145,6 +146,7 @@ router.beforeEach(async (to, from) => {
   // including across reload, expand/collapse and links inside the side panel.
   if (to.params.projectKey) {
     const query = { ...to.query }
+    if (to.params.ticketKey) delete query[PEEK_QUERY]
     let section = projectSection(to)
     let path = to.path
     if (!to.meta.projectSection) {
