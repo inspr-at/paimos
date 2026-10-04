@@ -3104,6 +3104,15 @@ project visibility only inside the SQL functions, restoring it on every return;
 normal authorization remains in each writer's final transaction. Derived parent
 updates preserve `updated_at`, so they do not invalidate an unrelated title/body
 edit. Live views consume `status_autopilot.derived` at that unchanged revision.
+At that revision, the row store rejects node responses sent before a newer
+accepted read or derived hint. Late list responses preserve status from newer
+node reads while still supplying list-only projections. List snapshots retain
+their server-position ordering; cross-source status uses request order when
+positions cannot be compared. Status and its ordering fence form one snapshot:
+an accepted node payload applies before its fence advances, including when a
+full cache was already confirmed. A post-gap read applies the recovered status
+before confirming freshness. Named regressions and 300 reproducible seeded
+node/list/stream-gap interleavings check this against a small reference model.
 
 Rollout remains OFF until AEON-429's `features` table and service merge. Its
 catalog must register `work-parent-status` (label: “Parents follow their work”),
@@ -3125,7 +3134,8 @@ Blocked, then Open. With only finished children, any Done gives Done; only
 Cancelled gives Cancelled; all Accepted gives Accepted; Delivered/Accepted gives
 Delivered; other finished mixtures give Done. Custom categories use these same
 buckets. Archived children are ignored. No remaining active work children keeps
-the last state and records a retention reason. PATCH rejects an explicit parent
+the last state and records a retention reason, including when the last work
+child converts to another kind. PATCH rejects an explicit parent
 status with `409 parent_status_derived`, including the current value; bulk reports
 such parents as skipped while applying authorized leaf changes. Imports retain
 canonical parent status and report `parent_status_derived` as a source conflict.
@@ -3143,8 +3153,11 @@ and affected children, then POST `/api/events/{id}/undo` with
 decodes its bounded confirmation before taking any transaction locks, then
 re-checks permissions and original child revisions under access-change fences
 even if the flag was disabled, and reverses the cause once. Parents are derived
-again while the feature is enabled. Later child edits, hidden/ambiguous causes, active
-work and unsupported reverse operations refuse the action atomically.
+again while the feature is enabled. Ordinary Undo also takes pairing, tree and
+tenant access fences before its event fence in both flag states, including
+across activation and concurrent knowledge writes.
+Later child edits, hidden/ambiguous causes, active work and unsupported reverse
+operations refuse the action atomically.
 
 The initial implementation deliberately serializes flagged tenant transactions
 and prelocks their work rows to avoid taking ancestor locks after the event
@@ -3152,8 +3165,12 @@ counter. Reads also enter that protocol within capacity. Limits fail the entire
 work mutation transaction: 50,000 live work rows (tombstones are excluded, and
 restoration counts toward the limit), 1,000 changed nodes, depth 1,000, 10,000
 cause events, and 10-second entry/derivation deadlines. Causal previews accept
-at most 200 children and 4 MiB of combined cause snapshots; confirmation bodies
-are limited to 1 KiB with a 10-second HTTP read deadline. The live-row limit is
+at most 200 children and 4 MiB of combined cause snapshots, checked on their
+expanded JSON in Postgres before transfer to the application. Confirmation
+bodies are limited to 1 KiB with a 10-second HTTP read deadline. Shared work-order,
+harness, run, hours and review endpoints, queue writes and brand settings buffer
+their existing bounded request bodies before transaction admission, with the
+same 10-second HTTP read deadline. The live-row limit is
 checked again against the final tree before commit, so crossing creates,
 restores and kind conversions roll back atomically. Direct work writes outside
 `db.InTenant` fail closed when the flag is enabled. These bounds and tenant-wide read serialization require

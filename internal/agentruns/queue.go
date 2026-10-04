@@ -101,7 +101,10 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
+				workorders.WriteError(w, workorders.Fail(400, "request body could not be read within limits"))
+				return
+			}
 			var out any
 			err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 				if err := authz.RequireTx(r.Context(), tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {

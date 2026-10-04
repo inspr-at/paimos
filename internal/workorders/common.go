@@ -82,7 +82,10 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 				return
 			}
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
+			WriteError(w, Fail(400, "request body could not be read within limits"))
+			return
+		}
 		var result any
 		err := db.InTenant(r.Context(), pool, p.TenantID, func(tx pgx.Tx) error {
 			if err := authorizeKey(r, tx, p, scope); err != nil {
