@@ -675,12 +675,6 @@ jobs:
     needs: [ci-plan, release-check-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
       - name: Require full validation or the classified PR exemption
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
@@ -704,7 +698,17 @@ jobs:
             echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          node scripts/ci-pr-plan.mjs gate "$CI_LANE" "$CI_PLAN" "$CHECK_RESULT"
+          # Judge dependencies inline; the PR checkout cannot supply gate code.
+          test "$CI_PLAN" = success
+          case "$CI_LANE" in
+            docs-only|spec-only)
+              test "$CHECK_RESULT" = skipped
+              echo "$CI_LANE: release checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
+            full)
+              test "$CHECK_RESULT" = success
+              ;;
+            *) exit 1 ;;
+          esac
 
   release-check-run:
     needs: [ci-plan, tree-reuse]
@@ -750,12 +754,6 @@ jobs:
     needs: [ci-plan, e2e-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
       - name: Require full validation or the classified PR exemption
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
@@ -779,7 +777,17 @@ jobs:
             echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          node scripts/ci-pr-plan.mjs gate "$CI_LANE" "$CI_PLAN" "$CHECK_RESULT"
+          # Judge dependencies inline; the PR checkout cannot supply gate code.
+          test "$CI_PLAN" = success
+          case "$CI_LANE" in
+            docs-only|spec-only)
+              test "$CHECK_RESULT" = skipped
+              echo "$CI_LANE: end-to-end checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
+            full)
+              test "$CHECK_RESULT" = success
+              ;;
+            *) exit 1 ;;
+          esac
 
   e2e-run:
     needs: [ci-plan, tree-reuse]

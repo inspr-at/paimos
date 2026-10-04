@@ -191,3 +191,51 @@ test('required gates reject failures, cancelled work and unexpected skips rather
   const result = spawnSync(process.execPath, [resolve('scripts/ci-pr-plan.mjs'), 'gate', 'full', 'success', 'failure'], { encoding: 'utf8' });
   assert.equal(result.status, 1); assert.match(result.stderr, /Expected success CI dependency, got failure/);
 });
+
+function requiredJob(id) {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const match = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:|$(?![\\s\\S]))`, 'm').exec(workflow);
+  assert.ok(match, `Missing required job ${id}`);
+  return match[1];
+}
+
+test('required aggregate checks never execute the checked-out classifier script', () => {
+  for (const id of ['go', 'web', 'release-check', 'e2e']) {
+    const job = requiredJob(id);
+    assert.doesNotMatch(job, /scripts\/ci-pr-plan\.mjs/, `${id} must not execute PR-owned gate code`);
+    assert.doesNotMatch(job, /uses: actions\/checkout@/, `${id} must judge results without a checkout`);
+  }
+});
+
+for (const id of ['release-check', 'e2e']) {
+  test(`${id} rejects failed dependencies even when the PR makes its gate script always succeed`, () => {
+    const repo = repository();
+    repo.file('scripts/ci-pr-plan.mjs', 'process.exit(0);\n');
+    repo.commit();
+    const run = requiredJob(id).split('        run: |\n')[1];
+    assert.ok(run, `${id} must have an executable gate`);
+    const script = run.replace(/^          /gm, '');
+    const execute = (lane, result, plan = 'success') => {
+      const execution = spawnSync('bash', ['-c', script], { cwd: repo.root, encoding: 'utf8', timeout: 10000,
+        env: { ...repo.env, REUSE: 'none', CI_LANE: lane, CI_PLAN: plan, CHECK_RESULT: result,
+          GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
+      assert.ifError(execution.error);
+      assert.equal(execution.signal, null, 'gate must finish without a signal');
+      return execution;
+    };
+    for (const lane of ['docs-only', 'spec-only', 'full']) {
+      const expected = lane === 'full' ? 'success' : 'skipped';
+      const positive = execute(lane, expected);
+      assert.equal(positive.status, 0, `${lane}: ${positive.stderr}`);
+      for (const result of ['failure', 'cancelled', '', 'pending', expected === 'success' ? 'skipped' : 'success']) {
+        assert.equal(execute(lane, result).status, 1, `${lane} must reject CHECK_RESULT=${result}`);
+      }
+      for (const plan of ['failure', 'cancelled', 'skipped', '']) {
+        assert.equal(execute(lane, expected, plan).status, 1, `${lane} must reject CI_PLAN=${plan}`);
+      }
+    }
+    for (const lane of ['', 'unknown']) {
+      assert.equal(execute(lane, 'success').status, 1, `gate must reject CI_LANE=${lane}`);
+    }
+  });
+}
