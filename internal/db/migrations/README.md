@@ -252,3 +252,11 @@ ask callers identify their new membership by its original request ID.
 P3 must use each pending effect's deadline rather than the source answer's human
 grace deadline. Corrections retain the original per-asker reuse pointers. Active
 Always publication and post-dispatch corrections remain P4/P3 responsibilities.
+
+AEON-503-simple reserves `1213_run_waiting_measurement.sql` for nullable
+`agent_runs.waiting_ms`. It sorts after release 122's 1209; 1214 remains free for
+this package, while 1215, 1225 and 1230–1239 belong to work-node packages. The
+migration preserves legacy run fields, estimate snapshots and outcomes exactly.
+No historical timing is reconstructed. The field is personal agent-run timing
+telemetry, located by `(tenant_id,id)`; add this classification to the DSAR
+inventory when that independently owned inventory lands (absent on this base).

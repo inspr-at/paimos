@@ -267,8 +267,11 @@ type MetadataChange struct {
 }
 
 type Commit struct {
-	SHA     string `json:"sha"`
-	Subject string `json:"subject"`
+	SHA          string `json:"sha"`
+	Subject      string `json:"subject"`
+	LinesAdded   *int64 `json:"lines_added,omitempty"`
+	LinesDeleted *int64 `json:"lines_deleted,omitempty"`
+	FilesChanged *int64 `json:"files_changed,omitempty"`
 }
 
 type sessionText struct {
@@ -328,6 +331,18 @@ func validCommits(commits []Commit) error {
 	}
 	for i := range commits {
 		c := &commits[i]
+		present := 0
+		for _, n := range []*int64{c.LinesAdded, c.LinesDeleted, c.FilesChanged} {
+			if n != nil {
+				present++
+				if *n < 0 || *n > 1_000_000_000 {
+					return workorders.Fail(400, "invalid commit diff count")
+				}
+			}
+		}
+		if present != 0 && present != 3 {
+			return workorders.Fail(400, "commit diff counts must be reported together")
+		}
 		if len(c.SHA) < 7 || len(c.SHA) > 40 || strings.Trim(c.SHA, "0123456789abcdefABCDEF") != "" {
 			return workorders.Fail(400, "invalid commit SHA")
 		}

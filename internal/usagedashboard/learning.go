@@ -51,7 +51,9 @@ type LearningSample struct {
 // LoadLearningSamples is the read-only AEON-503 learning query. Count a
 // completed ticket once, with fully measured worker runs and complete final
 // counters. Mixed-model/placement tickets, missing active time and unknown
-// identity are excluded rather than attributed to a guessed model. Wall time
+// identity are excluded rather than attributed to a guessed model. Legacy
+// runs with no waiting_ms measurement and tickets with multiple baselines do
+// not train this path; episode ownership remains a separate design decision. Wall time
 // and elapsed_seconds include waits and must never substitute for active_ms.
 // visible gates both the source project and the outcome project.
 //
@@ -181,19 +183,25 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
  s.model_profile_id,s.model_raw,s.reasoning_effort,s.work_placement,
  r.active_ms,u.tokens,
  (s.stopped_at IS NOT NULL AND s.stopped_at<=d.recorded_at AND r.status='completed'
-  AND s.project_id=d.project_id AND r.active_ms>0 AND u.complete AND u.tokens>0 AND s.model_profile_id IS NOT NULL
+  AND s.project_id=d.project_id AND s.project_id=snap.source_project_id
+  AND r.waiting_ms IS NOT NULL AND r.waiting_ms>=0
+  AND r.active_ms + r.waiting_ms = floor(extract(epoch FROM r.ended_at-r.started_at)*1000)::bigint
+  AND r.model_profile_id=s.model_profile_id AND r.active_ms>0 AND u.complete AND u.tokens>0 AND s.model_profile_id IS NOT NULL
   AND s.work_placement->>'kind' IS NOT NULL AND s.work_placement->>'bucket' IN ('normal','complex')) AS complete,
  snap.snapshot
  FROM done d JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid
  AND s.ticket_node_id=d.ticket_node_id AND s.role='worker' AND s.created_at<=d.recorded_at
- LEFT JOIN LATERAL (SELECT x.started_at,x.snapshot FROM ticket_estimate_snapshots x
+ LEFT JOIN LATERAL (SELECT x.started_at,x.snapshot,x.source_project_id FROM ticket_estimate_snapshots x
   WHERE x.tenant_id=s.tenant_id AND x.ticket_node_id=d.ticket_node_id AND x.started_at<=d.recorded_at
   ORDER BY x.started_at DESC,x.id DESC LIMIT 1) snap ON true
  LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
  LEFT JOIN LATERAL (SELECT sum(x.input_tokens+x.output_tokens)::float8 AS tokens,
   bool_and(x.input_tokens IS NOT NULL AND x.output_tokens IS NOT NULL AND x.cached_input_tokens IS NOT NULL AND NOT x.provisional) AS complete
   FROM harness_session_usage x WHERE x.tenant_id=s.tenant_id AND x.session_id=s.id) u ON true
- WHERE (snap.started_at IS NULL OR s.created_at>=snap.started_at)
+ WHERE snap.started_at IS NOT NULL AND s.created_at>=snap.started_at
+ -- Reopened/multiple baselines need the separately decided episode model.
+ AND (SELECT count(*) FROM (SELECT 1 FROM ticket_estimate_snapshots x
+  WHERE x.tenant_id=s.tenant_id AND x.ticket_node_id=d.ticket_node_id LIMIT 2) baselines)=1
  AND ((SELECT aeon_visible_all()) OR s.project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
 ), tickets AS (
  SELECT ticket_node_id,project_id,recorded_at,min(source_project::text) AS source_project,

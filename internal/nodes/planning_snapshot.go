@@ -28,16 +28,17 @@ type estimateRateBasis struct {
 }
 
 type planningSnapshot struct {
-	ModelEstimate *usagedashboard.ModelEstimateHistory `json:"model_estimate,omitempty"`
-	CostProject   string                               `json:"-"`
-	ID            string                               `json:"id"`
-	StartedAt     time.Time                            `json:"started_at"`
-	Source        string                               `json:"source"`
-	Hours         *float64                             `json:"estimate_hours"`
-	Tokens        *int64                               `json:"estimated_tokens"`
-	Cost          *string                              `json:"estimated_cost_usd,omitempty"`
-	Route         *planningRoute                       `json:"route"`
-	RateBasis     estimateRateBasis                    `json:"rate_basis"`
+	WorkClassification json.RawMessage                      `json:"work_classification,omitempty"`
+	ModelEstimate      *usagedashboard.ModelEstimateHistory `json:"model_estimate,omitempty"`
+	CostProject        string                               `json:"-"`
+	ID                 string                               `json:"id"`
+	StartedAt          time.Time                            `json:"started_at"`
+	Source             string                               `json:"source"`
+	Hours              *float64                             `json:"estimate_hours"`
+	Tokens             *int64                               `json:"estimated_tokens"`
+	Cost               *string                              `json:"estimated_cost_usd,omitempty"`
+	Route              *planningRoute                       `json:"route"`
+	RateBasis          estimateRateBasis                    `json:"rate_basis"`
 }
 
 // CapturePlanningStart serializes starts on the node, including competing
@@ -83,6 +84,10 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	cal := pl.calibration(route)
 	snap := planningSnapshot{ModelEstimate: pl.modelEstimate(row), Source: source, Hours: row.hours, Tokens: pl.estimate(row).tokens,
 		RateBasis: estimateRateBasis{Speed: cal.speed, planningCalibration: planningCalibration{BasisText: cal.basisText, Level: cal.level, Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, TokensPerHourExact: strconv.FormatFloat(cal.tokensPerHour, 'f', -1, 64), CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
+	// Freeze placement with the size estimate; later edits cannot relabel evidence.
+	if err = tx.QueryRow(ctx, `SELECT jsonb_strip_nulls(jsonb_build_object('area',fields->'area','route_role',fields->'route_role','complexity',fields->'complexity')) FROM nodes WHERE id=$1`, id).Scan(&snap.WorkClassification); err != nil {
+		return err
+	}
 	if route != nil {
 		snap.Route = route.view
 		if price := route.price; price != nil {

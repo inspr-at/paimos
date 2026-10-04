@@ -28,8 +28,8 @@ func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, pr
 			return err
 		}
 		var run, session string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,active_ms,started_at,ended_at)
- SELECT $1,$2,$3,id,'completed',$4,$5::timestamptz,$5::timestamptz+interval '8 hours' FROM model_profiles WHERE slug='codex-astra-xhigh' RETURNING id::text`, w.admin.TenantID, order.ID, w.agent, active, start).Scan(&run); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,active_ms,waiting_ms,started_at,ended_at)
+ SELECT $1,$2,$3,id,'completed',$4,28800000-$4::bigint,$5::timestamptz,$5::timestamptz+interval '8 hours' FROM model_profiles WHERE slug='codex-astra-xhigh' RETURNING id::text`, w.admin.TenantID, order.ID, w.agent, active, start).Scan(&run); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `UPDATE harness_sessions SET run_id=$2::uuid,model_profile_id=(SELECT id FROM model_profiles WHERE slug='codex-astra-xhigh'),
@@ -61,6 +61,13 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	}
 	seedLearningTicket(t, w, 6, nil, false)
 	seedLearningTicket(t, w, 7, int64(4*3600000), true)
+	legacy := seedLearningTicket(t, w, 20, int64(7*3600000), false)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET waiting_ms=NULL WHERE id IN (SELECT run_id FROM harness_sessions WHERE ticket_node_id=$1)`, legacy.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	target := placementNode(t, w, "LEARNOPEN-1", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 3})
 	other := placementNode(t, w, "LEARNOPEN-2", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 1})
 	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket&state=open&sort=-tokens"
