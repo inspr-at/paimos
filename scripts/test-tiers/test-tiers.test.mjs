@@ -418,6 +418,10 @@ test('three-tier manifests allow new NIGHTLY cases and never promote ungated bro
     if(row.tier==='ESSENTIAL'||row.tier==='NIGHTLY')continue
     assert.equal(row.tier,row.kind!=='browser'||gated.has(row.file)?'GATED-FULL':'NIGHTLY',key(row))
   }
+  // This established Knowledge registration caused the merge-group regression:
+  // its launch group is gated, so it must retain its full-gate classification.
+  assert.equal(web.tests.find(row=>row.kind==='browser'&&row.file==='tests/knowledge.spec.ts'&&
+    row.name==='the Knowledge tab groups by kind, filters, searches the text and moves with keys')?.tier,'GATED-FULL')
   assert.ok(web.tests.some(row=>row.kind==='browser'&&row.tier==='NIGHTLY'))
   assert.ok(web.tests.some(row=>row.kind==='browser'&&row.tier==='GATED-FULL'))
 })
