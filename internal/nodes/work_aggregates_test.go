@@ -316,7 +316,11 @@ func TestWorkAggregatesCalibratedTokenEstimates(t *testing.T) {
 	}
 	parent := aggregateNode(t, w, "CAL-20", w.root.ID, "open", 100)
 	group := aggregateNode(t, w, "CAL-21", parent.ID, "open", 100)
-	leaf := aggregateNode(t, w, "CAL-22", group.ID, "open", 2)
+	// Match the measured route explicitly; the work classifier's default build
+	// route is a different model and must not borrow Codex's calibration.
+	leaf := w.node(t, "CAL-22", "work", group.ID, "open", map[string]any{
+		"estimate_hours": 2, "area": "backend", "route_role": "build-hard", "complexity": "M",
+	})
 	for _, sort := range []string{"key", "tokens", "-tokens", "list_cost", "paid"} {
 		got := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+sort)
 		a, b := got[parent.Key], got[leaf.Key]

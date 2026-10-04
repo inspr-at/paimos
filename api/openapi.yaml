@@ -17272,7 +17272,7 @@ components:
             affected_nodes: {type: array, maxItems: 1, items: {type: string, format: uuid}}
         node_changes:
           type: array
-          description: Set on node.* events when read (history and stream), never stored. The nodes the event changed, for live views; values are read through the node routes.
+          description: Set on node.* events when read (history and stream), never stored. Also set on harness.usage_reported for the session's currently bound readable ticket, with estimate/planning fields and a null revision, to invalidate spend projections after late reports. Values are read through the authorized node routes.
           items:
             $ref: '#/components/schemas/NodeChange'
     NodeChange:
@@ -17293,13 +17293,13 @@ components:
           description: A restored node reads as created
         fields:
           type: array
-          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created.'
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created. Usage invalidation hints name estimate and planning projections.'
           items:
             type: string
         revision:
           type: [string, 'null']
           format: date-time
-          description: The node's updated_at after the change, the value If-Unmodified-Since takes
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes; null for a projection-only usage invalidation
     EventPage:
       type: object
       required: [items, next_after]

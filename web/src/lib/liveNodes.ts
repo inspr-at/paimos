@@ -198,7 +198,7 @@ export class LiveNodeStore {
     }
     source.addEventListener('stream.ready', current(event => this.ready(event)))
     source.addEventListener('stream.ping', current(() => {}))
-    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS]) source.addEventListener(name, current(event => this.receive(event)))
+    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS, 'harness.usage_reported']) source.addEventListener(name, current(event => this.receive(event)))
     source.onerror = () => {
       if (this.source !== source) return
       // Distrust in-flight pages as soon as the stream is lost, including
@@ -272,7 +272,11 @@ export class LiveNodeStore {
     const former = this.rows.latest(change.id)?.project?.id
     if (former) projects.add(former)
     const membership = change.change !== 'updated' || ['node.moved', 'node.project_moved', 'node.kind_changed'].includes(change.type)
-    const parents = this.rows.aggregateParents(projects, membership)
+    // A moved descendant need not have been loaded. The stream names only
+    // its destination, so no cached source means any held project may have
+    // lost it. Refresh held rows through their normal authorized reads.
+    const unknownSource = !former && (['node.moved', 'node.project_moved'].includes(change.type) || change.fields.includes('project_id'))
+    const parents = this.rows.aggregateParents(unknownSource ? null : projects, membership || unknownSource)
     this.applyOne(change)
     // Parent status and revision can stay unchanged while leaf estimates,
     // sessions, spend or membership change. These are projection hints only;
