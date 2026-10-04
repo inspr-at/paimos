@@ -327,6 +327,9 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 }
 
 func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
+	if _, err := os.Stat(filepath.Join(root(t), "scripts/ci-tree-reuse.mjs")); err != nil {
+		t.Fatalf("reuse verifier missing from the integrated workflow: %v", err)
+	}
 	cmd := exec.Command("node", "--input-type=module", "-e", `import {requiredJobs,executionSteps} from './scripts/ci-tree-reuse.mjs'; console.log(JSON.stringify({requiredJobs,executionSteps}))`)
 	cmd.Dir = root(t)
 	out, err := cmd.Output()
