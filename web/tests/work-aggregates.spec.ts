@@ -127,6 +127,27 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))
+    // Report staleness is the subject here; keep the connection healthy so
+    // reconnect rendering cannot replace the relative ETA or its tooltip.
+    await page.addInitScript(() => {
+      class HealthySource extends EventTarget {
+        readyState = 1
+        onopen: (() => void) | null = null
+        onerror: (() => void) | null = null
+        private heartbeat: ReturnType<typeof setInterval>
+        constructor(readonly url: string) {
+          super()
+          queueMicrotask(() => {
+            if (this.readyState === 2) return
+            this.onopen?.()
+            this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 700, resumed: false }), lastEventId: '700' }))
+          })
+          this.heartbeat = setInterval(() => this.dispatchEvent(new MessageEvent('stream.ping', { data: '{}' })), 10_000)
+        }
+        close() { this.readyState = 2; clearInterval(this.heartbeat) }
+      }
+      Object.assign(window, { EventSource: HealthySource })
+    })
     const data = fixtures()
     for (const node of data.nodes) node.kind_slug = 'work'
     data.preferences.theme = { choice: theme }
@@ -137,6 +158,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     parent.eta = { finished: false, progress_pct: 100, leaf_count: 2, estimated_leaves: 1, progress_basis: 'estimate', open_leaves: 1, ready_leaves: 0, ready_partial: true, eta_ready_at: '2026-10-04T12:00:00Z', ready_reported_at: '2026-10-04T08:00:00Z', ready_stale: true }
     await mockWork(page, data)
     await page.goto('/p/PHAROS')
+    await expect(page.locator('.list-freshness')).toHaveText('Live')
     const row = page.locator('#row-n-1')
     const eta = row.locator('.eta-cell')
     await expect(eta.locator('.shown')).toHaveText('~2 h · partial')
