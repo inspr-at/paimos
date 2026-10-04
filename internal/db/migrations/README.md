@@ -399,3 +399,22 @@ checks do not claim that validation. Evidence is retained in
 `tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
 `r123-*` logs. No feature change, origin push, deployment, migration renumbering,
 ticket status change or model review ran.
+
+AEON-503 merge-main round retains `origin/main` `4d7e7de34` in normal merge
+`3276ad4051`, preserving both migration README sections, both OpenAPI change
+sets and all route permissions. Migration 1213 retains its reserved filename;
+1214 remains unused. Independent preservation checks retained 23 branch and
+123 main files byte-for-byte, including main's deletions. Twelve unlisted Go
+cases are explicitly NIGHTLY, with post-gate provenance so the tier regression
+continues checking every legacy classification.
+
+Approved remote validation on mbp2606 passed all eleven affected Go packages
+(including OpenAPI reporter-contract checks), 26 migration-checker tests, the
+241-migration guard against `v261003095616.0.0`, 33 tier tests, web typecheck,
+lint and build, and 27 focused web tests across three files. The guard's missing
+remote release tag was supplied only in an isolated test repository using the
+verified release commit; shared release refs were unchanged. Go and migration
+tests ran at `3276ad4051`; the tier regression fix and remaining checks ran at
+`540a25677b`. Full repository and browser suites were not run in this scoped
+round. No feature behavior changed, migration was renumbered, origin push,
+deployment or model review ran.
