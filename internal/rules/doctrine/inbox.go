@@ -328,7 +328,7 @@ func (m *Module) recordInboxProposal(parent context.Context, actor tenant.Princi
 		if err != nil {
 			return err
 		}
-		if !stored.Inbox || stored.ProposedBy != actor.ID || (stored.InboxDigest != "" && stored.InboxDigest != inboxDigest(in) || stored.InboxDigest == "" && (stored.Path != in.Path || stored.RuleKey != in.RuleKey)) || stored.DeskQuestionID != "" || stored.DeskAnswerID != "" {
+		if !stored.Inbox || stored.ProposedBy != actor.ID || stored.InboxRequestDigest != inboxRequestDigest(in) || stored.DeskQuestionID != "" || stored.DeskAnswerID != "" {
 			return fail(409, "request_conflict", "That request UUID belongs to another proposal.")
 		}
 		p, found = stored, true
@@ -359,8 +359,19 @@ func (m *Module) recordInboxProposal(parent context.Context, actor tenant.Princi
 	return p, err
 }
 
+// This is the immutable original request, distinct from input_digest, which
+// changes when a person edits for publication. Omit only the UUID so an exact
+// retry with a fresh UUID can deduplicate. Legacy rows without this evidence
+// cannot safely certify a replay and return a conflict.
+func inboxRequestDigest(in InboxInput) string {
+	in.RequestID = ""
+	raw, _ := json.Marshal(in)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 func jsonData(p Proposal) ([]byte, error) {
-	return json.Marshal(proposalData{Proposal: p})
+	return json.Marshal(proposalData{Proposal: p, InboxRequestDigest: p.InboxRequestDigest})
 }
 
 func scanStored(ctx context.Context, m *Module, actor tenant.Principal, id string) (Proposal, error) {
@@ -800,9 +811,34 @@ func ticketComment(ctx context.Context, tx pgx.Tx, actor tenant.Principal, ticke
 // indexed at this commit. The linked ticket gets a comment. It runs inside the
 // index transaction.
 func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Source, files []File) error {
-	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals
+	// Filter by actual landed bytes before the batch bound: unmatched history
+	// and active publication leases cannot permanently occupy the first page.
+	type landedRule struct {
+		Path string `json:"path"`
+		SHA  string `json:"sha"`
+		TLDR string `json:"tldr"`
+	}
+	landed := []landedRule{}
+	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
+		for _, r := range v.Rules {
+			if r.TLDR != nil {
+				landed = append(landed, landedRule{v.Path, r.SHA256, tldrDigest(r.TLDR.EN, r.TLDR.DE)})
+			}
+		}
+	}
+	if len(landed) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(landed)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals p
 		WHERE source_id=$1 AND data->>'inbox'='true' AND COALESCE(data->>'state','proposed') NOT IN ('dismissed','promoted')
-		AND COALESCE(data->>'proposed_rule_sha256','')<>'' AND COALESCE(data->>'proposed_tldr_sha256','')<>'' ORDER BY created_at LIMIT 200`, s.ID)
+		AND (COALESCE(data->>'operation_id','')='' OR COALESCE((data->>'operation_until')::timestamptz,'-infinity'::timestamptz) <= $3)
+		AND EXISTS (SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS landed(path text,sha text,tldr text)
+		 WHERE landed.path=p.path AND landed.sha=p.data->>'proposed_rule_sha256' AND landed.tldr=p.data->>'proposed_tldr_sha256')
+		ORDER BY created_at,id LIMIT 200 FOR NO KEY UPDATE`, s.ID, encoded, time.Now())
 	if err != nil {
 		return err
 	}
@@ -822,17 +858,13 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 	if len(open) == 0 {
 		return nil
 	}
-	landed := map[string]bool{}
-	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
-		for _, r := range v.Rules {
-			if r.TLDR != nil {
-				landed[v.Path+"\x00"+r.SHA256+"\x00"+tldrDigest(r.TLDR.EN, r.TLDR.DE)] = true
-			}
-		}
-	}
+
 	var system *tenant.Principal
+	type notification struct{ ticket, body string }
+	var notifications []notification
+	var changes []events.Change
 	for _, p := range open {
-		if !landed[p.Path+"\x00"+p.ProposedSHA+"\x00"+p.ProposedTLDR] || p.OperationID != "" && time.Now().Before(p.OperationUntil) {
+		if p.OperationID != "" && time.Now().Before(p.OperationUntil) {
 			continue
 		}
 		p.State, p.PromotedCommit = "promoted", s.Commit
@@ -842,7 +874,7 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 				p.ApprovedFileSHA = hashText(string(f.Content))
 			}
 		}
-		if err := saveProposal(ctx, tx, actor, &p, "doctrine.inbox_promoted"); err != nil {
+		if err := saveProposal(ctx, tx, actor, &p, ""); err != nil {
 			var f *failure
 			if errors.As(err, &f) && f.Code == "proposal_changed" {
 				continue
@@ -852,6 +884,7 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 		if err := deleteDraft(ctx, tx, p.ID); err != nil {
 			return err
 		}
+		changes = append(changes, proposalChange(p, "doctrine.inbox_promoted"))
 		if p.TicketID == "" {
 			continue
 		}
@@ -870,7 +903,16 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 		if p.PRURL != "" {
 			body += " PR: " + p.PRURL
 		}
-		if err := ticketComment(ctx, tx, *system, p.TicketID, body); err != nil {
+		notifications = append(notifications, notification{p.TicketID, body})
+	}
+	// All proposal/draft/system-principal writes precede the event counter.
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, actor, change); err != nil {
+			return err
+		}
+	}
+	for _, notice := range notifications {
+		if err := ticketComment(ctx, tx, *system, notice.ticket, notice.body); err != nil {
 			return err
 		}
 	}

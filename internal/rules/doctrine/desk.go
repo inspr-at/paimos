@@ -164,7 +164,7 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	}
 	existing, err := getProposal(ctx, tx, in.RequestID)
 	if err == nil {
-		if !existing.Inbox || existing.ProposedBy != actor.ID || (existing.InboxDigest != "" && existing.InboxDigest != requestDigest || existing.InboxDigest == "" && (existing.Path != in.Path || existing.RuleKey != in.RuleKey)) || existing.DeskQuestionID != deskQuestion || existing.DeskAnswerID != deskAnswer {
+		if !existing.Inbox || existing.ProposedBy != actor.ID || existing.InboxRequestDigest != inboxRequestDigest(in) || existing.DeskQuestionID != deskQuestion || existing.DeskAnswerID != deskAnswer {
 			return Proposal{}, nil, fail(409, "request_conflict", "That request UUID belongs to another proposal.")
 		}
 		return existing, nil, nil
@@ -187,7 +187,7 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	}
 	p := Proposal{ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
 		State: "pending", ProposedBy: actor.ID, Inbox: true, BaseRuleSHA: old.SHA256, ProposedSHA: next.SHA256, Ticket: in.Ticket,
-		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index, DeskQuestionID: deskQuestion, DeskAnswerID: deskAnswer, InboxDigest: requestDigest}
+		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index, DeskQuestionID: deskQuestion, DeskAnswerID: deskAnswer, InboxDigest: requestDigest, InboxRequestDigest: inboxRequestDigest(in)}
 	current, err := getSource(ctx, tx, source.ID, false)
 	if err != nil {
 		return Proposal{}, nil, err
@@ -206,7 +206,12 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	if sameID != "" {
 		if deskQuestion == "" && sameSHA == next.SHA256 {
 			existing, err := getProposal(ctx, tx, sameID)
-			return existing, nil, err
+			if err != nil {
+				return Proposal{}, nil, err
+			}
+			if existing.InboxRequestDigest == p.InboxRequestDigest && existing.DeskQuestionID == "" && existing.DeskAnswerID == "" {
+				return existing, nil, nil
+			}
 		}
 		return Proposal{}, nil, fail(409, "rule_proposal_open", "You already proposed a change to this rule. A person has to act on it first.")
 	}

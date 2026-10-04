@@ -373,6 +373,10 @@ func TestSSEHeartbeatAndInvalidResume(t *testing.T) {
 
 func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 	d, a, _ := fixture(t)
+	// This test mounts the adapter directly, so supply the authority that the
+	// real route requires and the mutation transaction now rechecks.
+	dbtest.BindRole(t, d, a.TenantID, a.ID, "member")
+	a.Scopes = []string{"events.undo"}
 	event := appendEvents(t, d, a, 1)[0]
 	for i, opts := range [][]Option{nil, {WithUndo("test.changed", func(ctx context.Context, tx pgx.Tx, p tenant.Principal, e Event) (Change, error) {
 		if _, err := tx.Exec(ctx, `UPDATE principals SET name='Should rollback' WHERE id=$1`, p.ID); err != nil {

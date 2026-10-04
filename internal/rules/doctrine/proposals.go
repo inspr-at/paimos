@@ -54,6 +54,10 @@ type Proposal struct {
 	Version          int64     `json:"-"`
 	OperationID      string    `json:"-"`
 	OperationUntil   time.Time `json:"-"`
+
+	// Immutable inbox request evidence; publication edits change InputDigest only.
+	InboxRequestDigest string `json:"-"`
+
 	// Doctrine inbox (AEON-444): references and decisions, never prose.
 	Inbox          bool   `json:"inbox,omitempty"`
 	BaseRuleSHA    string `json:"base_rule_sha256,omitempty"`
@@ -74,10 +78,11 @@ type Proposal struct {
 
 type proposalData struct {
 	Proposal
-	GateReviewID   int64     `json:"gate_review_id,omitempty"`
-	Version        int64     `json:"version"`
-	OperationID    string    `json:"operation_id,omitempty"`
-	OperationUntil time.Time `json:"operation_until,omitempty"`
+	InboxRequestDigest string    `json:"inbox_request_digest,omitempty"`
+	GateReviewID       int64     `json:"gate_review_id,omitempty"`
+	Version            int64     `json:"version"`
+	OperationID        string    `json:"operation_id,omitempty"`
+	OperationUntil     time.Time `json:"operation_until,omitempty"`
 }
 
 const proposalColumns = `id::text,source_id::text,repository,path,rule_key,input_digest,base_commit,proposed_by::text,created_at,data`
@@ -98,6 +103,7 @@ func scanProposal(row pgx.Row, extra ...any) (Proposal, error) {
 	}
 	d.ID, d.SourceID, d.Repository, d.Path, d.RuleKey, d.InputDigest, d.BaseCommit, d.ProposedBy, d.CreatedAt = p.ID, p.SourceID, p.Repository, p.Path, p.RuleKey, p.InputDigest, p.BaseCommit, p.ProposedBy, p.CreatedAt
 	d.GateReview = d.GateReviewID
+	d.Proposal.InboxRequestDigest = d.InboxRequestDigest
 	d.Proposal.Version, d.Proposal.OperationID, d.Proposal.OperationUntil = d.Version, d.OperationID, d.OperationUntil
 	if d.State == "" {
 		d.State = "proposed"
@@ -122,7 +128,7 @@ func countPins(ctx context.Context, tx pgx.Tx, p *Proposal) error {
 	return nil
 }
 func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Proposal, event string) error {
-	raw, err := json.Marshal(proposalData{Proposal: *p, GateReviewID: p.GateReview, Version: p.Version + 1, OperationID: p.OperationID, OperationUntil: p.OperationUntil})
+	raw, err := json.Marshal(proposalData{Proposal: *p, InboxRequestDigest: p.InboxRequestDigest, GateReviewID: p.GateReview, Version: p.Version + 1, OperationID: p.OperationID, OperationUntil: p.OperationUntil})
 	if err != nil {
 		return err
 	}
@@ -137,6 +143,11 @@ func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Pro
 	if event == "" {
 		return nil
 	}
+	_, err = events.Append(ctx, tx, actor, proposalChange(*p, event))
+	return err
+}
+
+func proposalChange(p Proposal, event string) events.Change {
 	after := map[string]any{
 		"proposal_id": p.ID, "repository": p.Repository, "pr_number": p.PRNumber, "head_sha": p.HeadSHA, "state": p.State, "proposed_by": p.ProposedBy, "approved_by": p.ApprovedBy, "gate_review_id": p.GateReview, "merge_commit": p.MergeCommit, "release": p.Release, "release_commit": p.ReleaseCommit, "release_requested": p.ReleaseRequested,
 	}
@@ -151,8 +162,7 @@ func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Pro
 		after["dismissed_by"] = p.DismissedBy
 		after["promoted_commit"] = p.PromotedCommit
 	}
-	_, err = events.Append(ctx, tx, actor, events.Change{Type: event, After: after})
-	return err
+	return events.Change{Type: event, After: after}
 }
 func (m *Module) proposalAccess(p tenant.Principal) error {
 	if !m.app.configured() {
