@@ -24,7 +24,11 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"GET /api/model-preferences": "models.read",
+	"POST /api/agent-keys/{id}/trim-proposals":           "approvals.request",
+	"GET /api/key-trim-proposals":                        "keys.manage",
+	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",
+	"POST /api/key-trim-proposals/{proposalId}/restore":  "keys.manage",
+	"GET /api/model-preferences":                         "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
 	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
