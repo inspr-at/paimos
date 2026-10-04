@@ -347,6 +347,93 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("concurrent delay", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			const delay = 15 * time.Millisecond
+			const requests = 8
+			ctx, cancel := context.WithCancel(t.Context())
+			release := make(chan struct{})
+			starts := make(chan time.Time, requests)
+			var active, completed atomic.Int32
+			var wg sync.WaitGroup
+			defer func() {
+				cancel()
+				close(release)
+				wg.Wait()
+			}()
+			source := newSource(t, func(r *http.Request) (*http.Response, error) {
+				active.Add(1)
+				defer active.Add(-1)
+				starts <- time.Now()
+				<-release
+				return response(), nil
+			}, delay)
+			request := func() {
+				var rows []Record
+				if err := source.get(ctx, "/probe", &rows); err != nil {
+					if ctx.Err() == nil {
+						t.Error(err)
+					}
+					return
+				}
+				completed.Add(1)
+			}
+			start := time.Now()
+			assertStart := func(n int) {
+				t.Helper()
+				select {
+				case at := <-starts:
+					if got, want := at.Sub(start), time.Duration(n)*delay; got != want {
+						t.Fatalf("concurrent request %d start = %s, want %s", n, got, want)
+					}
+				default:
+					t.Fatalf("concurrent request %d did not start", n)
+				}
+				if len(starts) != 0 {
+					t.Fatalf("extra concurrent starts at %s: %d", time.Since(start), len(starts))
+				}
+			}
+			// Establish the first start, then queue seven callers while its
+			// transport is held. Only one caller can wait on the delay timer;
+			// the others durably block on the cap channel, not a sync.Mutex.
+			wg.Go(request)
+			synctest.Wait()
+			assertStart(0)
+			for range requests - 1 {
+				wg.Go(request)
+			}
+			synctest.Wait()
+			if active.Load() != 1 || len(starts) != 0 {
+				t.Fatalf("before delay: active=%d, extra starts=%d, want 1 and 0", active.Load(), len(starts))
+			}
+			for n := 1; n < requests; n++ {
+				if n > 1 {
+					// Free exactly one slot, keeping another transport in flight.
+					// The replacement must wait a full delay even under overlap.
+					release <- struct{}{}
+					synctest.Wait()
+					if active.Load() != 1 || len(starts) != 0 {
+						t.Fatalf("refill before delay %d: active=%d, extra starts=%d, want 1 and 0", n, active.Load(), len(starts))
+					}
+				}
+				// This advances virtual time only, with no wall-clock tolerance.
+				time.Sleep(delay)
+				synctest.Wait()
+				assertStart(n)
+				if active.Load() != 2 {
+					t.Fatalf("concurrent request %d: active=%d, want 2", n, active.Load())
+				}
+			}
+			for range 2 {
+				release <- struct{}{}
+			}
+			wg.Wait()
+			if completed.Load() != requests || active.Load() != 0 {
+				t.Fatalf("completed concurrent requests=%d, active=%d, want %d and 0", completed.Load(), active.Load(), requests)
+			}
+		})
+	})
 }
 
 func TestSourceSkipsDeletedProjectAndPurgedIssues(t *testing.T) {
