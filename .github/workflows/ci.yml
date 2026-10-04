@@ -11,11 +11,12 @@ on:
     types: [checks_requested]
   workflow_dispatch:
 
-# A newer push to the same pull request supersedes its older run; main and the queue always finish.
+# New main pushes supersede older main runs (AEON-585); PR cancellation stays per PR.
 concurrency:
-  # Unique per non-PR run: main pushes and queue runs never share a group, so none is cancelled while pending.
-  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Keep existing PR/queue/manual groups; only main pushes share a group.
+  # Queue runs retain unique run IDs, including while pending; main cannot cancel them or PR checks.
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -458,6 +459,7 @@ jobs:
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
+      - run: node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
       - run: node --test scripts/release-pin-pr.test.mjs
       - name: Offline code-health audit toolkit and slice ownership

@@ -314,7 +314,7 @@ test('manifest drift never blocks a PR: new specs stay ungated, removed ones are
   // The real tree with the real manifest keeps the full gate even if main moved on.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 49)
+  assert.equal(JSON.parse(out.pop()).specs, 50)
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {
