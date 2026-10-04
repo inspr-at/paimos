@@ -91,6 +91,7 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
       return route.fulfill({ json: question })
     }
     if (path === '/api/outcomes') return route.fulfill({ json: { outcomes: [{ id: 'outcome-ci', kind: 'ci_result', ticket_key: 'AEON-1', rules_version: null, release_title: null, recorded_at: '2026-10-02T08:00:00Z', payload: { result: 'pass', name: 'Tenant isolation', repo: 'inspr-at/paimos', number: 181 } }] } })
+    if (path === '/api/key-trim-proposals' && method === 'GET') return route.fulfill({ json: { items: [], has_more: false } })
     if (path === '/api/approvals') return route.fulfill({ json: [approval] })
     if (path.startsWith('/api/approvals/') && method === 'POST') { const body = request.postDataJSON(); calls.push({ path, body }); return route.fulfill({ status: control.denyWrite ? 409 : 200, json: control.denyWrite ? { error: 'Approval expired.' } : { ...approval, decision: body.decision } }) }
     if (path === '/api/rules/doctrine/inbox') return route.fulfill({ json: { items: [rule], pending: 1 } })
