@@ -6,6 +6,8 @@ Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI
 
 Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
 
+Ticket URLs select the record shown in the detail panel. A stale `peek` query is removed from a routed ticket URL; links followed inside that ticket reuse its panel and browser history. Desktop ticket panels leave room for the list, including at 1024 px and with a saved wider panel preference. Narrow ticket headers collapse breadcrumb text while keeping Back available. Phones retain the full-screen ticket sheet.
+
 Capped Done gate, Rules Preview and document-profile headings reveal their complete text on hover, keyboard focus or tap. Their reader stays inside the viewport and scrolls for long identities. Press Arrow Down on a clipped heading to enter the reader; Escape closes it and returns focus to the heading. Heading and action positions stay in place. Rules Preview reserves the width of both **Change** and **Done** labels so toggling the selectors keeps the button still without a fixed pixel width.
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
