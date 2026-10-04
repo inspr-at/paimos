@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runPlaywright } from '../../scripts/playwright-safe.mjs'
+import { validatePath } from '../../scripts/ci-pr-plan.mjs'
 
 export const webRoot = fileURLToPath(new URL('../', import.meta.url))
 export const manifestPath = resolve(webRoot, 'ci-web-shards.json')
@@ -164,6 +165,24 @@ export function retryCount(env) {
   return Number(value)
 }
 
+// Spec-only PRs include ungated and newly discovered specs, using their owning
+// group's config, project, flags and evidence paths rather than a generic launch.
+export function selectChangedSpecs(manifest, json) {
+  if (typeof json !== 'string' || Buffer.byteLength(json) > 2 * 1024 * 1024) throw new Error('Changed spec list too large')
+  const files = JSON.parse(json)
+  if (!Array.isArray(files) || !files.length || files.length > 10000) throw new Error('Expected nonempty changed spec list')
+  const selected = new Set(files.map(file => {
+    validatePath(file)
+    if (!/^web\/tests\/[^/]+\.spec\.ts$/.test(file)) throw new Error('Expected top-level UI spec')
+    return file.slice('web/'.length)
+  }))
+  const known = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  for (const file of selected) if (!known.has(file)) throw new Error(`Changed spec missing from checkout: ${file}`)
+  return { ...manifest, groups: manifest.groups.map(group => ({ ...group, gate: true,
+    specs: group.specs.filter(spec => selected.has(spec.file)),
+  })).filter(group => group.specs.length) }
+}
+
 export function planCommands(manifest, shard, env = process.env, root = webRoot) {
   const retries = retryCount(env)
   return [...manifest.groups].sort((a, b) => compare(a.id, b.id)).flatMap(group => {
@@ -278,12 +297,17 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
   readLastRun = path => JSON.parse(readFileSync(path, 'utf8')),
 } = {}) {
   const options = parseArgs(args, manifest.defaultShards ?? 12)
-  const expected = discoverSpecs(root, manifest.specDirectories ?? ['tests'])
+  let expected = discoverSpecs(root, manifest.specDirectories ?? ['tests'])
   const reconciled = reconcileManifest(manifest, expected)
   if (options.strict && (reconciled.unlisted.length || reconciled.stale.length)) {
     throw new Error(`Manifest drift: ${reconciled.unlisted.length} unlisted, ${reconciled.stale.length} stale spec(s): ${[...reconciled.unlisted, ...reconciled.stale].join(', ')}`)
   }
   manifest = reconciled.manifest
+  if (env.CI_CHANGED_SPECS !== undefined) {
+    if (options.count !== 1 || options.shard?.index !== 1) throw new Error('Changed specs require shard 1/1')
+    manifest = selectChangedSpecs(manifest, env.CI_CHANGED_SPECS)
+    expected = manifest.groups.flatMap(group => group.specs.map(spec => spec.file))
+  }
   const drift = { ...(reconciled.unlisted.length ? { unlisted: reconciled.unlisted } : {}), ...(reconciled.stale.length ? { stale: reconciled.stale } : {}) }
   const shards = balanceShards(manifest, options.count, { all: options.all })
   const coverage = checkCoverage(manifest, shards, expected, { all: options.all })
@@ -294,7 +318,7 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
     return 0
   }
   if (options.mode === 'list') { out(JSON.stringify(plans, null, 2)); return 0 }
-  if (Object.keys(drift).length) out(`::warning::ci-web-shards.json drift: ${drift.unlisted?.length ?? 0} unlisted spec(s) are not gated (add them to the manifest), ${drift.stale?.length ?? 0} stale entr${drift.stale?.length === 1 ? 'y' : 'ies'} ignored; update the manifest (ci:web:shard -- --check --strict)`)
+  if (Object.keys(drift).length) out(`::warning::ci-web-shards.json drift: ${drift.unlisted?.length ?? 0} unlisted spec(s) ${env.CI_CHANGED_SPECS !== undefined ? 'included when changed in this PR' : 'are not gated (add them to the manifest)'}, ${drift.stale?.length ?? 0} stale entr${drift.stale?.length === 1 ? 'y' : 'ies'} ignored; update the manifest (ci:web:shard -- --check --strict)`)
   // A full shard is a CI-only entry point. Local inspection remains browser-free.
   if (!env.CI || ['0', 'false'].includes(env.CI)) throw new Error('Run CI shards on hosted CI; use --list or --check locally')
   if (env.RUNNER_ENVIRONMENT !== 'github-hosted') throw new Error('CI web shards require RUNNER_ENVIRONMENT=github-hosted')
