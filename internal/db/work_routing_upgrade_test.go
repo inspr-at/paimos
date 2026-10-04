@@ -43,7 +43,7 @@ func TestWorkRoutingUpgradePreservesResidencyAndPins(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'upgrade-codex','1','codex','openai','gpt-6.1-sol','xhigh','standard')`, tid); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,residency) SELECT $1,$2,a.id,m.id,'queued','any' FROM principals a,model_profiles m WHERE a.name='Historical agent' AND m.slug='upgrade-codex' RETURNING id::text`, tid, order).Scan(&run)
+		return tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,residency) SELECT $1,$2,a.id,m.id,'queued',NULL FROM principals a,model_profiles m WHERE a.name='Historical agent' AND m.slug='upgrade-codex' RETURNING id::text`, tid, order).Scan(&run)
 	}); err != nil {
 		t.Fatal(err)
 	}

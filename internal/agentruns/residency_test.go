@@ -200,3 +200,24 @@ func TestCanonicalWorkResidencyAdmissionAndLiveRecheck(t *testing.T) {
 		return nil
 	})
 }
+
+func TestCanonicalWorkLiveResidencyRecheck(t *testing.T) {
+	f := setup(t)
+	order := f.order(t, nil)
+	leaf := bindOrderToWorkLeaf(t, f, order.NodeID)
+	run := f.run(t, order)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"residency":"local"}'::jsonb WHERE id=$1`, leaf)
+		return err
+	})
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		policy, err := modelprefs.RunRequirement(t.Context(), tx, run.ID)
+		if err != nil {
+			return err
+		}
+		if policy.Residency != "local" {
+			t.Fatal("live work restriction ignored", policy.Residency)
+		}
+		return nil
+	})
+}
