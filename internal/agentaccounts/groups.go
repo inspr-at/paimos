@@ -906,10 +906,16 @@ func withAllProjects(ctx context.Context, tx pgx.Tx, query string, runID string)
 			return "", err
 		}
 	}
-	if isNoRows(qerr) || id == nil {
+	if isNoRows(qerr) {
 		return "", nil
 	}
-	return *id, qerr
+	if qerr != nil {
+		return "", qerr
+	}
+	if id == nil {
+		return "", nil
+	}
+	return *id, nil
 }
 
 func runProjectID(ctx context.Context, tx pgx.Tx, runID string) (string, error) {

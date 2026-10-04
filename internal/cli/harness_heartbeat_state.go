@@ -20,6 +20,9 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	ModelSent             bool                    `json:"model_sent,omitempty"`
+	SentModel             string                  `json:"sent_model,omitempty"`
+	SentEffort            string                  `json:"sent_effort,omitempty"`
 	ActivityMode          string                  `json:"agent_activity_mode,omitempty"`
 	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
@@ -59,6 +62,10 @@ type heartbeatDisk struct {
 	TerminalReason        string                  `json:"terminal_reason,omitempty"`
 	Closed                bool                    `json:"closed,omitempty"`
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
+
+	// The observation fence survives clearing RequestedModel and helper
+	// restarts. Keep the existing JSON key for compatibility with saved state.
+	RequestedModelBaseline *heartbeatModelBaseline `json:"requested_model_baseline,omitempty"`
 }
 
 // heartbeatCodexCursor is the Codex scan context that must survive between

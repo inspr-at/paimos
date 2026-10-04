@@ -26,7 +26,7 @@
 //    optimistic), their projections (amend, for one revision and parent;
 //    child, once per child) and whether a node is gone (isDeleted).
 import { reactive, toRaw } from 'vue'
-import type { DeliveryOrder, Kind, ListItem, ListParent, WorkNode } from './api.ts'
+import type { DeliveryOrder, Kind, ListItem, ListParent, NodeRecurrence, WorkNode } from './api.ts'
 import { compareRevision } from './liveUpdates.ts'
 import { positionOf } from './position.ts'
 
@@ -67,6 +67,8 @@ interface Entry {
   readAt: number
   // List projections change independently of updated_at. Order their snapshots
   // by the server event position (AEON-449), then request order for older servers.
+  // Provenance is shared by list/GET reads and changes without a node write.
+  recurrenceRead?: { position?: number; sent: number; landed: number; value?: NodeRecurrence }
   projectionRead?: { position?: number; sent: number; landed: number }
   projectionChangedAt?: number
   projectionFloor?: number
@@ -77,7 +79,7 @@ interface Entry {
 
 // List attributes a list page may leave out (an older server): a newer page
 // without them clears them.
-const OPTIONAL = ['epic', 'eta', 'lead_worker', 'estimate'] as const
+const OPTIONAL = ['epic', 'eta', 'lead_worker', 'estimate', 'recurrence'] as const
 const OWN_PER_NODE = 8
 const CHILDREN_PER_NODE = 64
 const LIMIT = 4000
@@ -181,20 +183,50 @@ export class RowStore {
   // projectionFloor: the hint that triggered this batch. A page covering it may
   // advance the display while a newer hint still waits for the follow-up read.
   adopt(copy: ListItem, sent = this.clock, options: { show?: boolean; full?: boolean; projectionFloor?: number } = {}): ListItem | null {
-    return this.take(copy.id, sent, options.full ?? true, () => {
+    const row = this.take(copy.id, sent, options.full ?? true, () => {
       const previous = this.entries.get(copy.id)?.latest
       // A list read may not request placement. Keep the known projection in
       // that case; listNodes supplies null for authoritative journey absence.
-      return frozen(copy.delivery_order === undefined && previous?.delivery_order !== undefined
-        ? { ...copy, delivery_order: previous.delivery_order } : copy)
+      return this.withRecurrence(this.entries.get(copy.id)!, frozen(copy.delivery_order === undefined && previous?.delivery_order !== undefined
+        ? { ...copy, delivery_order: previous.delivery_order } : copy))
     }, copy.updated_at, !!copy.deleted_at, options.show ?? false, positionOf(copy), options.projectionFloor)
+    if (options.full !== false) this.readRecurrence(copy, sent)
+    return row
   }
-  // A node read (GET, a save answer): merged over the newest copy.
-  adoptNode(node: WorkNode, sent = this.clock, options: { show?: boolean } = {}): ListItem | null {
-    return this.take(node.id, sent, false, () => {
+  // A GET is authoritative for provenance; partial mutation answers opt out.
+  adoptNode(node: WorkNode, sent = this.clock, options: { show?: boolean; authoritative?: boolean } = {}): ListItem | null {
+    const row = this.take(node.id, sent, false, () => {
       const entry = this.entries.get(node.id)
-      return frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id), id => this.parents.get(id), id => this.kinds.get(id)))
+      return this.withRecurrence(entry!, frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id), id => this.parents.get(id), id => this.kinds.get(id))))
     }, node.updated_at, !!node.deleted_at, options.show ?? false)
+    if (options.authoritative !== false) this.readRecurrence(node, sent)
+    return row
+  }
+  // Receipt/source visibility changes without advancing the occurrence node's
+  // revision. Request order governs this projection, even while an editor pins
+  // the node; a late read or partial save cannot restore withheld provenance.
+  private withRecurrence(entry: Entry, copy: ListItem): ListItem {
+    if (!entry.recurrenceRead) return copy
+    const next = clone(copy)
+    delete next.recurrence
+    if (entry.recurrenceRead.value) next.recurrence = clone(entry.recurrenceRead.value)
+    return frozen(next)
+  }
+  private readRecurrence(node: WorkNode, sent: number) {
+    const entry = this.entries.get(node.id)
+    if (!entry?.latest || node.deleted_at || entry.tomb || this.gapSince(sent) || (entry.floor && compareRevision(node.updated_at, entry.floor) <= 0)) return
+    const held = entry.recurrenceRead, position = positionOf(node)
+    const older = held && position !== undefined && held.position !== undefined && position !== held.position
+      ? position < held.position && sent <= held.landed : held && sent < held.sent
+    if (older) return
+    entry.recurrenceRead = { position, sent, landed: ++this.clock, value: node.recurrence ? freeze(clone(node.recurrence)) : undefined }
+    const showingLatest = entry.shown === entry.latest
+    entry.latest = this.withRecurrence(entry, entry.latest)
+    if (entry.shown) entry.shown = showingLatest ? entry.latest : this.withRecurrence(entry, entry.shown)
+    if (entry.row) {
+      if (entry.recurrenceRead.value) entry.row.recurrence = clone(entry.recurrenceRead.value)
+      else delete entry.row.recurrence
+    }
   }
   private take(id: string, sent: number, full: boolean, make: () => ListItem, revision: string, deleted: boolean, show: boolean, position?: number, projectionFloor?: number): ListItem | null {
     const entry = this.entry(id)
@@ -334,7 +366,7 @@ export class RowStore {
     if (!node?.id || !node.updated_at) return null
     this.remember(node.id, node.updated_at)
     const entry = this.entries.get(node.id)
-    return entry?.latest || entry?.row ? this.adoptNode(node, sent, { show: true }) : null
+    return entry?.latest || entry?.row ? this.adoptNode(node, sent, { show: true, authoritative: false }) : null
   }
   // A delete this tab made. revision: the Aeon-Revision it answered with;
   // without one (an older server) nothing can prove the event is this tab's.
@@ -503,9 +535,9 @@ export class RowStore {
   showWrite(id: string, node: WorkNode, base: ListItem): ListItem {
     const entry = this.entries.get(id)
     if (!entry?.row) return base
-    const copy = entry.latest && compareRevision(entry.latest.updated_at, node.updated_at) === 0
+    const copy = this.withRecurrence(entry, entry.latest && compareRevision(entry.latest.updated_at, node.updated_at) === 0
       ? entry.latest
-      : frozen(fromNode(base, clone(node), key => this.names.get(key), key => this.parents.get(key), key => this.kinds.get(key)))
+      : frozen(fromNode(base, clone(node), key => this.names.get(key), key => this.parents.get(key), key => this.kinds.get(key))))
     if (compareRevision(copy.updated_at, entry.shown?.updated_at) >= 0) this.assign(entry, copy)
     return copy
   }

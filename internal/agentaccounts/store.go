@@ -288,6 +288,7 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
+	MeasurementOnly   bool                `json:"measurement_only,omitempty"`
 	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
 	DaemonID          string              `json:"daemon_id"`
@@ -299,11 +300,9 @@ type probeWrite struct {
 	Failure string `json:"failure,omitempty"`
 }
 
-// committedProbeError rejects a stale completion after a successful heartbeat.
-// The handler must commit the transaction before exposing this rejection.
-type committedProbeError struct{ rejection *httpError }
-
-func (e *committedProbeError) Error() string { return e.rejection.Error() }
+// A restart heartbeat can commit while the obsolete check result is rejected.
+// The HTTP wrapper must report that partial result after the transaction commits.
+type probeHeartbeatCommitted struct{ error }
 
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
 	if !uuidRE.MatchString(accountID) {
@@ -356,18 +355,96 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
 	}
+	if report := in.Readiness; !in.MeasurementOnly && report != nil && uuidRE.MatchString(report.CheckID) &&
+		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
+		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
+		before.daemonGeneration != nil && *before.daemonGeneration != generation {
+		c, err := scanCheck(tx.QueryRow(ctx, `SELECT `+checkColumns+` FROM account_readiness_checks WHERE id=$1 AND account_id=$2`, report.CheckID, accountID))
+		if err != nil && !isNoRows(err) {
+			return Account{}, err
+		}
+		// Only a currently pending check may announce the restart. Replaying a
+		// receipt from an older generation cannot move the heartbeat backwards.
+		if err == nil && c.State == "pending" && c.BindingRevision == before.LinkRevision &&
+			c.DaemonGeneration != nil && *c.DaemonGeneration == *before.daemonGeneration && now.Before(c.ExpiresAt) {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=$3,last_probe_failure=$4,last_daemon_generation=$5 WHERE id=$1`, accountID, now, in.Available, failure, generation); err != nil {
+				return Account{}, err
+			}
+			after, err := getAccount(ctx, tx, accountID)
+			if err != nil {
+				return Account{}, err
+			}
+			if err := learnOnline(ctx, tx, after, now); err != nil {
+				return Account{}, err
+			}
+			// The heartbeat commits even though the old check's facts do not.
+			// Evaluate only the already accepted measurements, before events take
+			// the counter lock, just as for an ordinary successful probe.
+			notices, err := prepareQuotaWarnings(ctx, tx, p, after, now)
+			if err != nil {
+				return Account{}, err
+			}
+			system, err := quotaSystemActor(ctx, tx, p.TenantID, len(notices) > 0)
+			if err != nil {
+				return Account{}, err
+			}
+			if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+				return Account{}, err
+			}
+			if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
+				return Account{}, err
+			}
+			return after, &probeHeartbeatCommitted{&httpError{status: 409, code: "stale_binding", msg: "check belongs to previous daemon generation; heartbeat recorded, check facts discarded"}}
+		}
+	}
 	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
 		return Account{}, err
 	}
-	var completionErr *committedProbeError
-	if in.Readiness != nil {
-		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
-			completionErr = &committedProbeError{rejection: &httpError{status: 409, code: "stale_binding", msg: "heartbeat committed; readiness daemon generation changed; refresh pending work"}}
-		} else if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+	if err := reconcileReadinessResources(ctx, tx, before); err != nil {
+		return Account{}, err
+	}
+	if c := before.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
 			return Account{}, err
 		}
 	}
-	if _, err := tx.Exec(ctx, `
+	if c := in.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if in.Readiness != nil {
+		if in.MeasurementOnly && (before.daemonGeneration == nil || *before.daemonGeneration != generation) {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
+		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
+		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+			return Account{}, err
+		}
+	} else if !in.MeasurementOnly && in.Available && before.Harness == "pi" && in.OpenRouterCredits != nil {
+		legacy := before
+		legacy.OpenRouterCredits = in.OpenRouterCredits
+		if err := storeLegacyKeyFact(tenant.WithPrincipal(ctx, p), tx, legacy, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if in.MeasurementOnly {
+		// This row lock is shared with ordinary health probes. A measurement,
+		// including delayed replay, has no authority to change their result.
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_daemon_generation=$2 WHERE id=$1::uuid`, accountID, generation); err != nil {
+			return Account{}, err
+		}
+	} else if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
 		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
@@ -378,16 +455,24 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, err
 	}
-	if after.LastProbeAt != nil {
+	if !in.MeasurementOnly && after.LastProbeAt != nil {
 		if err := learnOnline(ctx, tx, after, *after.LastProbeAt); err != nil {
 			return Account{}, err
 		}
 	}
+	notices, err := prepareQuotaWarnings(ctx, tx, p, after, now)
+	if err != nil {
+		return Account{}, err
+	}
+	system, err := quotaSystemActor(ctx, tx, p.TenantID, len(notices) > 0)
+	if err != nil {
+		return Account{}, err
+	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
 		return Account{}, err
 	}
-	if completionErr != nil {
-		return after, completionErr
+	if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
+		return Account{}, err
 	}
 	return after, nil
 }

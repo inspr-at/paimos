@@ -437,7 +437,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .actions { display: flex; gap: 8px; align-items: center; }
 .actions .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; }
 .more { margin: 10px 0 0; color: var(--ink-3); font-size: 12.5px; }
-.learn-dialog { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.learn-dialog { width: min(clamp(520px, 44vw, 960px), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .learn-dialog::backdrop { background: var(--scrim); }
 .learn-card { display: grid; gap: 10px; max-height: calc(100dvh - 24px); overflow: auto; padding: 18px 18px 16px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .pick { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }

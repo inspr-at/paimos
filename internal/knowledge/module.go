@@ -433,6 +433,9 @@ func parseCreate(raw map[string]json.RawMessage) (createInput, error) {
 	if !ok {
 		return in, fail(http.StatusBadRequest, "invalid_type", "type is runbook, guideline, memory, external-system or related-project")
 	}
+	if s.Kind == "decision" {
+		return in, fail(http.StatusForbidden, "decision_service_required", "Decisions are created and corrected through the Decision Desk.")
+	}
 	in.Spec = s
 	if in.Slug, _, err = stringField(raw, "slug"); err != nil {
 		return in, err

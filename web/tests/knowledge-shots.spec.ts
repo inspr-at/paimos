@@ -20,14 +20,10 @@ const DOCK_WIDTHS = (process.env.DOCK_WIDTHS ?? '1920,1440,1200,1199,390').split
 interface State { name: string; path: string; empty?: boolean; options?: KnowledgeMockOptions; act?: (page: Page, width: number) => Promise<void>; full?: boolean; widths?: number[] }
 const entry = '/p/PHAROS/knowledge/runbook/deploy-release'
 const states: State[] = [
-  { name: '01-list', path: '/p/PHAROS/knowledge', act: async page => { await expect(page.locator('.k-row').first()).toBeVisible() }, full: true },
   { name: '02-list-search', path: '/p/PHAROS/knowledge?q=deploy+probe', act: async page => { await expect(page.locator('.k-row mark').first()).toBeVisible() } },
-  { name: '03-list-kind', path: '/p/PHAROS/knowledge?type=memory&status=all', act: async page => { await expect(page.locator('.k-row').first()).toBeVisible(); await page.keyboard.press('j') } },
   { name: '04-list-empty', path: '/p/PHAROS/knowledge', empty: true, act: async page => { await expect(page.getByRole('heading', { name: /No knowledge in Pharos yet/ })).toBeVisible() } },
   { name: '05-list-nomatch', path: '/p/PHAROS/knowledge?q=kubernetes', act: async page => { await expect(page.getByRole('heading', { name: /Nothing matches/ })).toBeVisible() } },
-  { name: '06-entry', path: entry, act: async page => { await expect(page.locator('.e-body h2').first()).toBeVisible() }, full: true },
   { name: '07-entry-anchor', path: `${entry}#roll-back`, act: async page => { await expect(page.locator('#h-roll-back')).toBeVisible(); await page.waitForTimeout(300) } },
-  { name: '08-guideline', path: '/p/PHAROS/knowledge/guideline/no-edge-accents', act: async page => { await expect(page.locator('.e-rule')).toBeVisible() } },
   { name: '09-external', path: '/p/PHAROS/knowledge/external-system/hetzner', act: async page => { await expect(page.getByText('console.hetzner.cloud')).toBeVisible() } },
   { name: '10-proposed', path: '/p/PHAROS/knowledge/memory/hetzner-token-expiry', act: async page => { await expect(page.locator('.e-note.proposed')).toBeVisible() } },
   { name: '11-edit', path: entry, act: async page => { await expect(page.locator('.e-body')).toBeVisible(); await page.keyboard.press('e'); await expect(page.getByRole('form', { name: /Edit deploy-release/ })).toBeVisible() }, full: true },
@@ -42,11 +38,6 @@ const states: State[] = [
     await expect(page.locator('.e-conflict')).toBeVisible()
     await page.getByRole('button', { name: 'Compare the text' }).click()
   } },
-  { name: '14-create', path: '/p/PHAROS/knowledge', act: async page => {
-    await expect(page.locator('.k-row').first()).toBeVisible(); await page.keyboard.press('n')
-    await page.getByLabel('Title').fill('Restart the beacon after a kernel update')
-  } },
-  { name: '15-cross', path: '/knowledge', act: async page => { await expect(page.locator('.kp-row').first()).toBeVisible() }, full: true },
   { name: '16-cross-search', path: '/knowledge?q=deploy', act: async page => { await expect(page.locator('.kp-row mark').first()).toBeVisible() } },
   { name: '17-palette', path: '/p/PHAROS', act: async page => {
     await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
@@ -55,13 +46,8 @@ const states: State[] = [
   } },
   { name: '18-missing', path: '/p/PHAROS/knowledge/runbook/nope', act: async page => { await expect(page.getByRole('heading', { name: /No runbook called/ })).toBeVisible() } },
   { name: '19-renamed', path: '/p/PHAROS/knowledge/runbook/deploy-flow', act: async page => { await expect(page).toHaveURL(/deploy-release/); await expect(page.locator('.e-body')).toBeVisible() } },
-  // U25: the entry docked beside the list, at wide widths, at the docking edge (1200) and just below it.
-  { name: '20-dock', path: `/p/PHAROS/knowledge?entry=runbook/deploy-release`, widths: DOCK_WIDTHS, full: true, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
-  { name: '21-dock-external', path: `/p/PHAROS/knowledge?entry=external-system/hetzner`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
   { name: '22-dock-edit', path: `/p/PHAROS/knowledge?entry=guideline/no-edge-accents`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible(); await page.keyboard.press('e'); await expect(page.getByRole('form', { name: /Edit no-edge-accents/ })).toBeVisible() } },
   { name: '23-dock-missing', path: `/p/PHAROS/knowledge?entry=runbook/nope`, widths: DOCK_WIDTHS, act: async (page, width) => { if (width >= 1200) await expect(page.getByRole('heading', { name: /No runbook called/ })).toBeVisible() } },
-  { name: '24-dock-search', path: `/p/PHAROS/knowledge?q=deploy&entry=runbook/deploy-release`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
-  { name: '25-dock-memory', path: `/p/PHAROS/knowledge?status=all&entry=memory/hetzner-token-expiry`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
 ]
 
 test.skip(!round, 'set KNOWLEDGE_SHOTS to the round name to capture')

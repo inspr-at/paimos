@@ -30,17 +30,24 @@ func TestPreferencesArePrivateSmallObjectsPerPerson(t *testing.T) {
 	must(db.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', 'carol') RETURNING id::text`, otherTenantID).Scan(&carolID))
 
 	mux := http.NewServeMux()
+	var baseline int
+	must(db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&baseline))
 	New(db.App).Mount(mux)
 	request := func(tenantID, principalID, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID}))
+		if principalID != "" {
+			req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID}))
+		}
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w
 	}
 	value := func(w *httptest.ResponseRecorder) string {
 		t.Helper()
+		if w.Code != http.StatusOK {
+			t.Fatalf("preference response status=%d body=%s", w.Code, w.Body.String())
+		}
 		var out preference
 		must(json.Unmarshal(w.Body.Bytes(), &out))
 		return string(out.Value)
@@ -60,7 +67,7 @@ func TestPreferencesArePrivateSmallObjectsPerPerson(t *testing.T) {
 		t.Fatalf("read back = %s", read.Body.String())
 	}
 	// Overwrite replaces the whole value.
-	request(tenantID, aliceID, http.MethodPut, "/api/preferences/list:p1", `{"value":{"split":0.4}}`)
+	value(request(tenantID, aliceID, http.MethodPut, "/api/preferences/list:p1", `{"value":{"split":0.4}}`))
 	if got := value(request(tenantID, aliceID, http.MethodGet, "/api/preferences/list:p1", "")); strings.Contains(got, "columns") || !strings.Contains(got, "split") {
 		t.Fatalf("overwrite = %s", got)
 	}
@@ -86,13 +93,21 @@ func TestPreferencesArePrivateSmallObjectsPerPerson(t *testing.T) {
 			t.Fatalf("PUT %s %.40s status=%d want %d body=%s", tc.path, tc.body, got.Code, tc.status, got.Body.String())
 		}
 	}
-	if got := request(tenantID, "", http.MethodGet, "/api/preferences/list:p1", ""); got.Code == http.StatusOK && value(got) != "null" {
-		t.Fatalf("anonymous read %s", got.Body.String())
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		got := request("", "", method, "/api/preferences/list:anonymous", `{"value":{"anonymous":true}}`)
+		if got.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous %s status=%d body=%s", method, got.Code, got.Body.String())
+		}
+	}
+	var anonymousWrites int
+	must(db.Admin.QueryRow(ctx, `SELECT count(*) FROM user_preferences WHERE key='list:anonymous'`).Scan(&anonymousWrites))
+	if anonymousWrites != 0 {
+		t.Fatalf("anonymous PUT persisted %d preferences", anonymousWrites)
 	}
 	// No events for preferences.
 	var events int
 	must(db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&events))
-	if events != 0 {
-		t.Fatalf("preferences appended %d events", events)
+	if events != baseline {
+		t.Fatalf("preferences appended %d events", events-baseline)
 	}
 }

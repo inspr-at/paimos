@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { agentTheme, agentThemeBound, defaultAgentTheme } from './agentTheme.ts'
 import { computed } from 'vue'
 import { usePreference } from './preferences.ts'
 import { clampIconSize, isAgentIndicatorStyle, isIndicatorRing, type AgentIndicatorStyle, type IndicatorRing } from './indicatorVariants.ts'
@@ -24,7 +25,11 @@ export function normalizeAgentIndicator(value: unknown): AgentIndicatorPreferenc
 
 export function useAgentIndicator() {
   const preference = usePreference<AgentIndicatorPreference>(AGENT_INDICATOR_KEY)
-  const choice = computed(() => normalizeAgentIndicator(preference.value.value))
+  const choice = computed(() => {
+    if (!agentThemeBound.value && !agentTheme.value) return normalizeAgentIndicator(preference.value.value)
+    const theme = agentTheme.value ?? defaultAgentTheme
+    return normalizeAgentIndicator({ style: theme.avatar, ring: theme.ring, hovering: theme.hover, size: theme.size })
+  })
   const save = (patch: Partial<AgentIndicatorPreference>) => preference.save(normalizeAgentIndicator({ ...choice.value, ...patch }), 0)
   function setStyle(style: AgentIndicatorStyle) { save({ style }) }
   function setHovering(hovering: boolean) { save({ hovering }) }

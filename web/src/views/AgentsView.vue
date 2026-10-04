@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { tierEvidenceRefresh, type AgentEventIdentity } from '../lib/tierEvidenceLive'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, myPermissions } from '../lib/authz'
@@ -26,16 +27,40 @@ import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
+import QuotaWarnings from '../components/agents/QuotaWarnings.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 import AttachPending from '../components/agents/AttachPending.vue'
+import WindDownPanel from '../components/agents/WindDownPanel.vue'
+import FloatingPanel from '../components/work/FloatingPanel.vue'
+import { useAgentPause } from '../stores/agentPause'
 
 // Markus's desk for agents: a compact live line under the title, what waits on him
 // (only when something does), the accounts with today's plan, then every session
 // grouped by state. A session opens in the docked panel.
 const agents = useAgents()
+const pause = useAgentPause()
+const windDown = ref<InstanceType<typeof WindDownPanel>>()
+const sessionList = ref<InstanceType<typeof SessionList>>()
+const headerMenu = ref<{ type: 'add' | 'more'; anchor: HTMLElement } | null>(null)
+function headerAction(type: 'add' | 'more', event: Event) { headerMenu.value = headerMenu.value?.type === type ? null : { type, anchor: event.currentTarget as HTMLElement } }
+function menuAction(action: () => void) {
+  const anchor = headerMenu.value?.anchor
+  headerMenu.value = null
+  // Dialogs remember the durable header trigger, rather than a removed menu item.
+  anchor?.focus({ preventScroll: true })
+  action()
+}
+function menuKeys(event: KeyboardEvent) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role=menuitem]')].filter(item => !(item as HTMLButtonElement).disabled)
+  const i = items.indexOf(document.activeElement as HTMLElement)
+  items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (i + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+}
 const capacity = useCapacity()
 const projects = useProjects()
 const session = useSession()
@@ -49,11 +74,19 @@ watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   cursor.value = id
   focusRow(id)
 }, { immediate: true })
+// Provider-change notices link to the affected run's session or queued row.
+watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => agents.runs], async ([id, loaded]) => {
+  if (!loaded || typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return
+  const linked = agents.sessions.find(s => s.run_id === id)
+  if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
+  await nextTick()
+  if (route.query.run !== id) return
+  const queued = document.getElementById(`run-${id}`)
+  if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
+}, { immediate: true })
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
-const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
 const updatedFull = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleString())
-const updatedAge = computed(() => agents.sessionsUpdatedAt === null ? '' : `${Math.max(0, Math.floor((agents.now - agents.sessionsUpdatedAt) / 1000))} s ago`)
 const freshnessTip = computed(() => [live.value ? 'Connected to live updates' : 'Refreshing every 20 seconds', updatedFull.value ? `last update ${updatedFull.value}` : ''].filter(Boolean).join(' · '))
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
@@ -65,6 +98,9 @@ const pairingAccess = computed(() => pairingPermissions({
   principalKind: session.identity?.principal.kind,
 }))
 const showConnect = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
+const canAttach = computed(() => session.identity?.principal.kind === 'person' && pairingAccess.value.canLookup)
+const showNew = computed(() => canStart.value || canAttach.value || showConnect.value)
+watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null })
 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
@@ -261,6 +297,11 @@ function keydown(event: KeyboardEvent) {
       if (kind === 's') { event.preventDefault(); openSession(id) }
       else if (kind === 'm') { event.preventDefault(); const held = agents.held.find(m => m.id === id); if (held) openAgent(held.sender_principal_id) }
       break
+    case 'p': case 'r': {
+      const view = agents.views.find(v => v.session.id === id)
+      if (kind === 's' && view && pause.eligible(view.session, event.key === 'p' ? 'pause' : 'resume')) { event.preventDefault(); pause.open(event.key === 'p' ? 'pause' : 'resume', [view.session]) }
+      break
+    }
     case 'Escape':
       if (ticketPeekOpen.value) return
       if (sessionId.value) { event.preventDefault(); void closePanel() }
@@ -270,23 +311,29 @@ function keydown(event: KeyboardEvent) {
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
-const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
+const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load(), pause.refreshLeaving()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
-let tierCatchUp = false
-function changed(event?: string) {
-  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
+const evidenceRefresh = tierEvidenceRefresh(() => selected.value?.session, session => {
+  void serviceTiers.load(session).catch(error => { serviceTiers.errors[session.id] = error instanceof Error ? error.message : 'Tier evidence unavailable.' })
+}, () => document.visibilityState !== 'hidden')
+function evidenceVisible() { if (document.visibilityState !== 'hidden') evidenceRefresh.notify() }
+function changed(event?: string, identity?: AgentEventIdentity) {
+  evidenceRefresh.notify(event, identity)
+  // Confirmation polling already tracks its own exact pending sessions.
+  if (!event) serviceTiers.reconcile()
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
   debounce = setTimeout(() => {
     debounce = undefined
-    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
     void agents.loadAll()
+    void pause.refreshLeaving()
   }, 400)
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
   stopTierWatch = serviceTiers.watchPage()
+  document.addEventListener('visibilitychange', evidenceVisible)
   void agents.loadAll()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
@@ -295,6 +342,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
+  evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
@@ -307,28 +355,37 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <header class="page-head">
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
-        <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
+        <div class="title-row">
+          <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
+          <div class="head-side">
+            <p class="freshness" :class="{ on: live && !stale, stale }" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" /><span>{{ stale ? 'Update delayed' : live ? 'Live' : 'Connecting…' }}</span></p>
+            <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start an agent, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
+            <button type="button" class="icon-btn flat" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
+          </div>
+        </div>
         <LiveLine :views="agents.views" :now="agents.now" :loaded="agents.loaded" @open="openSession" @jump="jump" />
       </div>
-      <div class="head-side">
-        <div class="head-links">
-        <p class="freshness" :class="{ on: live && !stale, stale }" :data-tip="freshnessTip">
-          <span class="live-mark" aria-hidden="true" />
-          <span v-if="stale" class="live">Update delayed</span>
-          <span v-else-if="live" class="live">Live</span>
-          <span class="last-updated" :class="{ 'sr-only': live && !stale }" role="status">
-            <template v-if="agents.sessionsUpdatedAt !== null"><template v-if="!stale">Updated </template><time :datetime="new Date(agents.sessionsUpdatedAt).toISOString()">{{ agents.refreshStale ? updatedAge : updatedTime }}</time><template v-if="agents.refreshStale"> · retrying</template></template>
-            <template v-else>Connecting…</template>
-          </span>
-        </p>
-        <RouterLink class="context-link" to="/decision-desk">Decision Desk</RouterLink>
-        <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
-        <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
+      <AttachApproval ref="attachDialog" hide-trigger :now="agents.now" @changed="(result, declined) => attachPending?.settle(result, declined)" />
+      <FloatingPanel v-if="headerMenu" :anchor="headerMenu.anchor" align="end" :width="300" :label="headerMenu.type === 'add' ? 'Add agent or computer' : 'More agent actions'" @close="restore => { if (restore) headerMenu?.anchor.focus(); headerMenu = null }">
+        <div role="menu" class="header-menu" @keydown="menuKeys">
+          <template v-if="headerMenu.type === 'add'">
+            <button v-if="canStart" type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent…<small>Pick a ticket and a harness.</small></span></button>
+            <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
+            <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
+          </template>
+          <template v-else>
+            <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('pause-all'))"><AppIcon name="pause" /><span>Pause all…<small>Choose one level, with per-agent overrides.</small></span></button>
+            <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('resume-all'))"><AppIcon name="play" /><span>Resume all…<small>Continue from saved handovers, leads first.</small></span></button>
+            <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.focusWindDown())"><AppIcon name="clock" /><span>Wind down…<small>Starts on confirm, done by the deadline.</small></span></button>
+            <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
+            <RouterLink role="menuitem" class="menu-item" to="/decision-desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk</span></RouterLink>
+            <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
+            <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
+            <button role="menuitem" type="button" class="menu-item" @click="menuAction(() => sessionList?.toggleHistory())"><AppIcon name="history" /><span>History<small>Ended sessions and saved handovers.</small></span></button>
+            <RouterLink role="menuitem" class="menu-item" to="/settings/personal#agents" @click="headerMenu = null"><AppIcon name="gear" /><span>Agent settings<small>Default pause level and indicators.</small></span></RouterLink>
+          </template>
         </div>
-        <AttachApproval ref="attachDialog" :now="agents.now" @changed="(result, declined) => attachPending?.settle(result, declined)" />
-        <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect your machine</RouterLink>
-        <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
-      </div>
+      </FloatingPanel>
     </header>
 
     <!-- The first load swaps the loading layout for the real one in one step, so the
@@ -348,8 +405,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
+        <WindDownPanel v-if="agents.loaded" ref="windDown" />
         <SessionList
-          v-if="agents.loaded"
+          v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-start="canStart"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()"
@@ -360,9 +418,10 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
+        <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
         <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
     </div>
@@ -396,6 +455,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .freshness.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
 .freshness.stale .live-mark { background: var(--gold); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
+/* Reports and live groups grow below the controls without changing the viewport offset. */
+.agents-page { overflow-anchor: none; }
 /* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
@@ -427,4 +488,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
   .context-link { height: 36px; }
   .freshness { order: 9; margin: 0 0 0 auto; height: 36px; padding-right: 0; }
 }
+</style>
+
+<style scoped>
+.head-main{width:100%;min-width:0}.title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.title-row .head-side{display:flex;flex-wrap:nowrap;align-items:center;gap:6px}.title-row h1{margin:6px 0 0}.title-row .freshness{height:36px;font-size:12px;padding:0}.add-agent{width:36px;height:36px;padding:0}.header-menu .menu-item{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--ink);font-size:13px;text-align:left;text-decoration:none}.header-menu .menu-item:hover{background:var(--row-hover)}.header-menu .menu-item span{display:grid;gap:3px}.header-menu small{font-size:11px;color:var(--ink-3)}
+@media(max-width:600px){.title-row .head-side{display:flex}.title-row .freshness{margin:0}.title-row .icon-btn,.title-row .add-agent{width:40px;height:40px}}
 </style>

@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { commentEditable, describeChange, parseWorkerMarker, shortRole, type TimelineEntry } from '../../lib/activity'
 import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
@@ -16,7 +16,7 @@ import StatusIcon from './StatusIcon.vue'
 // field changes as one compact line per person and moment, agent work markers as
 // system lines that expand to the full marker.
 const props = defineProps<{
-  entries: TimelineEntry[]; loading: boolean; loadingOlder: boolean; hasOlder: boolean; error: string
+  recordId?: string; entries: TimelineEntry[]; loading: boolean; loadingOlder: boolean; hasOlder: boolean; error: string
   me: string | undefined; now: number; canWrite: boolean; canDelete: boolean
   edit: (id: string, body: string) => Promise<boolean>; remove: (id: string) => Promise<boolean>
 }>()
@@ -24,6 +24,9 @@ const emit = defineEmits<{ older: []; retry: [] }>()
 const editingId = ref<string | null>(null)
 const draft = ref('')
 const saving = ref(false)
+let generation = 0
+function discard() { generation++; editingId.value = null; draft.value = ''; saving.value = false }
+watch(() => props.recordId, discard, { flush: 'sync' })
 const expanded = ref(new Set<string>())
 const editor = ref<InstanceType<typeof MarkdownEditor>[]>()
 const historyOptions = [
@@ -66,8 +69,10 @@ async function startEdit(entry: Extract<TimelineEntry, { kind: 'comment' }>) {
 }
 async function saveEdit() {
   if (!editingId.value) return
+  const request = generation
   saving.value = true
   const ok = await props.edit(editingId.value, draft.value)
+  if (request !== generation) return
   saving.value = false
   if (ok) editingId.value = null
 }
@@ -79,7 +84,7 @@ async function removeComment(id: string) {
   if (await confirmAction({ title: 'Delete this comment?', body: 'It leaves the timeline for everyone. The audit log keeps a record.', confirmLabel: 'Delete comment', danger: true })) await props.remove(id)
 }
 function isDirty() { return editingId.value !== null }
-defineExpose({ isDirty })
+defineExpose({ isDirty, discard })
 </script>
 
 <template>

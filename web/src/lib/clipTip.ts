@@ -1,22 +1,51 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { nextTick, type Directive } from 'vue'
-const observers = new WeakMap<HTMLElement, { value: string; resize: ResizeObserver }>()
-function measure(el: HTMLElement) {
-  const value = observers.get(el)?.value
-  const target = el.parentElement?.matches('button') ? el.parentElement : el
-  if (value && el.scrollWidth > el.clientWidth + 1) target.dataset.tip = value
-  else delete target.dataset.tip
+import type { ObjectDirective } from 'vue'
+
+export type ClipTipValue = string | { text?: string; onClip?: (clipped: boolean) => void } | undefined
+
+/** Both ellipsis and line clamps expose their hidden extent through scroll size. */
+export function isTextClipped(element: Pick<HTMLElement, 'clientWidth' | 'clientHeight' | 'scrollWidth' | 'scrollHeight'>): boolean {
+  return element.clientWidth > 0 && element.clientHeight > 0 &&
+    (element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1)
 }
-// Use the app's pointer/focus tooltip only where the text is actually clipped.
-export const vClipTip: Directive<HTMLElement, string> = {
-  mounted(el, binding) {
-    const resize = new ResizeObserver(() => measure(el))
-    observers.set(el, { value: binding.value, resize }); resize.observe(el); measure(el)
+
+type State = { value: ClipTipValue; measure: () => void; observer?: ResizeObserver; tip: string | null; addedTab: boolean; live: boolean }
+const states = new WeakMap<HTMLElement, State>()
+// Local imports expose v-clip-tip without changing global app registration.
+export const vClipTip: ObjectDirective<HTMLElement, ClipTipValue> = {
+  mounted(element, binding) {
+    const state: State = { value: binding.value, measure: () => {}, tip: element.getAttribute('data-tip'), addedTab: false, live: true }
+    state.measure = () => {
+      if (!state.live) return
+      const clipped = isTextClipped(element)
+      const options = typeof state.value === 'string' ? { text: state.value } : state.value
+      const text = options?.text ?? element.textContent?.trim() ?? ''
+      if (clipped && text) {
+        element.setAttribute('data-tip', text)
+        if (!element.matches('button, input, textarea, select, a[href], [tabindex]')) {
+          element.setAttribute('tabindex', '0'); state.addedTab = true
+        }
+      } else {
+        if (state.tip === null) element.removeAttribute('data-tip')
+        else element.setAttribute('data-tip', state.tip)
+        if (state.addedTab) { element.removeAttribute('tabindex'); state.addedTab = false }
+      }
+      options?.onClip?.(clipped)
+    }
+    states.set(element, state)
+    state.observer = new ResizeObserver(state.measure)
+    state.observer.observe(element)
+    state.measure()
+    // Font loading can change clipping without changing the clamped box.
+    void document.fonts?.ready.then(state.measure)
   },
-  updated(el, binding) {
-    const state = observers.get(el)
-    if (state) state.value = binding.value
-    void nextTick(() => measure(el))
+  updated(element, binding) {
+    const state = states.get(element)
+    if (state) { state.value = binding.value; state.measure() }
   },
-  beforeUnmount(el) { observers.get(el)?.resize.disconnect(); observers.delete(el) },
+  unmounted(element) {
+    const state = states.get(element)
+    if (!state) return
+    state.live = false; state.observer?.disconnect(); states.delete(element)
+  },
 }

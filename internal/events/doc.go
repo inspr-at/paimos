@@ -25,8 +25,12 @@
 // Undo is opt-in by stable event type via WithUndo. The owning package's
 // UndoFunc locks and authorizes its resource, rejects stale snapshots, restores
 // it, and returns the actual compensating Change without writing an event.
-// The events module checks actor-or-admin authorization and duplicate undo,
-// runs that handler, and appends exactly one event in the same transaction.
+// The events module takes the tenant fence FOR NO KEY UPDATE and rechecks
+// events.undo in that transaction, plus events.undo_other for another actor's
+// event. It checks duplicate undo, runs the handler, and appends exactly one
+// event in the same transaction. Access and rules writers that also need the
+// tree advisory lock must take that tenant fence first, then tree and rows;
+// the event counter is last.
 // Unknown types and compensating events are not reversible (409). Register
 // node/kind/view handlers from their owning packages when wiring those modules;
 // their schema, tree and ownership rules must not be bypassed by generic SQL.

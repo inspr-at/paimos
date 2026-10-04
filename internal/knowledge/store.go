@@ -109,6 +109,7 @@ CROSS JOIN terms t
 `+nearestProject+`
 `+lastWrite+`
 WHERE n.tenant_id=$1 AND n.deleted_at IS NULL
+ AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'')
   AND ($5::uuid IS NULL OR proj.id=$5::uuid)
   AND ($3::text='' OR n.search_document @@ t.q
        OR n.title ILIKE $7 ESCAPE '\' OR coalesce(n.fields->>'slug','') ILIKE $7 ESCAPE '\'
@@ -264,7 +265,7 @@ func loadEntry(ctx context.Context, tx pgx.Tx, tenantID, id string, deleted bool
 	err := scanItem(tx.QueryRow(ctx, `
 SELECT `+itemColumns+`, n.body, n.fields
 FROM nodes n
-JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug = ANY($3::text[])
+JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug = ANY($3::text[]) AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'')
 `+nearestProject+`
 `+lastWrite+`
 WHERE n.tenant_id=$1 AND n.id=$2::uuid AND (n.deleted_at IS NULL OR $4::bool)`, tenantID, id, kindSlugs(), deleted), &e.Item, &e.Body, &fields)
@@ -359,70 +360,48 @@ ORDER BY n.key, r.type`, tenantID, id)
 	return out, rows.Err()
 }
 
-// resolve finds an entry by project, type and slug. When no live entry has
-// the slug, the newest rename away from it on a live entry answers instead.
+// slugCandidatesSQL is shared by URL resolution and graph mentions. refs
+// names the requested slugs, $1 the tenant and $4 the eligible knowledge kinds.
+// History provides evidence of a rename, never current visibility or authority.
+const slugCandidatesSQL = `   SELECT n.id,k.slug AS kind,n.fields->>'slug' AS lookup,n.updated_at,true AS current,0::bigint AS rename_id
+   FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+   WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug=ANY($4::text[])
+    AND n.fields ? 'slug' AND n.fields->>'slug' IN (SELECT slug FROM refs)
+   UNION ALL
+   SELECT n.id,k.slug,e.before->'fields'->>'slug',n.updated_at,false,e.id AS rename_id
+   FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
+    JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+   WHERE e.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug=ANY($4::text[])
+    AND e.type IN ('knowledge.updated','node.updated') AND e.undo_of IS NULL
+    AND e.before->'fields' ? 'slug' AND e.before->'fields'->>'slug' IN (SELECT slug FROM refs)
+    AND e.before->>'kind_id'=n.kind_id::text
+    AND (e.after->'fields'->>'slug') IS DISTINCT FROM (e.before->'fields'->>'slug')`
+
+// Current slugs win; aliases are ordered by immutable rename events. A body
+// edit cannot change an alias destination. id is a stable final tie-breaker.
+const slugCandidateOrder = `current DESC,rename_id DESC,updated_at DESC,id`
+
+// resolve finds a live entry by slug, then the newest visible rename away from it.
 func resolve(ctx context.Context, tx pgx.Tx, tenantID, projectID string, s spec, slug string) (Entry, error) {
-	var kindID string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug=$2`, tenantID, s.Kind).Scan(&kindID)
+	var id string
+	var current bool
+	err := tx.QueryRow(ctx, `WITH refs AS (SELECT $3::text AS slug), candidates AS (
+ `+slugCandidatesSQL+`
+ ), scoped AS (
+ SELECT c.* FROM candidates c JOIN nodes n ON n.tenant_id=$1 AND n.id=c.id `+nearestProject+`
+ WHERE proj.id=$2::uuid
+ ) SELECT id::text,current FROM scoped ORDER BY `+slugCandidateOrder+` LIMIT 1`, tenantID, projectID, slug, []string{s.Kind}).Scan(&id, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Entry{}, errNotFound
 	}
 	if err != nil {
 		return Entry{}, err
 	}
-	var id string
-	err = tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n `+nearestProject+`
-	  WHERE n.tenant_id=$1 AND n.kind_id=$2::uuid AND n.deleted_at IS NULL AND n.fields->>'slug'=$3 AND proj.id=$4::uuid
-	  ORDER BY n.updated_at DESC LIMIT 1`, tenantID, kindID, slug, projectID).Scan(&id)
-	if err == nil {
-		return loadEntry(ctx, tx, tenantID, id, false)
+	entry, err := loadEntry(ctx, tx, tenantID, id, false)
+	if err == nil && !current {
+		entry.RenamedFrom = slug
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Entry{}, err
-	}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (e.node_id) e.node_id::text FROM events e
-	  WHERE e.tenant_id=$1 AND e.type IN ('knowledge.updated','node.updated') AND e.undo_of IS NULL
-	    AND (e.before->'fields'->>'slug')=$2 AND e.before->>'kind_id'=$3
-	    AND (e.after->'fields'->>'slug') IS DISTINCT FROM $2
-	  ORDER BY e.node_id, e.id DESC`, tenantID, slug, kindID)
-	if err != nil {
-		return Entry{}, err
-	}
-	var candidates []string
-	for rows.Next() {
-		var c string
-		if err := rows.Scan(&c); err != nil {
-			rows.Close()
-			return Entry{}, err
-		}
-		candidates = append(candidates, c)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return Entry{}, err
-	}
-	var best *Entry
-	for _, c := range candidates {
-		e, err := loadEntry(ctx, tx, tenantID, c, false)
-		if errors.Is(err, errNotFound) {
-			continue
-		}
-		if err != nil {
-			return Entry{}, err
-		}
-		if e.Project == nil || e.Project.ID != projectID || e.Kind != s.Kind || e.Slug == slug {
-			continue
-		}
-		if best == nil || e.UpdatedAt.After(best.UpdatedAt) {
-			found := e
-			best = &found
-		}
-	}
-	if best == nil {
-		return Entry{}, errNotFound
-	}
-	best.RenamedFrom = slug
-	return *best, nil
+	return entry, err
 }
 
 // ---------- Writes ----------
@@ -456,12 +435,15 @@ func trimDecimal(s string) string {
 func lockNode(ctx context.Context, tx pgx.Tx, tenantID, id string, deleted bool) (nodeSnap, string, error) {
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND k.slug = ANY($3::text[]) AND (n.deleted_at IS NULL OR $4::bool) FOR UPDATE OF n`,
+	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND k.slug = ANY($3::text[]) AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'') AND (n.deleted_at IS NULL OR $4::bool) FOR UPDATE OF n`,
 		tenantID, id, kindSlugs(), deleted).Scan(&kind); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nodeSnap{}, "", errNotFound
 		}
 		return nodeSnap{}, "", err
+	}
+	if kind == "decision" {
+		return nodeSnap{}, "", fail(403, "decision_service_required", "Correct Decisions through the Decision Desk to preserve their history.")
 	}
 	snap, err := scanSnap(tx.QueryRow(ctx, `SELECT `+nodeReturning+` FROM nodes WHERE tenant_id=$1 AND id=$2::uuid FOR UPDATE`, tenantID, id))
 	return snap, kind, err

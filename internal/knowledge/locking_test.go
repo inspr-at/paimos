@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
+func TestKnowledgeTenantBeforeTreeAndRowForDeleteAndUndo(t *testing.T) {
 	for _, action := range []string{"delete", "undo-create", "undo-delete", "undo-update"} {
 		t.Run(action, func(t *testing.T) {
 			f := setup(t)
@@ -50,6 +50,21 @@ func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 				first <- w
 			}()
 			pid := barrier.Wait(t, ctx)
+			// Tenant serialization alone would hide a missing tree lock.
+			// Probe it independently at the row-lock boundary.
+			if err := db.InTenant(ctx, f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+				var free bool
+				if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, 0))`, f.a.TenantID).Scan(&free); err != nil {
+					return err
+				}
+				if free {
+					t.Error("knowledge writer reached row lock without the tree fence")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
 			second := make(chan *httptest.ResponseRecorder, 1)
 			done := make(chan struct{})
 			go func() {
@@ -69,8 +84,8 @@ func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 			}()
 			lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, pid, done)
 			barrier.Release()
-			if lock != "advisory" {
-				t.Errorf("generic PATCH waited for %q instead of tree", lock)
+			if lock != "transactionid" {
+				t.Errorf("generic PATCH waited for %q instead of the tenant access fence", lock)
 			}
 			firstStatus := 201
 			if action == "delete" {

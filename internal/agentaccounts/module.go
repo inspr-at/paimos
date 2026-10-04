@@ -40,6 +40,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("GET /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("PUT /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("GET /api/agent-accounts/readiness", m.readinessList)
+	handle("GET /api/agent-accounts/quota-warnings", m.warningSessions)
+	handle("GET /api/settings/quota-warnings", m.warningSettings)
+	handle("PUT /api/settings/quota-warnings", m.warningSettings)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)
 	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
 	handle("PUT /api/agent-accounts/quota-pool", m.quotaPool)
@@ -140,7 +143,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 					if err != nil {
 						return err
 					}
-					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3`, a.ID, a.LinkRevision, now.Add(-CheckTTL)))
+					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3 AND daemon_generation IS NOT DISTINCT FROM $4`, a.ID, a.LinkRevision, now.Add(-CheckTTL), a.daemonGeneration))
 					if err != nil && !isNoRows(err) {
 						return err
 					}
@@ -292,7 +295,7 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	var completionErr *committedProbeError
+	var committed error
 	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
 		scopes, err := keyScopes(r.Context(), tx, r, p)
 		if err != nil {
@@ -300,20 +303,22 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		reader := p
 		reader.Scopes = scopes
-		if !hasScope(scopes, "account.probe") && (in.Readiness != nil || !hasScope(scopes, "account.manage")) {
+		if !hasScope(scopes, "account.probe") && (in.Readiness != nil || in.MeasurementOnly || !hasScope(scopes, "account.manage")) {
 			return fail(403, "account probe scope required")
 		}
 		// Existing opaque enrollments historically authorize probes by their
 		// live key scope and registering principal. Preserve that protocol;
 		// the additive readiness report also requires current role authority.
-		if in.Readiness != nil {
+		if in.Readiness != nil || in.MeasurementOnly {
 			if err := authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}); err != nil {
 				return fail(403, "account probe permission required")
 			}
 		}
 		var reportErr error
 		out, reportErr = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
-		if errors.As(reportErr, &completionErr) {
+		var partial *probeHeartbeatCommitted
+		if errors.As(reportErr, &partial) {
+			committed = partial.error
 			return nil
 		}
 		return reportErr
@@ -322,9 +327,9 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if completionErr != nil {
+	if committed != nil {
 		w.Header().Set("X-Aeon-Write-Committed", "true")
-		writeErr(w, completionErr.rejection)
+		writeErr(w, committed)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)

@@ -90,6 +90,7 @@ type fixture struct {
 	db         *dbtest.DB
 	h          http.Handler
 	tenantID   string
+	tenantSlug string
 	person     string
 	cookie     *http.Cookie
 	profiles   map[string]string
@@ -120,13 +121,17 @@ func uuid(t *testing.T, d *dbtest.DB) string {
 }
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	d := dbtest.Open(t)
-	id, err := tenantbootstrap.Create(t.Context(), d.App, "pairtest", "Pairing test")
+	return newFixtureInTenant(t, dbtest.Open(t), "pairtest")
+}
+
+func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string) *fixture {
+	t.Helper()
+	id, err := tenantbootstrap.Create(t.Context(), d.App, slug, "Pairing test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	f := &fixture{t: t, db: d, tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey}
 	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
@@ -170,11 +175,11 @@ func newFixture(t *testing.T) *fixture {
 // changes. Database rows, signing configuration and modules remain identical.
 func (f *fixture) rebuildHandler() {
 	f.t.Helper()
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: f.tenantSlug, BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	pairing := agentpairing.New(f.db.App, origin, "pairtest")
+	pairing := agentpairing.New(f.db.App, origin, f.tenantSlug)
 	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
 		f.t.Fatal(err)
 	}
@@ -1021,7 +1026,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatalf("expiry leaked reservation or invented process: %s %s held=%d started=%v claimed=%v expired=%v", state, holdState, held, started, claimed, expired)
 	}
 	retry := f.redeem(p)
-	if retry.Enrollments[0].VerificationState != "expired" || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
+	if retry.Enrollments[0].VerificationState != "expired" || !retry.Enrollments[0].VerificationExpiredReady || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
 		t.Fatal("expiry projection/retry binding wrong")
 	}
 	f.claim(v, e, key, ids, 409)
@@ -1039,6 +1044,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/windows", map[string]any{"starts_at": time.Now(), "ends_at": time.Now().Add(time.Hour), "unit": "requests", "allowance": 2, "pace_model": "unrestricted"}, true, "", 201)
+	fixtureWorkHours(t, f, e.AccountID)
 	var old, ongoing agentruns.Run
 	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &old)
 	decodeResult(t, f.call("POST", "/api/work-orders/"+old.OrderID+"/runs", map[string]string{"agent_principal_id": *v.PrincipalID, "model_profile_id": e.ProfileID, "requested_account_id": e.AccountID}, true, "", 201), &ongoing)
@@ -1555,8 +1561,8 @@ func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
 	proof["progress"] = progress
 	report = agentpairing.View{}
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
-	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
-		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
+	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 1 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("blocked account attention was lost: %+v", report.HarnessDetails["claude"])
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -241,18 +240,45 @@ func (a *PiAdapter) ProbeStatus(ctx context.Context, key string) (bool, error) {
 }
 
 func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, error) {
+	op, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ctx = op
+	a.probeMu.Lock()
+	managed := a.capacityManaged && a.Providers[key] == "openrouter"
+	a.probeMu.Unlock()
+	if !managed {
+		release, err := a.acquireProbe(ctx, key)
+		if err != nil {
+			return false, err
+		}
+		defer release()
+	}
+	return a.probeOwned(ctx, key, fresh, managed)
+}
+
+// The same bounded owner serializes standalone health requests and captures.
+// Supervised health never enters the network lane, so neither polling nor a
+// fresh launch can bypass the scheduler's persisted measurement retry policy.
+func (a *PiAdapter) acquireProbe(ctx context.Context, key string) (func(), error) {
 	a.probeMu.Lock()
 	if a.probeLocks == nil {
-		a.probeLocks = map[string]*sync.Mutex{}
+		a.probeLocks = map[string]chan struct{}{}
 	}
 	lock := a.probeLocks[key]
 	if lock == nil {
-		lock = &sync.Mutex{}
+		lock = make(chan struct{}, 1)
 		a.probeLocks[key] = lock
 	}
 	a.probeMu.Unlock()
-	lock.Lock()
-	defer lock.Unlock()
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, openrouter.ErrUnavailable
+	}
+}
+
+func (a *PiAdapter) probeOwned(ctx context.Context, key string, fresh, managed bool) (bool, error) {
 	// Report permission errors distinctly, before localHome rejects the profile.
 	if info, err := os.Stat(a.Homes[key]); err == nil && info.IsDir() && info.Mode().Perm()&0077 != 0 {
 		return false, piprobe.ErrPrivateProfile
@@ -291,7 +317,17 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 			// No prompt or completion. The key stays inside the local profile reader.
 			err = launcherReady(ctx, a.Path, node.Path, piprobe.Environment(home, node.Path))
 			if err == nil {
-				credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+				if managed {
+					err = agentsetup.ValidateOpenRouterProfile(home)
+				} else {
+					credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+				}
+				// A transport/measurement failure says nothing about the locally
+				// configured key's validity. Keep execution health independent;
+				// typed idle checks report the measurement failure separately.
+				if errors.Is(err, openrouter.ErrUnavailable) && !errors.Is(err, openrouter.ErrProfile) {
+					err = nil
+				}
 			}
 		} else {
 			provider, err = piprobe.Provider(ctx, a.Path, home, expected, node.Path)
@@ -462,13 +498,24 @@ func (a *ClaudeAdapter) ProbeAccountStatus(ctx context.Context, key string) (Pro
 }
 
 func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStatus {
+	unavailable := func(detail string) ProbeStatus { return ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: detail} }
 	home, err := localHome(a.Homes, key)
 	if err != nil {
-		return probeUnavailable
+		detail := agentsetup.ProbeProfileMissing
+		if errors.Is(err, errAccountHomePhysical) {
+			detail = agentsetup.ProbeProfilePhysical
+		}
+		if errors.Is(err, errAccountHomePrivate) {
+			detail = agentsetup.ProbeProfilePrivate
+			if userHome, e := os.UserHomeDir(); e == nil && a.Homes[key] == filepath.Join(userHome, ".claude") {
+				detail = agentsetup.ProbeClaudeDefaultPrivate
+			}
+		}
+		return unavailable(detail)
 	}
 	raw, code, err := probeRun(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
 	if err != nil {
-		return probeUnavailable
+		return unavailable(agentsetup.ProbeCommandFailed)
 	}
 	var status struct {
 		AccountID  string `json:"accountId"`
@@ -477,29 +524,29 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		AuthMethod string `json:"authMethod"`
 	}
 	if decodeProbeJSON(raw, &status) != nil || status.LoggedIn == nil {
-		return probeUnavailable
+		return unavailable(agentsetup.ProbeOutputInvalid)
 	}
 	if !*status.LoggedIn {
-		return probeAuthFailed
+		return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut}
 	}
 	if a.Emails != nil {
 		if a.Emails[key] == "" {
-			return probeUnavailable
+			return unavailable(agentsetup.ProbeIdentityMissing)
 		}
 		// An API-key login or a different email is explicitly another account;
 		// a login without an email says nothing about which account it is.
 		if status.AuthMethod == "api_key" {
-			return probeAuthFailed
+			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeAPIKeyLogin}
 		}
 		if strings.TrimSpace(status.Email) == "" {
-			return probeUnavailable
+			return unavailable(agentsetup.ProbeEmailMissing)
 		}
 		if !strings.EqualFold(status.Email, a.Emails[key]) {
-			return probeAuthFailed
+			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity}
 		}
 	}
 	if code != 0 {
-		return probeUnavailable
+		return unavailable(agentsetup.ProbeExitFailed)
 	}
 	if status.AccountID != "" {
 		a.quotaIdentities().Store(key, status.AccountID)

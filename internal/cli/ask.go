@@ -178,12 +178,61 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 	fmt.Fprintf(rt.stdout, "question: %s\nstate: %s\nrevision: %d\n", q.ID, q.State, q.Revision)
 	for _, a := range q.Askers {
 		fmt.Fprintf(rt.stdout, "comment destination: %s\nreply root: %s\n", a.CommentNodeID, a.ReplyRootID)
+		if a.FromRecord != nil {
+			fmt.Fprintf(rt.stdout, "%s: %s (revision %d)\n", a.FromRecord.Label, a.FromRecord.DecisionID, a.FromRecord.Revision)
+		}
 	}
 	if q.Answer != nil {
 		fmt.Fprintln(rt.stdout, "answer:", q.Answer.Answer)
 	}
 	for _, p := range q.Pending {
-		fmt.Fprintf(rt.stdout, "%s: %s\n", p.Kind, p.State)
+		state := p.State
+		if p.Kind == "inbox" && p.State == "delivered" {
+			state = "dispatched; receipt unavailable"
+			switch p.ReceiptState {
+			case "queued":
+				state = "queued; awaiting receiver"
+			case "handed_off":
+				state = "delivered; receiver confirmed"
+			case "failed":
+				state = "undelivered: " + p.ReceiptFailure
+			}
+		} else if p.ErrorCode != "" {
+			state += ": " + p.ErrorCode
+		}
+		if p.Kind == "outcome" && p.State == "delivered" && q.Answer != nil {
+			if q.Answer.Outcome == "doctrine" {
+				switch p.DoctrineState {
+				case "pending":
+					state = "draft saved; waiting for a person"
+				case "dismissed":
+					state = "draft dismissed or expired"
+				case "":
+					if p.EffectData.DoctrineID == "" && len(p.EffectData.ReviewRequired) > 0 {
+						state = "no new draft created"
+					} else {
+						state = "draft recorded; current proposal state unavailable"
+					}
+				default:
+					state = "proposal: " + p.DoctrineState
+				}
+			} else {
+				state = "applied"
+			}
+		}
+		if len(p.EffectData.ReviewRequired) > 0 {
+			state += "; person review required"
+		}
+		fmt.Fprintf(rt.stdout, "%s: %s\n", p.Kind, state)
+		for _, review := range p.EffectData.ReviewRequired {
+			fmt.Fprintf(rt.stdout, "  review %s %s: %s\n", review.Kind, review.Ref, review.Why)
+		}
+		if p.ErrorMessage != "" {
+			fmt.Fprintln(rt.stdout, "  why:", p.ErrorMessage)
+		}
+		if p.Kind == "outcome" && p.EffectRef != "" {
+			fmt.Fprintln(rt.stdout, "  effect:", p.EffectRef)
+		}
 	}
 	return nil
 }

@@ -7,6 +7,7 @@ import { useModelDisplay } from '../../lib/prefs'
 import AppIcon from '../AppIcon.vue'
 import ColumnPicker from './ColumnPicker.vue'
 import SortEditor from './SortEditor.vue'
+import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
 // The Display menu: grouping, sort, row height and columns of this list. In a
 // saved view these are part of the view; otherwise columns are the person's own.
@@ -17,6 +18,8 @@ defineProps<{
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   grouped?: boolean
   headerGraph?: boolean
+  sheet?: boolean
+  projectHeader?: boolean
 }>()
 // The header graph is on until a person turns it off. Callers that omit the
 // prop keep that default so the switch does not flash off.
@@ -30,7 +33,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="display-panel">
+  <div class="display-panel" :class="{ sheet }">
     <template v-if="view === 'list'">
       <p class="eyebrow">Group by</p>
       <div class="group-grid" role="radiogroup" aria-label="Group by">
@@ -51,7 +54,7 @@ const emit = defineEmits<{
         <button type="button" class="btn sm" @click="emit('collapseAll')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
       </div>
     </template>
-    <SortEditor class="section" :sort="filters.sort" @change="keys => emit('sort', keys)" />
+    <SortEditor class="section" :sort="filters.sort" :stable="sheet" @change="keys => emit('sort', keys)" />
     <div class="section">
       <p class="eyebrow">Row height</p>
       <div class="seg wide" role="radiogroup" aria-label="Row height">
@@ -59,7 +62,8 @@ const emit = defineEmits<{
         <button type="button" role="radio" :aria-checked="density === 'compact'" @click="emit('density', 'compact')"><AppIcon name="rows-compact" :size="14" />Compact</button>
       </div>
     </div>
-    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
+    <HeaderRoomyChoice v-if="projectHeader" class="section" />
+    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" :reserve-notes="sheet" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
     <div class="section model-display">
       <div class="model-choice"><span>Effort meter</span><div class="seg" role="radiogroup" aria-label="Effort meter">
         <button v-for="on in [true, false]" :key="String(on)" type="button" role="radio" :aria-checked="modelDisplay.effortMeter === on" @click="setModelDisplay('effortMeter', on)">{{ on ? 'On' : 'Off' }}</button>
@@ -95,4 +99,15 @@ const emit = defineEmits<{
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg.wide button { height: 30px; }
+/* In a sheet, sort keys grow last, away from the fixed choices above them. */
+.sheet .sort-editor { order: 1; }
+.sheet .group-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sheet .group-option, .sheet .pair .btn, .sheet .seg button { height: 44px; }
+.sheet :deep(.head) { min-height: 44px; }
+.sheet :deep(.reset), .sheet :deep(.add), .sheet :deep(.sort-field), .sheet :deep(.icon-btn) { height: 44px; }
+.sheet :deep(.sort-editor .icon-btn) { width: 44px; flex: none; }
+.sheet :deep(.row:not(.noted)) { height: 44px; }
+.sheet :deep(.moves .icon-btn) { width: 44px; flex: none; }
+.sheet :deep(.moves) { opacity: 1; }
+.sheet :deep(.fine) { display: none; }
 </style>

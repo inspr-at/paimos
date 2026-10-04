@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
@@ -11,6 +12,7 @@ import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import TicketTypeIcon from './TicketTypeIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
@@ -19,6 +21,7 @@ import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
 import PlanningCell from './PlanningCell.vue'
 import QueueAction from './QueueAction.vue'
+import QueueStaleHint from './QueueStaleHint.vue'
 import QueueIndicator from './QueueIndicator.vue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useWorkQueue } from '../../stores/workQueue'
@@ -500,7 +503,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :class="[density, { embedded, selectable, selecting, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :class="[density, { embedded, selectable, selecting, customised: layout.customised, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layout.customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
@@ -702,13 +705,13 @@ defineExpose({
                 <span v-if="entry.tree" class="tree" :style="{ width: `${(entry.tree.depth + 1) * INDENT}px` }">
                   <span v-for="i in entry.tree.depth" :key="i" class="guide" :class="guideClass(i - 1, entry.tree.depth, entry.tree.guides, entry.tree.last)" :style="{ left: `${(i - 1) * INDENT}px` }" />
                   <button
-                    v-if="entry.tree.hasChildren" type="button" class="twisty" :style="{ left: `${entry.tree.depth * INDENT}px` }" :aria-expanded="entry.tree.expanded"
+                    v-if="entry.tree.hasChildren" type="button" class="twisty" :style="{ '--twisty-left': `${entry.tree.depth * INDENT}px` }" :aria-expanded="entry.tree.expanded"
                     :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" tabindex="-1" @click.stop="emit('toggleRow', entry.row.id)"
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
                 </span>
-                <AppIcon :name="entry.row.kind_slug === 'epic' ? 'epic' : entry.row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="kindLabel(entry.row.kind_slug)" />
-                <a class="title-link" :href="href(entry.row)" :tabindex="embedded ? 0 : -1" :data-tip="embedded ? entry.row.title : undefined" @click="linkClick"><span class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
+                <TicketTypeIcon :kind="entry.row.kind_slug" :recurrence="entry.row.recurrence" />
+                <a class="title-link" :href="href(entry.row)" :tabindex="embedded ? 0 : -1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
@@ -731,19 +734,19 @@ defineExpose({
               </span>
             </td>
             <template v-for="column in columns.slice(2)" :key="column.id">
-              <td v-if="column.id === 'status'" class="c-status">
+              <td v-if="column.id === 'status'" class="c-status" :data-column-label="column.label">
                 <div class="cell"><button type="button" class="status-btn" :disabled="embedded" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}${embedded ? '' : `. Change status of ${entry.row.key}`}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
                   <StatusIcon :state="entry.row.state" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
-                </button></div>
+                </button><QueueStaleHint :row="entry.row" /></div>
               </td>
-              <td v-else-if="column.id === 'priority'" class="c-prio" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
+              <td v-else-if="column.id === 'priority'" class="c-prio" :data-column-label="column.label" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
                 <div class="cell" :data-tip="entry.row.priority && entry.row.priority !== 'none' ? priorityLabel(entry.row.priority) : 'No priority'">
                   <template v-if="entry.row.priority && entry.row.priority !== 'none'"><PriorityIcon :priority="entry.row.priority" /><span class="prio-label">{{ priorityLabel(entry.row.priority) }}</span></template>
                   <span v-else class="empty" aria-label="No priority">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'assignee'" class="c-assignee">
+              <td v-else-if="column.id === 'assignee'" class="c-assignee" :data-column-label="column.label">
                 <div class="cell"><button type="button" class="assignee-btn" :disabled="!mayAssign" :aria-label="`Assignee: ${queued(entry.row) ? `queued #${queued(entry.row)!.position}` : entry.row.assignee?.name ?? (embedded ? 'Not reported' : 'Unassigned')}${embedded ? '' : `. Change assignee of ${entry.row.key}`}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)">
                   <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length || queued(entry.row) }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span v-if="!queued(entry.row)" class="person-name">{{ entry.row.assignee.name }}</span></span>
                   <QueueIndicator v-if="queued(entry.row)" :entry="queued(entry.row)!" :manual="queue.snapshots[projectId]?.manual_order" />
@@ -751,8 +754,8 @@ defineExpose({
                   <span v-else-if="!entry.row.assignee" class="empty" :aria-label="embedded ? 'Assignee not reported' : 'Unassigned'">—</span>
                 </button><TicketWorkers v-if="!queued(entry.row) && assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></div>
               </td>
-              <td v-else-if="column.id === 'suggested'" class="c-suggested"><div class="cell"><SuggestedReleaseCell :row="entry.row" :project-id="projectId" :now="now" /></div></td>
-              <td v-else-if="column.id === 'epic'" class="c-epic">
+              <td v-else-if="column.id === 'suggested'" class="c-suggested" :data-column-label="column.label"><div class="cell"><SuggestedReleaseCell :row="entry.row" :project-id="projectId" :now="now" /></div></td>
+              <td v-else-if="column.id === 'epic'" class="c-epic" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="epicOf(entry.row)" class="epic-cell" :data-tip="`Epic ${epicOf(entry.row)!.key}\n${epicOf(entry.row)!.title}`">
                     <AppIcon name="epic" :size="12" class="epic-glyph" />
@@ -761,7 +764,7 @@ defineExpose({
                   <span v-else class="empty" aria-label="No epic">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'release'" class="c-release">
+              <td v-else-if="column.id === 'release'" class="c-release" :data-column-label="column.label">
                 <div class="cell">
                   <button
                     v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
@@ -772,23 +775,23 @@ defineExpose({
                   <span v-else class="empty" :aria-label="nativeRelease(entry.row).label">{{ nativeRelease(entry.row).text }}</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'tags'" class="c-tags">
+              <td v-else-if="column.id === 'tags'" class="c-tags" :data-column-label="column.label">
                 <div v-if="tagList(entry.row.fields).length" class="cell tag-cell" :data-tip="tagTip(tagList(entry.row.fields))">
                   <span v-for="tag in tagList(entry.row.fields).slice(0, TAG_SHOWN)" :key="tag.name" class="tag-chip"><i class="tag-dot" :data-color="tag.color || undefined" aria-hidden="true" />{{ tag.name }}</span>
                   <span v-if="tagList(entry.row.fields).length > TAG_SHOWN" class="tag-more mono">+{{ tagList(entry.row.fields).length - TAG_SHOWN }}</span>
                 </div>
                 <div v-else class="cell"><span class="empty" aria-label="No tags">—</span></div>
               </td>
-              <td v-else-if="column.id === 'cost'" class="c-cost">
+              <td v-else-if="column.id === 'cost'" class="c-cost" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="costUnitLabel(entry.row.fields)" class="cost-cell" :data-tip="`Cost unit ${costUnitLabel(entry.row.fields)}`"><AppIcon name="coin" :size="12" class="cost-glyph" /><span class="cost-name">{{ costUnitLabel(entry.row.fields) }}</span></span>
                   <span v-else class="empty" aria-label="No cost unit">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
-              <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
-              <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
-              <td v-else-if="column.id === 'progress'" class="c-progress">
+              <td v-else-if="column.id === 'estimate'" class="c-estimate" :data-column-label="column.label"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
+              <td v-else-if="column.id === 'created'" class="c-created" :data-column-label="column.label"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
+              <td v-else-if="column.id === 'updated'" class="c-updated" :data-column-label="column.label"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
+              <td v-else-if="column.id === 'progress'" class="c-progress" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="progressOf(entry.row)" class="progress-read" :class="{ stale: progressOf(entry.row)!.stale }" role="img" :aria-label="progressOf(entry.row)!.label" :data-tip="progressOf(entry.row)!.label">
                     <span class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
@@ -797,8 +800,8 @@ defineExpose({
                   <span v-else class="empty" aria-label="No progress">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
-              <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
+              <td v-else-if="column.id === 'eta'" class="c-eta" :data-column-label="column.label"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
+              <td v-else-if="isPlanning(column.id)" :class="column.cls" :data-column-label="column.label"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
           </tr>
         </template>
@@ -849,6 +852,11 @@ defineExpose({
 .embedded .ticket-row .c-key { padding-left: 28px; }
 .embedded .c-status .status-btn { padding: 0; }
 .table-card.compact { --row-h: 30px; }
+/* Touch tablets need a full 44px content line plus the row's hairline.
+   Both densities keep hit targets inside their row; fine pointers stay dense. */
+@media (min-width: 721px) and (pointer: coarse) {
+  .table-card, .table-card.compact { --row-h: 45px; }
+}
 .tickets { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13.5px; }
 .tickets:focus-visible { box-shadow: none; }
 /* Keyboard cursor: the app focus ring around the whole row. A shadow on the
@@ -883,6 +891,9 @@ thead th:hover .col-resize::after { opacity: 1; }
 
 /* Every cell centres one flex line in the row, so text, icons and chips share a baseline. */
 .ticket-row { height: var(--row-h); cursor: default; scroll-margin-top: calc(var(--toolbar-h, 0px) + 40px); scroll-margin-bottom: 24px; }
+.ticket-row { --recurrence-row-tint: transparent; }
+@media (hover: hover) { .ticket-row:hover { --recurrence-row-tint: var(--row-hover); } }
+.ticket-row.selected, .ticket-row.cursor, .ticket-row.open, .ticket-row.drop-target { --recurrence-row-tint: var(--row-selected); }
 .ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ticket-row td:first-child { padding-left: 18px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
@@ -913,7 +924,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .guide.line::before, .guide.elbow::before { content: ''; position: absolute; left: 8.5px; top: 0; bottom: 0; width: 1px; background: var(--line-2); }
 .guide.elbow.last::before { bottom: 50%; }
 .guide.elbow::after { content: ''; position: absolute; left: 8.5px; top: 50%; width: 9px; height: 1px; background: var(--line-2); }
-.twisty { position: absolute; top: 50%; display: grid; place-items: center; width: 18px; height: 22px; margin-top: -11px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
+.twisty { position: absolute; top: 50%; left: var(--twisty-left); display: grid; place-items: center; width: 18px; height: 22px; margin-top: -11px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
 .twisty svg { transition: transform .15s ease; }
 .twisty[aria-expanded="true"] svg { transform: rotate(90deg); }
 @media (hover: hover) { .twisty:hover { color: var(--ink); background: var(--row-selected); } }
@@ -973,6 +984,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .kind-glyph { color: var(--ink-3); }
 .kind-glyph.epic { color: var(--gold); }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; }
+.title-text { display: block; overflow: hidden; text-overflow: ellipsis; }
 .ticket-row.epic .title-link { font-weight: 650; }
 .title-link:focus-visible { box-shadow: none; }
 .child-count { flex-shrink: 0; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; line-height: 17px; color: var(--ink-2); }
@@ -986,20 +998,24 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 /* Row actions float over the end of the title cell instead of reserving space in every
    row; the title fades out beneath them, whatever the row tint underneath. */
 td.c-title { position: relative; overflow: hidden; }
+/* Let the arrow's invisible reach cross the cell edge on touch layouts.
+   The title link and phone title text retain their own clipping. */
+@media (max-width: 720px), (pointer: coarse) { td.c-title { overflow: visible; } }
 .row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
 /* Release work keeps its context visible; its rows have no inline action tray. */
 .embedded .ticket-row.cursor .parent-chip, .embedded .ticket-row:hover .parent-chip, .embedded td.c-title:focus-within .parent-chip { opacity: 1; }
-/* Hover actions float at the end of the title. Reserve their width (two 24px
+/* Hover actions float at the end of the title. Reserve their width on opening,
+   so hovering or focusing the recurring marker never shrinks the title link (two 24px
    buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
    leaves the cue 12px clear of Copy. Phones hide the actions. */
 @media (min-width: 721px) {
+  .title-cell { padding-right: 58px; }
   .ticket-row:hover .title-cell,
   .ticket-row.cursor .title-cell,
   td.c-title:focus-within .title-cell {
-    padding-right: 58px;
     -webkit-mask-image: none !important;
     mask-image: none !important;
   }
@@ -1008,6 +1024,17 @@ td.c-title { position: relative; overflow: hidden; }
 .row-actions :deep(.icon-btn) { width: 24px; height: 24px; color: var(--ink-3); }
 .row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
+@media (min-width: 721px) and (pointer: coarse) {
+  /* Keep the compact visuals, but reserve each full 44px reach plus the
+     existing 2px separation before interaction, as on fine pointers above.
+     Padding contains the outer edges as well. Touch can set :hover during
+     a hold; reserving space only then shrinks the name under the pointer. */
+  .row-actions { gap: 22px; padding: 0 10px; }
+  .compact .row-actions { gap: 24px; padding: 0 11px; }
+  /* Reserve the touch action reach before hover/focus so the recurring
+     marker never changes the title width when those actions appear. */
+  .title-cell { padding-right: 98px; }
+}
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
@@ -1130,6 +1157,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
+  /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
+  .table-card.compact .ticket-row { padding-top: 11px; }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
   .table-card.selecting .ticket-row {
@@ -1159,18 +1188,18 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }
   .ticket-row:not(:has(.c-estimate .mono)) .c-estimate { display: none !important; }
-  .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
-  .table-card.selecting .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
+  .table-card:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
+  .table-card.selecting:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
   .c-progress { grid-area: progress; justify-self: end; min-width: 0; }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
-  .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
-  .table-card.selecting .ticket-row:has(.progress-read) {
+  .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
+  .table-card.selecting:not(.customised) .ticket-row:has(.progress-read) {
     grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
-  .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
-  .table-card.selecting .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
+  .table-card:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
+  .table-card.selecting:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
   /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
@@ -1183,7 +1212,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .embedded .ticket-row .c-estimate { display: block !important; justify-self: start; }
   .embedded .ticket-row .c-eta { display: block !important; grid-area: eta; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
-  .title-cell .kind-glyph { margin-top: 2px; }
+  .title-cell .kind-glyph, .title-cell .ticket-type-icon { margin-top: 2px; }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
@@ -1203,7 +1232,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .guide { display: none; }
   /* The chevron area sits left of the title with a generous tap target. */
   .tree-row .title-cell { position: relative; padding-left: 0; }
-  .twisty { position: static; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
+  /* Centre the shared hit area on the arrow; desktop indentation is already
+     represented by the card's padding, so it must not offset the phone arrow. */
+  .twisty { position: relative; inset: auto; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
   .twisty-spacer { display: block; flex-shrink: 0; width: 26px; }
   .tree-row .tree { display: contents; }
   .tree-row .title-link { flex-basis: calc(100% - 60px); }
@@ -1221,6 +1252,26 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; }
   .group-head { height: 40px; }
   .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
+  /* Saved columns read as labelled metadata below Key and Title, in the chosen
+     order. Automatic cards retain their compact layout above. No optional
+     value is hidden or placed in an implicit off-screen grid column. */
+  .table-card.customised .tickets .ticket-row {
+    grid-template-columns: minmax(0, 1fr); grid-template-areas: none;
+  }
+  .table-card.customised.selecting .tickets .ticket-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .table-card.customised .ticket-row td { grid-area: auto; min-width: 0; justify-self: stretch; }
+  .table-card.customised.selecting .ticket-row td { grid-column: 2; }
+  .table-card.customised.selecting .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
+  .table-card.customised .ticket-row td[data-column-label] {
+    display: grid !important; grid-template-columns: minmax(7em, 30%) minmax(0, 1fr); align-items: center; gap: 8px;
+  }
+  .table-card.customised td[data-column-label]::before { content: attr(data-column-label); color: var(--ink-3); font-size: 11.5px; }
+  .table-card.customised td[data-column-label] .cell { min-width: 0; flex-wrap: wrap; justify-content: flex-start; white-space: normal; }
+  .table-card.customised .c-prio .empty, .table-card.customised .prio-label { display: inline; }
+  .table-card.customised .cost-name, .table-card.customised .epic-name, .table-card.customised .person-name { white-space: normal; overflow-wrap: anywhere; }
+  @media (pointer: coarse) {
+    .table-card.customised .status-btn, .table-card.customised .assignee-btn, .table-card.customised button.release-chip { min-height: 44px; }
+  }
 }
 @media (min-width: 721px) {
   .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }

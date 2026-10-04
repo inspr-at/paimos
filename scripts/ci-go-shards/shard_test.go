@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -293,8 +294,12 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	foundCache := false
 	foundFreshTests := false
 	for _, step := range job.Steps {
-		if step.Name == "Test this shard" {
-			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, `test "$cached" -eq 0`)
+		if strings.HasPrefix(step.Name, "Test this shard") {
+			tierRunner, err := os.ReadFile(filepath.Join(root, "scripts/test-tiers/cli.mjs"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, "cli.mjs run go --shard") && strings.Contains(string(tierRunner), "'-count=1'")
 		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			foundCache = true
@@ -314,7 +319,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 				t.Fatal("cache must restore this branch before main without crossing platforms, toolchains, dependencies or shards")
 			}
 		}
-		if strings.Contains(step.Run, "ci-go-shards test-timing") {
+		if strings.Contains(step.Run, "cli.mjs run go --full --timing") {
 			t.Fatal("timing budgets run on routed hardware")
 		}
 		if strings.Contains(step.Run, "ci-go-shards test ") || strings.Contains(step.Run, "ci-go-shards needs-shell ") {
@@ -355,7 +360,7 @@ func TestWorkflowShardRerunsChangedChildScript(t *testing.T) {
 	}
 	var flags string
 	for _, step := range workflow.Jobs["go-test"].Steps {
-		if step.Name == "Test this shard" {
+		if strings.HasPrefix(step.Name, "Test this shard") {
 			flags = step.Env["GOFLAGS"]
 		}
 	}
@@ -802,6 +807,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 		nodesPackage: {
 			"TestKeep", "TestNew", "TestSafeListPerformancePlan",
 			"TestPlanningBulkUsagePerformance", "TestList6000Performance", "TestList6000FiltersPerformance",
+			"TestList6000PerformanceWithStaleKindStatistics",
 		},
 	}
 	if err := coverageHoles(items, listed, runnable, hostedShardCount); err != nil {
@@ -815,7 +821,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSkip := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance|TestSafeListPerformancePlan)$"
+	wantSkip := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestList6000PerformanceWithStaleKindStatistics|TestPlanningBulkUsagePerformance|TestSafeListPerformancePlan)$"
 	if len(args) != 1 || strings.Join(args[0], " ") != wantSkip {
 		t.Fatalf("catch-all args %q", args)
 	}
@@ -847,7 +853,7 @@ func TestTimingBudgetsLeaveTheParallelShards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTimed := "test -p 1 " + nodesPackage + " -run ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance)$"
+	wantTimed := "test -p 1 " + nodesPackage + " -run ^(TestList6000FiltersPerformance|TestList6000Performance|TestList6000PerformanceWithStaleKindStatistics|TestPlanningBulkUsagePerformance)$"
 	if strings.Join(timed, " ") != wantTimed {
 		t.Fatalf("timing args %q", timed)
 	}
@@ -881,7 +887,7 @@ func TestWholePackageSkipsTimingBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestPlanningBulkUsagePerformance)$"
+	want := "test " + nodesPackage + " -skip ^(TestList6000FiltersPerformance|TestList6000Performance|TestList6000PerformanceWithStaleKindStatistics|TestPlanningBulkUsagePerformance)$"
 	if len(args) != 1 || strings.Join(args[0], " ") != want {
 		t.Fatalf("%q", args)
 	}
@@ -895,6 +901,7 @@ func TestClassifyTimedTests(t *testing.T) {
 		nodesPackage: {
 			"TestList6000FiltersPerformance",
 			"TestList6000Performance",
+			"TestList6000PerformanceWithStaleKindStatistics",
 			"TestPlanningBulkUsagePerformance",
 			"TestSafeListPerformancePlan",
 		},
@@ -914,7 +921,7 @@ func TestClassifyTimedTests(t *testing.T) {
 	}
 }
 
-func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
+func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -939,12 +946,12 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	timing := workflow.Jobs["go-timing"]
-	if timing.RunsOn != "ubuntu-latest" || timing.If != "" {
-		t.Fatal("timing job must always run hosted")
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || !reflect.DeepEqual(timing.Needs, []any{"ci-plan", "tree-reuse"}) {
+		t.Fatal("timing job must run hosted for full validation")
 	}
 	count := 0
 	for _, step := range timing.Steps {
-		if strings.Contains(step.Run, "ci-go-shards test-timing") {
+		if strings.Contains(step.Run, "cli.mjs run go --full --timing") {
 			count++
 			if step.If != "" {
 				t.Fatal("timing budgets have a conditional skip")
@@ -958,7 +965,7 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatalf("timing command runs %d times", count)
 	}
 	foundGuard := false
-	for _, step := range workflow.Jobs["release-check"].Steps {
+	for _, step := range workflow.Jobs["release-check-run"].Steps {
 		if strings.Contains(step.Run, "go test ./scripts/ci-runner-guard -count=1") {
 			foundGuard = true
 		}
@@ -974,7 +981,9 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			hasTiming = true
 		}
 	}
-	if gate.If != "always()" || !ok || !hasTiming || !strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = success`) {
+	if gate.If != "always()" || !ok || !hasTiming ||
+		!strings.Contains(gate.Steps[0].Run, `full) expected=success`) ||
+		!strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = "$expected"`) {
 		t.Fatal("required go gate does not require successful timing budgets")
 	}
 }
@@ -1032,6 +1041,13 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 
 func TestList6000Performance(t *testing.T) { hit("TestList6000Performance") }
 
+func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
+	if os.Getenv("AEON_SHARD_FIXTURE_TIMING") != "1" {
+		t.Fatal("stale-kind timing budget ran on a parallel shard")
+	}
+	hit("TestList6000PerformanceWithStaleKindStatistics")
+}
+
 func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerformance") }
 `)
 	items := []Item{
@@ -1056,6 +1072,7 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 	listed := []string{nodesPackage}
 	hits := filepath.Join(root, "hits")
 	env := withoutEnvPrefix(os.Environ(), "HITS=")
+	env = withoutEnvPrefix(env, "AEON_SHARD_FIXTURE_TIMING=")
 	env = append(env, "HITS="+hits)
 	ran := 0
 	for shard := 1; shard <= count; shard++ {
@@ -1090,7 +1107,7 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 	}
 	cmd := exec.Command("go", append(timed, "-count=1", "-timeout=60s")...)
 	cmd.Dir = root
-	cmd.Env = env
+	cmd.Env = append(env, "AEON_SHARD_FIXTURE_TIMING=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("timing go %s: %v\n%s", strings.Join(timed, " "), err, out)
@@ -1109,6 +1126,7 @@ func TestList6000FiltersPerformance(t *testing.T) { hit("TestList6000FiltersPerf
 		"TestKeep", "TestNew", "TestSafeListPerformancePlan",
 		"TestPlanningBulkUsagePerformance", "TestPlanningBulkUsagePerformance/sub",
 		"TestList6000Performance", "TestList6000FiltersPerformance",
+		"TestList6000PerformanceWithStaleKindStatistics",
 	}
 	for _, name := range want {
 		if got[name] != 1 {

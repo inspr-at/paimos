@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -59,6 +60,11 @@ func TestReadinessProjectionUnknownAndHardFacts(t *testing.T) {
 		if out = ProjectReadiness(input); !out.CanTry || out.State != "unknown" {
 			t.Fatalf("measurement error is not sign-out: %+v", out)
 		}
+	}
+	cap := 10.0
+	input.Facts = []ReadinessFact{{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "ordinary_key", ReadingAt: &now, Remaining: &cap, CreditState: "unknown"}}}
+	if out = ProjectReadiness(input); out.State != "unknown" || !out.CanTry || out.DisplayReason != UsageUnknownReason {
+		t.Fatalf("cap alias implied known total balance: %+v", out)
 	}
 }
 
@@ -748,6 +754,120 @@ func TestFix2KnownKeyCapKeepsTotalBalanceUnknown(t *testing.T) {
 	}
 }
 
+func TestFix2ReadinessNullChecksPreserveHardStopObservation(t *testing.T) {
+	for _, stop := range []string{"named_reset", "money_402"} {
+		t.Run(stop, func(t *testing.T) {
+			now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+			f := readinessWorld(t, "fix2-stop-observation-"+stop, now)
+			var resource string
+			if err := adminPool.QueryRow(t.Context(), `SELECT resource_id::text FROM account_readiness_memberships WHERE account_id=$1`, f.account.ID).Scan(&resource); err != nil {
+				t.Fatal(err)
+			}
+			used, reset := 100.0, now.Add(time.Hour)
+			fact := ReadinessFactWrite{ResourceID: resource, WindowKey: "provider", Source: "provider", ObservedAt: now, ReadingAt: &now, UsedPercent: &used, CreditState: "unknown", StopKind: stop, DenialReason: "quota_exhausted"}
+			if stop == "named_reset" {
+				fact.ResetsAt = &reset
+			} else {
+				fact.UsedPercent = nil
+				fact.CreditState = "exhausted"
+				fact.DenialReason = "money_exhausted"
+			}
+			path := "/api/agent-accounts/" + f.account.ID + "/probe"
+			report := ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}
+			probe := probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &report}
+			callStatus(t, f.mod, &f.runner, f.token, "POST", path, encoded(t, probe), 200, nil)
+			if stop == "money_402" {
+				if _, err := adminPool.Exec(t.Context(), `UPDATE account_readiness_facts SET backoff_step=3,next_attempt_at=$2,early_recovery_used=true WHERE resource_id=$1 AND window_key='provider'`, resource, now.Add(8*time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fact.ObservedAt = now.Add(20 * time.Minute)
+			fact.ReadingAt, fact.UsedPercent = nil, nil
+			fact.CreditState, fact.StopKind, fact.DenialReason = "unknown", "none", ""
+			report.Facts = []ReadinessFactWrite{fact}
+			later := fixedClockModule{Module: New(appPool), at: fact.ObservedAt}
+			callStatus(t, later, &f.runner, f.token, "POST", path, encoded(t, probe), 200, nil)
+			var observed time.Time
+			if err := adminPool.QueryRow(t.Context(), `SELECT observed_at FROM account_readiness_facts WHERE resource_id=$1 AND window_key='provider'`, resource).Scan(&observed); err != nil || !observed.Equal(now) {
+				t.Fatalf("null check moved hard-stop evidence: observed=%v want=%v err=%v", observed, now, err)
+			}
+			roomAt, room := now.Add(15*time.Minute), 20.0
+			fact.ObservedAt = now.Add(21 * time.Minute)
+			fact.ReadingAt, fact.UsedPercent = &roomAt, &room
+			report.Facts = []ReadinessFactWrite{fact}
+			later = fixedClockModule{Module: New(appPool), at: fact.ObservedAt}
+			callStatus(t, later, &f.runner, f.token, "POST", path, encoded(t, probe), 200, nil)
+			if stop == "named_reset" {
+				if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='provider' AND stop_kind='none' AND used_percent=20`, resource) != 1 {
+					t.Fatal("newer same-window room could not clear stop after a null check")
+				}
+			} else if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='provider' AND stop_kind='money_402' AND observed_at=$2 AND wait_id IS NOT NULL AND backoff_step=3 AND next_attempt_at=$3 AND early_recovery_used`, resource, now, now.Add(8*time.Hour)) != 1 {
+				t.Fatal("ordinary check changed money-stop evidence or spent recovery state")
+			}
+		})
+	}
+}
+
+func TestFix2ReadinessLegacyZeroDeclaredCapStaysBlocking(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-legacy-zero-cap", now)
+	var pi Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"pi-local","harness":"pi","daemon_id":"daemon-pi","label":"Local pi"}`, 201, &pi)
+	ownFixtureAccount(t, f.admin, &pi)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET provider='openrouter' WHERE id=$1`, pi.ID); err != nil {
+		t.Fatal(err)
+	}
+	zero := 0.0
+	probe := probeWrite{DaemonID: "daemon-pi", DaemonGeneration: "g1", Available: true, OpenRouterCredits: &openrouter.Credits{ObservedAt: now.Add(-20 * time.Minute), Limit: &zero}}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	var page struct {
+		Items []AccountReadiness `json:"items"`
+	}
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &page)
+	found := false
+	for _, row := range page.Items {
+		if row.AccountID != pi.ID {
+			continue
+		}
+		found = true
+		if row.CanTry || !slices.Contains(row.ReasonCodes, "key_cap_exhausted") || row.MeasuredUsage != nil {
+			t.Fatalf("stale legacy zero cap became missing usage: %+v", row)
+		}
+	}
+	if !found {
+		t.Fatal("legacy Pi account absent from readiness")
+	}
+	// A legacy null-cap refresh and then a failed measurement must leave the
+	// same stop in place; only newer room evidence for this key can clear it.
+	later := fixedClockModule{Module: New(appPool), at: now.Add(time.Minute)}
+	probe.OpenRouterCredits = &openrouter.Credits{ObservedAt: later.at}
+	callStatus(t, later, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	probe.Readiness = &ReadinessReport{BindingRevision: ptrRevision(0), Result: "protocol"}
+	probe.OpenRouterCredits = nil
+	callStatus(t, later, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	callStatus(t, later, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &page)
+	found = false
+	for _, row := range page.Items {
+		if row.AccountID == pi.ID {
+			found = true
+			if row.CanTry || !slices.Contains(row.ReasonCodes, "key_cap_exhausted") {
+				t.Fatalf("legacy null/failed check erased zero cap: %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("legacy Pi account disappeared after refresh")
+	}
+	limit, remaining := 10.0, 5.0
+	later = fixedClockModule{Module: New(appPool), at: now.Add(2 * time.Minute)}
+	probe.Readiness = nil
+	probe.OpenRouterCredits = &openrouter.Credits{ObservedAt: later.at, Limit: &limit, Remaining: &remaining}
+	callStatus(t, later, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE reported_by_account_id=$1 AND window_key='key_cap' AND stop_kind='none' AND remaining=5 AND wait_id IS NULL`, pi.ID) != 1 {
+		t.Fatal("newer same-key room could not clear legacy zero cap")
+	}
+}
+
 func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
 	p := tenant.Principal{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", TenantID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Kind: tenant.Person}
 	r := httptest.NewRequest("POST", "/api/agent-accounts", nil).WithContext(tenant.WithPrincipal(t.Context(), p))
@@ -761,4 +881,50 @@ func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
 	if !committed || w.Code != 503 || w.Header().Get("X-Aeon-Write-Committed") != "true" || !strings.Contains(w.Body.String(), "write committed") {
 		t.Fatalf("committed mutation reported as failed: %d %s", w.Code, w.Body.String())
 	}
+}
+
+func TestBRestartHeartbeatSurvivesOldCheckFence(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-restart-check", now)
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	f.token = issueKey(t, f.runner, f.runner.Scopes)
+	path := "/api/agent-accounts/" + f.account.ID
+	var c AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("old", 0), 202, &c)
+	resource := bResource(t, f)
+	used := 10.0
+	reset := now.Add(time.Hour)
+	body := encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "old_capture", Source: "harness", ObservedAt: now, ReadingAt: &now, ResetsAt: &reset, UsedPercent: &used, CreditState: "unknown"}}}})
+	mux := http.NewServeMux()
+	f.mod.Mount(mux)
+	req := httptest.NewRequest("POST", path+"/probe", strings.NewReader(body))
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), f.runner))
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, req)
+	if response.Code != 409 || response.Header().Get("X-Aeon-Write-Committed") != "true" || !strings.Contains(response.Body.String(), "stale_binding") {
+		t.Fatalf("restart partial result not explicit: %d %s", response.Code, response.Body.String())
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_daemon_generation='g2' AND last_probe_at=$2 AND last_probe_ok`, f.account.ID, now) != 1 {
+		t.Fatal("old-check fence rolled back valid restart heartbeat")
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated'`, c.ID) != 1 || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='old_capture'`, resource) != 0 {
+		t.Fatal("restart accepted stale check facts or retained pending work")
+	}
+	var rows []Account
+	callStatus(t, f.mod, &f.runner, f.token, "GET", "/api/agent-accounts?include_checks=true", "", 200, &rows)
+	if len(rows) != 1 || rows[0].PendingCheck != nil {
+		t.Fatalf("poll repeated old check after restart: %+v", rows)
+	}
+	replay := encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}})
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", replay, 409, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_daemon_generation='g2'`, f.account.ID) != 1 {
+		t.Fatal("old check replay moved daemon generation backwards")
+	}
+	later := fixedClockModule{Module: New(appPool), at: now.Add(CheckGap)}
+	callStatus(t, later, &f.admin, "", "POST", path+"/check", requestBody("new", 0), 202, &c)
+	if c.DaemonGeneration == nil || *c.DaemonGeneration != "g2" {
+		t.Fatalf("fresh check bound to obsolete generation: %+v", c)
+	}
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 200, nil)
 }

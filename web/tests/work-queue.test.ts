@@ -73,3 +73,13 @@ test('queued suggestions with no server start use visible workload and measured 
   assert.equal(authoritative.text, 'Next +1'); assert.doesNotMatch(authoritative.tip, /Other projects/)
   assert.equal(visibleQueueTiming(snapshot, 'unknown'), null)
 })
+
+test('stale progress is queueable only with authoritative idle evidence', () => {
+  const idle = { kind_slug: 'ticket', state: 'in_progress', queue_stale: true }
+  assert.equal(queueable(idle), true)
+  for (const state of ['In progress', 'in-progress', 'active', 'progress']) assert.equal(queueable({ ...idle, state }), true)
+  assert.equal(queueable({ ...idle, queue_stale: false }), false)
+  assert.equal(queueable({ ...idle, kind_slug: 'epic' }), false)
+  assert.equal(queueable({ ...idle, assignee: { id: 'person', name: 'Markus Barta' } }), false)
+  assert.equal(queueable({ ...idle, lead_worker: { key: 'run', name: 'Builder' } }), false)
+})

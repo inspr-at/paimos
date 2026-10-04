@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/inspr-at/paimos/internal/workquery"
+	"github.com/inspr-at/paimos/internal/workstate"
 )
 
 // workStateSep matches the spaces and hyphens collapsed by workStateNormSQL.
@@ -19,11 +19,31 @@ func normaliseWorkState(state string) string {
 	return workStateSep.ReplaceAllString(strings.ToLower(strings.TrimSpace(state)), "_")
 }
 
-func workStateNormSQL(expr string) string          { return workquery.StateNormSQL(expr) }
-func workStateCategoryCTE() string                 { return workquery.StateCategoryCTE() }
-func workCountBucketSQL(expr, alias string) string { return workquery.StateBucketSQL(expr, alias) }
-func workNotClosedSQL(expr, alias string) string {
-	return workCountBucketSQL(expr, alias) + ` NOT IN ('done','cancelled','archived')`
+// Existing node queries and recurrence readers share the same SQL definitions.
+func workStateNormSQL(expr string) string { return workstate.NormSQL(expr) }
+func workStateCategoryCTE() string        { return workstate.CategoryCTE() }
+
+// workStatusSQL identifies the status shown in the header without losing the
+// bucket assigned by the node's own kind. The list's legacy state filter stays exact.
+func workStatusSQL(expr string) string {
+	norm := workStateNormSQL(expr)
+	return `CASE ` + norm + ` WHEN 'active' THEN 'in_progress' WHEN 'inprogress' THEN 'in_progress' WHEN 'canceled' THEN 'cancelled' ELSE ` + norm + ` END`
+}
+
+func workCountBucketSQL(stateExpr, categoryAlias string) string {
+	return workstate.CountBucketSQL(stateExpr, categoryAlias)
+}
+func workNotClosedSQL(stateExpr, categoryAlias string) string {
+	return workstate.NotClosedSQL(stateExpr, categoryAlias)
+}
+
+// workHideStateSQL splits the done bucket into its three Hide choices. Custom
+// done-bucket states use Done; per-kind bucket overrides still take precedence.
+func workHideStateSQL(stateExpr, categoryAlias string) string {
+	return `CASE ` + workCountBucketSQL(stateExpr, categoryAlias) + `
+		WHEN 'done' THEN CASE ` + workStatusSQL(stateExpr) + `
+			WHEN 'delivered' THEN 'delivered' WHEN 'accepted' THEN 'accepted' ELSE 'done' END
+		WHEN 'cancelled' THEN 'cancelled' WHEN 'archived' THEN 'archived' ELSE '' END`
 }
 
 // workStateKnownSQL is 0 for a workflow state and 1 otherwise. It stays

@@ -67,6 +67,7 @@ type Account struct {
 // Window is one allowance bound for a single unit.
 type Window struct {
 	// Internal routing metadata; never accepted from or serialized to user APIs.
+	recoveryPermits     []recoveryPermit
 	pairingVerification bool
 	capacityReadAt      *time.Time
 	capacityAllowed     bool

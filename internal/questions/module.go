@@ -2,11 +2,13 @@
 package questions
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -15,9 +17,26 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool     *pgxpool.Pool
+	doctrine DoctrineAdapter
+	// Production uses the database clock; deterministic tests inject one clock for decisions and dispatch.
+	clock func(context.Context, pgx.Tx) (time.Time, error)
+}
+
+func (m *Module) now(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if m.clock != nil {
+		return m.clock(ctx, tx)
+	}
+	var now time.Time
+	err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	return now, err
+}
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
+
+// WithDoctrine must be called before mounting or starting the dispatcher.
+func (m *Module) WithDoctrine(adapter DoctrineAdapter) *Module { m.doctrine = adapter; return m }
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/questions", m.handleAsk)
 	mux.HandleFunc("GET /api/projects/{projectId}/questions", m.handleList)
@@ -129,7 +148,7 @@ func (m *Module) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	// Bearer credentials never acquire human authority, including injected
 	// person contexts in internal callers that accidentally retain a key header.
-	if p.Kind != tenant.Person || r.Header.Get("Authorization") != "" {
+	if p.Kind != tenant.Person || p.KeyCreatorID != "" || r.Header.Get("Authorization") != "" {
 		result(w, 0, nil, fail(403, "person_required", "a signed-in person must decide"))
 		return
 	}
@@ -180,6 +199,13 @@ func (m *Module) handleList(w http.ResponseWriter, r *http.Request) {
 		result(w, 0, nil, fail(400, "invalid_request", "invalid state"))
 		return
 	}
-	page, err := m.list(r.Context(), p, project, state, limit, offset)
+	order, cursor := r.URL.Query().Get("order"), r.URL.Query().Get("cursor")
+	if (order != "" && order != "asc" && order != "desc") ||
+		(order == "desc" && (state != "answered" || offset != 0)) ||
+		(cursor != "" && order != "desc") || len(cursor) > 512 {
+		result(w, 0, nil, fail(400, "invalid_request", "invalid order or cursor"))
+		return
+	}
+	page, err := m.list(r.Context(), p, project, state, limit, offset, order, cursor)
 	result(w, 200, page, err)
 }

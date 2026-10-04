@@ -5,6 +5,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,7 +19,7 @@ func (rt *runtime) cmdMCP() *Command {
 	return &Command{
 		Name:  "mcp",
 		Short: "MCP server over stdio",
-		Long:  "Exposes whoami, ask, ask_status and the issue, knowledge and search tools. Unimplemented tools report that they arrive in R1.",
+		Long:  "Exposes whoami, ask, ask_status and the issue, knowledge and search tools. Uses the same scoped API operations as the CLI.",
 		Use:   "mcp",
 		run: func(args []string) error {
 			ctx, stop := signalContext()
@@ -35,19 +37,19 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	}, rt.toolWhoami)
 	mcp.AddTool(s, &mcp.Tool{Name: "ask", Description: "Leave a durable question for a person; return immediately with ID, state and destination. Same scoped contract as HTTP and CLI; request_id is required for retries."}, rt.toolAsk)
 	mcp.AddTool(s, &mcp.Tool{Name: "ask_status", Description: "Read your authorized question, answer revision and delivery state without waiting."}, rt.toolAskStatus)
-	addR1Tool(s, "issue_list", "List issues.", issueListArgs{})
-	addR1Tool(s, "issue_get", "Fetch one issue by key.", issueRefArgs{})
-	addR1Tool(s, "issue_create", "Create an issue.", issueCreateArgs{})
+	addWorkTool(s, rt, "issue_list", "List issues.", issueListArgs{})
+	addWorkTool(s, rt, "issue_get", "Fetch one issue by key.", issueRefArgs{})
+	addWorkTool(s, rt, "issue_create", "Create an issue.", issueCreateArgs{})
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "issue_update",
-		Description: "Update an issue. A type or kind is refused with kind_change_not_allowed; other updates arrive in R1.",
+		Description: "Update an issue. A type or kind is refused with kind_change_not_allowed; updates use the node revision precondition.",
 	}, rt.toolIssueUpdate)
-	addR1Tool(s, "issue_comment", "Comment on an issue.", issueCommentArgs{})
-	addR1Tool(s, "knowledge_list", "List knowledge entries.", knowledgeListArgs{})
-	addR1Tool(s, "knowledge_get", "Fetch one knowledge entry.", knowledgeGetArgs{})
-	addR1Tool(s, "knowledge_create", "Create a knowledge entry.", knowledgeCreateArgs{})
-	addR1Tool(s, "knowledge_update", "Update a knowledge entry.", knowledgeUpdateArgs{})
-	addR1Tool(s, "search", "Search issues by free text.", searchArgs{})
+	addWorkTool(s, rt, "issue_comment", "Comment on an issue.", issueCommentArgs{})
+	addWorkTool(s, rt, "knowledge_list", "List knowledge entries.", knowledgeListArgs{})
+	addWorkTool(s, rt, "knowledge_get", "Fetch one knowledge entry.", knowledgeGetArgs{})
+	addWorkTool(s, rt, "knowledge_create", "Create a knowledge entry.", knowledgeCreateArgs{})
+	addWorkTool(s, rt, "knowledge_update", "Update a knowledge entry.", knowledgeUpdateArgs{})
+	addWorkTool(s, rt, "search", "Search issues by free text.", searchArgs{})
 	rt.addReleaseTools(s)
 	return s
 }
@@ -97,25 +99,17 @@ func (rt *runtime) toolIssueUpdate(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		requested = typ
 	}
-	if requested == "" {
-		return nil, nil, errors.New("issue_update arrives in R1")
-	}
-	n, err := rt.nodeByKey(strings.TrimSpace(in.Ref))
-	if err != nil {
-		return nil, nil, err
-	}
-	kinds, err := rt.loadKinds()
-	if err != nil {
-		return nil, nil, err
-	}
-	current := kinds.slug(n.KindID)
-	if current == requested {
-		if strings.TrimSpace(in.Title) != "" || strings.TrimSpace(in.Status) != "" || strings.TrimSpace(in.Description) != "" {
-			return nil, nil, errors.New("issue_update arrives in R1")
+	work := rt.workRuntime(ctx)
+	if requested != "" {
+		if err := work.checkIssueKind(in.Ref, requested); err != nil {
+			return nil, nil, err
 		}
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "kind is already " + current}}}, nil, nil
+		if strings.TrimSpace(in.Title+in.Status) == "" && in.Description == "" {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "kind is already " + requested}}}, nil, nil
+		}
 	}
-	return nil, nil, errors.New("kind_change_not_allowed")
+	result, err := work.updateIssueResult(issuePatch{Ref: in.Ref, Title: in.Title, Status: in.Status, Description: in.Description})
+	return nil, result.Issue, err
 }
 
 type issueCommentArgs struct {
@@ -170,11 +164,66 @@ func (rt *runtime) toolWhoami(ctx context.Context, _ *mcp.CallToolRequest, _ noA
 	return nil, me, nil
 }
 
-func addR1Tool[In any](s *mcp.Server, name, description string, _ In) {
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        name,
-		Description: description + " Not in the Aeon API yet.",
-	}, func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, any, error) {
-		return nil, nil, errors.New(name + " arrives in R1")
+// addWorkTool adapts reusable application operations to MCP without invoking
+// command parsing or capturing terminal output. Each call owns its cache/context.
+func addWorkTool[In any](s *mcp.Server, rt *runtime, name, description string, _ In) {
+	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description}, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		work := rt.workRuntime(ctx)
+		var result any
+		var err error
+		switch args := any(in).(type) {
+		case issueListArgs:
+			if args.Limit < 0 || args.Limit > 200 || args.Offset < 0 || args.Offset > 10000 {
+				return nil, nil, usagef("limit 0–200 and offset 0–10000 required")
+			}
+			result, err = work.listIssuesResult(args.Project, args.Status, args.Type, args.Priority, "", args.Limit, args.Offset)
+		case issueRefArgs:
+			result, err = work.getIssueResult(args.Ref)
+		case issueCreateArgs:
+			tags := append([]string(nil), args.Tags...)
+			if args.Bug && !slices.Contains(tags, "bug") {
+				tags = append(tags, "bug")
+			}
+			result, err = work.createIssueResult(issueInput{Project: args.Project, Title: args.Title, Type: args.Type, Status: args.Status, Description: args.Description, Tags: tags})
+		case issueCommentArgs:
+			var comment issueCommentResult
+			comment, err = work.commentIssueResult(args.Ref, args.Body)
+			result = comment.Comment
+		case knowledgeListArgs:
+			var kinds kindTable
+			var nodes []apiNode
+			kinds, nodes, err = work.knowledgeNodes(args.Project, args.Type)
+			items := []knowledgeView{}
+			for _, n := range nodes {
+				items = append(items, viewKnowledge(n, kinds))
+			}
+			result = items
+		case knowledgeGetArgs:
+			var kinds kindTable
+			var nodes []apiNode
+			kinds, nodes, err = work.knowledgeNodes(args.Project, args.Type)
+			if err == nil {
+				err = fmt.Errorf("knowledge %s/%s not found", args.Type, args.Slug)
+				for _, n := range nodes {
+					if fieldString(fieldMap(n.Fields), "slug") == args.Slug {
+						result = viewKnowledge(n, kinds)
+						err = nil
+						break
+					}
+				}
+			}
+		case knowledgeCreateArgs:
+			result, err = work.createKnowledgeResult(args.Project, args.Type, args.Slug, args.Title, args.Body, "")
+		case knowledgeUpdateArgs:
+			result, err = work.updateKnowledgeResult(args.Type, args.Slug, args.Project, args.Title, args.Body, args.Status, "", "")
+		case searchArgs:
+			result, err = work.searchIssuesResult(args.Query, args.Project, args.Type, args.Limit)
+		default:
+			err = fmt.Errorf("unsupported work tool")
+		}
+		return nil, result, err
 	})
 }

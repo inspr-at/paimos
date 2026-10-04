@@ -14,22 +14,26 @@ type SortKey struct {
 	Desc bool   `json:"desc"`
 }
 type Query struct {
-	KindID      *string   `json:"kind_id"`
-	KindsNot    []string  `json:"kinds_not,omitempty"`
-	Kinds       []string  `json:"kinds"`
-	States      []string  `json:"states"`
-	Priorities  []string  `json:"priorities"`
-	Assignees   []string  `json:"assignees"`
-	Q           string    `json:"q"`
-	Within      *string   `json:"within"`
-	ParentSet   bool      `json:"parent_set"`
-	ParentID    *string   `json:"parent_id"`
-	Descendants bool      `json:"descendants"`
-	HideClosed  bool      `json:"hide_closed"`
-	Sort        []SortKey `json:"sort"`
-	FacetNames  []string  `json:"facets"`
-	Limit       int       `json:"limit"`
-	Cursor      string    `json:"-"`
+	KindID        *string   `json:"kind_id"`
+	KindsNot      []string  `json:"kinds_not,omitempty"`
+	Kinds         []string  `json:"kinds"`
+	States        []string  `json:"states"`
+	Priorities    []string  `json:"priorities"`
+	Assignees     []string  `json:"assignees"`
+	Q             string    `json:"q"`
+	Within        *string   `json:"within"`
+	ParentSet     bool      `json:"parent_set"`
+	ParentID      *string   `json:"parent_id"`
+	Descendants   bool      `json:"descendants"`
+	HideStates    []string  `json:"hide_states,omitempty"`
+	WorkStates    []string  `json:"work_states,omitempty"`
+	WorkStatesNot []string  `json:"work_states_not,omitempty"`
+	WorkBuckets   []string  `json:"work_buckets,omitempty"`
+	HideClosed    bool      `json:"hide_closed"`
+	Sort          []SortKey `json:"sort"`
+	FacetNames    []string  `json:"facets"`
+	Limit         int       `json:"limit"`
+	Cursor        string    `json:"-"`
 	// A "!" before a value excludes it: within a dimension the plain values
 	// are alternatives (OR) and every excluded value must not match (AND NOT);
 	// dimensions combine with AND. "none" stands for an empty value.
@@ -130,6 +134,9 @@ func SQL(q Query, sortFields bool) (string, []any) {
 	})
 	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
 	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
+	add(q.WorkStates, func(v []string) string { return workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[])` })
+	add(q.WorkStatesNot, func(v []string) string { return `NOT (` + workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[]))` })
+	add(q.WorkBuckets, func(v []string) string { return workCountBucketSQL("n.state", "cfg") + `=ANY(` + arg(v) + `::text[])` })
 	add(q.PrioritiesNot, func(v []string) string {
 		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
 	})
@@ -282,10 +289,13 @@ func SQL(q Query, sortFields bool) (string, []any) {
 	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
 	configuredCTE := ""
 	configuredJoin := ""
-	if q.HideClosed {
+	if q.HideClosed || len(q.WorkBuckets) > 0 {
 		configuredCTE = `, ` + workStateCategoryCTE()
 		configuredJoin = ` LEFT JOIN configured cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state")
 		closedPred = workNotClosedSQL("n.state", "cfg")
+		if q.HideClosed && len(q.HideStates) > 0 {
+			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
+		}
 	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `

@@ -13,7 +13,7 @@ import (
 
 func TestStatusHelpUsesAPIForAgents(t *testing.T) {
 	isolate(t)
-	body := `{"definitions":[{"state":"accepted","label":"Accepted","meaning":"Confirmed","set_by":"Person, or the 45-day rule"}],"queued":{"label":"Queued","meaning":"Open plus a place in the work queue","is_status":false},"autopilot":{"enabled":true,"effective_enabled":true,"project_mode":"inherit","rules":{"accept":{"enabled":true,"days":45}}},"triage":{"mode":"apply","available":false},"limits_source":"workspace"}`
+	body := `{"definitions":[{"state":"accepted","label":"Accepted","meaning":"Confirmed","set_by":"Person, or the 45-day rule"}],"queued":{"label":"Queued","meaning":"Open plus a place in the work queue","is_status":false},"recurring":{"label":"Recurring","meaning":"Loop marker with schedule and occurrence number; not a status","is_status":false},"autopilot":{"enabled":true,"effective_enabled":true,"project_mode":"inherit","rules":{"accept":{"enabled":true,"days":45}}},"triage":{"mode":"apply","available":false},"limits_source":"workspace"}`
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" || r.URL.Path != "/api/status/help" {
@@ -44,7 +44,7 @@ func TestStatusHelpUsesAPIForAgents(t *testing.T) {
 		}
 	}
 	code, out, err := runCLI([]string{"aeon", "--config", config, "status", "help"}, "")
-	if code != 0 || err != "" || !strings.Contains(out, "45-day rule") || !strings.Contains(out, "Queued") || calls != 3 {
+	if code != 0 || err != "" || !strings.Contains(out, "45-day rule") || !strings.Contains(out, "Queued") || !strings.Contains(out, "Loop marker with schedule and occurrence number") || calls != 3 {
 		t.Fatalf("text help: %d %s %s; calls %d", code, out, err, calls)
 	}
 }

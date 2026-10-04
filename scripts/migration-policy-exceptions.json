@@ -49,6 +49,61 @@
       "sha256": "8a250cda5f7db57dced4c582aa59ada0ddcb943fee3b39606ecd85c8c60dada5",
       "ticket": "AEON-558",
       "reason": "Replace the last-owner trigger function's tenant FOR UPDATE fence with FOR NO KEY UPDATE to preserve access-writer serialization while allowing tenant foreign-key key-share checks. The last-active-owner restriction, trigger signature and existing data remain unchanged; no table, column or route is removed. CREATE OR REPLACE FUNCTION is conservatively outside the classifier allowlist. This exact-byte exception requires coordinator review before merge/release; it does not grant acceptance or skip previous-binary compatibility probes."
+    },
+    {
+      "file": "1116_owner_workstation.sql",
+      "sha256": "6fdcee0752cfc6c538b60c00ebb1618b6385e41b10a08f30d60c8e24d3e81b2d",
+      "sourceCommit": "f37d0ee39fb63b3fbf352d6c6fdc918488eea2c4",
+      "ticket": "AEON-580",
+      "reason": "Existing AEON-580 migration bytes are unchanged. The classifier flags the validated CHECK and separately added foreign key on agent_keys, plus CREATE OR REPLACE of aeon_guard_approval. Existing keys retain false/NULL/0 defaults. The approval guard preserves valid person decisions and agent self-proposals, fails closed on missing or expired authority, and permits another agent to decide only with the exact transaction-bound marked key and connected pairing. Self-approval remains refused; server permission, signer and step-up fences remain required. This exact-byte exception requires coordinator review before merge/release; workers only measure draft CI. It does not make the SQL expand-safe, grant rollout acceptance or skip previous-binary migration compatibility."
+    },
+    {
+      "file": "1117_desk_delivery.sql",
+      "sha256": "4eac5b9c842ae660571c645c99018e682dd7089b998b82def80415412838faac",
+      "ticket": "AEON-564",
+      "reason": "Relax immediate sent_event_id NOT NULL checks on inbox_messages and inbox_compat_messages only within a transaction so message rows can be reserved before the tenant event counter. Deferred constraint triggers still reject any surviving row without a sent event at commit. Previous-binary writers continue supplying non-null event IDs at INSERT, so their writes remain valid and readers never see committed null event references during the rollout window. No columns, rows, foreign keys or RLS policies are removed. DROP NOT NULL, the dynamic trigger function and CREATE CONSTRAINT TRIGGER are outside the conservative expand-safe allowlist; retaining immediate NOT NULL would break the existing reservation path. This exact-byte exception requires coordinator review before merge/release and does not skip previous-binary compatibility probes in CI."
+    },
+    {
+      "file": "1122_recurrence_event_visibility.sql",
+      "sha256": "bcb1f9237f97973511b4f0c70da9fb48f1814b8e75c8de29ad9f816f5414a3a9",
+      "ticket": "AEON-573",
+      "reason": "Additive recurrence retirement state, tenant-scoped tombstone backfill, and project event visibility. Complete snapshots stay unchanged; only validated workspace tags at template.tags are omitted from definition reference walks, with other references and event domains preserved. ALTER POLICY, trigger replacement and the one-time reference backfill follow the existing 0823 migration pattern and are conservatively outside the classifier allowlist. This owned, unpublished migration and exact-byte exception are exposed in draft PR #188 for coordinator review; regressions cover hidden deletion events, workspace-tag history, and project/reference/workspace boundaries. Previous-binary compatibility is measured in CI; no merge or release authority is granted."
+    },
+    {
+      "file": "1138_portal_products.sql",
+      "sha256": "39a0436761b6467a48d7e5fe91985d64a546dd1f6fa6c966c67df752d9aaedb0",
+      "ticket": "AEON-619",
+      "reason": "Additive product registry, product project-link table and nullable legacy product bindings. The classifier flags the FORCE-RLS tenant-loop backfill and legacy mirror DELETE despite retaining every legacy table, column, ballot and response shape. Backfill captures the old default once and retains participation as legacy for existing published products; new products are disabled. Exact-byte exception is for coordinator review before merge/release and does not waive previous-binary probes. Fix round 2 registers pre-existing nested/deleted products as unpublished and disabled, and idempotently registers newly eligible roots on move/restore/kind changes; existing settings/default choices remain intact."
+    },
+    {
+      "file": "1141_chat_identity.sql",
+      "sha256": "4a748622f79da3c967954178375c03b802fcce72092fb84a7d1474cd19a336e8",
+      "ticket": "AEON-618",
+      "reason": "R1 chat identity is disabled by default. New tenant-scoped chat tables and alias-only backfill create no owners, bindings or deliveries; no existing table, column, row or route is removed. The permission registry replacement preserves every previous permission and adds only chat.read/send/bind/receive. Legacy inbox writes leave the new nullable chat_thread_id NULL, so existing bodies, same-mode replies, projections, receipts, wakes and harness deliveries retain their legacy path; non-chat events pass the new policy. Native registration triggers retain unowned harness changes and 64-byte observation references, but intentionally reject cross-owner/project/role reuse after an explicit chat claim, mixed reference encodings and alias components beyond 1024; tenant-fence contention can also fail closed. CREATE OR REPLACE FUNCTION and the alias seed SELECT are conservatively outside the classifier allowlist; this is not a blanket expand-safe or old-binary write-compatibility claim. Evidence: check-migrations.test.mjs verifies the registry superset and exact-byte rejection; internal/chat legacy snapshots, transport/RLS and native-store regressions exercise legacy exclusion and ownership boundaries. CI migration-compat boots the immutable previous binary on the candidate schema and probes health, ready, SPA and authenticated reads, not every legacy write. This exact-byte exception requires coordinator review before merge/release; it does not grant acceptance, enable rollout or skip previous-binary compatibility probes."
+    },
+    {
+      "file": "1206_themes.sql",
+      "sha256": "5b289f99f660914f99861c22ba126dc09983d48c2811e735aa08af66a956ecc6",
+      "ticket": "AEON-641",
+      "reason": "Additive tenant themes and owner-only selections, with a fixed Porcelain seed for existing and future tenants. The classifier conservatively flags the tenant-loop DO backfill, ON CONFLICT DO NOTHING in the seed function, and REVOKE EXECUTE on fixed SECURITY DEFINER seed helpers. The events SELECT policy restricts only the new theme.* namespace; existing event types and previous-binary writes are unchanged. No existing table, column, route or constraint is removed. Exact bytes require coordinator review before merge/release and do not waive previous-binary compatibility probes or grant release authority."
+    },
+    {
+      "file": "1207_theme_principal_links.sql",
+      "sha256": "6ca9500eecd6ccf7804921b275b0e6f51d101edbcae61af75799bfec36428a40",
+      "ticket": "AEON-641",
+      "reason": "Preserve immutable theme owners, choice rows and append-only audit through current principal links. Only theme-specific policies and guards change; no existing data, non-theme policy, route or column is removed. ALTER POLICY and CREATE OR REPLACE FUNCTION require this exact-byte coordinator-reviewed exception before merge/release, plus normal previous-binary compatibility probes. It grants no approval or release authority."
+    },
+    {
+      "file": "1208_theme_selection_generation.sql",
+      "sha256": "601ae9ff9206769a92e77704e27f0d361f11d24be373b2e7ce0d3af31cef41c5",
+      "ticket": "AEON-641",
+      "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
+    },
+    {
+      "file": "1235_agent_appearance_themes.sql",
+      "sha256": "7af6fafd5c777ac98de0767d756589b5f26d2bab5c5b978027f9df07b0fe7e2c",
+      "ticket": "AEON-643",
+      "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Snapshots existing explicit choices across linked identities before backfill, preserving effective themes/defaults and selection generations. Legacy-only physical identities in explicitly selected groups, and every linked alias, retain lower-priority selections via the existing unsaved-revision marker; a canonical account without a selection row records its absence so no alias backfill wins while linked; unlink restores each alias's own appearance without displacing linked explicit choices or what the canonical account showed. Selection audit snapshots retain that marker for undo. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
     }
   ]
 }

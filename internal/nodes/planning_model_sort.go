@@ -8,20 +8,23 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Resolve the same live role routes as the cells, including account health.
+// Resolve the same placements as the cells, including account health.
 func prepareModelNameSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
-	rows := []planRow{}
-	for _, role := range []string{"scout", "mechanical", "build", "build-hard"} {
-		rows = append(rows, planRow{role: role})
+	rows, err := filteredPlanPlacements(ctx, tx, *q)
+	if err != nil {
+		return err
 	}
 	routes, err := resolvePlanRoutes(ctx, tx, rows)
 	if err != nil {
 		return err
 	}
 	names := map[string]string{}
-	for role, route := range routes {
+	if person := planningViewer(ctx, tx); person != nil {
+		names["_viewer"] = *person
+	}
+	for key, route := range routes {
 		if route != nil && route.view != nil {
-			names[role] = route.view.FullName()
+			names[key] = route.view.FullName()
 		}
 	}
 	q.modelNames, err = json.Marshal(names)
@@ -59,11 +62,12 @@ func modelNameSortSQL(namesArg string) (string, string) {
   SELECT lower(coalesce(used.name,
    CASE WHEN snap.id IS NOT NULL THEN coalesce(nullif(btrim((snap.snapshot->'route'->>'display_name')||' '||coalesce(snap.snapshot->'route'->>'model_version','')),''),
      nullif(split_part(snap.snapshot->'route'->>'label',' · ',1),''))
-   WHEN btrim(coalesce(rn.fields->>'area','')) IN ('backend','frontend','full-stack','infra','design','docs') THEN ` + namesArg + `::jsonb->>btrim(rn.fields->>'route_role') END)) COLLATE "C" AS name
-  FROM nodes rn
+   ELSE ` + namesArg + `::jsonb->>(` + placementKeySQL("pk") + `) END)) COLLATE "C" AS name
+  FROM nodes n` + assigneeJoin + `
+  CROSS JOIN LATERAL (SELECT ` + planPlacementColumns("("+namesArg+"::jsonb->>'_viewer')") + `) pk
   LEFT JOIN model_used used ON used.root=f.id
   LEFT JOIN LATERAL (SELECT id,snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=f.id ORDER BY started_at DESC,id DESC LIMIT 1) snap ON true
-  WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id AND f.kind_slug IN ('ticket','task')
+  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id AND f.kind_slug IN ('ticket','task')
  ) route ON true`
 	return cte, join
 }

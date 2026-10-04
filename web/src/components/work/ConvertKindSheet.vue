@@ -162,7 +162,7 @@ async function submit() {
 </template>
 
 <style scoped>
-.convert { display: flex; flex-direction: column; width: min(420px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
+.convert { display: flex; flex-direction: column; width: min(clamp(420px, 44vw, 760px), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
 .convert::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 32px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .convert-scroll { min-height: 0; overflow: auto; padding: 22px 24px 0; }
