@@ -458,5 +458,132 @@
       },
       "pending": "Upstream AEON-593 behavioral suites were already merged by the coordinator; no broad local retest. Remote/hosted Go and browser validation remains unavailable under the documented guards."
     }
+  },
+  "fixRound4": {
+    "recordedAt": "2026-10-04T11:33:57Z",
+    "ticket": "AEON-681",
+    "base": "d8e9906c4",
+    "implementationCommit": "aea1f536c31470c545b58a9ca8eade075d9f7887",
+    "sourceMainSHA": "c5266ee91ad608b291f08f2a1be8700d78c164c9",
+    "mainAlreadyMerged": true,
+    "policy": "Three explicit tiers. Full means ESSENTIAL + GATED-FULL for uncertain paths, missing impact, push, manual CI and --full. Schedule/--all means every current registration. Mapped PR/MQ changes retain ESSENTIAL plus the changed area. The existing browser gate comes from ci-web-shards.json; never-gated cases stay NIGHTLY, except already approved ESSENTIAL promotions. Runtime reconciliation, known-flaky ownership, inline aggregates, requiredJobs and exact-SHA reuse remain.",
+    "classification": {
+      "go": {
+        "inventory": {
+          "ESSENTIAL": 331,
+          "GATED-FULL": 3217,
+          "NIGHTLY": 0
+        },
+        "full": {
+          "ESSENTIAL": 331,
+          "GATED-FULL": 3217,
+          "NIGHTLY": 0
+        },
+        "nightly": {
+          "ESSENTIAL": 331,
+          "GATED-FULL": 3217,
+          "NIGHTLY": 0
+        },
+        "shardCoverage": "every selected key exactly once",
+        "essentialIdentitiesPreserved": true,
+        "existingAttributesAndTagsPreserved": true
+      },
+      "web": {
+        "inventory": {
+          "ESSENTIAL": 207,
+          "GATED-FULL": 2578,
+          "NIGHTLY": 2232
+        },
+        "full": {
+          "ESSENTIAL": 207,
+          "GATED-FULL": 2578,
+          "NIGHTLY": 0
+        },
+        "nightly": {
+          "ESSENTIAL": 207,
+          "GATED-FULL": 2578,
+          "NIGHTLY": 2232
+        },
+        "fullBrowserCases": 1216,
+        "shardCoverage": "every selected key exactly once",
+        "essentialIdentitiesPreserved": true,
+        "existingAttributesAndTagsPreserved": true
+      }
+    },
+    "currentMainRefresh": {
+      "go": {
+        "added": 21,
+        "staleDropped": []
+      },
+      "web": {
+        "added": 24,
+        "staleDropped": [
+          "browser:tests/markdown-ticket-links.spec.ts:a plain click opens the ticket peek and a modified click opens the URL"
+        ]
+      }
+    },
+    "regressionsAgainstBase": {
+      "javascript": {
+        "file": "scripts/test-tiers/test-tiers.test.mjs",
+        "pattern": "three-tier",
+        "tests": 5,
+        "failed": 5,
+        "failureKind": "All five assertion failures against isolated d8e9906c implementation, manifests and workflows; no setup or import failures."
+      },
+      "go": {
+        "file": "scripts/ci-runner-guard/main_test.go",
+        "test": "TestNightlyFullRequiresAllThreeTiers",
+        "failed": true,
+        "failureKind": "d8e9906c guard rejects the normalized --all nightly workflow: nightly-go-test must select every tier."
+      }
+    },
+    "validation": {
+      "selectorTests": {
+        "file": "scripts/test-tiers/test-tiers.test.mjs",
+        "passed": 33,
+        "failed": 0,
+        "skipped": 0
+      },
+      "nativeWebTests": {
+        "file": "web/scripts/aeon-681-ci.test.mjs",
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "browserLaunches": 0,
+        "note": "Native Node/Vitest selectors execute three requested cases (two ESSENTIAL, one GATED-FULL). Native Playwright --list proves ESSENTIAL, GATED-FULL and all-catalogue case lists exactly match collected registrations. CLI full/--all/scheduled planning checked end to end."
+      },
+      "go": {
+        "package": "./scripts/ci-runner-guard",
+        "passed": true,
+        "goVersion": "1.26.8",
+        "GOMAXPROCS": 2,
+        "packageParallelism": 2,
+        "note": "Includes repository workflow safety and four nightly downgrade regressions, including the isolated timing lane."
+      },
+      "inventory": "Fresh Go source and native web registration inventories reconcile strictly with no drift; no Go or browser test bodies run during collection.",
+      "preservation": "Every active preexisting identity, its test attributes and deletion tags preserved. ESSENTIAL identities unchanged. One stale, renamed browser registration replaced by its current names; no test source removed. ci.yml, ci-tree-reuse.mjs and known-flaky.json unchanged in this round.",
+      "diffWhitespace": "passed"
+    },
+    "remoteValidation": {
+      "goAttempts": 1,
+      "requestedCommit": "aea1f536c31470c545b58a9ca8eade075d9f7887",
+      "exitCode": 3,
+      "started": false,
+      "reason": "Approved remote-test.sh stopped because Colima is not running.",
+      "requestedPackages": [
+        "./scripts/test-tier-go",
+        "./scripts/ci-go-shards",
+        "./scripts/releaseworkflow",
+        "./scripts/ci-runner-guard"
+      ],
+      "runnerResidue": "Runner stopped after temporary ref/worktree creation, before its own cleanup. Coordinator may inspect its exact run refs/runs/aea1f536c3 and aeon-runs/aea1f536c3; no extra SSH or cleanup attempted outside the approved runner.",
+      "browserExitCode": 3,
+      "browserStarted": false,
+      "browserReason": "Approved playwright-remote.mjs refuses while OPS-247 bootstrap/launcher is pending.",
+      "pending": "Hosted Linux Chromium, broad Go/web unit/build execution remain coordinator CI work on the final SHA. No broad local fallback and no origin push."
+    },
+    "approvedDesignConflicts": [],
+    "noOriginPushOrDeploy": true,
+    "reviewOwnership": "Consolidated review remains with coordinator; no model CLI or package review run."
   }
 }

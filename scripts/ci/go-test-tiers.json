@@ -3531,6 +3531,27 @@
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIClassifiedAggregateResults","tier":"GATED-FULL"},
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIClassifiedWebShardMatrix","tier":"GATED-FULL"},
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIMigrationCompatibilityIndependentOfClassification","tier":"GATED-FULL"},
-    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIPlanUsesTrustedBaseClassifier","tier":"GATED-FULL"}
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIPlanUsesTrustedBaseClassifier","tier":"GATED-FULL"},
+    {"package":"internal/agentd","name":"TestIdleChildCleanupStopsAndJoinsItsOwnedChild","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/agentd","name":"TestIdleChildDelayedCleanupNeverSignalsReleasedIdentity","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/auth","name":"TestProductPortalAllowlistIsExact","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/capacity","name":"TestRelease11OracleRetainsHistoricalValidation","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/importer","name":"TestSourceDispatchDelayUsesInjectedClock","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/importer","name":"TestSourceRequestCapRefillAndConcurrentDelay","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/nodes","name":"TestNodeWritesAllowConcurrentCommentTenantFK","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestDisplayedProductBindingRejectsDefaultSwitch","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestPortalBodyReadPrecedesTenantAndTreeLocks","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestPortalPermissionRevokedDuringBodyRead","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestPortalProductMoveAndRestoreRegistersOnce","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestPortalWritesSerializeWithPairingTreeBeforeTenant","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestNewProductStartsClosedAndDisabled","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestProductHistoryUsesBoundedKeysetPages","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestProductMigrationPreservesLegacySelectionAndVotes","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestProductPolicyRacesParticipation","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestProductPortalDefaultAndIsolation","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestProductProjectLinksRemainIndependent","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/portal","name":"TestProductRegisteredGateAndBallotHistory","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/rules/doctrine","name":"TestControlledDoctrineGuardCounts","kind":"go","tier":"GATED-FULL"},
+    {"package":"internal/rules/doctrine","name":"TestDefaultDoctrineGuardIgnoresUnrelatedCheckouts","kind":"go","tier":"GATED-FULL"}
   ]
 }
