@@ -212,6 +212,12 @@
     }
   ],
   "tests": [
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"needs-you counts problems, keeps calm kinds and uses the container for narrow actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"dock keeps navigation and the clicked row; sheets isolate focus and pin actions through content and series changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"popover menus navigate, confirm destructive effects and return focus without moving the trigger","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"forms retain failed writes, reserve feedback and respect platform submit and two-step Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"one popover owns the frame and closes for outside presses, moved triggers, resize and identity changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"approved shared shapes fit long German copy at phone, tablet and desktop in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts the nested catalog and rejects the old flat launch catalog","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > fails closed when the catalog is missing, forbidden, or the wrong shape","tier":"ESSENTIAL"},
