@@ -36,7 +36,7 @@ function key(event: KeyboardEvent) {
     return
   }
   if (event.altKey || (mac ? event.ctrlKey : event.metaKey)) return
-  if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); emit('save'); return }
+  if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); focusAction(); emit('save'); return }
   if (event.ctrlKey || event.metaKey || field) return
   if (event.key.toLowerCase() === 'e') { event.preventDefault(); emit('edit') }
   if (event.key.toLowerCase() === 'u') { event.preventDefault(); emit('undo') }

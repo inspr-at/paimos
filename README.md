@@ -59,7 +59,9 @@ local drafts and Undo; it does not promise to roll back an in-flight server writ
 
 Editors reserve useful read/help space above the previews and keep long content
 inside scrolling bodies. Phone editors use full-height sheets with safe-area
-action bars. Save keycaps follow the platform; Escape first leaves a field, then
+action bars. Save keycaps follow the platform; keyboard Save focuses the stable
+Save action before fields are disabled, retaining focus for subsequent keyboard
+Undo and Escape. Escape first leaves a field, then
 closes the editor. Browser geometry and request-contract coverage lives in
 `web/tests/policy-editors.spec.ts`; screenshot evidence is generated locally in
 `web/test-results/aeon-633web/` and is not committed.
