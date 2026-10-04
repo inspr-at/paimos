@@ -1477,7 +1477,7 @@ New required properties on these shared components still require a major bump.
 Changed existing properties, newly requiring an existing optional property, and adding a required
 property to a previously closed response schema also remain major changes.
 
-Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Parents show the sum of their visible, non-archived, non-cancelled leaves at any depth, including done leaves. A typed parent estimate stays alongside as “planned” and never enters the leaf sum. Progress weights estimated leaves by hours and shows coverage; with no estimates it counts leaves. Regrouping the same leaves does not change project progress. Ready/live ETA is the latest report among open leaves, labelled partial when some have no report. Headline and state-facet counts (including Hide) count leaves only; parents group work. Historical spend stays on former leaves and each session counts once per scope, including cancelled/archived work; exact-money visibility still requires access to both the row and source projects. The invoker-rights `aeon_work_scope` traversal deduplicates requested roots and has no depth cutoff; `aeon_work_aggregates` shares leaf facts/session reads and returns explicit coverage. Migration 1230 preserves both old `aeon_node_eta` and `aeon_node_eta_progress` signatures for previous binaries. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Parents show the sum of their visible, non-archived, non-cancelled leaves at any depth, including done leaves. A typed parent estimate stays alongside as “planned” and never enters the leaf sum. Progress weights estimated leaves by hours and shows coverage; with no estimates it counts leaves. Regrouping the same leaves does not change project progress. Ready/live ETA is the latest report among open leaves, labelled partial when some have no report. Weighted or rounded 100% does not suppress that ETA or staleness while leaves remain open. Project-scoped readers receive authorized Autopilot Undo facts so these projections refresh even when parent status stays unchanged. Headline and state-facet counts (including Hide) count leaves only; parents group work. Historical spend stays on former leaves and each session counts once per scope, including cancelled/archived work; exact-money visibility still requires access to both the row and source projects. The invoker-rights `aeon_work_scope` traversal deduplicates requested roots and has no depth cutoff; `aeon_work_aggregates` shares leaf facts/session reads and returns explicit coverage. Migration 1230 preserves both old `aeon_node_eta` and `aeon_node_eta_progress` signatures for previous binaries. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
 
 For a backfill, an agent drafts a JSON plan such as `[{"key":"AEON-317","hours":2},{"key":"AEON-318","hours":0.5}]`, then runs:
 
@@ -3165,6 +3165,15 @@ project visibility only inside the SQL functions, restoring it on every return;
 normal authorization remains in each writer's final transaction. Derived parent
 updates preserve `updated_at`, so they do not invalidate an unrelated title/body
 edit. Live views consume `status_autopilot.derived` at that unchanged revision.
+At that revision, the row store rejects node responses sent before a newer
+accepted read or derived hint. Late list responses preserve status from newer
+node reads while still supplying list-only projections. List snapshots retain
+their server-position ordering; cross-source status uses request order when
+positions cannot be compared. Status and its ordering fence form one snapshot:
+an accepted node payload applies before its fence advances, including when a
+full cache was already confirmed. A post-gap read applies the recovered status
+before confirming freshness. Named regressions and 300 reproducible seeded
+node/list/stream-gap interleavings check this against a small reference model.
 
 Rollout remains OFF until AEON-429's `features` table and service merge. Its
 catalog must register `work-parent-status` (label: “Parents follow their work”),
@@ -3186,7 +3195,8 @@ Blocked, then Open. With only finished children, any Done gives Done; only
 Cancelled gives Cancelled; all Accepted gives Accepted; Delivered/Accepted gives
 Delivered; other finished mixtures give Done. Custom categories use these same
 buckets. Archived children are ignored. No remaining active work children keeps
-the last state and records a retention reason. PATCH rejects an explicit parent
+the last state and records a retention reason, including when the last work
+child converts to another kind. PATCH rejects an explicit parent
 status with `409 parent_status_derived`, including the current value; bulk reports
 such parents as skipped while applying authorized leaf changes. Imports retain
 canonical parent status and report `parent_status_derived` as a source conflict.
@@ -3204,8 +3214,11 @@ and affected children, then POST `/api/events/{id}/undo` with
 decodes its bounded confirmation before taking any transaction locks, then
 re-checks permissions and original child revisions under access-change fences
 even if the flag was disabled, and reverses the cause once. Parents are derived
-again while the feature is enabled. Later child edits, hidden/ambiguous causes, active
-work and unsupported reverse operations refuse the action atomically.
+again while the feature is enabled. Ordinary Undo also takes pairing, tree and
+tenant access fences before its event fence in both flag states, including
+across activation and concurrent knowledge writes.
+Later child edits, hidden/ambiguous causes, active work and unsupported reverse
+operations refuse the action atomically.
 
 The initial implementation deliberately serializes flagged tenant transactions
 and prelocks their work rows to avoid taking ancestor locks after the event
@@ -3213,8 +3226,12 @@ counter. Reads also enter that protocol within capacity. Limits fail the entire
 work mutation transaction: 50,000 live work rows (tombstones are excluded, and
 restoration counts toward the limit), 1,000 changed nodes, depth 1,000, 10,000
 cause events, and 10-second entry/derivation deadlines. Causal previews accept
-at most 200 children and 4 MiB of combined cause snapshots; confirmation bodies
-are limited to 1 KiB with a 10-second HTTP read deadline. The live-row limit is
+at most 200 children and 4 MiB of combined cause snapshots, checked on their
+expanded JSON in Postgres before transfer to the application. Confirmation
+bodies are limited to 1 KiB with a 10-second HTTP read deadline. Shared work-order,
+harness, run, hours and review endpoints, queue writes and brand settings buffer
+their existing bounded request bodies before transaction admission, with the
+same 10-second HTTP read deadline. The live-row limit is
 checked again against the final tree before commit, so crossing creates,
 restores and kind conversions roll back atomically. Direct work writes outside
 `db.InTenant` fail closed when the flag is enabled. These bounds and tenant-wide read serialization require
@@ -3248,6 +3265,9 @@ Tests use the current starter catalog; historic mixed-kind cases define their ow
 tenant kinds.
 Lists without sized work skip calibration reads that cannot produce an estimate,
 while still resolving displayed routes and retaining historical usage.
+Progress tooltips and accessibility labels share ETA's completion rule: weighted
+or rounded 100% still says “work remains” while leaves are open or their completion
+is unknown. The displayed percentage and estimate coverage remain visible.
 
 The unreleased 1230 migration bounds every shared scope traversal to 4096 input
 roots and 50000 distinct root/node pairs, counting overlapping roots against the

@@ -341,6 +341,67 @@ describe('LiveNodeStore', () => {
     release()
   })
 
+  it.each(['status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed'])('refreshes unchanged parent projections directly from %s without a heartbeat', async type => {
+    const parent = { ...node('parent', '2026-09-29T10:00:00Z'), state: 'in_progress', kind_slug: 'work', children_count: 2,
+      project: { id: 'A', key: 'A', title: 'A' }, estimate: { is_parent: true, hours: 10 },
+      eta: { finished: false, progress_pct: 20, eta_ready_at: '2026-09-29T12:00:00Z' },
+    } as ListItem
+    const updated = { ...parent, estimate: { is_parent: true, hours: 18 },
+      eta: { ...parent.eta!, progress_pct: 60, eta_ready_at: '2026-09-29T13:00:00Z' } } as ListItem
+    const fetchAggregate = vi.fn(async () => updated)
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, fetchAggregate, rows })
+    const panel = view(['parent'])
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    rows.adopt(parent, rows.mark(), { show: true })
+    const release = rows.hold(() => ['parent'])
+    latest().node(41, [{ id: 'uncached-leaf', fields: ['state', 'fields.estimate_hours'], change: type === 'import.node_created' ? 'created' : 'updated' }], type)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchAggregate).toHaveBeenCalledExactlyOnceWith('parent')
+    expect(panel.calls.find(call => call.id === 'parent')?.node).toMatchObject({
+      updated_at: parent.updated_at, state: parent.state, estimate: { hours: 18 },
+      eta: { progress_pct: 60, eta_ready_at: '2026-09-29T13:00:00Z' },
+    })
+    expect(fetchNode).not.toHaveBeenCalled()
+    expect(panel.resyncs).toEqual(['initial'])
+    release()
+  })
+
+  it('refreshes former leaves in both held projects after an uncached import reparent at the same revision', async () => {
+    const parents = ['source', 'destination'].map(project => ({
+      ...node(project + '-parent', '2026-09-29T10:00:00Z'), kind_slug: 'work', children_count: 0,
+      project: { id: project, key: project, title: project }, estimate: { is_parent: false, hours: 10 },
+    } as ListItem))
+    const fetchAggregate = vi.fn(async (id: string) => ({ ...parents.find(parent => parent.id === id)!,
+      children_count: id.startsWith('destination') ? 1 : 0, estimate: { is_parent: id.startsWith('destination'), hours: 2 },
+    } as ListItem))
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, fetchAggregate, rows })
+    const panel = view(parents.map(parent => parent.id))
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    for (const parent of parents) rows.adopt(parent, rows.mark(), { show: true })
+    const release = rows.hold(() => parents.map(parent => parent.id))
+    latest().node(41, [{ id: 'uncached-leaf', project_id: 'destination', fields: ['parent_id', 'project_id'], revision: parents[0].updated_at }], 'import.parent_changed')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchAggregate.mock.calls.map(([id]) => id).sort()).toEqual(['destination-parent', 'source-parent'])
+    expect(panel.calls.find(call => call.id === 'destination-parent')?.node).toMatchObject({ children_count: 1, estimate: { is_parent: true, hours: 2 } })
+    expect(panel.calls.find(call => call.id === 'source-parent')?.node).toMatchObject({ children_count: 0, estimate: { is_parent: false, hours: 2 } })
+    release()
+  })
+
+  it('refetches an imported child reparenting at an unchanged revision', async () => {
+    const panel = view(['n1'])
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    const base = node('n1', '2026-09-29T10:00:00Z', { parent_id: 'old-parent' })
+    rows.adoptNode(base, rows.mark(), { show: true })
+    fetchNode.mockResolvedValueOnce({ ...base, parent_id: 'new-parent' })
+    latest().node(41, [{ id: 'n1', fields: ['parent_id'], revision: base.updated_at }], 'import.parent_changed')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchNode).toHaveBeenCalledExactlyOnceWith('n1')
+    expect(panel.calls[0].node).toMatchObject({ parent_id: 'new-parent', updated_at: base.updated_at })
+  })
+
   it('refreshes a derived parent state at the same edit revision', async () => {
     const panel = view(['n1'])
     store.subscribe(panel.v)

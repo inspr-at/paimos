@@ -4885,7 +4885,7 @@ paths:
       - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
     get:
       operationId: previewCausalUndo
-      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision and mutation permissions as Undo without committing writes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
+      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision and mutation permissions as Undo without committing writes. Reversing roadmap publication, a human-check completion or its person provenance requires a person, including for imported child changes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
       security: *auth
       responses:
         '200':
@@ -4928,7 +4928,7 @@ paths:
               required: [confirmed_cause_event_id]
               properties:
                 confirmed_cause_event_id: {type: integer, minimum: 1, description: Must match the cause_event_id returned by undo-preview. Required only for derived parent events.}
-      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Confirmation is limited to 1 KiB and read with a 10-second deadline before mutation locks; its cause and permissions are rechecked inside the final transaction even after the derivation feature is disabled. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
+      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Confirmation is limited to 1 KiB and read with a 10-second deadline before mutation locks; its cause and permissions are rechecked inside the final transaction even after the derivation feature is disabled. Reversing roadmap publication, a human-check completion or its person provenance requires a person; an authorized reversal preserves the historical snapshot attribution. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '201':
@@ -14842,7 +14842,7 @@ components:
         leaf_count: {type: integer, minimum: 0, description: Non-archived non-cancelled leaves contributing to progress.}
         estimated_leaves: {type: integer, minimum: 0}
         progress_basis: {type: string, enum: [estimate, leaves]}
-        open_leaves: {type: integer, minimum: 0}
+        open_leaves: {type: integer, minimum: 0, description: Leaves whose workflow status is not complete. A parent retains its ETA and staleness while this is positive even when estimate-weighted or rounded progress_pct is 100.}
         ready_leaves: {type: integer, minimum: 0}
         live_leaves: {type: integer, minimum: 0}
         ready_partial: {type: boolean, description: Some open leaves have no ready ETA.}
@@ -17399,7 +17399,7 @@ components:
             affected_nodes: {type: array, maxItems: 1, items: {type: string, format: uuid}}
         node_changes:
           type: array
-          description: Set on node.* events when read (history and stream), never stored. Also set on harness.usage_reported for the session's currently bound readable ticket, with estimate/planning fields and a null revision, to invalidate spend projections after late reports. Values are read through the authorized node routes.
+          description: Set on node.*, status_autopilot.derived/changed/undone and import.node_created/node_updated/parent_changed events when read (history and stream), never stored. Import reparenting can retain updated_at; membership hints must refresh affected parent aggregates even when parent status and revision are unchanged. Also set on harness.usage_reported for the session's currently bound readable ticket, with estimate/planning fields and a null revision, to invalidate spend projections after late reports. Values are read through the authorized node routes.
           items:
             $ref: '#/components/schemas/NodeChange'
     NodeChange:

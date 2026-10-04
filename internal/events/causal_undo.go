@@ -4,6 +4,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -50,7 +51,21 @@ func (m *module) causalChange(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if id == nil {
 		return Event{}, nil, out, ErrConflict
 	}
-	e, err := scanEvent(tx.QueryRow(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of FROM events WHERE tenant_id=$1 AND id=$2`, p.TenantID, *id))
+	// Bound the expanded JSON on the server before transferring any snapshots.
+	// Physical JSONB size is insufficient: large bulk fields can compress well.
+	e, err := scanEvent(tx.QueryRow(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of FROM events
+	 WHERE tenant_id=$1 AND id=$2 AND coalesce(octet_length(before::text),0)::bigint+coalesce(octet_length(after::text),0)::bigint <= $3`, p.TenantID, *id, 4<<20))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Keep invisible/missing causes as not-found, while visible oversized
+		// causes are conflicts. This probe returns no snapshot payloads.
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND id=$2)`, p.TenantID, *id).Scan(&visible); err != nil {
+			return Event{}, nil, out, err
+		}
+		if visible {
+			return Event{}, nil, out, ErrConflict
+		}
+	}
 	if err != nil {
 		return Event{}, nil, out, err
 	}
