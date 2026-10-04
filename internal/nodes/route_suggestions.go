@@ -15,7 +15,7 @@ import (
 )
 
 // Suggestions are deterministic planning hints, never confirmed estimates of
-// difficulty. Only a fields write with valid hours opts into filling gaps.
+// difficulty. An estimate or role change with valid hours opts into filling gaps.
 func suggestEstimateRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, title string, parent *string, raw, before json.RawMessage) (json.RawMessage, error) {
 	if kind != "ticket" && kind != "task" {
 		return raw, nil
@@ -31,6 +31,15 @@ func suggestEstimateRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, ki
 	old, err := decodeRouteFields(before)
 	if err != nil {
 		return nil, err
+	}
+	// The update caller supplies the stored fields read under the node lock,
+	// after canonicalizing the incoming estimate and role. A replacement
+	// document carrying unchanged values must not backfill missing hints.
+	if sameEstimateFields(fields, old) {
+		sameRole, err := sameRouteValue(fields, old, "route_role")
+		if err != nil || sameRole {
+			return raw, err
+		}
 	}
 	project, err := routeProject(ctx, tx, parent)
 	if err != nil {

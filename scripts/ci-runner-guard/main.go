@@ -17,7 +17,7 @@ import (
 )
 
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
-const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
+const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
@@ -45,7 +45,8 @@ var reservedCIJobs = map[string]bool{
 	"go": true, "web": true, "release-check": true, "e2e": true,
 	"cross-family": true, "gate/cross-family": true,
 	"go-test": true, "go-static": true, "go-timing": true, "runner-route": true,
-	"ci-plan": true, "web-setup": true, "web-shard": true,
+	"tier-plan": true,
+	"ci-plan":   true, "web-setup": true, "web-shard": true,
 	"release-check-run": true, "e2e-run": true,
 }
 
@@ -184,6 +185,10 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		}
 	} else if name == "full-ui-qa.yml" {
 		if err := checkFullUIQA(workflow); err != nil {
+			reject(err.Error())
+		}
+	} else if name == "nightly-full.yml" {
+		if err := checkNightlyFull(workflow); err != nil {
 			reject(err.Error())
 		}
 	} else if hasEvent(workflow["on"], "pull_request") {
@@ -348,6 +353,35 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 	return problems
 }
 
+func checkNightlyFull(workflow map[string]any) error {
+	expected := map[string]any{
+		"schedule":          []any{map[string]any{"cron": "23 1 * * *"}},
+		"workflow_dispatch": nil,
+	}
+	if !reflect.DeepEqual(mapping(workflow["on"]), expected) {
+		return fmt.Errorf("nightly full must retain schedule and manual triggers only")
+	}
+	jobs := mapping(workflow["jobs"])
+	for _, id := range []string{"nightly-go-test", "nightly-go-static", "nightly-go-timing", "nightly-web-setup", "nightly-web-shard", "nightly-migration-compat", "nightly-e2e", "nightly-release-check"} {
+		job := mapping(jobs[id])
+		if job == nil || job["runs-on"] != "ubuntu-latest" || job["if"] != nil || job["continue-on-error"] != nil {
+			return fmt.Errorf("nightly full must retain unconditional hosted full job %q", id)
+		}
+	}
+	for _, spec := range []struct{ id, command string }{
+		{"nightly-go-test", "cli.mjs run go --all --shard"},
+		{"nightly-go-timing", "cli.mjs run go --all --timing"},
+		{"nightly-web-setup", "cli.mjs run web --all --unit"},
+		{"nightly-web-shard", "cli.mjs run web --all --shard"},
+	} {
+		body, _ := yaml.Marshal(jobs[spec.id])
+		if !strings.Contains(string(body), spec.command) {
+			return fmt.Errorf("nightly full job %q must select every tier", spec.id)
+		}
+	}
+	return nil
+}
+
 func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	events := mapping(workflow["on"])
 	var names []string
@@ -399,7 +433,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run", "release-list-comparison"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
@@ -409,11 +443,18 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		case "web-setup", "web-shard":
 			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
 		}
-		condition = "always() && needs.ci-plan.result == 'success' && (" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
+		tierGuard := ""
+		if id == "go-test" || id == "web-setup" || id == "web-shard" {
+			tierGuard = "needs.tier-plan.result == 'success' && "
+			if !hasNeed(job["needs"], "tier-plan") {
+				return fmt.Errorf("required CI job %q must gate tier planning", id)
+			}
+		}
+		condition = "always() && needs.ci-plan.result == 'success' && " + tierGuard + "(" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
 		switch id {
 		case "go-test":
 			condition += " && needs.runner-route.result == 'success'"
-		case "web-shard", "release-list-comparison":
+		case "web-shard":
 			condition += " && needs.web-setup.result == 'success'"
 		}
 		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") || !hasNeed(job["needs"], "tree-reuse") {
@@ -421,7 +462,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 	}
 	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
-	if webMatrix != `${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
+	if webMatrix != `${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
 		return fmt.Errorf("web shard matrix must retain 12 full rows and one changed-spec row")
 	}
 	for _, context := range []string{"go", "web", "release-check", "e2e"} {
@@ -436,7 +477,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing", "tree-reuse", "cache-prime", "tier-plan"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if context == "web" {
@@ -444,7 +485,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}) {
 				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
 			}
 		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}) {

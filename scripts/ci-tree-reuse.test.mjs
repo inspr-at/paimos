@@ -13,8 +13,8 @@ function fixture(attempt = 1) {
   const run = { id: 123, name: 'CI', repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: attempt, event: 'merge_group', head_sha: sha };
   const workflow = { id: 20, name: 'CI', path: workflowPath };
   const jobs = { total_count: requiredJobs.length + 2, jobs: requiredJobs.map(name => {
-    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard' : name.startsWith('web-shard (') ? 'Run balanced UI shard with merge-queue flake control' : undefined);
-    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : [] };
+    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
+    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...((name==='web-setup'||/^(go-test|web-shard) \(/.test(name))?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   jobs.jobs.push({ name: 'tree-reuse', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
@@ -40,6 +40,23 @@ test('found: an exact-SHA successful merge-group full suite reuses with source n
   assert(f.calls.includes(listPath));
   assert(f.calls.includes('actions/runs/123/attempts/1/jobs?per_page=100'));
   assert(!f.calls.some(p => /git\/|compare\/|pulls\/|statuses\//.test(p)));
+});
+
+test('the full suite reuses without the retired comparison job and still requires every surviving job', async () => {
+  const f = fixture();
+  // Do not inherit the verifier's obsolete requirement through the fixture.
+  f.jobs.jobs = f.jobs.jobs.filter(j => j.name !== 'release-list-comparison');
+  f.jobs.total_count = f.jobs.jobs.length;
+  assert.deepEqual(await verifyRun(repository, 123, f.api, sha), { run: 123, attempt: 1, sha });
+  assert.deepEqual(await check(f), { reuse: 'merge_group', run: 123, reason: 'reused merge_group run 123' });
+
+  const fullJobs = f.jobs.jobs;
+  for (const { name } of fullJobs.filter(j => !['cache-prime', 'tree-reuse'].includes(j.name))) {
+    f.jobs.jobs = fullJobs.filter(j => j.name !== name);
+    f.jobs.total_count = f.jobs.jobs.length;
+    await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing or failed suite job/, name);
+    assert.equal((await check(f)).reuse, 'none', name);
+  }
 });
 
 test('not found: a direct main push runs the full suite', async () => {
@@ -209,4 +226,17 @@ test('transport forwards cancellation with an injected signal, no timing thresho
   const controller = new AbortController(); controller.abort();
   const request = transport('fixture', 'fixture', controller.signal, async (_url, options) => { assert(options.signal.aborted); throw options.signal.reason; });
   await assert.rejects(request('https://api.github.com'));
+});
+
+// Narrowed queue coverage cannot masquerade as the full-suite proof AEON-423 requires.
+test('a two-shard essential queue run falls back to fresh full main validation', async () => {
+  const f=fixture();f.jobs.jobs=f.jobs.jobs.filter(j=>!(/^(go-test|web-shard) \(/.test(j.name))||/\([12]\)$/.test(j.name));f.jobs.total_count=f.jobs.jobs.length;
+  assert.equal((await check(f)).reuse,'none');
+});
+
+test('full fan-out alone cannot prove full execution when the independent selector narrowed',async()=>{
+  const f=fixture();job(f,'go-test (1)').steps=job(f,'go-test (1)').steps.filter(step=>step.name!=='Confirm full tier execution');
+  assert.equal((await check(f)).reuse,'none');
+  const web=fixture();job(web,'web-setup').steps.find(step=>step.name==='Confirm full tier execution').conclusion='skipped';
+  assert.equal((await check(web)).reuse,'none');
 });
