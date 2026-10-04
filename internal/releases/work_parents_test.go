@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -261,6 +262,216 @@ func TestLeafShapeChangesReconcileMovedAndRestoredChildren(t *testing.T) {
 				t.Fatalf("parent=%v has live membership=%v after %s", change.parent, member, change.sql)
 			}
 			return nil
+		})
+	}
+}
+
+func TestLeafShapeChangesPreserveCompleteProjectionAndUndo(t *testing.T) {
+	f := ticketSetup(t)
+	former := f.existing("work", f.feature, "Estimated access change", "open")
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET feature_node_id=$2,walker_position=17,source='requirements',estimated_hours=12.5,access_change=true,scope_revision_required=false WHERE ticket_node_id=$1`, former, f.feature)
+		return err
+	})
+	var original []byte
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT to_jsonb(t) FROM journey_tickets t WHERE ticket_node_id=$1`, former).Scan(&original)
+	})
+	child := f.existing("work", former, "Temporary child", "open")
+	nodes.New(f.db.App, nil).Mount(f.mux)
+	events.New(f.db.App, events.WithUndoHandlers(nodes.UndoHandlers())).Mount(f.mux)
+	assertProjection := func() {
+		t.Helper()
+		f.tx(func(tx pgx.Tx) error {
+			var actual []byte
+			var access bool
+			if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(t),r.access_required FROM journey_tickets t JOIN journey_releases r ON r.release_node_id=t.release_node_id WHERE t.ticket_node_id=$1`, former).Scan(&actual, &access); err != nil {
+				return err
+			}
+			if string(actual) != string(original) || !access {
+				t.Errorf("projection lost across shape change: original=%s actual=%s access_required=%v", original, actual, access)
+			}
+			return nil
+		})
+	}
+	// Exercise the actual move and compensating-event paths, twice, rather
+	// than simulating Undo with another fixture update.
+	for range 2 {
+		w := f.request(f.person, http.MethodPost, "/api/nodes/"+child+"/move", fmt.Sprintf(`{"parent_id":%q}`, f.project))
+		if w.Code != 200 {
+			t.Fatalf("move: %d %s", w.Code, w.Body.String())
+		}
+		assertProjection()
+		var eventID int64
+		f.tx(func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE node_id=$1 AND type='node.moved' AND undo_of IS NULL ORDER BY id DESC LIMIT 1`, child).Scan(&eventID)
+		})
+		if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", eventID), ""); w.Code != 201 {
+			t.Fatalf("undo move: %d %s", w.Code, w.Body.String())
+		}
+		f.tx(func(tx pgx.Tx) error {
+			var count int
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_tickets WHERE ticket_node_id=$1`, former).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				t.Error("Undo retained a parent as a live member")
+			}
+			return nil
+		})
+	}
+	// Undoing a move into the parent must restore the complete leaf projection
+	// too, including the release's access-review requirement.
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, child, f.project)
+		return err
+	})
+	assertProjection()
+	w := f.request(f.person, http.MethodPost, "/api/nodes/"+child+"/move", fmt.Sprintf(`{"parent_id":%q}`, former))
+	if w.Code != 200 {
+		t.Fatalf("move back: %d %s", w.Code, w.Body.String())
+	}
+	var eventID int64
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE node_id=$1 AND type='node.moved' AND undo_of IS NULL ORDER BY id DESC LIMIT 1`, child).Scan(&eventID)
+	})
+	if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", eventID), ""); w.Code != 201 {
+		t.Fatalf("undo move into parent: %d %s", w.Code, w.Body.String())
+	}
+	assertProjection()
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, child, former); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, child)
+		return err
+	})
+	assertProjection()
+}
+
+func TestFormerParentReassignmentUpdatesFutureIntentAndUndo(t *testing.T) {
+	for _, undo := range []bool{false, true} {
+		t.Run(fmt.Sprint("undo=", undo), func(t *testing.T) {
+			f := ticketSetup(t)
+			former := f.existing("work", f.feature, "Former leaf", "open")
+			membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+			child := f.existing("work", former, "First child", "open")
+			second := f.existing("release", f.project, "Later choice", "open")
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, child); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,2)`, f.person.TenantID, second, f.project); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET current_release_node_id=$2 WHERE project_node_id=$1`, f.project, second)
+				return err
+			})
+			out := membershipOK(t, f.request(f.person, http.MethodPost, "/api/projects/"+f.project+"/releases/"+second+"/membership", fmt.Sprintf(`{"expected_revision":1,"ticket_node_ids":[%q],"confirm_move":true}`, former)))
+			want := second
+			if undo {
+				events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
+				if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", out.EventID), ""); w.Code != 201 {
+					t.Fatalf("undo reassignment: %d %s", w.Code, w.Body.String())
+				}
+				want = f.release
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var actual string
+				if err := tx.QueryRow(t.Context(), `SELECT release_node_id::text FROM work_parent_releases WHERE parent_node_id=$1`, former).Scan(&actual); err != nil {
+					return err
+				}
+				if actual != want {
+					t.Errorf("stale intent: got %s want %s", actual, want)
+				}
+				// Closing the obsolete choice must not divert new descendants.
+				if !undo {
+					_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.release)
+					return err
+				}
+				return nil
+			})
+			fresh := f.existing("work", former, "New child after choice", "open")
+			row := f.readMembership(fresh)[0]
+			if row.ReleaseID == nil || *row.ReleaseID != want || row.InheritanceNote != nil {
+				t.Fatalf("child inherited obsolete choice: %+v want %s", row, want)
+			}
+		})
+	}
+}
+
+func TestWorkParentPlacementThousandLeavesWithNestedParents(t *testing.T) {
+	f := ticketSetup(t)
+	nested := f.existing("work", f.feature, "Intermediate parent", "open")
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),$2,'Boundary leaf '||i FROM node_kinds k CROSS JOIN generate_series(1,1000) i WHERE k.slug='work'`, f.person.TenantID, nested)
+		return err
+	})
+	out := membershipOK(t, f.addExisting([]string{f.feature, nested}, 1, false))
+	if len(out.LeafIDs) != 1000 || len(out.Walker.Tickets) != 1000 {
+		t.Fatalf("exact boundary omitted leaves: ids=%d tickets=%d", len(out.LeafIDs), len(out.Walker.Tickets))
+	}
+}
+
+func TestFormerParentPlanRemovalAndUndoRespectsBacklog(t *testing.T) {
+	for _, undo := range []bool{false, true} {
+		t.Run(fmt.Sprint("undo=", undo), func(t *testing.T) {
+			f := ticketSetup(t)
+			former := f.existing("work", f.feature, "Former parent", "open")
+			membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+			child := f.existing("work", former, "Temporary child", "open")
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, child)
+				return err
+			})
+			var rev int64
+			f.tx(func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT revision FROM journey_releases WHERE release_node_id=$1`, f.release).Scan(&rev)
+			})
+			w := f.request(f.person, http.MethodPut, "/api/projects/"+f.project+"/releases/"+f.release+"/plan", fmt.Sprintf(`{"expected_revision":%d,"ordered_ticket_ids":[%q],"included_ticket_ids":[]}`, rev, former))
+			if w.Code != 200 {
+				t.Fatalf("remove former parent: %d %s", w.Code, w.Body.String())
+			}
+			var eventID int64
+			f.tx(func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE type='journey.release_membership_changed' ORDER BY id DESC LIMIT 1`).Scan(&eventID)
+			})
+			if undo {
+				events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
+				if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", eventID), ""); w.Code != 201 {
+					t.Fatalf("undo removal: %d %s", w.Code, w.Body.String())
+				}
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var intent *string
+				if err := tx.QueryRow(t.Context(), `SELECT release_node_id::text FROM work_parent_releases WHERE parent_node_id=$1`, former).Scan(&intent); err != nil {
+					return err
+				}
+				if undo && (intent == nil || *intent != f.release) || !undo && intent != nil {
+					t.Errorf("removal/Undo did not reconcile intent: %v undo=%v", intent, undo)
+				}
+				return nil
+			})
+			fresh := f.existing("work", former, "After removal", "open")
+			row := f.readMembership(fresh)[0]
+			if undo && (row.ReleaseID == nil || *row.ReleaseID != f.release) || !undo && row.ReleaseID != nil {
+				t.Fatalf("removal/Undo inherited old placement: %+v undo=%v", row, undo)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, fresh)
+				return err
+			})
+			f.tx(func(tx pgx.Tx) error {
+				var assigned *string
+				if err := tx.QueryRow(t.Context(), `SELECT release_node_id::text FROM journey_tickets WHERE ticket_node_id=$1`, former).Scan(&assigned); err != nil {
+					return err
+				}
+				if undo && (assigned == nil || *assigned != f.release) || !undo && assigned != nil {
+					t.Errorf("restored leaf ignored explicit backlog/Undo: %v undo=%v", assigned, undo)
+				}
+				return nil
+			})
 		})
 	}
 }

@@ -49,28 +49,25 @@ func expandWorkLeaves(ctx context.Context, tx pgx.Tx, project string, ids []stri
 		if !valid {
 			return nil, nil, nil, fail(404, "work node not found in project")
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text,is_leaf FROM aeon_work_release_scope(ARRAY[$1::uuid]) WHERE project_id=$2 AND kind_slug IN ('work','epic','ticket','task') ORDER BY id LIMIT 1001`, id, project)
+		var parent bool
+		if err := tx.QueryRow(ctx, `SELECT NOT aeon_work_is_release_leaf(current_setting('aeon.tenant_id')::uuid,$1::uuid)`, id).Scan(&parent); err != nil {
+			return nil, nil, nil, err
+		}
+		// The scope helper independently bounds traversal to 50,000 nodes.
+		// This API's tighter limit counts leaves, not intermediate parents.
+		rows, err := tx.Query(ctx, `SELECT id::text FROM aeon_work_release_scope(ARRAY[$1::uuid]) WHERE project_id=$2 AND kind_slug IN ('work','epic','ticket','task') AND is_leaf ORDER BY id LIMIT 1001`, id, project)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		total := 0
-		parent := false
 		rootLeaves := []string{}
 		for rows.Next() {
 			var node string
-			var leaf bool
-			if err = rows.Scan(&node, &leaf); err != nil {
+			if err = rows.Scan(&node); err != nil {
 				rows.Close()
 				return nil, nil, nil, err
 			}
-			total++
-			if node == id && !leaf {
-				parent = true
-			}
-			if leaf {
-				rootLeaves = append(rootLeaves, node)
-			}
-			if leaf && !leaves[node] {
+			rootLeaves = append(rootLeaves, node)
+			if !leaves[node] {
 				leaves[node] = true
 				out = append(out, node)
 			}
@@ -80,8 +77,8 @@ func expandWorkLeaves(ctx context.Context, tx pgx.Tx, project string, ids []stri
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if total > 1000 || len(leaves) > 1000 {
-			return nil, nil, nil, fail(409, "parent release placement exceeds 1000 work nodes")
+		if len(rootLeaves) > 1000 || len(leaves) > 1000 {
+			return nil, nil, nil, fail(409, "parent release placement exceeds 1000 leaves")
 		}
 		if parent {
 			parents = append(parents, id)

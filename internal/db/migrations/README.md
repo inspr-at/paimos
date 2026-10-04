@@ -333,11 +333,14 @@ records their individual purposes in its shared ledger; workers author only in
 their own worktree. Migration 1233 adds `work_parent_releases`: tenant, parent,
 project and release UUIDs are metadata, located by `(tenant_id,parent_node_id)`.
 The DSAR inventory does not exist in this stack or its local origin/main;
-classify these four columns when integrating AEON-490's inventory.
+classify these four columns and 1237's retained membership projection when
+integrating AEON-490's inventory. The retained object stores journey UUIDs,
+source, position, estimate and scope/access flags as metadata at the same locator.
 
 `ticket_node_ids` accepts parents and leaves. Placement expands work edges in
 the same project and deduplicates overlapping roots, with at most 100 roots,
-1000 work nodes per root and 1000 resulting leaves; excess rolls back. Parent
+1000 resulting leaves and a separate 50,000-node traversal bound; intermediate
+parents do not count against the leaf limit. Excess rolls back. Parent
 intent is separate from release membership. Future leaves inherit the nearest
 placed ancestor's release only while it is planning. Otherwise they remain
 unassigned, become Backlog and carry `release_inheritance_note=parent_release_closed`.
@@ -356,7 +359,12 @@ recurrence trigger. Historical sessions and Decision Desk IDs are untouched.
 
 Migration 1237 (AEON-653 fix2) reconciles current planning membership on work
 creation, moves, restoration and deletion. A leaf becoming a parent keeps its
-placement as intent and leaves the live member set; released/frozen member rows
+placement and the complete bounded membership projection as intent and leaves
+the live member set. Returning to leaf restores feature, position, source,
+estimate and scope/access flags; Undo follows the same reconciliation path.
+Explicit membership changes synchronize retained intent, including plan
+removal to backlog and compensating Undo, so subsequent children follow the
+latest choice. Released/frozen member rows
 and stored note snapshots remain unchanged. Live walkers, current-release journey
 calculations and new note captures exclude parents. Quick-create applies explicit inclusion
 even after automatic inheritance and advances each revision once. Membership

@@ -4,6 +4,27 @@
 -- retain FORCE RLS. Historical memberships and frozen payloads are not rewritten.
 SET LOCAL lock_timeout = '5s';
 
+-- This migration is still unshipped on the AEON-653 branch. Retain the complete
+-- typed projection, including access-review input, without making a parent a
+-- live release member. The bounded object contains only journey_tickets data.
+ALTER TABLE work_parent_releases ALTER COLUMN release_node_id DROP NOT NULL;
+ALTER TABLE work_parent_releases ADD COLUMN retained_membership jsonb
+ CHECK (jsonb_typeof(retained_membership)='object' AND octet_length(retained_membership::text)<=4096);
+
+-- Explicit membership changes (including plan removal and compensating Undo)
+-- supersede old intent. Invoker rights retain the table's tenant/project RLS.
+CREATE FUNCTION aeon_work_sync_parent_release() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ UPDATE work_parent_releases SET project_node_id=NEW.project_node_id,release_node_id=NEW.release_node_id,
+  retained_membership=CASE WHEN retained_membership IS NOT NULL THEN to_jsonb(NEW) END
+  WHERE tenant_id=NEW.tenant_id AND parent_node_id=NEW.ticket_node_id;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER journey_tickets_parent_release_change AFTER UPDATE OF release_node_id,project_node_id ON journey_tickets
+ FOR EACH ROW WHEN (ROW(OLD.release_node_id,OLD.project_node_id) IS DISTINCT FROM ROW(NEW.release_node_id,NEW.project_node_id))
+ EXECUTE FUNCTION aeon_work_sync_parent_release();
+
 CREATE FUNCTION aeon_work_is_release_leaf(p_tenant uuid, p_node uuid) RETURNS boolean
 LANGUAGE sql STABLE AS $$
  SELECT NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.tenant_id=c.tenant_id AND k.id=c.kind_id
@@ -12,18 +33,19 @@ $$;
 
 CREATE OR REPLACE FUNCTION aeon_work_inherited_release(parent uuid, project uuid) RETURNS uuid
 LANGUAGE plpgsql STABLE AS $$
-DECLARE cur uuid := parent; rel uuid; next_parent uuid; depth integer := 0;
+DECLARE cur uuid := parent; rel uuid; next_parent uuid; placed boolean; depth integer := 0;
 BEGIN
  WHILE cur IS NOT NULL LOOP
   depth := depth+1;
   IF depth>1000 THEN RAISE EXCEPTION 'release ancestry exceeds 1000 nodes' USING ERRCODE='54000'; END IF;
-  SELECT coalesce(p.release_node_id,t.release_node_id),n.parent_id INTO rel,next_parent
+  SELECT CASE WHEN t.ticket_node_id IS NOT NULL THEN t.release_node_id ELSE p.release_node_id END,
+   n.parent_id,(t.ticket_node_id IS NOT NULL OR p.parent_node_id IS NOT NULL) INTO rel,next_parent,placed
    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
    LEFT JOIN work_parent_releases p ON p.tenant_id=n.tenant_id AND p.parent_node_id=n.id AND p.project_node_id=project
    LEFT JOIN journey_tickets t ON t.tenant_id=n.tenant_id AND t.ticket_node_id=n.id AND t.project_node_id=project
    WHERE n.id=cur AND n.project_id=project AND n.deleted_at IS NULL AND k.slug='work';
   IF NOT FOUND THEN RETURN NULL; END IF;
-  IF rel IS NOT NULL THEN RETURN rel; END IF;
+  IF placed THEN RETURN rel; END IF;
   cur := next_parent;
  END LOOP;
  RETURN NULL;
@@ -35,20 +57,21 @@ $$;
 -- Frozen/released rows remain historical evidence and live readers filter them.
 CREATE FUNCTION aeon_work_reconcile_release_nodes(ids uuid[]) RETURNS void
 LANGUAGE plpgsql AS $$
-DECLARE member record; candidate record; rel uuid; changed uuid[] := '{}'; inserted integer;
+DECLARE member record; candidate record; rel uuid; retained jsonb; changed uuid[] := '{}'; inserted integer;
 BEGIN
  IF cardinality(ids)>100 THEN RAISE EXCEPTION 'release reconciliation exceeds 100 nodes' USING ERRCODE='54000'; END IF;
  FOR member IN
-  SELECT t.* FROM journey_tickets t JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id
+  SELECT t.* FROM journey_tickets t LEFT JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id
   JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id
   JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-  WHERE n.id=ANY(ids) AND n.deleted_at IS NULL AND k.slug='work' AND r.state='planning'
+  WHERE n.id=ANY(ids) AND n.deleted_at IS NULL AND k.slug='work' AND (r.state='planning' OR t.release_node_id IS NULL)
    AND NOT aeon_work_is_release_leaf(n.tenant_id,n.id)
   ORDER BY t.release_node_id,t.ticket_node_id
  LOOP
-  INSERT INTO work_parent_releases(tenant_id,parent_node_id,project_node_id,release_node_id)
-   VALUES(member.tenant_id,member.ticket_node_id,member.project_node_id,member.release_node_id)
-   ON CONFLICT(tenant_id,parent_node_id) DO NOTHING;
+  INSERT INTO work_parent_releases(tenant_id,parent_node_id,project_node_id,release_node_id,retained_membership)
+   VALUES(member.tenant_id,member.ticket_node_id,member.project_node_id,member.release_node_id,to_jsonb(member))
+   ON CONFLICT(tenant_id,parent_node_id) DO UPDATE SET project_node_id=excluded.project_node_id,
+    release_node_id=excluded.release_node_id,retained_membership=excluded.retained_membership;
   DELETE FROM journey_tickets WHERE tenant_id=member.tenant_id AND ticket_node_id=member.ticket_node_id;
   changed := array_append(changed,member.release_node_id);
  END LOOP;
@@ -58,14 +81,23 @@ BEGIN
     AND NOT EXISTS(SELECT 1 FROM journey_tickets t WHERE t.tenant_id=n.tenant_id AND t.ticket_node_id=n.id)
    ORDER BY n.id
  LOOP
-  SELECT coalesce((SELECT p.release_node_id FROM work_parent_releases p WHERE p.tenant_id=candidate.tenant_id AND p.parent_node_id=candidate.id AND p.project_node_id=candidate.project_id),
-   aeon_work_inherited_release(candidate.parent_id,candidate.project_id)) INTO rel;
-  IF rel IS NULL OR NOT EXISTS(SELECT 1 FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id
+  SELECT p.release_node_id,p.retained_membership INTO rel,retained FROM work_parent_releases p
+   WHERE p.tenant_id=candidate.tenant_id AND p.parent_node_id=candidate.id AND p.project_node_id=candidate.project_id;
+  IF NOT FOUND THEN rel := aeon_work_inherited_release(candidate.parent_id,candidate.project_id); END IF;
+  IF rel IS NOT NULL AND NOT EXISTS(SELECT 1 FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id
    WHERE r.release_node_id=rel AND r.project_node_id=candidate.project_id AND r.state='planning' AND n.deleted_at IS NULL) THEN CONTINUE; END IF;
-  INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source,scope_revision_required)
-   VALUES(candidate.tenant_id,candidate.id,candidate.project_id,rel,
-    (SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=candidate.project_id),'manual',true)
-   ON CONFLICT(tenant_id,ticket_node_id) DO NOTHING;
+  IF retained IS NOT NULL THEN
+   INSERT INTO journey_tickets SELECT saved.* FROM jsonb_populate_record(NULL::journey_tickets,
+    jsonb_set(retained,'{release_node_id}',coalesce(to_jsonb(rel),'null'::jsonb))) saved
+    WHERE saved.tenant_id=candidate.tenant_id AND saved.ticket_node_id=candidate.id AND saved.project_node_id=candidate.project_id
+    ON CONFLICT(tenant_id,ticket_node_id) DO NOTHING;
+  ELSIF rel IS NOT NULL THEN
+   INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source,scope_revision_required)
+    VALUES(candidate.tenant_id,candidate.id,candidate.project_id,rel,
+     (SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=candidate.project_id),'manual',true)
+    ON CONFLICT(tenant_id,ticket_node_id) DO NOTHING;
+  ELSE CONTINUE;
+  END IF;
   GET DIAGNOSTICS inserted = ROW_COUNT;
   IF inserted>0 THEN changed := array_append(changed,rel); END IF;
  END LOOP;

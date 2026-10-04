@@ -70,9 +70,9 @@
     },
     {
       "file": "1237_work_release_leaf_lifecycle.sql",
-      "sha256": "d07eafbb382429eabd4f522e3dbb0b571f8f4e001163d0baaa1f38de3d1b12a1",
+      "sha256": "ec608ef18e336ab867082df27e130db1aaa5cac695fa07baeee906bf20530f77",
       "ticket": "AEON-653",
-      "reason": "Reconcile planning members when live leaf shape changes and retain future placement as separate intent. Add live leaf filtering and coverage while preserving all frozen membership rows, published snapshots and historical identities. Replacement helpers and the tenant-scoped repair block are conservatively outside the expansion allowlist. Exact bytes require coordinator consolidated review, paused structural writers and the existing whole-chain backup/previous-binary gates; this local worker grants no release approval."
+      "reason": "Reconcile planning/backlog members when live leaf shape changes; retain the complete bounded membership projection and synchronize explicit placement changes including Undo. Add live leaf filtering and coverage while preserving frozen membership rows, published snapshots and historical identities. Replacement helpers, nullable backlog intent and the tenant-scoped repair block are conservatively outside the expansion allowlist. These unshipped branch bytes require coordinator consolidated review, paused structural writers and the existing whole-chain backup/previous-binary gates; this local worker grants no release approval."
     }
   ]
 }
