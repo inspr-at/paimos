@@ -142,7 +142,7 @@ func TestImportParentChangeHintInHistoryAndStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := New(d.App).(*module).read(t.Context(), reader, "", 0, 50)
+	page, err := New(d.App).(*module).read(t.Context(), reader, "", recorded.ID-1, 50)
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("import history: %+v %v", page.Items, err)
 	}

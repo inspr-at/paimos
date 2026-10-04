@@ -198,42 +198,16 @@ func migrateTenantWorkNodes(ctx context.Context, tx pgx.Tx, tenantID string) err
 	}
 	// Only direct, live work children make a parent. A work order, knowledge
 	// entry or Decision Desk child alone does not trigger the busy-leaf guard.
-	busy, err := tx.Query(ctx, `SELECT n.key,
-  CASE WHEN EXISTS(SELECT 1 FROM harness_sessions s WHERE s.ticket_node_id=n.id AND s.stopped_at IS NULL)
-   THEN 'bound session' ELSE 'claim or running work order' END
-  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('epic','ticket','task')
-   AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
-    WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug IN ('epic','ticket','task','work'))
-   AND (EXISTS(SELECT 1 FROM harness_sessions s WHERE s.ticket_node_id=n.id AND s.stopped_at IS NULL)
-    OR EXISTS(SELECT 1 FROM agent_runs r WHERE r.queue_node_id=n.id AND r.status IN ('queued','starting','running','waiting'))
-    OR EXISTS(SELECT 1 FROM work_orders w JOIN nodes wn ON wn.tenant_id=w.tenant_id AND wn.id=w.node_id
-     WHERE w.tenant_id=n.tenant_id AND wn.parent_id=n.id AND w.status='running'))
-  ORDER BY n.key LIMIT 101`, tenantID)
+	parents, err := busyWorkParents(ctx, tx, tenantID, "00000000-0000-0000-0000-000000000000", 101)
 	if err != nil {
 		return err
 	}
-	var findings []string
-	for busy.Next() {
-		var key, reason string
-		if err := busy.Scan(&key, &reason); err != nil {
-			busy.Close()
-			return err
+	if len(parents) > 0 {
+		blocked := &BusyWorkParentsError{Parents: parents, Truncated: len(parents) > 100}
+		if blocked.Truncated {
+			blocked.Parents = parents[:100]
 		}
-		findings = append(findings, key+" ("+reason+")")
-	}
-	err = busy.Err()
-	busy.Close()
-	if err != nil {
-		return err
-	}
-	if len(findings) > 0 {
-		more := ""
-		if len(findings) > 100 {
-			findings = findings[:100]
-			more = "; report truncated (more than 100)"
-		}
-		return fmt.Errorf("tenant %s: busy work parents require graceful handover: %s%s", tenantID, strings.Join(findings, ", "), more)
+		return blocked
 	}
 	// One keyless migration actor per tenant. It is not a dispatcher identity.
 	var actor string

@@ -222,7 +222,7 @@ ALTER POLICY events_project_visibility ON events
                     AND (split_part(type, '.', 1) IN ('node', 'nodes', 'comment', 'comments', 'attachment',
                             'attachments', 'relation', 'relations', 'import', 'journey', 'intake', 'requirement',
                             'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
-                            'kind', 'kinds', 'profile')
+                            'kind', 'kinds', 'profile', 'recurrence')
                          OR type IN ('status_autopilot.changed', 'status_autopilot.undone', 'status_autopilot.skipped', 'status_autopilot.derived', 'status_autopilot.retained', 'status_autopilot.causal_undo')
                          OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))
             END

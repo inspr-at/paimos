@@ -291,11 +291,15 @@ func TestPositionReadForwardsDeadlinesWithoutFlushing(t *testing.T) {
 			t.Error("response escaped before its event position was known")
 		}
 	})
+	before, err := newestEvent(t.Context(), d.App, p.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	PositionMiddleware(d.App)(handler).ServeHTTP(w, r)
 	if len(w.deadlines) != 2 || w.deadlines[0] != deadline || !w.deadlines[1].IsZero() {
 		t.Fatalf("connection deadlines = %v; want installed then cleared", w.deadlines)
 	}
-	if w.Code != http.StatusOK || w.Header().Get(PositionHeader) != "0" || w.Header().Get("X-Initial") != "kept" || strings.TrimSpace(w.Body.String()) != `{"ok":true}` {
+	if w.Code != http.StatusOK || w.Header().Get(PositionHeader) != strconv.FormatInt(before, 10) || w.Header().Get("X-Initial") != "kept" || strings.TrimSpace(w.Body.String()) != `{"ok":true}` {
 		t.Fatalf("buffered response changed: status=%d headers=%v body=%s", w.Code, w.Header(), w.Body)
 	}
 }

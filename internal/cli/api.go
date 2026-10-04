@@ -132,13 +132,6 @@ func (rt *runtime) api() (*client.Client, error) {
 	return c, nil
 }
 
-func (rt *runtime) requestCtx() context.Context {
-	if rt.requestContext != nil {
-		return rt.requestContext
-	}
-	return context.Background()
-}
-
 func (rt *runtime) do(method, path string, body, dest any) error {
 	return rt.doHeaders(method, path, body, dest, nil)
 }

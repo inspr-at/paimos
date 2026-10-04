@@ -11130,9 +11130,28 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    WorkLifecyclePreview:
+      type: object
+      required: [is_leaf, busy, open_leaves, updated_at, scope_revision, pending]
+      properties:
+        is_leaf: {type: boolean}
+        busy: {type: boolean}
+        open_leaves: {type: integer, minimum: 0, maximum: 100}
+        updated_at: {type: string, format: date-time}
+        scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+        pending: {oneOf: [{$ref: '#/components/schemas/WorkLifecycleAction'}, {type: 'null'}]}
     WorkLifecycleAction:
-        WorkLifecyclePreview:
-        ChatSendRequest:
+      type: object
+      required: [id, node_id, kind, state, target_count, waiting_count, result]
+      properties:
+        id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [split, cancel]}
+        state: {type: string, enum: [waiting, completed, abandoned]}
+        target_count: {type: integer, minimum: 0, maximum: 100}
+        waiting_count: {type: integer, minimum: 0, maximum: 100}
+        result: {type: array, maxItems: 100, items: {type: string, format: uuid}}
+    ChatSendRequest:
       type: "object"
       additionalProperties: false
       required: ["client_message_id", "body"]

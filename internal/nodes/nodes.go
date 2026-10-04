@@ -210,7 +210,6 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 		if err := loadQueueProjection(ctx, tx, &node); err != nil {
 			return err
 		}
-		node.Queued = queued[id]
 		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err

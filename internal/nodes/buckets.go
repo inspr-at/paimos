@@ -4,6 +4,7 @@ package nodes
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/inspr-at/paimos/internal/fieldschema"
 	"github.com/inspr-at/paimos/internal/workstate"

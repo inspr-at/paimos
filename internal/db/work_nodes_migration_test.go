@@ -128,7 +128,7 @@ func TestWorkNodesMigrationPreservesRowsHistoryAndIdentities(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	nodesSQL := `SELECT jsonb_agg(to_jsonb(n)-'kind_id' ORDER BY key) FROM nodes n`
+	nodesSQL := `SELECT jsonb_agg(to_jsonb(n)-ARRAY['kind_id','benefit_generation'] ORDER BY key) FROM nodes n`
 	sessionSQL := `SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM harness_sessions s`
 	deskSQL := `SELECT jsonb_agg(to_jsonb(n) ORDER BY key) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='question'`
 	before := workSnapshot(t, d, tid, nodesSQL)
@@ -286,6 +286,24 @@ func TestWorkNodesMigrationBusyGuardAndAtomicRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY key) FROM nodes n`)
+			before := workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n`)
+			var reported []db.BusyWorkParent
+			preflightErr := db.CheckWorkMigration(t.Context(), d.App, func(p db.BusyWorkParent) error {
+				reported = append(reported, p)
+				return nil
+			})
+			busy := reason == "session" || reason == "claim" || reason == "work_order"
+			var blocked *db.BusyWorkParentsError
+			if busy {
+				if !errors.As(preflightErr, &blocked) || len(reported) != 1 || reported[0].Key != "KEEP-1" || reported[0].TenantID != tid {
+					t.Fatalf("preflight missed exact busy parent for %s: %v, %+v", reason, preflightErr, reported)
+				}
+			} else if preflightErr != nil || len(reported) != 0 {
+				t.Fatalf("non-busy preflight: %v, %+v", preflightErr, reported)
+			}
+			if !reflect.DeepEqual(before, workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n`)) {
+				t.Fatal("preflight changed node content")
+			}
 			err = db.MigrateWithHook(t.Context(), d.App, nil)
 			want := "busy work parents require graceful handover"
 			if reason == "schema" {
@@ -367,7 +385,7 @@ func TestWorkNodesMigrationExactNumbers(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			nodesSQL := `SELECT jsonb_agg(to_jsonb(n)-'kind_id' ORDER BY key) FROM nodes n`
+			nodesSQL := `SELECT jsonb_agg(to_jsonb(n)-ARRAY['kind_id','benefit_generation'] ORDER BY key) FROM nodes n`
 			before := workSnapshot(t, d, tid, nodesSQL)
 			kindsSQL := `SELECT jsonb_agg(to_jsonb(k) ORDER BY slug) FROM node_kinds k`
 			kinds := workSnapshot(t, d, tid, kindsSQL)
@@ -618,7 +636,7 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 		t.Fatal("fixture already includes later schema")
 	}
 	tid := workSeed(t, d, "release-122-upgrade")
-	preserved := `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n)-'kind_id' ORDER BY key) FROM nodes n),'sessions',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM harness_sessions s),'questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q))`
+	preserved := `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n)-ARRAY['kind_id','benefit_generation'] ORDER BY key) FROM nodes n),'sessions',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM harness_sessions s),'questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q))`
 	before := workSnapshot(t, d, tid, preserved)
 	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
 		t.Fatal(err)

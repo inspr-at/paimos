@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
--- AEON-654 reserved slot 1237. Metadata lives on the already-locked parent,
+-- AEON-654 integration slot 1239 (renumbered from colliding unpublished 1237). Metadata lives on the already-locked parent,
 -- so a derived transition never acquires another lock after the event counter.
 -- No historical rows or published release-note snapshots are rewritten.
 -- DSAR classification: nodes.benefit_generation is metadata, located by (tenant_id,id).

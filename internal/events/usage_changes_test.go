@@ -41,7 +41,7 @@ func TestLateUsageReportHasAuthorizedNodeHint(t *testing.T) {
 	}
 	want := []NodeChange{{ID: ticket, ProjectID: &project, Change: "updated", Fields: []string{"estimate", "planning"}}}
 	m := New(d.App).(*module)
-	page, err := m.read(t.Context(), reader, "", 0, 50)
+	page, err := m.read(t.Context(), reader, "", reported.ID-1, 50)
 	if err != nil || len(page.Items) != 1 || !reflect.DeepEqual(page.Items[0].NodeChanges, want) {
 		t.Fatalf("late report history hint: %+v, %v; want %+v", page.Items, err, want)
 	}
