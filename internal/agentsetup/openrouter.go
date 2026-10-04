@@ -85,9 +85,24 @@ func (d Discovery) PrepareOpenRouter(ctx context.Context, root, key string, clie
 // OpenRouterCredits opens only an Aeon-owned API-key profile, never executes
 // auth.json command substitutions, and projects only numeric usage fields.
 func OpenRouterCredits(ctx context.Context, home string, client openrouter.Client) (*openrouter.Credits, error) {
+	key, err := openRouterProfileKey(home)
+	if err != nil {
+		return nil, err
+	}
+	return client.CheckKey(ctx, key)
+}
+
+// ValidateOpenRouterProfile checks the approved local credential shape without
+// network IO. Provider acceptance remains a separate measured observation.
+func ValidateOpenRouterProfile(home string) error {
+	_, err := openRouterProfileKey(home)
+	return err
+}
+
+func openRouterProfileKey(home string) (string, error) {
 	raw, err := ReadPrivateFile(filepath.Join(home, "auth.json"), 16<<10)
 	if err != nil {
-		return nil, openrouter.ErrUnavailable
+		return "", errors.Join(openrouter.ErrUnavailable, openrouter.ErrProfile)
 	}
 	var auth struct {
 		OpenRouter struct {
@@ -95,10 +110,10 @@ func OpenRouterCredits(ctx context.Context, home string, client openrouter.Clien
 			Key  string `json:"key"`
 		} `json:"openrouter"`
 	}
-	if json.Unmarshal(raw, &auth) != nil || auth.OpenRouter.Type != "api_key" || strings.HasPrefix(auth.OpenRouter.Key, "!") {
-		return nil, openrouter.ErrKey
+	if json.Unmarshal(raw, &auth) != nil || auth.OpenRouter.Type != "api_key" || !openrouter.ValidKey(auth.OpenRouter.Key) {
+		return "", openrouter.ErrKey
 	}
-	return client.CheckKey(ctx, auth.OpenRouter.Key)
+	return auth.OpenRouter.Key, nil
 }
 
 // ConfigureOpenRouterModel publishes a custom ID for pi's bundled catalog to

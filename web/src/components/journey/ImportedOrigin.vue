@@ -56,7 +56,7 @@ const routeKey = computed(() => ctx.project.value.routeKey)
         <ul class="j-rows">
           <li v-for="entry in shownKnowledge" :key="entry.id">
             <span class="kind">{{ typeMeta(entry.type).label }}</span>
-            <RouterLink class="grow title" :to="entryPath(routeKey, entry.type, entry.slug)">{{ entry.title }}</RouterLink>
+            <RouterLink v-clip-tip="entry.title" class="grow title clip-name" :to="entryPath(routeKey, entry.type, entry.slug)">{{ entry.title }}</RouterLink>
           </li>
         </ul>
         <RouterLink class="more-link" :to="`/p/${encodeURIComponent(routeKey)}/knowledge`">

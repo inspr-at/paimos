@@ -34,6 +34,10 @@ import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 import { quickRemoval } from './sessionActions'
 import { sessionEtaEligible } from './sessionRow'
+import ServiceTierBlock from './ServiceTierBlock.vue'
+import { tierHistoryText, tierRunCostLabel, tierCostAmount } from '../../lib/serviceTier'
+import { useServiceTiers } from '../../stores/serviceTiers'
+const serviceTiers = useServiceTiers()
 
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
@@ -95,7 +99,15 @@ const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? 
   return note ? [{ ...item, note }] : []
 }))
 const currentTimeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activityDurations((activity.value?.current_activity_history ?? []).filter(item => activity.value?.agent_activity_mode !== 'tool_activity' || item.source === 'auto'), props.now, s.value?.stopped_at))
-const metadataHistory = computed(() => metadataChanges(s.value?.metadata_history))
+const tierState = computed(() => s.value ? serviceTiers.state(s.value) : undefined)
+const runCost = computed(() => {
+  const cost = tierState.value?.run_cost
+  return cost && run.value && cost.run_id === run.value.id && cost.model === s.value?.model ? cost : undefined
+})
+const metadataHistory = computed(() => [
+  ...metadataChanges(s.value?.metadata_history).map((item, i) => ({ id: `metadata-${i}`, at: item.at, text: metadataChangeText(item) })),
+  ...(tierState.value?.history ?? []).map(item => ({ id: `tier-${item.id}`, at: item.at, text: tierHistoryText(item) })),
+].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
 const step = computed(() => {
   if (!props.view) return ''
   return currentActivity(props.view, props.now) || currentStep(props.view)
@@ -143,6 +155,10 @@ onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
 const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
 const quick = computed(() => !!props.view && quickRemoval(props.view))
+function pickTier() {
+  const view = props.view, anchor = root.value?.querySelector<HTMLElement>('[aria-label="More session actions"]')
+  if (view && anchor) serviceTiers.open(view.session, view.name, anchor)
+}
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
@@ -177,6 +193,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more>
+          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
@@ -234,6 +251,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <DeliveryRating v-if="s && s.phase === 'stopped'" :session-id="s.id" />
       </section>
 
+      <ServiceTierBlock :key="view.session.id" :session="view.session" :name="view.name" />
+
       <section class="block first" aria-labelledby="setup-title">
         <h3 id="setup-title" class="eyebrow">Details</h3>
         <dl class="facts">
@@ -247,8 +266,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>
         </dl>
         <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
-          <li v-for="(item, index) in metadataHistory" :key="`${item.field}-${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ metadataChangeText(item) }}</span></li>
+          <li v-for="item in metadataHistory" :key="item.id"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.text }}</span></li>
         </ol>
+        <p v-if="tierState?.history_truncated" class="muted">Showing the latest 50 tier events.</p>
       </section>
 
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
@@ -268,7 +288,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="run.wait?.code === 'vendor' ? '' : RUN_OUTCOME[run.status].tone">{{ run.wait?.code === 'vendor' ? 'Throttled' : RUN_OUTCOME[run.status].label }}</span></div>
           <div class="metric"><span class="metric-label">Tokens in</span><b>{{ tokens(run.input_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Tokens out</span><b>{{ tokens(run.output_tokens) }}</b></div>
-          <div class="metric"><span class="metric-label">Cost</span><b>{{ cost(run.cost_micros) }}</b></div>
+          <div class="metric"><span class="metric-label">Cost</span><b>{{ runCost ? tierCostAmount(runCost) : cost(run.cost_micros) }}</b><small v-if="runCost" class="tier-cost">{{ tierRunCostLabel(runCost) }}</small><small v-if="runCost">{{ runCost.provisional ? 'Provisional token estimate' : 'Token estimate' }} · not billed cost</small><small v-if="runCost && run.cost_micros > 0">Reported cost {{ cost(run.cost_micros) }}</small></div>
         </div>
       </section>
 

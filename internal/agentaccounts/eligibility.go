@@ -92,11 +92,11 @@ func activeWindows(windows []Window, now time.Time) []Window {
 		if w.capacityRetired {
 			continue
 		}
-		if !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute {
-			return out
-		}
 		if !now.Before(w.EndsAt) {
 			continue
+		}
+		if !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute {
+			return out
 		}
 		if !w.capacityAllowed || now.Before(w.StartsAt) {
 			usable = false
