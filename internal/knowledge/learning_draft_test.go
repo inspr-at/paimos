@@ -78,7 +78,7 @@ func TestLearningRuleDraft(t *testing.T) {
 		t.Fatalf("changelog accept wrote %d rule nodes", n)
 	}
 
-	note := addNode(t, f, "LEARN-3", "ticket", "Ship the note once", &f.project)
+	note := addNode(t, f, "LEARN-3", "work", "Ship the note once", &f.project)
 	setFields(t, f, note, map[string]any{"tags": []any{"process-learning"}})
 	noteID := nodeLearningID(note)
 	layer := rulesLayer(t, h, f.b, rules.Scope{Layer: "person", OwnerID: f.b.ID})
@@ -158,7 +158,7 @@ func TestLearningRuleDraft(t *testing.T) {
 		t.Fatal("failed undo reopened the learning")
 	}
 
-	gate := addNode(t, f, "LEARN-4", "ticket", "Gate the draft", &f.project)
+	gate := addNode(t, f, "LEARN-4", "work", "Gate the draft", &f.project)
 	setFields(t, f, gate, map[string]any{"tags": []any{"process-learning"}})
 	gateID := nodeLearningID(gate)
 	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "admin")
@@ -213,7 +213,7 @@ func TestLearningRuleDraft(t *testing.T) {
 		t.Fatalf("second %s", w.Body.String())
 	}
 
-	floor := addNode(t, f, "LEARN-5", "ticket", "Keep the floor", &f.project)
+	floor := addNode(t, f, "LEARN-5", "work", "Keep the floor", &f.project)
 	setFields(t, f, floor, map[string]any{"tags": []any{"process-learning"}})
 	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(floor)+"/draft", map[string]any{"layer_id": companyLayer.ID, "set_id": company.ID})
 	expect(t, w, 200)

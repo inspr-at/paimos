@@ -67,8 +67,8 @@ func TestLooksSensitive(t *testing.T) {
 // changed.
 func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 	f := setup(t)
-	host := addNode(t, f, "INC-1", "ticket", "Incident host", &f.project)
-	leakyTicket := addNode(t, f, "DONE-7", "ticket", "Rotate "+fakeAWSKey()+" before Friday", &f.project)
+	host := addNode(t, f, "INC-1", "work", "Incident host", &f.project)
+	leakyTicket := addNode(t, f, "DONE-7", "work", "Rotate "+fakeAWSKey()+" before Friday", &f.project)
 	closeAged(t, f, leakyTicket, "done", "1 hour")
 	leakyIncident := addComment(t, f, host, "The incident: someone pasted "+fakeGitHubToken()+" in chat")
 	leakyVerdict := addComment(t, f, host, "VERDICT fail. Found password=Winter2026! in the fixture")
@@ -133,7 +133,7 @@ func TestTaggerSkipsCredentialsAndServesLiveSource(t *testing.T) {
 
 func TestTaggerVerdictSourceChanged(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "REV-2", "ticket", "Review the backups", &f.project)
+	ticket := addNode(t, f, "REV-2", "work", "Review the backups", &f.project)
 	outcome := insertOutcome(t, f, f.project, ticket, `{"verdict":"pass","summary":"Backups restore in minutes"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestTaggerVerdictSourceChanged(t *testing.T) {
 		t.Fatalf("verdict now holding a key served %q", got)
 	}
 
-	leaky := addNode(t, f, "REV-3", "ticket", "Review the vault", &f.project)
+	leaky := addNode(t, f, "REV-3", "work", "Review the vault", &f.project)
 	insertOutcome(t, f, f.project, leaky, `{"verdict":"fail","summary":"the header was Bearer `+strings.Repeat("Zm9vYmFy", 3)+`"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestTaggerVerdictSourceChanged(t *testing.T) {
 // is written, not as they were when the tagger scanned.
 func TestTaggerKeepsConcurrentFieldEdits(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-8", "ticket", "Keep the priority", &f.project)
+	ticket := addNode(t, f, "DONE-8", "work", "Keep the priority", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "low", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")
 	var edited time.Time
@@ -216,7 +216,7 @@ func TestTaggerKeepsConcurrentFieldEdits(t *testing.T) {
 // moves from A to B, people who see only B do not get A's verdict.
 func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "REV-4", "ticket", "Review the migration", &f.project)
+	ticket := addNode(t, f, "REV-4", "work", "Review the migration", &f.project)
 	insertOutcome(t, f, f.project, ticket, `{"verdict":"fail","summary":"Project A internal verdict text"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestTaggerVerdictStaysInItsProject(t *testing.T) {
 	}
 
 	// A verdict recorded in A for a ticket already in B is not nominated.
-	late := addNode(t, f, "REV-5", "ticket", "Already moved", &f.other)
+	late := addNode(t, f, "REV-5", "work", "Already moved", &f.other)
 	insertOutcome(t, f, f.project, late, `{"verdict":"pass","summary":"Late A verdict"}`, "")
 	if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 		t.Fatal(err)
@@ -271,15 +271,15 @@ func TestTaggerCursorSameTimestamp(t *testing.T) {
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT date_trunc('second', clock_timestamp() - interval '1 hour')`).Scan(&at); err != nil {
 		t.Fatal(err)
 	}
-	host := addNode(t, f, "HOST-1", "ticket", "Comment host", &f.project)
+	host := addNode(t, f, "HOST-1", "work", "Comment host", &f.project)
 	var closed, reviewed, comments []string
 	for i := range 5 {
-		c := addNode(t, f, "SAME-"+strconv.Itoa(i+1), "ticket", "Closed together "+strconv.Itoa(i), &f.project)
+		c := addNode(t, f, "SAME-"+strconv.Itoa(i+1), "work", "Closed together "+strconv.Itoa(i), &f.project)
 		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET state='done', updated_at=$3 WHERE tenant_id=$1 AND id=$2::uuid`, f.a.TenantID, c, at); err != nil {
 			t.Fatal(err)
 		}
 		closed = append(closed, c)
-		r := addNode(t, f, "VER-"+strconv.Itoa(i+1), "ticket", "Reviewed together "+strconv.Itoa(i), &f.project)
+		r := addNode(t, f, "VER-"+strconv.Itoa(i+1), "work", "Reviewed together "+strconv.Itoa(i), &f.project)
 		insertOutcome(t, f, f.project, r, `{"verdict":"pass","summary":"Held `+strconv.Itoa(i)+`"}`, at.Format(time.RFC3339Nano))
 		reviewed = append(reviewed, r)
 		var id int64
@@ -322,7 +322,7 @@ func TestOpenNominationSurvivesDecidedWindow(t *testing.T) {
 			  INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, state)
 			  SELECT $1, 'ND-'||g::text, k.id, 'Decided '||g::text, $2::uuid, 'done'
 			  FROM generate_series(1, $3) AS g
-			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='ticket'
+			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='work'
 			  RETURNING id, title
 			), nominated AS (
 			  INSERT INTO method_learning_nominations (tenant_id, source_key, project_id, node_id, origin, excerpt, source_hash, nominated_at)
@@ -344,7 +344,7 @@ func TestOpenNominationSurvivesDecidedWindow(t *testing.T) {
 			WITH old AS (
 			  INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, state)
 			  SELECT $1, 'OLDN-1', k.id, 'The older nomination is still open', $2::uuid, 'done'
-			  FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'
+			  FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work'
 			  RETURNING id, title
 			)
 			INSERT INTO method_learning_nominations (tenant_id, source_key, project_id, node_id, origin, excerpt, source_hash, nominated_at)
@@ -368,7 +368,7 @@ func TestLearningDraftProjectOnlyUndo(t *testing.T) {
 	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "admin")
 	layer := rulesLayer(t, h, f.a, rules.Scope{Layer: "project", ProjectID: f.project})
 	set := rulesSet(t, h, f.a, layer.ID, "Pharos rules")
-	note := addNode(t, f, "LEARN-9", "ticket", "Draft and take it back", &f.project)
+	note := addNode(t, f, "LEARN-9", "work", "Draft and take it back", &f.project)
 	setFields(t, f, note, map[string]any{"tags": []any{"process-learning"}})
 	noteID := nodeLearningID(note)
 

@@ -197,7 +197,7 @@ func TestGraphTicketSatellitesIncludeRelationsWithoutExpandingHops(t *testing.T)
 		// expansion must only inspect the knowledge body's references.
 		for i, id := range []*string{&satellite, &distant} {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,body)
- SELECT $1,$2,id,'Satellite',$3,'PHAROS-9' FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING id::text`, f.a.TenantID, fmt.Sprintf("PHAROS-%d", i+8), f.other).Scan(id); err != nil {
+ SELECT $1,$2,id,'Satellite',$3,'PHAROS-9' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.a.TenantID, fmt.Sprintf("PHAROS-%d", i+8), f.other).Scan(id); err != nil {
 				return err
 			}
 		}

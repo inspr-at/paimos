@@ -39,7 +39,7 @@ var (
 	incidentWord         = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_-])incident([^A-Za-z0-9_-]|$)`)
 	atxHeading           = regexp.MustCompile(`^(#{1,6})[ \t]+(.+?)\s*$`)
 	changelogWord        = regexp.MustCompile(`(?i)changelog`)
-	issueKinds           = map[string]bool{"ticket": true, "task": true, "epic": true}
+	issueKinds           = map[string]bool{"work": true, "ticket": true, "task": true, "epic": true}
 )
 
 // Learning is one open method learning on the Knowledge tab.
@@ -552,7 +552,7 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	  `+nearestProject+`
 	  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL
-	    AND k.slug IN ('ticket','task','epic')
+	    AND k.slug IN ('work','ticket','task','epic')
 	    AND proj.id=$2::uuid
 	    AND n.fields::text ILIKE '%process-learning%'
 	    AND `+undecidedNode+`
