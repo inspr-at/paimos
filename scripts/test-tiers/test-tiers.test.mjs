@@ -40,6 +40,16 @@ test('PR and merge group take essential union changed package and reverse depend
   }
 })
 
+test('large optional reverse-dependency expansion keeps all changed-package tests within the core union',()=>{
+  const many=[...cases,...Array.from({length:301},(_,i)=>g('internal/dependant',`TestExtra${i}`))]
+  const selected=select(many,{event:'pull_request',paths:['internal/auth/key.go'],imports:{'internal/dependant':['internal/auth']}})
+  assert.equal(selected.full,false)
+  assert.ok(selected.tests.some(row=>row.name==='TestRotation'))
+  assert.ok(selected.tests.some(row=>row.name==='TestCRUD'))
+  assert.ok(!selected.tests.some(row=>row.package==='internal/dependant'))
+  assert.match(selected.reason,/optional Go reverse dependencies exceed 300/)
+})
+
 test('uncertain and missing metadata select full on every premerge event',()=>{
   for(const path of ['go.mod','go.sum','api/openapi.yaml','.github/workflows/ci.yml',
     'internal/db/migrations/9999.sql','internal/auth/testdata/token.json','web/tests/access-fixtures.ts',
@@ -122,6 +132,16 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.equal(measurement.measured.goRunnerMinutes,2)
   assert.equal(measurement.coverage,'incomplete')
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
+})
+
+test('rerun measurements reject earlier-attempt artifacts instead of replaying case passes',()=>{
+  const job={name:'go-test (1)',status:'completed',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
+  const earlier={...reportCases([cases[0]],[{key:key(cases[0]),status:'passed',started:true}],1,'go-test-1'),runId:'123',attempt:'1',sha:'a'}
+  const report=aggregate([earlier],[job],{runId:'123',attempt:'2',sha:'a'})
+  assert.equal(report.coverage,'incomplete');assert.deepEqual(report.classes,{})
+  assert.deepEqual(report.missingEvidence,['go-test-1']);assert.equal(report.excludedEvidence.length,1)
+  const fresh=aggregate([{...earlier,attempt:'2'}],[job],{runId:'123',attempt:'2',sha:'a'})
+  assert.equal(fresh.coverage,'reported');assert.equal(fresh.classes.ESSENTIAL.passed,1)
 })
 
 test('exact-SHA reuse records provenance and current costs without fabricating fresh case passes',()=>{

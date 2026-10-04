@@ -32,6 +32,14 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   return {...selection,all,tests:shard(filtered,index,count,weights)}
 }
 
+export function browserList(rows,all) {
+  const files=new Set(rows.map(row=>row.file))
+  const whole=new Set([...files].filter(file=>rows.filter(row=>row.file===file).length===all.filter(row=>row.kind==='browser'&&row.file===file).length))
+  const descriptions=[...whole].map(file=>`[${rows.find(row=>row.file===file).project}] › ${file.replace(/^tests\//,'')}`)
+  descriptions.push(...rows.filter(row=>!whole.has(row.file)).map(row=>`[${row.project}] › ${row.file.replace(/^tests\//,'')}:${row.line} › ${row.name}`))
+  return descriptions
+}
+
 function execute(bin,args,path,{cwd=root,env=process.env}={}) {
   mkdirSync(resolve(path,'..'),{recursive:true})
   const result=spawnSync(bin,args,{cwd,env,encoding:'utf8',timeout:30*60*1000,maxBuffer:64*1024*1024})
@@ -104,9 +112,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
       if(!rows.length) continue
       const stem=resolve(evidence,`${job}-${group.id}`),listPath=`${stem}.txt`,reportPath=`${stem}.json`
       saveJSON(reportPath,{})
-      const whole=new Set([...files].filter(file=>rows.filter(row=>row.file===file).length===selection.all.filter(row=>row.kind==='browser'&&row.file===file).length))
-      const descriptions=[...whole].map(file=>`[${rows.find(row=>row.file===file).project}] › ${file.replace(/^tests\//,'')}`)
-      descriptions.push(...rows.filter(row=>!whole.has(row.file)).map(row=>`[${row.project}] › ${row.file.replace(/^tests\//,'')}:${row.line} › ${row.name}`))
+      const descriptions=browserList(rows,selection.all)
       writeFileSync(listPath,descriptions.join('\n')+'\n')
       const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
       const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
@@ -121,6 +127,9 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
     }
   }
   const report=reportCases(selection.tests,outcomes,(performance.now()-begin)/1000,job)
+  report.runId=env.GITHUB_RUN_ID
+  report.attempt=env.GITHUB_RUN_ATTEMPT
+  report.sha=env.GITHUB_SHA
   report.full=selection.full
   report.reason=selection.reason
   report.exitCode=code

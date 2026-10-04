@@ -636,7 +636,8 @@ keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
 Test tiers (AEON-681): PRs and merge groups run ESSENTIAL plus the changed area's
-tests and reverse dependencies. Shared CI, module, migration or fixture changes,
+tests and reverse dependencies (Go expansion is limited to 300 extra cases;
+otherwise all tests of the changed packages still run). Shared CI, module, migration or fixture changes,
 or uncertain impact, run the full suite. The exact classifications live in the
 [Go manifest](scripts/ci/go-test-tiers.json) and
 [web manifest](scripts/ci/web-test-tiers.json); add new registrations as NIGHTLY

@@ -74,12 +74,18 @@ export function select(tests, { event, paths, imports = {}, webImports = {} }) {
     }
     else return { full: true, reason: `unmapped input: ${path}`, tests }
   }
-  const go = reverseDependants(changedGo, imports)
+  const dependants = reverseDependants(changedGo, imports)
+  // Test-import cycles can turn a tiny package edit into almost the whole
+  // repository. The approved cheap-dependency policy retains every changed
+  // package but limits the optional reverse-dependency expansion.
+  const extraGoCases=tests.filter(t=>t.kind==='go'&&dependants.has(t.package)&&!changedGo.has(t.package)&&t.tier!=='ESSENTIAL').length
+  const boundedGo=extraGoCases>300
+  const go=boundedGo?changedGo:dependants
   const web = reverseDependants(changedWeb, webImports)
   // Deleted/unknown files cannot be analysed using only the candidate graph.
   if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return { full: true, reason: 'missing web dependency metadata', tests }
   if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return {full:true,reason:'web module has no mapped test importer',tests}
-  return { full: false, reason: 'essential plus changed area and reverse dependencies',
+  return { full: false, reason: boundedGo?`essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (${extraGoCases})`:'essential plus changed area and reverse dependencies',
     tests: tests.filter(t => t.tier === 'ESSENTIAL' || (t.kind === 'go' ? go.has(t.package) : web.has(t.file))) }
 }
 

@@ -13,7 +13,12 @@ export function jobMinutes(job) {
 export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom}={}) {
   if(reusedFrom!==undefined && !/^[1-9][0-9]*$/.test(String(reusedFrom))) throw new Error("Invalid reused source run")
   if(reusedFrom!==undefined && reports.length) throw new Error("Reused execution must not report fresh test passes")
-  const names=new Set(),classes={}
+  const names=new Set(),classes={},excludedEvidence=[]
+  reports=reports.filter(report=>{
+    const mismatched=Object.entries({runId,attempt,sha}).some(([field,value])=>value!==undefined&&String(report[field])!==String(value))
+    if(mismatched)excludedEvidence.push({job:report.job,reason:'different or missing run, attempt or SHA'})
+    return !mismatched
+  })
   for(const report of reports) {
     if(report.version!==1||names.has(report.job)) throw new Error(`Invalid or duplicate measurement: ${report.job}`)
     names.add(report.job)
@@ -31,7 +36,7 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom}={}) {
   const missingEvidence=reusedFrom!==undefined?[]:required.map(job=>evidenceName(job.name)).filter(name=>!names.has(name))
   const runners=jobs.map(job=>({name:job.name,status:job.status,conclusion:job.conclusion,runnerMinutes:jobMinutes(job)}))
   const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)).reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
-  return {version:1,runId,attempt,sha,classes,reports,jobs:runners,missingEvidence,
+  return {version:1,runId,attempt,sha,classes,reports,jobs:runners,missingEvidence,excludedEvidence,
     reusedFrom,
     coverage:reusedFrom!==undefined?'reused':missingEvidence.length?'incomplete':'reported',
     baselines:{goRunnerMinutes:22.5,webRunnerMinutes:42.17},
@@ -50,10 +55,10 @@ export function readReports(directory) {
   return reports
 }
 export function main(directory,env=process.env) {
-  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY??'')||!/^\d+$/.test(env.GITHUB_RUN_ID??'')) throw new Error('Missing Actions run identity')
+  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT??'')) throw new Error('Missing Actions run identity')
   const jobs=[]
   for(let page=1;page<=20;page++) {
-    const result=JSON.parse(command('gh',['api',`repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`]))
+    const result=JSON.parse(command('gh',['api',`repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}/jobs?per_page=100&page=${page}`]))
     jobs.push(...result.jobs)
     if(jobs.length>=result.total_count) break
     if(page===20) throw new Error('Job inventory exceeds measurement bound')
