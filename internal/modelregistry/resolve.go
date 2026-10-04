@@ -65,12 +65,16 @@ func validateResolveQuery(q resolveQuery) (resolveQuery, error) {
 }
 
 func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) (Resolution, error) {
+	return resolveRoleWithCatalog(ctx, tx, q, now, nil)
+}
+
+func resolveRoleWithCatalog(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time, catalog *preferencePreviewCatalog) (Resolution, error) {
 	q, err := validateResolveQuery(q)
 	if err != nil {
 		return Resolution{}, err
 	}
 	role, _ := roleByName(q.Role)
-	steps, err := loadLadder(ctx, tx, q.Role)
+	steps, err := catalog.ladder(ctx, tx, q.Role)
 	if err != nil {
 		return Resolution{}, err
 	}
@@ -104,7 +108,11 @@ func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) 
 }
 
 func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
-	rows, err := tx.Query(ctx, `
+	return loadLadderLimit(ctx, tx, role, 0)
+}
+
+func loadLadderLimit(ctx context.Context, tx pgx.Tx, role string, limit int) ([]ladderStep, error) {
+	query := `
 		SELECT r.priority, r.profile_id::text, r.state, r.reason, r.valid_until,
 		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at,
 		       d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider,
@@ -113,7 +121,13 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
 		JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		WHERE r.role = $1
-		ORDER BY r.priority, r.profile_id`, role)
+		ORDER BY r.priority, r.profile_id`
+	args := []any{role}
+	if limit > 0 {
+		query += ` LIMIT $2`
+		args = append(args, limit)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,9 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -32,9 +35,10 @@ type preferenceViewRow struct {
 	Complex     preferenceEffective `json:"complex"`
 }
 type preferenceView struct {
-	Choices          []preferenceChoice `json:"choices"`
-	ChoicesTruncated bool               `json:"choices_truncated"`
-	Residency        struct {
+	Choices             []preferenceChoice `json:"choices"`
+	ChoicesTruncated    bool               `json:"choices_truncated"`
+	ResolutionTruncated bool               `json:"resolution_truncated"`
+	Residency           struct {
 		modelprefs.ResidencyResult
 		QualifyingRoutes int `json:"qualifying_routes"`
 	} `json:"residency"`
@@ -62,6 +66,8 @@ type preferenceDocument struct {
 }
 
 func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) (preferenceDocument, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	person, err := currentPreferencePerson(ctx, tx, p)
 	if err != nil {
 		return preferenceDocument{}, err
@@ -88,16 +94,11 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	if truncated {
 		profiles = profiles[:256]
 	}
-	routes, err := listRoutes(ctx, tx)
+	reviewProfiles, err := pickerReviewProfiles(ctx, tx, profiles)
 	if err != nil {
 		return out, err
 	}
-	reviewProfiles := map[string]bool{}
-	for _, route := range routes {
-		if route.Role == "review-gate" {
-			reviewProfiles[route.ProfileID] = true
-		}
-	}
+	catalog := &preferencePreviewCatalog{}
 	routeProfiles := map[string]string{}
 	for _, profile := range profiles {
 		if profile.Enabled {
@@ -191,7 +192,12 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 				cacheKey := q.Role + bucket + string(cacheCell)
 				resolved, hit := resolvedCells[cacheKey]
 				if !hit {
-					resolved, err = ResolveWork(ctx, tx, preview, q, now)
+					resolved, err = resolveWorkWithCatalog(ctx, tx, preview, q, now, catalog)
+					if errors.Is(err, errPreferencePreviewIncomplete) {
+						resolved = WorkResolution{Trace: PreferenceTrace{Blocked: errPreferencePreviewIncomplete.Error()}}
+						view.ResolutionTruncated = true
+						err = nil
+					}
 					if err != nil {
 						return out, err
 					}

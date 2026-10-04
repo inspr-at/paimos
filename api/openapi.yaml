@@ -14577,7 +14577,8 @@ components:
       type: object
       required: [residency, rows, changes]
       properties:
-        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Automatic routing still uses the full registry.}
+        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Live dispatch still uses the full registry.}
+        resolution_truncated: {type: boolean, description: A preview required more than 256 catalog profiles (including retired revisions) or role ladder steps. Affected cells have no selected profile and explain the incomplete preview in unavailable_reason and row warnings. Bounded reads are reused across levels and selectors; live dispatch remains authoritative.}
         choices:
           type: array
           maxItems: 256

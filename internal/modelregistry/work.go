@@ -128,6 +128,10 @@ func expandPreference(cell modelprefs.Cell, profiles []Profile) []Profile {
 // ResolveWork preserves resolveRole byte-for-byte with an empty matrix and an
 // any requirement. Placement chooses a cell; it never changes the role ladder.
 func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
+	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
+}
+
+func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
 	if q.TicketID != "" {
 		var fields []byte
 		var project *string
@@ -156,7 +160,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		if q.AuthorFamily == "" {
 			return WorkResolution{}, fail(400, "review-gate requires author_family")
 		}
-		route, err := ResolveReviewFor(ctx, tx, p, q, now)
+		route, err := resolveReviewWithCatalog(ctx, tx, p, q, now, catalog)
 		if err != nil {
 			return WorkResolution{}, err
 		}
@@ -195,7 +199,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		result := modelprefs.ResolveCell(chain, kind.Slug, out.Trace.Bucket)
 		traceCell(&out.Trace, result)
 		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := listProfiles(ctx, tx)
+			profiles, err := catalog.profiles(ctx, tx)
 			if err != nil {
 				return out, err
 			}
@@ -246,7 +250,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			}
 		}
 	}
-	out.Resolution, err = resolveRole(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness}, now)
+	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness}, now, catalog)
 	if err != nil {
 		return out, err
 	}
@@ -254,7 +258,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 	if requirement == "any" {
 		return out, nil
 	}
-	steps, err := loadLadder(ctx, tx, q.Role)
+	steps, err := catalog.ladder(ctx, tx, q.Role)
 	if err != nil {
 		return out, err
 	}

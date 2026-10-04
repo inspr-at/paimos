@@ -168,10 +168,18 @@ func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) e
 }
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
-	return readProfiles(ctx, tx, `
+	return listProfilesLimit(ctx, tx, 0)
+}
+
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
+	query := `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-		ORDER BY p.slug, p.version, p.id`)
+		ORDER BY p.slug, p.version, p.id`
+	if limit > 0 {
+		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
+	}
+	return readProfiles(ctx, tx, query)
 }
 
 // listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
@@ -183,8 +191,8 @@ func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 		ORDER BY p.slug, p.version, p.id LIMIT 257`)
 }
 
-func readProfiles(ctx context.Context, tx pgx.Tx, query string) ([]Profile, error) {
-	rows, err := tx.Query(ctx, query)
+func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Profile, error) {
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -41,6 +41,13 @@
 // selector results, with a separate review-floor key, and validated replacement
 // kinds are reused inside the same tenant fence. SQL latest-line matching is
 // tested against ProfileLine across the catalog and concrete harness forms.
+// Preference GET bounds catalog preview reads (including retired revisions) and
+// each role ladder to 256 entries plus one overflow sentinel before decoding,
+// reusing them across levels and selectors in the repeatable-read snapshot.
+// Picker review membership uses bounded profile IDs rather than all routes.
+// Incomplete resolution returns no profile, an unavailable_reason/row warning
+// and resolution_truncated on its view; choices_truncated remains independent.
+// The document has a 30-second work deadline. Live dispatch remains unchanged.
 //
 // Every preference person-level PUT/DELETE now requires If-Prefs-Person from
 // the coherent GET. This is a client compatibility change: all You writers,

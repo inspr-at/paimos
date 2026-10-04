@@ -41,6 +41,10 @@ func ResolveReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, author, p
 // ResolveReviewFor forms the qualified set before applying preferences.
 // Preferences never introduce a profile or an unqualified account.
 func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (ReviewRoute, error) {
+	return resolveReviewWithCatalog(ctx, tx, p, q, now, nil)
+}
+
+func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (ReviewRoute, error) {
 	out := ReviewRoute{Ladder: []Candidate{}, Role: "review-gate"}
 	if strings.TrimSpace(q.Area) == "security" || q.Role == "review-gate-security" {
 		out.Role = "review-gate-security"
@@ -67,7 +71,7 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		out.Trace.Hard = []string{"security_review"}
 		return out, nil
 	}
-	steps, err := loadLadder(ctx, tx, out.Role)
+	steps, err := catalog.ladder(ctx, tx, out.Role)
 	if err != nil {
 		return out, err
 	}
@@ -141,7 +145,7 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		result := modelprefs.ResolveCell(chain, "review", out.Trace.Bucket)
 		traceCell(&out.Trace, result)
 		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := listProfiles(ctx, tx)
+			profiles, err := catalog.profiles(ctx, tx)
 			if err != nil {
 				return out, err
 			}
