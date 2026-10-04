@@ -164,6 +164,7 @@ func (f *fixture) reserve(t *testing.T, v agentruns.Run) []string {
 		}
 		return nil
 	})
+	roundTheClock(t, f, v.ID)
 	return []string{reservation}
 }
 func claimBody(ids []string) map[string]any {

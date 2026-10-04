@@ -19,6 +19,8 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -26,14 +28,16 @@ import (
 )
 
 type Module struct {
-	pool      *pgxpool.Pool
-	publisher StatusPublisher
+	pool          *pgxpool.Pool
+	publisher     StatusPublisher
+	webhookSecret []byte
 }
 
 func New(pool *pgxpool.Pool, publisher StatusPublisher) *Module {
 	return &Module{pool: pool, publisher: publisher}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/reviews/github", m.pullChanged)
 	mux.HandleFunc("GET /api/nodes/{nodeId}/reviews", workorders.Endpoint(m.pool, "work_orders.read", false, 200, m.list))
 	mux.HandleFunc("POST /api/nodes/{nodeId}/reviews", workorders.Endpoint(m.pool, "work_orders.write", false, 201, m.create))
 }
@@ -61,6 +65,7 @@ type Review struct {
 	GateReason     string                    `json:"gate_reason"`
 	Result         reviewgate.Result         `json:"result"`
 	Ladder         []modelregistry.Candidate `json:"ladder"`
+	Trace          json.RawMessage           `json:"trace,omitempty"`
 	Cost           *int64                    `json:"cost_micros"`
 	Duration       *int64                    `json:"duration_seconds"`
 	CreatedAt      time.Time                 `json:"created_at"`
@@ -106,17 +111,20 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	family := in.AuthorFamily
 	if in.AuthorRunID != nil {
-		var owner, f string
-		err = tx.QueryRow(ctx, `SELECT r.agent_principal_id::text,p.family FROM agent_runs r
+		var owner, f, harness, model string
+		err = tx.QueryRow(ctx, `SELECT r.agent_principal_id::text,p.family,p.harness,p.model FROM agent_runs r
             JOIN work_orders w ON w.tenant_id=r.tenant_id AND w.node_id=r.work_order_id
             JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
             JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.model_profile_id
-            WHERE r.id=$1 AND n.parent_id=$2 AND n.deleted_at IS NULL AND w.kind='build' AND r.status='completed'`, *in.AuthorRunID, id).Scan(&owner, &f)
+            WHERE r.id=$1 AND n.parent_id=$2 AND n.deleted_at IS NULL AND w.kind='build' AND r.status='completed'`, *in.AuthorRunID, id).Scan(&owner, &f, &harness, &model)
 		if err != nil {
 			return nil, workorders.Fail(400, "author run must be a completed build for this ticket")
 		}
 		if p.Kind == tenant.Agent && owner != p.ID {
 			return nil, workorders.Fail(403, "only the author may request its review")
+		}
+		if !harnesslaunch.FamilyMatches(harness, model, f) {
+			return nil, workorders.Fail(400, "author profile family does not match its harness/provider binding")
 		}
 		if family != "" && family != f {
 			return nil, workorders.Fail(400, "author family conflicts with the author run")
@@ -151,7 +159,11 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
 		return nil, err
 	}
-	route, err := modelregistry.ResolveReview(ctx, tx, p, family, scope.ProjectID, now)
+	placement := modelprefs.PlacementFields(fields)
+	person := modelprefs.PrefsPerson(ctx, tx, p)
+	route, err := modelregistry.ResolveReviewFor(ctx, tx, p, modelregistry.WorkQuery{
+		AuthorFamily: family, ProjectID: scope.ProjectID, PersonID: person, Area: placement.Area, Complexity: placement.Complexity,
+		ComplexitySource: placement.ComplexitySource, TicketRole: placement.RouteRole, TicketResidency: placement.Residency}, now)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +195,16 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	ladder, _ := json.Marshal(route.Ladder)
+	trace, err := json.Marshal(route.Trace)
+	if err != nil {
+		return nil, err
+	}
 	githubStatus := "unconfigured"
 	if m.publisher != nil && in.PullRequest != nil && m.publisher.Configured(p.TenantID, in.Repository) {
 		githubStatus = "pending"
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO work_order_reviews(tenant_id,work_order_id,ticket_node_id,request_id,request,repository,base_sha,head_sha,author_run_id,author_family,reviewer_profile_id,reviewer_family,pull_request,ladder,github_status,ticket_snapshot)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, p.TenantID, o.NodeID, id, in.RequestID, request, b.Repository, b.BaseSHA, b.HeadSHA, b.AuthorRunID, b.AuthorFamily, b.ProfileID, b.ReviewerFamily, b.PullRequest, ladder, githubStatus, snapshot)
+	_, err = tx.Exec(ctx, `INSERT INTO work_order_reviews(tenant_id,work_order_id,ticket_node_id,request_id,request,repository,base_sha,head_sha,author_run_id,author_family,reviewer_profile_id,reviewer_family,pull_request,ladder,github_status,ticket_snapshot,trace)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, p.TenantID, o.NodeID, id, in.RequestID, request, b.Repository, b.BaseSHA, b.HeadSHA, b.AuthorRunID, b.AuthorFamily, b.ProfileID, b.ReviewerFamily, b.PullRequest, ladder, githubStatus, snapshot, trace)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +220,7 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	if route.Profile != nil {
-		if _, err = agentruns.QueueReview(ctx, tx, p, o, *assignee, route.Profile.ID, route.Account.ID); err != nil {
+		if _, err = agentruns.QueueReview(ctx, tx, p, o, *assignee, route.Profile.ID, route.Account.ID, person, route.Residency, trace); err != nil {
 			return nil, err
 		}
 	}
@@ -259,14 +275,19 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 	var v Review
 	var raw, ladder json.RawMessage
 	var orderStatus string
+	var reviewerHarness, reviewerFamily, authorHarness, authorModel, authorFamily *string
 	err := tx.QueryRow(ctx, `SELECT v.work_order_id::text,v.ticket_node_id::text,v.request_id::text,v.repository,v.base_sha,v.head_sha,v.author_run_id::text,v.author_family,v.reviewer_profile_id::text,v.reviewer_family,v.pull_request,
         v.run_id::text,coalesce(r.status,'blocked'),p.model,p.effort,p.version,r.effective_model,coalesce(r.model_evidence,''),v.result,v.ladder,v.created_at,v.github_status,w.status,
         CASE WHEN EXISTS(SELECT 1 FROM run_telemetry t WHERE t.tenant_id=r.tenant_id AND t.run_id=r.id AND t.cost_micros_delta>0) THEN r.cost_micros END,
-        CASE WHEN r.started_at IS NOT NULL THEN greatest(0,extract(epoch FROM(coalesce(r.ended_at,clock_timestamp())-r.started_at)))::bigint END
+        CASE WHEN r.started_at IS NOT NULL THEN greatest(0,extract(epoch FROM(coalesce(r.ended_at,clock_timestamp())-r.started_at)))::bigint END,v.trace,
+        p.harness,p.family,ap.harness,ap.model,ap.family
         FROM work_order_reviews v JOIN work_orders w ON w.tenant_id=v.tenant_id AND w.node_id=v.work_order_id
         LEFT JOIN agent_runs r ON r.tenant_id=v.tenant_id AND r.id=v.run_id
-        LEFT JOIN model_profiles p ON p.tenant_id=v.tenant_id AND p.id=v.reviewer_profile_id WHERE v.work_order_id=$1`, id).Scan(
-		&v.OrderID, &v.TicketID, &v.RequestID, &v.Repository, &v.BaseSHA, &v.HeadSHA, &v.AuthorRunID, &v.AuthorFamily, &v.ProfileID, &v.ReviewerFamily, &v.PullRequest, &v.RunID, &v.Status, &v.Model, &v.Effort, &v.ProfileVersion, &v.EffectiveModel, &v.modelEvidence, &raw, &ladder, &v.CreatedAt, &v.GitHubStatus, &orderStatus, &v.Cost, &v.Duration)
+        LEFT JOIN model_profiles p ON p.tenant_id=v.tenant_id AND p.id=v.reviewer_profile_id
+        LEFT JOIN agent_runs ar ON ar.tenant_id=v.tenant_id AND ar.id=v.author_run_id
+        LEFT JOIN model_profiles ap ON ap.tenant_id=ar.tenant_id AND ap.id=ar.model_profile_id WHERE v.work_order_id=$1`, id).Scan(
+		&v.OrderID, &v.TicketID, &v.RequestID, &v.Repository, &v.BaseSHA, &v.HeadSHA, &v.AuthorRunID, &v.AuthorFamily, &v.ProfileID, &v.ReviewerFamily, &v.PullRequest, &v.RunID, &v.Status, &v.Model, &v.Effort, &v.ProfileVersion, &v.EffectiveModel, &v.modelEvidence, &raw, &ladder, &v.CreatedAt, &v.GitHubStatus, &orderStatus, &v.Cost, &v.Duration, &v.Trace,
+		&reviewerHarness, &reviewerFamily, &authorHarness, &authorModel, &authorFamily)
 	if err != nil {
 		return v, err
 	}
@@ -280,6 +301,18 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 	if v.GateOpen && (v.Model == nil || v.EffectiveModel == nil || !reviewgate.ModelMatches(*v.Model, *v.EffectiveModel)) {
 		v.GateOpen = false
 		v.GateReason = "The effective reviewer model differs from its pinned profile."
+	}
+	if v.ProfileID != nil && (reviewerHarness == nil || reviewerFamily == nil || v.Model == nil || v.ReviewerFamily == nil || *reviewerFamily != *v.ReviewerFamily || !harnesslaunch.FamilyMatches(*reviewerHarness, *v.Model, *reviewerFamily)) {
+		v.GateOpen = false
+		v.GateReason = "The reviewer profile does not establish its provider family."
+	}
+	if v.AuthorRunID != nil && (authorHarness == nil || authorModel == nil || authorFamily == nil || *authorFamily != v.AuthorFamily || !harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily)) {
+		v.GateOpen = false
+		v.GateReason = "The author profile does not establish its provider family."
+	}
+	if v.GitHubStatus == "stale" {
+		v.GateOpen = false
+		v.GateReason = "The pull request range changed; request a new review."
 	}
 	if orderStatus == "cancelled" {
 		v.GateOpen = false

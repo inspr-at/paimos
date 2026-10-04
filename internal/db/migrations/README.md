@@ -44,6 +44,31 @@ RLS also applies to the migration owner. Each tenant commits independently;
 `ON CONFLICT DO NOTHING` makes a partially completed run safe to retry. The
 filename is recorded only after every tenant succeeds. Key scopes are unchanged.
 
+AEON-502 A (1104–1107) adds work kinds, sparse model preferences, run
+residency/starter stamps, session placement and profile retirements. An empty
+matrix preserves existing role ladders. Model locks bound Default → You →
+Project selection; residency locks allow any narrower choice and flag loosening.
+Ticket requirements and existing run stamps remain floors. Account routing
+recomputes the canonical starter's live requirement before every reservation,
+recheck and vendor retry; no account evidence means class `any`.
+Pairing verification remains exempt. Preference endpoints, planning callers
+and UI editing follow in 502b–e.
+
+AEON-604 (1129) stores host-owned residency evidence per account in a tenant-RLS
+table. The record includes bounded country sets, profile coverage, local
+execution, verification/expiry, proof reference and optional retention/training
+declarations. Writes snapshot the account binding and emit an event; the fence
+rejects missing, expired, future-dated or superseded evidence. The additive table
+does not change existing account rows or grant any account residency by default.
+
+Migration 1104's tenant-loop seed and replacement area-schema helper require an
+exact-byte exception in `scripts/migration-policy-exceptions.json`. The new
+slug pattern includes every previous area, and current Go area validation stays
+unchanged. Coordinator review and previous-binary compatibility CI remain
+required before merge/release. Before rolling back below this fence, set all
+residency requirements to `any` or pause dispatch; older binaries cannot enforce
+these stamps.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement
@@ -186,6 +211,34 @@ transaction after 1100 releases its exclusive lock; 1102 builds the unique conte
 index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
+
+AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
+replacing unpublished migration 1136. The current shared ledger assigns
+1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
+The replacement reservations are recorded on AEON-613 before renaming; the
+coordinator must mirror 1147/1148 to the shared ledger because workers may
+author only inside their own repository. The settings/receipt SQL is unchanged.
+
+DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.
+Classify `quota_warning_settings` as metadata, located by `(tenant_id)`.
+Classify `account_quota_warnings` as personal quota telemetry (resource/window
+identity, reading time, remaining percentage, reset, threshold and recovery),
+located by `(tenant_id,id)`, when merging with the inventory branch. These
+records contain no credentials, local paths or raw vendor responses.
+
+AEON-613 fix5 reserves **1148** for `account_quota_warning_observations`,
+replacing unpublished migration 1137. This stores the latest measured
+quota/window state, including healthy readings, separately from notification
+receipts in 1147. Only its filename and receipt-migration comment change.
+The reservation is recorded on AEON-613; the coordinator must mirror it to the
+shared ledger under the same ownership boundary. Existing receipts remain
+unchanged, and current availability resumes with the next fresh measurement.
+The first fenced write seeds its watermark from retained receipt reading and
+recovery times. A historical recovery with no retained healthy percentage stays
+unknown; it never synthesizes a quota figure. A newer measured observation
+replaces it, while delayed readings remain blocked across reset transitions.
+Classify this table as personal quota telemetry, located by
+`(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
 
 AEON-563's `1118_desk_matching.sql` adds an expression index over exact Q&A
 fingerprints and nullable per-asker source decision/revision pointers. Existing

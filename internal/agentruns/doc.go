@@ -20,6 +20,9 @@
 // evidence), and retry_of_run_id.
 // Direct SQL completion leaves the new fields null. A retry must name an
 // earlier run of the same work order and agent.
+// Creation stamps the canonical preference starter and residency requirement,
+// including ticket-queue runs. The saved trace explains overrides that loosen
+// an inherited residency lock; vendor retries preserve that creation evidence.
 // This extends New; no new plugin installation or server wiring is required.
 //
 // AC3 / AEON-181: RunCreate accepts optional requested_account_id (0851).
@@ -42,11 +45,14 @@
 // Agents create their own runs, read their own runs, and see only their queue.
 // Claim requires the assigned agent or a live, unrevoked run.claim grant for
 // this run. The caller must also own the reserved daemon account. A new claim
-// verifies all reservation IDs, active windows, compatible profile, recent
+// verifies all reservation IDs, active holds, compatible profile, recent
 // successful probe (two minutes), account availability and remaining order
 // budget. Same-generation claims replay without mutation; another generation
 // cannot take over a live process. Profile and requested model are pinned when
 // queued; effective model is separately retained with vendor evidence.
+// Obsolete managed measurements defer to current account admission; only an
+// outstanding recoverable stop needs a recovery permit. Manual and pairing
+// window expiry remains binding, and exact reservation IDs survive revalidation.
 //
 // Coordinator contract reconciliation: R2 RunTelemetry lacks fencing fields.
 // This module therefore requires X-Aeon-Daemon-ID and X-Aeon-Daemon-Generation

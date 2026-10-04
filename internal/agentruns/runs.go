@@ -4,6 +4,7 @@ package agentruns
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -14,12 +15,15 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type Run struct {
+	Trace                     json.RawMessage             `json:"trace,omitempty"`
 	QueueNodeID               *string                     `json:"queue_node_id,omitempty"`
 	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
 	QueueRoutedAt             *time.Time                  `json:"queue_routed_at,omitempty"`
@@ -131,11 +135,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 // statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace)
 
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
@@ -290,6 +294,11 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = tx.QueryRow(ctx, `SELECT model,harness FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model, &harness); err != nil {
 		return nil, err
 	}
+	person := modelprefs.PrefsPerson(ctx, tx, p)
+	requirement, trace, err := modelprefs.OrderRequirementTrace(ctx, tx, o.NodeID, person)
+	if err != nil {
+		return nil, err
+	}
 	if in.Account != nil {
 		var matches bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1 AND registered_by_principal_id=$2 AND harness=$3 AND (allowed_model_profile_ids IS NULL OR $4::uuid=ANY(allowed_model_profile_ids)))`, *in.Account, in.Agent, harness, in.Profile).Scan(&matches); err != nil {
@@ -299,6 +308,19 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(409, "requested account must belong to the run agent and allow the model profile")
 		}
 	}
+	if in.Account != nil {
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			return nil, err
+		}
+		qualifies, err := agentaccounts.AccountMeetsResidency(ctx, tx, *in.Account, in.Profile, requirement, now)
+		if err != nil {
+			return nil, err
+		}
+		if !qualifies {
+			return nil, &modelprefs.ResidencyUnmet{}
+		}
+	}
 	if in.Retry != nil {
 		var orderID, agentID string
 		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
@@ -306,7 +328,15 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride))
+	placement, err := modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	dispatchTrace := struct {
+		modelprefs.RequirementTrace
+		Placement *modelregistry.WorkPlacement `json:"work_placement,omitempty"`
+	}{trace, placement}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace))
 	if err != nil {
 		return nil, err
 	}
@@ -417,18 +447,37 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if generation == nil || *generation != in.Generation {
 		return nil, workorders.Fail(409, "account daemon generation changed")
 	}
+	// Disconnect may already have released a queued run's reservations. Check
+	// enrollment authority under the pairing lock before those mutable holds so
+	// the owning daemon still gets the revocation cleanup instruction.
+	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
+		return nil, err
+	}
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
+	// A managed run's own provisional estimate can outlive its short ledger
+	// window while a vendor stop is backing off. Its current permission comes
+	// from ValidateReservedCapacity below, including the single recovery permit.
+	// Obsolete measured holds defer to that same current admission. Measurement
+	// age is not a vendor stop: only an outstanding recoverable stop needs a
+	// recovery permit. Requiring one after the stop clears strands queued holds.
+	// Manual and pairing windows retain their expiry/freshness gates.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,
  (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
   SELECT 1 FROM agent_accounts door JOIN agent_accounts ledger
    ON ledger.tenant_id=door.tenant_id AND ledger.harness=door.harness
    AND door.quota_pool_fingerprint<>'' AND ledger.quota_pool_fingerprint=door.quota_pool_fingerprint
   WHERE door.id=$2::uuid AND ledger.id=w.account_id
-   AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
-  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
+   AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp()
+  AND (w.ends_at>clock_timestamp() OR ($3::text='managed' AND NOT w.pairing_verification
+   AND w.capacity_kind IN ('blind','refresh') AND w.capacity_source='estimate' AND w.capacity_refresh_run=r.run_id))
+  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance)),
+ coalesce(($3::text='managed' AND NOT w.pairing_verification AND w.starts_at<=clock_timestamp()
+  AND w.capacity_read_at<=clock_timestamp() AND coalesce(w.capacity_source,'')<>'estimate'
+  AND coalesce(w.capacity_kind,'') NOT IN ('blind','refresh')
+  AND (w.capacity_read_at<clock_timestamp()-interval '10 minutes' OR w.ends_at<=clock_timestamp() OR w.capacity_retired)),false)
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
-	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
+	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID, v.Purpose)
 	if err != nil {
 		return nil, err
 	}
@@ -438,15 +487,15 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	active := true
 	for rows.Next() {
 		var id, state string
-		var current, quotaMatches bool
-		if err = rows.Scan(&id, &state, &quotaMatches, &current); err != nil {
+		var current, quotaMatches, obsoleteMeasured bool
+		if err = rows.Scan(&id, &state, &quotaMatches, &current, &obsoleteMeasured); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		count++
 		valid = valid && seen[id]
 		quotaValid = quotaValid && quotaMatches
-		active = active && state == "active" && current
+		active = active && state == "active" && (current || obsoleteMeasured)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -460,9 +509,6 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return releaseObsoleteClaim(ctx, tx, p, v, "quota_pool_changed")
 		}
 		return nil, workorders.Fail(409, "reservation set mismatch")
-	}
-	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
-		return nil, err
 	}
 	if v.Status != "queued" {
 		if v.DaemonID != nil && v.Generation != nil {

@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "permissions": [
+    "authz.read",
+    "profile.read",
+    "profile.write",
+    "profile.portal_read",
+    "profile.portal_write",
+    "kinds.read"
+  ]
+}

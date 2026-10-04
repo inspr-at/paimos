@@ -62,7 +62,7 @@ defineExpose({ focus: () => fold.value?.focus() })
       >
         <AppIcon name="chevron" :size="12" class="chev" />
         <GroupMarker :group="group" :size="variant === 'cards' ? 9 : 8" />
-        <span class="name">{{ group.name }}</span>
+        <span v-clip-tip="group.name" class="name">{{ group.name }}</span>
         <span class="count mono" :aria-label="`${count} ${count === 1 ? 'project' : 'projects'}`">{{ count }}</span>
         <span v-if="group.kind === 'shared'" class="shared" data-tip="Shared with the workspace"><AppIcon name="users" :size="13" /><span class="sr-only">, shared with the workspace</span></span>
       </button>
@@ -108,5 +108,9 @@ button.fold:focus-visible { box-shadow: var(--focus-ring); }
 .cards { height: 40px; padding: 0 4px; }
 .cards .fold { height: 34px; font-size: 14.5px; font-weight: 650; }
 .cards .count { font-size: 11.5px; }
+.count, .shared, .chev, .more { flex-shrink: 0; }
+@media (max-width: 720px) {
+  .name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+}
 @media (max-width: 760px) { .list, .cards { height: 48px; } .list { padding: 0 4px 0 10px; } .list .fold, .cards .fold { height: 44px; } .more { width: 44px; height: 44px; } .rename { height: 40px; } }
 </style>

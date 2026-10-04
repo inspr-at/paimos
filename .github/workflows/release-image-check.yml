@@ -80,7 +80,9 @@ jobs:
           metadata="$(node scripts/verify-release.mjs --release)"
           node --input-type=module -e 'import { appendFileSync } from "node:fs"; appendFileSync(process.env.GITHUB_OUTPUT, "version=" + JSON.parse(process.argv[1]).version + "\n");' "$metadata"
       - name: Release history fixture
-        run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline -candidate "$VERSION"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Require native platform
         env:
