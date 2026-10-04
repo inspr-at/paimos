@@ -595,7 +595,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .verify-again[data-requested] { outline: 1px solid var(--ink-3); outline-offset: 2px; }
 .computer-confirmation { margin: 0; padding: 0 16px 12px; color: var(--ink-2); font-size: 12px; }
 .ac { position: relative; display: grid; gap: 14px; min-width: 0; z-index: 3; container: ac / inline-size; }
-.ac-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
+/* Folding removes the taller actions; keep the title controls anchored at the top. */
+.ac-head { display: flex; align-items: flex-start; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
 .ac-title { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-width: 0; }
 .ac-title h2 { font: 700 21px/1.2 var(--font); letter-spacing: -.015em; color: var(--ink); }
 .ac-title h2:focus { outline: none; }

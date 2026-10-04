@@ -362,7 +362,9 @@ test('AEON-685: tablet verification control is independent of the status label w
   })
 })
 
-test('AEON-685: approval link expands once and honors folding', async ({ page }) => {
+for (const width of [390, 900, 1024, 1280, 1440]) {
+test(`AEON-685: approval link expands once and honors folding at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1100 })
   const { work } = await setup(page)
   work.preferences['agents-page'] = { setupFolded: true }
   await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
@@ -371,6 +373,7 @@ test('AEON-685: approval link expands once and honors folding', async ({ page })
   await expect(computer(page, 'mbp2607')).toBeVisible()
   await expectStableControls({
     controls: { fold, modelPreferences: panel(page).getByRole('button', { name: 'Account model preferences', exact: true }) },
+    scrollAreas: { panel: panel(page) },
     interactions: [
       { name: 'fold with approval query still present', run: async () => {
         await fold.click()
@@ -400,6 +403,7 @@ test('AEON-685: approval link expands once and honors folding', async ({ page })
   await expect(fold).toHaveAttribute('aria-expanded', 'true')
   await expect(computer(page, 'mbp2607')).toBeVisible()
 })
+}
 
 test('AEON-685: queued verification reports a failed pairing refresh', async ({ page }) => {
   const { capacity } = await setup(page)
