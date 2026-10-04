@@ -94,13 +94,13 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		f.mux.ServeHTTP(w, r)
 		queueDone <- w.Code
 	}()
+	var waiter uint32
 	for {
-		var waiting bool
-		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity a WHERE a.datname=current_database() AND $1::int=ANY(pg_blocking_pids(a.pid)) AND a.query LIKE '%FROM tenants WHERE%FOR NO KEY UPDATE%')`, pid).Scan(&waiting)
+		err := f.d.Admin.QueryRow(ctx, `SELECT coalesce((SELECT a.pid FROM pg_stat_activity a WHERE a.datname=current_database() AND $1::int=ANY(pg_blocking_pids(a.pid)) AND a.query LIKE '%FROM tenants WHERE%FOR NO KEY UPDATE%' LIMIT 1),0)`, pid).Scan(&waiter)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if waiting {
+		if waiter != 0 {
 			break
 		}
 		select {
@@ -112,22 +112,14 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 			runtime.Gosched()
 		}
 	}
-	// Prove that neither blocked writer holds the tree, independently of the
-	// expected pairing barrier. A misplaced tree acquisition would deadlock.
-	treeProbe, err := f.d.Admin.Begin(ctx)
-	if err != nil {
+	// The review holds tenant/tree/pairing. The queue must wait at tenant
+	// before acquiring either advisory lock; inspect its backend directly.
+	var holdsAdvisory bool
+	if err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND granted)`, waiter).Scan(&holdsAdvisory); err != nil {
 		t.Fatal(err)
 	}
-	defer treeProbe.Rollback(context.Background())
-	var treeFree bool
-	if err := treeProbe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, f.person.TenantID).Scan(&treeFree); err != nil {
-		t.Fatal(err)
-	}
-	if !treeFree {
-		t.Fatal("pairing waiter already holds tree lock")
-	}
-	if err := treeProbe.Rollback(ctx); err != nil {
-		t.Fatal(err)
+	if holdsAdvisory {
+		t.Fatal("tenant waiter already holds tree or pairing lock")
 	}
 	close(pause.resume)
 	for _, result := range []struct {

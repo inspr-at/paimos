@@ -22,6 +22,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -121,6 +122,17 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 	}
 	if p != nil {
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), *p))
+		if p.Kind == tenant.Person && method != http.MethodGet && strings.HasPrefix(path, "/api/model-preferences/levels/person") {
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				person, err := modelprefs.CanonicalPerson(t.Context(), tx, p.ID)
+				if err == nil && person != nil {
+					r.Header.Set("If-Prefs-Person", *person)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if p.Kind == tenant.Agent {
 			// A real scoped fixture key; current scopes are read from storage.
 			prefix := strings.ReplaceAll(p.ID, "-", "")
