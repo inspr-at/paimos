@@ -60,7 +60,7 @@ func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-list-comparison", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
 		j := treeMap(jobs[id])
 		condition, _ := j["if"].(string)
 		if !strings.Contains(condition, "always()") || !strings.Contains(condition, "needs.ci-plan.result == 'success'") || !strings.Contains(condition, fullQueueFallback) || !containsNeed(j["needs"], "tree-reuse") {
@@ -414,6 +414,14 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 		t.Fatal("incomplete merge-main tier fixture")
 	}
 	for id, expected := range baseline.Hashes {
+		if id == "release-list-comparison" {
+			// AEON-679 retired this capture-only job. Keep the historical pin,
+			// assert retirement, and verify every surviving job's hash below.
+			if _, exists := jobs[id]; exists {
+				t.Fatal("AEON-679 retired release-list-comparison; it must remain absent")
+			}
+			continue
+		}
 		if tierHash, changed := tierBaseline.MergeMain.Hashes[id]; changed {
 			expected = tierHash
 		}

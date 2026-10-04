@@ -21,7 +21,7 @@ export const executionSteps = {
 };
 export const requiredJobs = [
   'tier-plan', 'tier-measurements',
-  'runner-route / route', 'go', 'web', 'release-check', 'e2e', 'release-list-comparison',
+  'runner-route / route', 'go', 'web', 'release-check', 'e2e',
   ...Object.keys(executionSteps),
   ...Array.from({ length: 7 }, (_, i) => `go-test (${i + 1})`),
   ...Array.from({ length: 12 }, (_, i) => `web-shard (${i + 1})`),

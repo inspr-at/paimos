@@ -12,6 +12,22 @@ import (
 )
 
 func TestRepositoryWorkflows(t *testing.T) {
+	t.Run("CI accepts the retired comparison job's absence", func(t *testing.T) {
+		body, err := os.ReadFile("../../.github/workflows/ci.yml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var workflow map[string]any
+		if err := yaml.Unmarshal(body, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := mapping(workflow["jobs"])["release-list-comparison"]; exists {
+			t.Fatal("AEON-679 retired the capture-only comparison job")
+		}
+		if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
+			t.Fatalf("current CI without the retired comparison job must pass: %v", err)
+		}
+	})
 	problems, err := checkDirectory("../../.github/workflows")
 	if err != nil {
 		t.Fatal(err)
