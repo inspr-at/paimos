@@ -578,7 +578,11 @@ test('unassigning In progress work enables Queue directly from the mutation resp
   await ticket.getByRole('button', { name: /Change assignee/ }).click()
   const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-12', exact: true })
   await menu.getByRole('menuitemradio', { name: 'Unassigned', exact: true }).click()
-  await expect(ticket.locator('.c-assignee')).toContainText('Unassigned')
+  // The approved compact list uses a dash; its accessible label carries the
+  // assignment state. Assert both exactly, including removal of the person.
+  await expect(ticket.locator('.c-assignee .empty')).toHaveText('—')
+  await expect(ticket.locator('.c-assignee .empty')).toHaveAttribute('aria-label', 'Unassigned')
+  await expect(ticket.getByRole('button', { name: /Change assignee/ })).toHaveAccessibleName('Assignee: Unassigned. Change assignee of PHAROS-12')
   await expect(queue).toHaveAttribute('aria-disabled', 'false')
   await expect(queue).toHaveAttribute('data-tip', 'In progress, but nobody is working on it. Queue it for the next free agent · q')
   await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
