@@ -2,6 +2,7 @@
 package nodes
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -142,6 +143,59 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkBenefitsCausalUndoRejectsIncompleteCompletion(t *testing.T) {
+	for _, state := range []string{"done", "custom-complete"} {
+		for _, fields := range []string{`{}`, `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit."}`} {
+			for _, method := range []string{"GET", "POST"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", state, fields, method), func(t *testing.T) {
+					p := newPrincipal(t, "benefits-causal-undo")
+					k := kindBySlug(t, p, "work")
+					setBenefitStateCatalog(t, p.TenantID, k.ID)
+					parent := workNodeTest(t, p, "", "open")
+					enableWorkStatusTest(t, p)
+					child := workNodeTest(t, p, parent.ID, state)
+					// Historical completed leaves remain editable without benefits.
+					code, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, fmt.Sprintf(`{"fields":%s}`, fields))
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					// The current leaf has valid benefits; Undo must validate the
+					// historical fields it would restore, rather than these fields.
+					code, raw = call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"state":"open","fields":`+benefitFields+`}`)
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					id, cause := lastDerivedTest(t, p, parent.ID)
+					if currentWorkTest(t, p, parent.ID).State != "open" || currentWorkTest(t, p, child.ID).State != "open" {
+						t.Fatal("fixture did not reopen the leaf and derive its parent")
+					}
+					// Capture complete rows (including benefit jobs and revisions)
+					// plus the audit log, so a rejection cannot partially mutate them.
+					snapshot := func() (json.RawMessage, json.RawMessage) {
+						t.Helper()
+						var nodes, audit json.RawMessage
+						if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+							if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n WHERE id=ANY($1::uuid[])`, []string{parent.ID, child.ID}).Scan(&nodes); err != nil {
+								return err
+							}
+							return tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e`).Scan(&audit)
+						}); err != nil {
+							t.Fatal(err)
+						}
+						return nodes, audit
+					}
+					beforeNodes, beforeAudit := snapshot()
+					code, raw = causalCallTest(t, p, method, id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+					if code != http.StatusConflict || !strings.Contains(string(raw), `"code":"conflict"`) || !strings.Contains(string(raw), events.ErrConflict.Error()) {
+						t.Errorf("incomplete completion must reject causal Undo: %d %s", code, raw)
+					}
+					afterNodes, afterAudit := snapshot()
+					if !sameJSON(beforeNodes, afterNodes) || !sameJSON(beforeAudit, afterAudit) {
+						t.Error("rejected causal Undo changed the leaf, parent, benefit job, revision or audit log")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
 	p := newPrincipal(t, "benefits-race")
 	k := kindBySlug(t, p, "work")
