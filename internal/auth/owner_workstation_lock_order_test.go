@@ -103,8 +103,12 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 	// BEFORE tenant. The second request's actual pairing wait proves overlap;
 	// neither request may own tenant until both advisory fences are held.
 	pool, barrier, ctx := dbtest.BarrierPool(t, originalPool, func(query string) bool {
-		return strings.Contains(query, "pg_advisory_xact_lock") &&
-			strings.Contains(query, "aeon-pairing:") == (fence == "pairing")
+		if fence == "pairing" {
+			return strings.Contains(query, "pg_advisory_xact_lock") && strings.Contains(query, "aeon-pairing:")
+		}
+		// Key-usage admission also takes an advisory lock before pairing.
+		// Pause at the actual tree fence, after pairing is already held.
+		return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))")
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

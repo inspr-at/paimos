@@ -27,6 +27,7 @@ import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
@@ -50,6 +51,16 @@ watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   await nextTick()
   cursor.value = id
   focusRow(id)
+}, { immediate: true })
+// Provider-change notices link to the affected run's session or queued row.
+watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => agents.runs], async ([id, loaded]) => {
+  if (!loaded || typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return
+  const linked = agents.sessions.find(s => s.run_id === id)
+  if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
+  await nextTick()
+  if (route.query.run !== id) return
+  const queued = document.getElementById(`run-${id}`)
+  if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
@@ -329,6 +340,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <template v-else>Connecting…</template>
           </span>
         </p>
+        <button type="button" class="icon-btn sm flat" aria-label="Model preferences" data-tip="Which models do which work" @click="openModelPrefs()"><AppIcon name="gear" :size="16" /></button>
         <RouterLink class="context-link" to="/decision-desk">Decision Desk</RouterLink>
         <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
