@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "internal/harness TestTierChangeConfirmUndoAndSafePoint",
+      "kind": "go",
+      "owner": "AEON-623",
+      "added": "2026-10-03",
+      "expires": "2026-10-10",
+      "note": "Known tier-change confirmation/undo/safe-point flake. Fixed by AEON-623; short quarantine while the fix is verified in the merge queue. Remove after clean runs, by expiry."
+    },
+    {
+      "id": "internal/importer TestSourceRequestCapAndDelay",
+      "kind": "go",
+      "owner": "AEON-675",
+      "added": "2026-10-03",
+      "expires": "2026-10-10",
+      "note": "Wall-clock spacing (>=10 ms between request starts) and exact peak of 2 concurrent requests flake on loaded hosted runners. AEON-675 replaces the timing with an injected clock. Remove this entry in that change, by expiry."
+    }
+  ],
+  "template": {
+    "id": "relative/package TestName OR spec.spec.ts:line:column › describe › test",
+    "kind": "go",
+    "owner": "OWNING-TICKET",
+    "added": "YYYY-MM-DD",
+    "expires": "YYYY-MM-DD",
+    "note": "Copy into entries, select go or playwright, name the owner ticket, document evidence and a short expiry. The template is never active."
+  }
+}

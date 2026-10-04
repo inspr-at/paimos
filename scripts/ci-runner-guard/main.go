@@ -392,6 +392,14 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
+		} else if context == "web" {
+			// OPS-257: web is the aggregate over setup and the sharded UI jobs, like go.
+			if job["if"] != "always()" {
+				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
+			}
+			if !reflect.DeepEqual(job["needs"], []any{"web-setup", "web-shard"}) {
+				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
+			}
 		} else if _, exists := job["if"]; exists {
 			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
 		}
