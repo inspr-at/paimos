@@ -59,19 +59,22 @@ func TestDirectAnchorRefusesDeletedMovedConvertedAndTail(t *testing.T) {
 			f := newStoreFixture(t)
 			a := f.item(t, "ticket", "TK-1", "open", f.next, "V")
 			moved := f.item(t, "ticket", "TK-2", "open", f.release, "V")
+			destination := f.next
 			switch state {
 			case "deleted":
 				f.exec(t, `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, a, f.clock)
 			case "moved":
 				f.exec(t, `UPDATE ships_in SET release_node_id=$2,rank='W' WHERE item_node_id=$1`, a, f.release)
 			case "converted":
+				destination = ""
 				f.exec(t, `UPDATE ships_in SET release_node_id=NULL WHERE item_node_id=$1`, a)
 				f.exec(t, `UPDATE nodes SET kind_id=$2 WHERE id=$1`, a, f.kinds["release"])
 			case "tail":
+				destination = ""
 				a = f.item(t, "ticket", "TK-3", "open", "", "")
 			}
 			before := f.scalar(t, `SELECT count(*) FROM events`)
-			result, err := f.store.PlaceWithRevision(t.Context(), f.person, f.project, []PlacementRequest{{ItemID: moved, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1, Slot: Slot{AfterID: a}}})
+			result, err := f.store.PlaceWithRevision(t.Context(), f.person, f.project, []PlacementRequest{{ItemID: moved, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: destination, ExpectedReleaseRevision: 1, Slot: Slot{AfterID: a}}})
 			if !errors.Is(err, ErrNotFound) || result.UndoEventID != nil {
 				t.Fatalf("wrong refusal: %+v %v", result, err)
 			}
@@ -122,5 +125,41 @@ func TestReleaseExtremaUseUpcomingAndKeepTerminalKeys(t *testing.T) {
 	}
 	if result.Rank <= "D" || result.Rank >= high.Rank {
 		t.Fatalf("not Upcoming end: %+v", result)
+	}
+}
+
+func TestBeforeAnchorAndLegacyPairAcrossTombstone(t *testing.T) {
+	f := newStoreFixture(t)
+	a := f.item(t, "ticket", "TK-1", "open", f.next, "V")
+	hidden := f.item(t, "ticket", "TK-2", "open", f.next, "W")
+	b := f.item(t, "ticket", "TK-3", "done", f.next, "X")
+	subject := f.item(t, "ticket", "TK-4", "open", f.release, "V")
+	f.exec(t, `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, hidden, f.clock)
+	request := PlacementRequest{ItemID: subject, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1, Slot: Slot{AfterID: a, BeforeID: b}}
+	before := f.scalar(t, `SELECT count(*) FROM events`)
+	result, err := f.store.PlaceWithRevision(t.Context(), f.person, f.project, []PlacementRequest{request})
+	var conflict *Conflict
+	if !errors.As(err, &conflict) || conflict.Code != "neighbours_changed" || result.UndoEventID != nil || f.scalar(t, `SELECT count(*) FROM events`) != before {
+		t.Fatalf("legacy pair must refuse physical non-adjacency: %+v %v", result, err)
+	}
+	request.Slot = Slot{BeforeID: b}
+	result, err = f.store.PlaceWithRevision(t.Context(), f.person, f.project, []PlacementRequest{request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Items[0].Rank; got <= "W" || got >= "X" {
+		t.Fatalf("before must resolve its physical predecessor, got %s", got)
+	}
+}
+func TestTopInEmptyRankedBacklogDoesNotRankTheTail(t *testing.T) {
+	f := newStoreFixture(t)
+	tail := f.item(t, "ticket", "TK-1", "open", "", "")
+	subject := f.item(t, "ticket", "TK-2", "open", f.release, "V")
+	result, err := f.store.PlaceWithRevision(t.Context(), f.person, f.project, []PlacementRequest{{ItemID: subject, ExpectedProjectID: f.project, ExpectedRevision: 1, Slot: Slot{Position: "top"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Items[0].Rank == "" || f.placed(t, tail).Revision != 0 {
+		t.Fatalf("empty ranked portion must accept top without an invented anchor: %+v", result)
 	}
 }

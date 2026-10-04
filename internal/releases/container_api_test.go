@@ -92,6 +92,36 @@ func TestContainerPlacementPreservesFlagsAndReturnsDestinationRevision(t *testin
 	}
 }
 
+func TestContainerExplicitPositionsAreAdditiveAndExclusive(t *testing.T) {
+	f := adoptFixture(t)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "owner")
+	id := f.existing("ticket", f.project, "Work", "open")
+	path := "/api/nodes/" + id + "/ships-in"
+	for _, extra := range []string{`,"position":"end"`, `,"position":""`, `,"position":null`, `,"position":"top","after_id":"` + f.release + `"`} {
+		body := fmt.Sprintf(`{"expected_project_id":%q,"expected_revision":0,"release_id":null%s}`, f.project, extra)
+		if w := f.request(f.person, "PUT", path, body); w.Code != 400 {
+			t.Fatalf("invalid position: %d %s", w.Code, w.Body.String())
+		}
+	}
+	body := fmt.Sprintf(`{"expected_project_id":%q,"expected_revision":0,"release_id":null,"position":"top"}`, f.project)
+	if w := f.request(f.person, "PUT", path, body); w.Code != 200 {
+		t.Fatalf("additive top: %d %s", w.Code, w.Body.String())
+	}
+	base := "/api/projects/" + f.project + "/releases/" + f.release
+	for _, tc := range []struct{ action, body string }{
+		{"rank", `{"expected_revision":1,"position":"bad"}`},
+		{"rank", fmt.Sprintf(`{"expected_revision":1,"position":"append","before_id":%q}`, f.release)},
+		{"state", `{"expected_revision":1,"to":"building","position":"top"}`},
+	} {
+		if w := f.request(f.person, "POST", base+"/"+tc.action, tc.body); w.Code != 400 {
+			t.Fatalf("invalid action position: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if w := f.request(f.person, "POST", base+"/rank", `{"expected_revision":1,"position":"top"}`); w.Code != 200 {
+		t.Fatalf("rank top: %d %s", w.Code, w.Body.String())
+	}
+}
+
 type reportFake struct {
 	calls   int
 	project string

@@ -281,14 +281,14 @@ func (m *module) containerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Revision int64  `json:"expected_revision"`
-		To       string `json:"to"`
-		Scheme   string `json:"version_scheme"`
-		Version  string `json:"version"`
-		Ref      string `json:"reservation_ref"`
-		Before   string `json:"before_id"`
-		After    string `json:"after_id"`
-		Position string `json:"position"`
+		Revision int64           `json:"expected_revision"`
+		To       string          `json:"to"`
+		Scheme   string          `json:"version_scheme"`
+		Version  string          `json:"version"`
+		Ref      string          `json:"reservation_ref"`
+		Before   string          `json:"before_id"`
+		After    string          `json:"after_id"`
+		Position json.RawMessage `json:"position"`
 	}
 	if !decodeContainer(w, r, &in) {
 		return
@@ -297,12 +297,17 @@ func (m *module) containerAction(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "expected_revision required")
 		return
 	}
+	position, positionErr := parsePosition(in.Position)
+	if positionErr != nil {
+		httpapi.WriteError(w, 400, "invalid position")
+		return
+	}
 	action := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-	if (action != "state" && in.To != "") || (action != "cut" && (in.Scheme != "" || in.Version != "")) || (action != "publish" && in.Ref != "") || (action != "rank" && (in.Before != "" || in.After != "" || in.Position != "")) || !delivery.ValidPosition(in.Position, in.Before, in.After) || (in.Before != "" && in.After != "") {
+	if (action != "state" && in.To != "") || (action != "cut" && (in.Scheme != "" || in.Version != "")) || (action != "publish" && in.Ref != "") || (action != "rank" && (in.Before != "" || in.After != "" || position != "")) || !delivery.ValidPosition(position, in.Before, in.After) || (in.Before != "" && in.After != "") {
 		httpapi.WriteError(w, 400, "fields do not match this release action")
 		return
 	}
-	edit := delivery.ReleaseEdit{ProjectID: r.PathValue("projectId"), ReleaseID: r.PathValue("releaseId"), ExpectedRevision: in.Revision, Slot: delivery.Slot{BeforeID: in.Before, AfterID: in.After, Position: in.Position}}
+	edit := delivery.ReleaseEdit{ProjectID: r.PathValue("projectId"), ReleaseID: r.PathValue("releaseId"), ExpectedRevision: in.Revision, Slot: delivery.Slot{BeforeID: in.Before, AfterID: in.After, Position: position}}
 	var out delivery.Release
 	var err error
 	switch action {
@@ -380,10 +385,22 @@ type placementInput struct {
 	ReleaseRevision int64           `json:"expected_release_revision"`
 	Before          string          `json:"before_id"`
 	After           string          `json:"after_id"`
-	Position        string          `json:"position"`
+	Position        json.RawMessage `json:"position"`
 	Expedite        *bool           `json:"expedite"`
 	Due             json.RawMessage `json:"due_on"`
 	Reason          string          `json:"reason"`
+}
+
+// Omission remains compatible; an explicit null/empty/unknown position is invalid.
+func parsePosition(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 {
+		return "", nil
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil || (value != "top" && value != "append") {
+		return "", errors.New("position must be top or append")
+	}
+	return value, nil
 }
 
 func parseReleaseID(raw json.RawMessage) (string, error) {
@@ -406,8 +423,9 @@ func (m *module) containerPlace(w http.ResponseWriter, r *http.Request) {
 	if !decodeContainer(w, r, &in) {
 		return
 	}
+	position, positionErr := parsePosition(in.Position)
 	release, err := parseReleaseID(in.Release)
-	if err != nil || !uuid.MatchString(r.PathValue("nodeId")) || !uuid.MatchString(in.Project) || in.Revision == nil || *in.Revision < 0 || release != "" && in.ReleaseRevision < 1 || len(in.Reason) > 2048 || !delivery.ValidPosition(in.Position, in.Before, in.After) || in.Before != "" && !uuid.MatchString(in.Before) || in.After != "" && !uuid.MatchString(in.After) {
+	if err != nil || positionErr != nil || !uuid.MatchString(r.PathValue("nodeId")) || !uuid.MatchString(in.Project) || in.Revision == nil || *in.Revision < 0 || release != "" && in.ReleaseRevision < 1 || len(in.Reason) > 2048 || !delivery.ValidPosition(position, in.Before, in.After) || in.Before != "" && !uuid.MatchString(in.Before) || in.After != "" && !uuid.MatchString(in.After) {
 		httpapi.WriteError(w, 400, "invalid placement")
 		return
 	}
@@ -425,7 +443,7 @@ func (m *module) containerPlace(w http.ResponseWriter, r *http.Request) {
 		due = &text
 	}
 	expedite := in.Expedite != nil && *in.Expedite
-	out, err := m.store.PlaceWithRevision(r.Context(), p, in.Project, []delivery.PlacementRequest{{ItemID: r.PathValue("nodeId"), ExpectedProjectID: in.Project, ExpectedRevision: *in.Revision, ReleaseID: release, ExpectedReleaseRevision: in.ReleaseRevision, Slot: delivery.Slot{BeforeID: in.Before, AfterID: in.After, Position: in.Position}, Expedite: expedite, DueOn: due, PreserveExpedite: in.Expedite == nil, PreserveDueOn: len(in.Due) == 0}})
+	out, err := m.store.PlaceWithRevision(r.Context(), p, in.Project, []delivery.PlacementRequest{{ItemID: r.PathValue("nodeId"), ExpectedProjectID: in.Project, ExpectedRevision: *in.Revision, ReleaseID: release, ExpectedReleaseRevision: in.ReleaseRevision, Slot: delivery.Slot{BeforeID: in.Before, AfterID: in.After, Position: position}, Expedite: expedite, DueOn: due, PreserveExpedite: in.Expedite == nil, PreserveDueOn: len(in.Due) == 0}})
 	containerResponse(w, out, err)
 }
 func (m *module) containerBatch(w http.ResponseWriter, r *http.Request) {
