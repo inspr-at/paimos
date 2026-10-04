@@ -802,6 +802,25 @@
       ]
     },
     {
+      "id": "key-layout",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/key-layout.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        }
+      ]
+    },
+    {
       "id": "planning",
       "config": "playwright.ui.config.ts",
       "project": null,
