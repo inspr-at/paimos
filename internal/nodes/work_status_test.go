@@ -28,6 +28,69 @@ func enableWorkStatusTest(t *testing.T, p tenant.Principal) {
 	t.Helper()
 	dbtest.EnableWorkParentStatus(t, testDB, p.TenantID)
 }
+
+type workStatusEntryTrace struct{ ready chan uint32 }
+
+func (w workStatusEntryTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
+	if q.SQL == "SELECT aeon_work_status_begin()" {
+		w.ready <- conn.PgConn().PID()
+	}
+	return ctx
+}
+
+func (workStatusEntryTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestWorkStatusEntryFencesTenantBeforeTree(t *testing.T) {
+	p := newPrincipal(t, "work-entry-lock-order")
+	enableWorkStatusTest(t, p)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	ready := make(chan uint32, 1)
+	cfg := appPool.Config()
+	cfg.ConnConfig.Tracer = workStatusEntryTrace{ready: ready}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); pool.Close() })
+	holder, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	var holderPID int
+	if err := holder.QueryRow(ctx, `SELECT pg_backend_pid() FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- db.InTenant(dbtest.Seed(ctx), pool, p.TenantID, func(pgx.Tx) error { return nil })
+	}()
+	waiterPID := dbtest.Await(t, ctx, ready)
+	// Observe the actual function waiting on this tenant fence. No advisory
+	// lock may have been acquired ahead of it, including the pairing lock.
+	waitErr := dbtest.WaitForBlocked(ctx, adminPool, int(waiterPID), holderPID, "SELECT aeon_work_status_begin()")
+	var advisoryLocks int
+	var inspectErr error
+	if waitErr == nil {
+		inspectErr = adminPool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND granted`, waiterPID).Scan(&advisoryLocks)
+	}
+	releaseErr := holder.Rollback(ctx)
+	result := dbtest.Await(t, ctx, done)
+	if waitErr != nil {
+		t.Fatal(waitErr)
+	}
+	if inspectErr != nil {
+		t.Fatal(inspectErr)
+	}
+	if advisoryLocks != 0 {
+		t.Fatalf("work-status entry holds %d advisory locks while waiting for the tenant fence", advisoryLocks)
+	}
+	if releaseErr != nil || result != nil {
+		t.Fatalf("work-status entry did not resume after tenant release: release=%v entry=%v", releaseErr, result)
+	}
+}
+
 func workNodeTest(t *testing.T, p tenant.Principal, parent string, state string) nodeJSON {
 	t.Helper()
 	k := kindBySlug(t, p, "work")

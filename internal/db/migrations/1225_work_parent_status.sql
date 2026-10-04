@@ -41,7 +41,7 @@ END;
 $$;
 
 -- Called at transaction entry, before any resource or event-counter lock.
--- Follow the existing paired-writer protocol: pairing -> tree -> tenant -> rows.
+-- Follow the shared writer protocol: tenant -> pairing -> tree -> rows.
 -- Every work row is prelocked once (bounded), including both sides of a move.
 -- This also permits final derivation after an existing writer has emitted its
 -- cause: it acquires no new resource locks after the event counter.
@@ -59,9 +59,9 @@ BEGIN
   PERFORM set_config('aeon.visible_projects',coalesce(prior_visible,''),true),set_config('aeon.system',coalesce(prior_system,''),true);
   RETURN false;
  END IF;
+ PERFORM 1 FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE;
  PERFORM pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0));
  PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0));
- PERFORM 1 FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE;
  SELECT count(*) INTO total FROM (SELECT n.id FROM nodes n JOIN node_kinds k USING(tenant_id)
    WHERE k.id=n.kind_id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid AND k.slug='work'
      AND n.deleted_at IS NULL LIMIT 50001) s;
