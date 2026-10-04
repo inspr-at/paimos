@@ -115,6 +115,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     if (shots) {
       mkdirSync(shots, { recursive: true })
       await page.screenshot({ path: join(shots, `agents-${width}-${theme}.png`) })
+      await page.locator('.sessions').scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(shots, `agents-sessions-${width}-${theme}.png`) })
+      await row(page, 2).locator('.agent-link').click()
+      await expect(page.locator('.now-eta .report-source')).toBeVisible()
+      await page.screenshot({ path: join(shots, `agents-session-details-${width}-${theme}.png`) })
     }
   })
 }
