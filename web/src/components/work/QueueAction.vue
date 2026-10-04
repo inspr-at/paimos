@@ -69,7 +69,7 @@ async function showAdded(row: ListItem, project: string, actor: string | undefin
 defineExpose({ toggle })
 </script>
 <template>
-  <button ref="button" type="button" class="q-btn" :class="[label ? 'btn sm q-action' : 'icon-btn sm flat', { unready: !entry && eligible && gaps.length }]" :aria-pressed="!!entry" :aria-disabled="!allowed || (!entry && !eligible)" :disabled="queue.busy" :aria-haspopup="!entry && gaps.length ? 'dialog' : undefined" :aria-label="`${entry ? `Remove ${row.key} from the queue` : `Queue ${row.key}`}${!allowed || (!entry && !eligible) || (!entry && gaps.length) ? `: ${title}` : ''}`" :data-tip="title" aria-keyshortcuts="q" @click.stop="toggle">
+  <button v-if="row.is_leaf !== false" ref="button" type="button" class="q-btn" :class="[label ? 'btn sm q-action' : 'icon-btn sm flat', { unready: !entry && eligible && gaps.length }]" :aria-pressed="!!entry" :aria-disabled="!allowed || (!entry && !eligible)" :disabled="queue.busy" :aria-haspopup="!entry && gaps.length ? 'dialog' : undefined" :aria-label="`${entry ? `Remove ${row.key} from the queue` : `Queue ${row.key}`}${!allowed || (!entry && !eligible) || (!entry && gaps.length) ? `: ${title}` : ''}`" :data-tip="title" aria-keyshortcuts="q" @click.stop="toggle">
     <AppIcon v-if="!entry" name="queue-add" :size="label ? 14 : 13" />
     <template v-else><AppIcon name="queue-on" class="g-on" :size="label ? 14 : 13" /><AppIcon name="queue-off" class="g-remove" :size="label ? 14 : 13" /></template>
     <span v-if="label" class="q-label">Queue</span>

@@ -4,10 +4,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Kind } from '../../lib/api'
 import { isIssueKind } from '../../lib/kindConvert'
 import { kinds } from '../../lib/useTicket'
-import AppIcon from '../AppIcon.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
+import { WORK_ICONS } from '../../lib/workVocabulary'
 import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
+  levelName?: string; levelIcon?: string;
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
   mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean; canWorkActions?: boolean
   canRepeat?: boolean
@@ -51,7 +53,8 @@ function pickNewTab() { moreAnchor.value = null; emit('newTab') }
 function pickWorkActions() { moreAnchor.value = null; emit('workActions') }
 const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
-const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
+const displayIcon = computed<IconName>(() => WORK_ICONS.includes(props.levelIcon as typeof WORK_ICONS[number]) ? props.levelIcon as IconName : props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
+const canConvert = computed(() => props.kind !== 'work' && props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
 function focusMore() { moreButton.value?.focus() }
 function menuKeys(event: KeyboardEvent) {
   const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
@@ -80,7 +83,7 @@ void props
       </nav>
     </template>
     <button type="button" class="key-chip" :aria-label="`Copy ${ticketKey}`" :data-tip="`Copy ${ticketKey}`" @click="emit('copyKey')">
-      <AppIcon v-if="kind" :name="kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket'" :size="12" :class="kind" />
+      <AppIcon v-if="kind" :name="displayIcon" :data-tip="levelName" :size="12" :class="kind" />
       <span>{{ ticketKey }}</span>
       <AppIcon name="copy" :size="11" class="copy-glyph" />
     </button>
@@ -119,7 +122,7 @@ void props
         <button type="button" role="menuitem" class="menu-item" @click="pickNewTab"><AppIcon name="external" :size="14" />Open in a new tab</button>
         <button v-if="canWorkActions" type="button" role="menuitem" class="menu-item" @click="pickWorkActions"><AppIcon name="task" :size="14" />Work actions</button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
-        <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
+        <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another parent…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
         <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
       </div>

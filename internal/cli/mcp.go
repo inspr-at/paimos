@@ -3,11 +3,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -58,7 +61,7 @@ type noArgs struct{}
 type issueListArgs struct {
 	Project  string `json:"project,omitempty" jsonschema:"project key"`
 	Status   string `json:"status,omitempty" jsonschema:"status filter"`
-	Type     string `json:"type,omitempty" jsonschema:"issue type"`
+	Type     string `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"page size"`
 	Offset   int    `json:"offset,omitempty" jsonschema:"pagination offset"`
 	Priority string `json:"priority,omitempty" jsonschema:"priority filter"`
@@ -71,7 +74,8 @@ type issueRefArgs struct {
 type issueCreateArgs struct {
 	Project     string   `json:"project" jsonschema:"project key"`
 	Title       string   `json:"title" jsonschema:"issue title"`
-	Type        string   `json:"type,omitempty" jsonschema:"issue type"`
+	Parent      string   `json:"parent,omitempty" jsonschema:"parent work item key; depth decides the name"`
+	Type        string   `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Status      string   `json:"status,omitempty" jsonschema:"initial status"`
 	Description string   `json:"description,omitempty" jsonschema:"description markdown"`
 	Tags        []string `json:"tags,omitempty" jsonschema:"tag names preserved when filing the issue"`
@@ -147,7 +151,7 @@ type knowledgeUpdateArgs struct {
 type searchArgs struct {
 	Query   string `json:"query" jsonschema:"free-text query"`
 	Project string `json:"project,omitempty" jsonschema:"project key"`
-	Type    string `json:"type,omitempty" jsonschema:"issue type"`
+	Type    string `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"page size"`
 }
 
@@ -224,5 +228,42 @@ func addWorkTool[In any](s *mcp.Server, rt *runtime, name, description string, _
 			err = fmt.Errorf("unsupported work tool")
 		}
 		return nil, result, err
+	})
+}
+
+// A request-local runtime keeps MCP calls from racing on shared output sinks.
+// These tools use the same authorization and compatibility paths as the CLI.
+func (rt *runtime) issueTool(ctx context.Context, run func(*runtime) error) (*mcp.CallToolResult, any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	copy := *rt
+	copy.requestContext = ctx
+	var out bytes.Buffer
+	copy.stdout = &out
+	copy.stderr = io.Discard
+	copy.jsonOut = true
+	if err := run(&copy); err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.String()}}}, nil, nil
+}
+func (rt *runtime) toolIssueList(ctx context.Context, req *mcp.CallToolRequest, in issueListArgs) (*mcp.CallToolResult, any, error) {
+	return rt.issueTool(ctx, func(r *runtime) error {
+		return r.listIssues(in.Project, in.Status, in.Type, in.Priority, "", in.Limit, in.Offset)
+	})
+}
+func (rt *runtime) toolIssueGet(ctx context.Context, req *mcp.CallToolRequest, in issueRefArgs) (*mcp.CallToolResult, any, error) {
+	return rt.issueTool(ctx, func(r *runtime) error { return r.getIssue(in.Ref) })
+}
+func (rt *runtime) toolIssueCreate(ctx context.Context, req *mcp.CallToolRequest, in issueCreateArgs) (*mcp.CallToolResult, any, error) {
+	tags := append([]string(nil), in.Tags...)
+	if in.Bug {
+		tags = append(tags, "bug")
+	}
+	return rt.issueTool(ctx, func(r *runtime) error {
+		return r.createIssue(issueInput{Project: in.Project, Title: in.Title, Type: in.Type, Status: in.Status, Parent: in.Parent, Description: in.Description, Tags: tags})
 	})
 }

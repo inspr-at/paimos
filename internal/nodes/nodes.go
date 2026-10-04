@@ -26,8 +26,9 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
-	Recurrence *nodeRecurrence   `json:"recurrence,omitempty"`
-	QueueStale bool              `json:"queue_stale"`
+	Recurrence *nodeRecurrence `json:"recurrence,omitempty"`
+	QueueStale bool            `json:"queue_stale"`
+	*WorkShape
 	Queued     *workqueue.Queued `json:"queued,omitempty"`
 	HumanCheck *string           `json:"human_check"`
 	Estimate   *estimateView     `json:"estimate,omitempty"`
@@ -206,7 +207,11 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Recurrence = recurrences[id]
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		node.Queued = queued[id]
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
@@ -372,7 +377,10 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node.Estimate = views[loaded.ID]
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
@@ -444,7 +452,10 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return err
 			}
 			node.Estimate = views[id]
-			return loadQueueProjection(ctx, tx, &node)
+			if err := loadQueueProjection(ctx, tx, &node); err != nil {
+				return err
+			}
+			return enrichNodes(ctx, tx, []*nodeJSON{&node})
 		}
 		if hours, ok := raw["estimate_hours"]; ok {
 			if _, replaces := raw["fields"]; replaces {
@@ -580,7 +591,10 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		node.Estimate = views[id]
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, dbErr("update node", err)
 }
@@ -711,7 +725,10 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 			return err
 		}
 		node = loaded
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }

@@ -58,9 +58,10 @@ async function load(id: string) {
   }
 }
 
-const noun = computed(() => props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
+const noun = computed(() => props.kind === 'work' ? 'work item' : props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
 const rollup = computed(() => {
   if (!report.value?.includes_descendants || !report.value.sessions.length) return ''
+  if (props.kind === 'work') return 'Totals include this work item and its descendant leaves.'
   if (props.kind === 'epic') return 'Totals include this epic and the tickets and tasks under it.'
   if (props.kind === 'ticket') return 'Totals include this ticket and the tasks under it.'
   return 'Totals include this task and the work under it.'

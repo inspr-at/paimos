@@ -7,13 +7,13 @@ import { recurrenceMarkerLabel } from '../../lib/recurrenceMarker'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import RecurrenceGlyph from '../recurrences/RecurrenceGlyph.vue'
-const props = defineProps<{ kind: string; recurrence?: NodeRecurrence }>()
+const props = defineProps<{ kind: string; levelName?: string; levelIcon?: string; recurrence?: NodeRecurrence }>()
 const profile = useProfile()
-const label = computed(() => props.recurrence ? recurrenceMarkerLabel(props.recurrence, profile.profile?.locale || navigator.language) : kindLabel(props.kind))
+const label = computed(() => props.recurrence ? recurrenceMarkerLabel(props.recurrence, profile.profile?.locale || navigator.language) : props.levelName ?? kindLabel(props.kind))
 </script>
 <template>
   <span class="ticket-type-icon" role="img" :aria-label="label" :title="label" :data-tip="label" :tabindex="recurrence ? 0 : undefined">
-    <AppIcon :name="kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket'" :size="16" class="kind-glyph" :class="kind" />
+    <AppIcon :name="levelIcon ?? (kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket')" :size="16" class="kind-glyph" :class="kind" />
     <span v-if="recurrence" class="recurrence-dot" aria-hidden="true"><RecurrenceGlyph :size="7" /></span>
   </span>
 </template>

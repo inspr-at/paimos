@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,10 @@ import (
 )
 
 type apiNode struct {
+	IsLeaf    *bool             `json:"is_leaf,omitempty"`
+	Depth     int               `json:"depth,omitempty"`
+	LevelName string            `json:"level_name,omitempty"`
+	LevelIcon string            `json:"level_icon,omitempty"`
 	Queued    *workqueue.Queued `json:"queued,omitempty"`
 	Warnings  []string          `json:"warnings,omitempty"`
 	ID        string            `json:"id"`
@@ -79,7 +84,7 @@ func explicitIssueFamily(raw json.RawMessage) (marked, ok bool) {
 
 func seededIssueName(name string) bool {
 	switch name {
-	case "epic", "ticket", "task":
+	case "work", "epic", "ticket", "task":
 		return true
 	default:
 		return false
@@ -93,6 +98,18 @@ type kindPage struct {
 type kindTable struct {
 	bySlug map[string]apiKind
 	byID   map[string]apiKind
+}
+
+// Old type names are aliases only on migrated workspaces; non-work kinds
+// and UUIDs are never remapped. The canonical ID is the workspace's work kind.
+func (t kindTable) issueKind(slug string) (apiKind, bool) {
+	if issueKinds[slug] {
+		if k, ok := t.bySlug["work"]; ok {
+			return k, true
+		}
+	}
+	k, ok := t.bySlug[slug]
+	return k, ok
 }
 
 func (t kindTable) slug(id string) string {
@@ -113,6 +130,13 @@ func (rt *runtime) api() (*client.Client, error) {
 	c := client.New(inst.URL, inst.APIKey)
 	c.ConfirmStepUp = localStepUp(inst.URL, inst.AgentdStateRoot)
 	return c, nil
+}
+
+func (rt *runtime) requestCtx() context.Context {
+	if rt.requestContext != nil {
+		return rt.requestContext
+	}
+	return context.Background()
 }
 
 func (rt *runtime) do(method, path string, body, dest any) error {
@@ -186,7 +210,7 @@ func (rt *runtime) kindCtx(ctx context.Context, slug string) (apiKind, error) {
 	if err != nil {
 		return apiKind{}, err
 	}
-	k, ok := table.bySlug[slug]
+	k, ok := table.issueKind(slug)
 	if !ok {
 		return apiKind{}, rt.fail(fmt.Errorf("node kind %q is not configured", slug), "")
 	}
@@ -237,6 +261,9 @@ func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(api
 			return nil, fmt.Errorf("incomplete node listing: repeated cursor")
 		}
 		seen[*body.NextCursor] = true
+		if page == 49 {
+			return nil, errors.New("node listing exceeds 10000 items; narrow the scope")
+		}
 		q.Set("cursor", *body.NextCursor)
 	}
 	return nil, fmt.Errorf("incomplete node listing: exceeds 50 pages")

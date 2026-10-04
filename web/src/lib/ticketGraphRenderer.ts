@@ -9,7 +9,7 @@ import { normaliseState } from './work.ts'
 
 // The graph API has no assignee, labels or date-range projection. Visible
 // membership comes from the shared server-filtered context in headerGlimpse.ts.
-export const TICKET_GRAPH_FILTERS: Dimension[] = ['status', 'priority', 'type']
+export const TICKET_GRAPH_FILTERS: Dimension[] = ['status', 'priority', 'shape', 'depth', 'type']
 export const ticketStatusTokens = { open: '--st-new', doing: '--st-progress', done: '--st-closed' } as const satisfies Record<TicketStatusCategory, `--${string}`>
 export const ticketLinkStyles = {
   parent: { color: '--ink-3', width: .45, directed: false, curvature: 0 },
@@ -30,7 +30,9 @@ export function filterTicketGraph(data: TicketGraph, filters: ListFilters): Tick
   const nodes = data.nodes.filter(node => (filters.showClosed || node.status_category !== 'done')
     && matches(filters.status, node.status, normaliseState)
     && matches(filters.priority, node.priority ?? 'none')
-    && matches(filters.type, node.type)
+    && matches(filters.type, node.type, v => node.type === 'work' && ['epic','ticket','task'].includes(v) ? 'work' : v.toLowerCase())
+    && matches(filters.shape, node.is_leaf === false || (node.is_leaf === undefined && node.type === 'epic') ? 'parent' : 'leaf')
+    && matches(filters.depth, String(node.depth ?? 1))
     && words.every(word => `${node.key} ${node.title}`.toLowerCase().includes(word)))
   const ids = new Set(nodes.map(node => node.id))
   return { nodes, links: data.links.filter(link => ids.has(link.source) && ids.has(link.target)), truncated: data.truncated }
@@ -38,12 +40,12 @@ export function filterTicketGraph(data: TicketGraph, filters: ListFilters): Tick
 
 export function ticketGraphData(data: TicketGraph, projectKey: string): GraphData {
   const byId = new Map(data.nodes.map(node => [node.id, node]))
-  // Cluster by epic ancestry, including tickets nested below other tickets.
+  // Cluster by work-parent ancestry, including nested work parents.
   const group = (id: string): string => {
     const seen = new Set<string>()
     let node = byId.get(id)
     while (node && !seen.has(node.id)) {
-      if (node.type === 'epic') return node.id
+      if ((node.is_leaf === false || (node.is_leaf === undefined && node.type === 'epic'))) return node.id
       seen.add(node.id); node = node.parent_id ? byId.get(node.parent_id) : undefined
     }
     return 'unparented'
@@ -53,7 +55,7 @@ export function ticketGraphData(data: TicketGraph, projectKey: string): GraphDat
       id: node.id, label: ticketLabel(node.key, node.title), group: group(node.id),
       color: ticketStatusTokens[node.status_category],
       // Sublinear, bounded size keeps busy hubs legible without swallowing peers.
-      weight: Math.log2(1 + Math.min(100, Math.max(0, node.link_count))) * .65 + (node.type === 'epic' ? 4.5 : 0),
+      weight: Math.log2(1 + Math.min(100, Math.max(0, node.link_count))) * .65 + ((node.is_leaf === false || (node.is_leaf === undefined && node.type === 'epic')) ? 4.5 : 0),
       href: `/p/${encodeURIComponent(projectKey)}/${encodeURIComponent(node.key)}`,
     })),
     links: data.links.filter(link => byId.has(link.source) && byId.has(link.target)).map(link => ({ ...link, ...ticketLinkStyles[link.kind] })),

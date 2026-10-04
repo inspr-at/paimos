@@ -236,6 +236,9 @@ func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 			if path == paths[0] && page.Facets["kind"]["work"] != 2058 {
 				t.Fatalf("filtered ticket facet = %d, want 2058", page.Facets["kind"]["work"])
 			}
+			if strings.Contains(path, "&epic=none&") && page.Facets["kind"]["work"] != 6000 {
+				t.Fatalf("no-parent filter lost root work: %#v", page.Facets)
+			}
 			for _, item := range page.Items {
 				if item.ChildrenCount != 0 {
 					t.Fatalf("unexpected children for %s: %d", item.Key, item.ChildrenCount)

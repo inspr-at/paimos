@@ -68,7 +68,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func writeErr(w http.ResponseWriter, err error) {
 	var pgerr *pgconn.PgError
 	scopeLimit := errors.As(err, &pgerr) && pgerr.Code == "54000" &&
-		(pgerr.Message == "work scope root budget exceeded" || pgerr.Message == "work scope expansion budget exceeded")
+		(pgerr.Message == "work shape budget exceeded" || pgerr.Message == "work scope root budget exceeded" || pgerr.Message == "work scope expansion budget exceeded")
 	if scopeLimit || errors.Is(err, context.DeadlineExceeded) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeError(w, http.StatusServiceUnavailable, "Work aggregates exceeded a resource limit; narrow the scope or retry.")

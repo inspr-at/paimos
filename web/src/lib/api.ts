@@ -135,6 +135,8 @@ export interface ParentBenefitGeneration {
 export interface WorkNode {
   recurrence?: NodeRecurrence
   queue_stale?: boolean
+  is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string
+  work_children_count?: number; status_derived?: boolean
   human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
@@ -241,6 +243,7 @@ export interface ListItem extends WorkNode {
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
+ shape?: string[]; depth?: string[]
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]

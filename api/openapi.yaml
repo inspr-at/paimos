@@ -19,6 +19,37 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/work-vocabulary:
+    get:
+      summary: Read workspace work names and icons
+      operationId: getWorkVocabulary
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Vocabulary and revision; empty names use stable fallbacks
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkVocabulary'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    put:
+      summary: Replace workspace vocabulary (person with settings.manage)
+      operationId: putWorkVocabulary
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkVocabulary'}
+      responses:
+        '200':
+          description: Saved vocabulary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkVocabulary'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Revision changed; reload before saving
   /nodes/{nodeId}/work-lifecycle/{actionId}/continue:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4965,8 +4996,10 @@ paths:
       description: 'Work aggregate reads reject more than 4096 roots or 50000 expanded root/node pairs before computing facts. Over-budget scopes fail explicitly; results are never silently truncated. A cursor whose anchor was deleted or no longer matches the filters returns 409 cursor_expired; restart from the first page.'
       security: *auth
       parameters:
+        - {name: shape, in: query, description: 'parent or leaf; supports ! exclusions', schema: {type: array, items: {type: string, enum: [parent, leaf, '!parent', '!leaf']}}}
+        - {name: depth, in: query, description: 'Project-relative work levels; supports ! exclusions', schema: {type: array, items: {type: string}}}
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
-        - {name: kind, in: query, description: Repeatable or comma-separated kind slugs or IDs, schema: {type: array, items: {type: string}}}
+        - {name: kind, in: query, description: 'Repeatable or comma-separated kind slugs or IDs. epic, ticket and task also match work after migration; a leading ! excludes the alias', schema: {type: array, items: {type: string}}}
         - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
         - {name: work_state, in: query, description: 'Canonical work statuses as in project status_counts. Recognises all stored spelling variants. Repeatable or comma-separated, with ! exclusions; at most 64 values of 64 characters each. Combines with other filters.', schema: {type: array, maxItems: 64, items: {type: string, maxLength: 64}}}
         - {name: work_bucket, in: query, description: 'Work buckets using the same kind categories and fallback as project counts and Hide. Repeatable or comma-separated; at most five values. Combines with other filters.', schema: {type: array, maxItems: 5, items: {type: string, enum: [open, in_progress, done, cancelled, archived]}}}
@@ -4984,7 +5017,7 @@ paths:
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits the hide_states choices, defaulting to nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
         - {name: hide_states, in: query, description: 'Closed statuses omitted when hide_closed is true. Defaults to all five. Kind-aware buckets and canonical spellings match project counts: delivered and accepted keep their names inside the done bucket; other done-bucket statuses use done, and exit buckets use cancelled or archived. At least one and at most five choices; ignored when hide_closed is false.', style: form, explode: false, schema: {type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: {type: string, enum: [done, delivered, accepted, cancelled, archived]}}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. State facets count work leaves only, so status-grid and Hide counts omit grouping parents. Other facets retain row semantics. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check, shape, depth. State facets count work leaves only, so status-grid and Hide counts omit grouping parents. Other facets retain row semantics. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -6436,7 +6469,7 @@ paths:
     get:
       operationId: listTicketReviews
       summary: Cross-family review results for this ticket
-      description: Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      description: Work and legacy Ticket/Task nodes retain their existing review history. Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
@@ -11033,7 +11066,7 @@ paths:
       description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id, rules_version or a paired from/to range is required. from/to selects recorded timestamps in [from, to), spanning at most 366 days. cursor continues the same filters in descending timestamp/ID order. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
       security: *auth
       parameters:
-        - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
+        - {name: ticket_node_id, in: query, schema: {type: string}, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
         - {name: session_id, in: query, schema: {type: string, format: uuid}}
         - {name: outcome_id, in: query, schema: {type: string, format: uuid}, description: Exact source outcome within the other filters.}
         - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
@@ -11049,7 +11082,7 @@ paths:
     post:
       operationId: recordOutcome
       summary: Record a review, fix round, CI result or revert
-      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
+      description: "Accepts Work and legacy Ticket nodes. Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
       security: *auth
       parameters:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
@@ -18389,7 +18422,7 @@ components:
       required: [kind, ticket, payload]
       properties:
         kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert]}
-        ticket: {type: string, description: Ticket node id or issue key}
+        ticket: {type: string, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
         session_id: {type: [string, "null"], format: uuid}
         rules_version: {type: [string, "null"], maxLength: 128, description: Optional until a rules version is recorded.}
         payload:
@@ -18688,7 +18721,13 @@ components:
               id: {type: string, format: uuid}
               key: {type: string}
               title: {type: string}
-              type: {type: string, enum: [ticket, epic, work]}
+              is_leaf: {type: boolean}
+              depth: {type: integer, minimum: 1}
+              level_name: {type: string}
+              level_icon: {type: string}
+              work_children_count: {type: integer, minimum: 0}
+              status_derived: {type: boolean}
+              type: {type: string, enum: [work, ticket, epic, task]}
               status: {type: string, description: Stored workflow state}
               status_category: {type: string, enum: [open, doing, done]}
               priority:
@@ -18696,7 +18735,7 @@ components:
               parent_id:
                 type: [string, 'null']
                 format: uuid
-                description: Parent work item, ticket or epic when that parent is visible. Null when the parent is a project, another kind, or not visible.
+                description: Parent work item when that parent is visible. Null when the parent is a project, another kind, or not visible.
               release_id:
                 type: [string, 'null']
                 format: uuid
@@ -19119,11 +19158,35 @@ components:
           properties:
             mode: {type: string, enum: [off, suggest, apply]}
             available: {type: boolean}
+    WorkVocabulary:
+      type: object
+      additionalProperties: false
+      required: [revision, leaf, levels]
+      properties:
+        revision: {type: integer, minimum: 0}
+        leaf: {$ref: '#/components/schemas/WorkLevel'}
+        levels:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/WorkLevel'}
+    WorkLevel:
+      type: object
+      additionalProperties: false
+      required: [name, icon]
+      properties:
+        name: {type: string, maxLength: 60, description: 'Empty uses Ticket, Epic, Story or Level N.'}
+        icon: {type: string, enum: ['', ticket, epic, task, layers, tree, folder, check, box]}
     Node:
       description: Ticket creation may return benefit warnings. Entering a built-in completed state (done, accepted, delivered) from outside that set requires both pills and benefits, including on creation and when hidden from release notes. Already-completed records remain editable, including transitions within that set.
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
+        is_leaf: {type: boolean, description: 'Work shape; only live work children make a parent. Absent for non-work nodes.'}
+        depth: {type: integer, minimum: 1, description: 'Work level, starting at 1 after every project.'}
+        level_name: {type: string, description: 'Workspace name, behind work-parent-status rollout. Leaf name wins over depth.'}
+        level_icon: {type: string, description: 'Workspace SVG icon token; stable fallback.'}
+        work_children_count: {type: integer, minimum: 0, description: 'Visible direct work children; never includes non-work children.'}
+        status_derived: {type: boolean, description: 'Parent status follows children while rollout is enabled.'}
         queued: {$ref: '#/components/schemas/QueuedTicket'}
         recurrence:
           $ref: '#/components/schemas/NodeRecurrence'

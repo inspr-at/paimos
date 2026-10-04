@@ -654,6 +654,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/settings/quota-warnings":                                                          "settings.manage",
 	"PUT /api/settings/quota-warnings":                                                          "settings.manage",
 	"GET /api/agent-accounts/quota-warnings":                                                    "account.read",
+	"GET /api/settings/work-vocabulary":                                                         "nodes.read",
+	"PUT /api/settings/work-vocabulary":                                                         "settings.manage",
 	"GET /api/settings/eta-interval":                                                            "settings.manage",
 	"PUT /api/settings/eta-interval":                                                            "settings.manage",
 	"GET /api/settings/brand":                                                                   "settings.manage",

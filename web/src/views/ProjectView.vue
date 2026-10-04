@@ -941,11 +941,12 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
   const current = project.value
   if (!current) return false
   try {
-    const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
+    const catalog = await kinds()
+    const kind = catalog.find(candidate => candidate.slug === 'work') ?? catalog.find(candidate => candidate.slug === draft.kind || candidate.slug === 'ticket')
     if (!kind) throw new Error('this workspace has no such type')
     let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
     if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
-      const text = await askDoneGate({ key: 'New ticket', title: draft.title, state: draft.state, fields })
+      const text = await askDoneGate({ key: 'New work item', title: draft.title, state: draft.state, fields })
       if (!text) return false
       fields = completionFields(fields, text)
     }
@@ -953,7 +954,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
       kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
     })
-    const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+    const parent = draft.epic ? { ...draft.epic, kind_slug: kind.slug === 'work' ? 'work' : 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
     const created = asListItem(node, kind, parent, { id: current.id, key: current.key, title: current.title })
     list.insertRow(created)
     outline.insert(created)
@@ -972,14 +973,14 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
 }
 function childCreated(item: ListItem) { list.insertRow(item); outline.insert(item); void projects.load(true) }
 function childMoved(item: ListItem, fromParent: string | null) {
-  outline.relocate(item, fromParent, fromParent && outline.node(fromParent)?.kind_slug === 'epic' ? fromParent : null)
+  outline.relocate(item, fromParent, fromParent && (outline.node(fromParent)?.is_leaf === false || outline.node(fromParent)?.kind_slug === 'epic') ? fromParent : null)
 }
 function closeCreate() { creating.value = false; outline.startCreateUnder(null) }
 // Drag and drop in the Outline: the same guarded move as the workspace's "Move to another epic".
 async function moveRow(row: ListItem, epic: ListItem | null) {
   const current = project.value
   if (!current) return
-  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: epic.kind_slug } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
   if (await guardedMove(row, parent, childMoved) === 'ok') {
     if (epic) outline.setExpanded(epic.id, true)
     cursorId.value = row.id
@@ -1596,7 +1597,7 @@ function keydown(event: KeyboardEvent) {
       else if (ticketKey.value) { event.preventDefault(); closePanel() }
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
-    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
+    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && (row?.is_leaf === false || row?.kind_slug === 'epic') ? row : null); break
     case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
     case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
@@ -1837,7 +1838,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="ticketsHeader"

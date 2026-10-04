@@ -5,14 +5,16 @@ import { nextTick, ref } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 
 // The children of an epic (tickets) or a ticket (tasks), with progress and an
 // inline add row that stays open for the next title.
-const props = defineProps<{ children: ListItem[]; loading: boolean; editable: boolean; childLabel: 'ticket' | 'task'; progress: { done: number; total: number; percent: number }; add: (title: string) => Promise<ListItem | null> }>()
+const props = defineProps<{ children: ListItem[]; loading: boolean; editable: boolean; childLabel: 'work item' | 'ticket' | 'task'; progress: { done: number; total: number; percent: number } | null; progressError?: string; add: (title: string) => Promise<ListItem | null> }>()
 const emit = defineEmits<{ open: [key: string] }>()
 const adding = ref(false)
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const draft = ref('')
 const busy = ref(false)
 const input = ref<HTMLInputElement>()
@@ -27,18 +29,27 @@ async function submit() {
   await nextTick(); input.value?.focus()
 }
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Enter') { event.preventDefault(); void submit() }
-  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); adding.value = false; draft.value = '' }
+  if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); void submit() }
+  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (event.target instanceof HTMLElement && event.target.matches('input')) event.target.blur(); else { adding.value = false; draft.value = '' } }
 }
 defineExpose({ startAdd })
 </script>
 
 <template>
-  <section class="children" :aria-label="`${childLabel === 'ticket' ? 'Tickets' : 'Tasks'} in this ${childLabel === 'ticket' ? 'epic' : 'ticket'}`">
+  <section class="children" :aria-label="childLabel === 'work item' ? 'Child work items' : `${childLabel === 'ticket' ? 'Tickets' : 'Tasks'} in this ${childLabel === 'ticket' ? 'epic' : 'ticket'}`">
     <header class="children-head">
-      <h3 class="eyebrow">{{ childLabel === 'ticket' ? 'Tickets' : 'Tasks' }} <span class="count">{{ children.length }}</span></h3>
-      <span v-if="progress.total" class="progress" :data-tip="`${progress.done} of ${progress.total} done`"><span class="bar"><i :style="{ width: `${progress.percent}%` }" /></span><span class="mono pct">{{ progress.done }}/{{ progress.total }}</span></span>
+      <h3 class="eyebrow">{{ childLabel === 'work item' ? 'Children' : childLabel === 'ticket' ? 'Tickets' : 'Tasks' }} <span class="count">{{ children.length }}</span></h3>
+      <span v-if="progress?.total" class="progress" :data-tip="`${progress.done} of ${progress.total} leaves done`"><span class="bar"><i :style="{ width: `${progress.percent}%` }" /></span><span class="mono pct">{{ progress.done }}/{{ progress.total }}</span></span>
+      <span v-else-if="!progress" class="progress" role="status" :aria-label="progressError || 'Loading leaf progress…'"><span class="progress-status" :data-tip="progressError || 'Loading leaf progress…'">{{ progressError ? 'Leaf progress unavailable' : 'Loading leaf progress…' }}</span></span>
     </header>
+    <div v-if="editable" class="add-row">
+      <label v-if="adding" class="add-field">
+        <AppIcon name="plus" :size="13" />
+        <input ref="input" v-model="draft" class="add-input" :placeholder="`New ${childLabel} title`" :aria-label="`New ${childLabel} title`" :disabled="busy" @keydown="keydown" @blur="!draft && (adding = false)" />
+        <KeyCap k="mod" /><KeyCap k="enter" />
+      </label>
+      <button v-else type="button" class="add-btn" @click="startAdd"><AppIcon name="plus" :size="13" />Add {{ childLabel }}</button>
+    </div>
     <ul v-if="children.length" class="child-list">
       <li v-for="child in children" :key="child.id">
         <button type="button" class="child-row" :class="{ closed: statusMeta(child.state).closed }" @click="emit('open', child.key)">
@@ -51,14 +62,7 @@ defineExpose({ startAdd })
     </ul>
     <div v-else-if="loading" class="child-skeleton" aria-hidden="true"><span class="skeleton" /><span class="skeleton short" /></div>
     <p v-else class="none">No {{ childLabel }}s yet.</p>
-    <div v-if="editable" class="add-row">
-      <label v-if="adding" class="add-field">
-        <AppIcon name="plus" :size="13" />
-        <input ref="input" v-model="draft" class="add-input" :placeholder="`${childLabel === 'ticket' ? 'Ticket' : 'Task'} title, Enter to add`" :aria-label="`New ${childLabel} title`" :disabled="busy" @keydown="keydown" @blur="!draft && (adding = false)" />
-        <kbd class="keycap"><AppIcon name="enter" /></kbd>
-      </label>
-      <button v-else type="button" class="add-btn" @click="startAdd"><AppIcon name="plus" :size="13" />Add {{ childLabel }}</button>
-    </div>
+
   </section>
 </template>
 
@@ -67,6 +71,7 @@ defineExpose({ startAdd })
 .children-head .eyebrow { margin: 0; }
 .count { margin-left: 4px; color: var(--ink-2); letter-spacing: 0; }
 .progress { display: inline-flex; align-items: center; gap: 8px; width: 160px; }
+.progress-status { font-size: 11px; white-space: nowrap; color: var(--ink-2); }
 .progress .bar { flex: 1; height: 5px; }
 .pct { font-size: 11px; color: var(--ink-2); }
 .child-list { margin: 0; padding: 4px; list-style: none; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }

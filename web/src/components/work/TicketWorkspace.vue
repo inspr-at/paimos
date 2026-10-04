@@ -186,7 +186,7 @@ const queuePoller = usePoller(() => queue.load(props.project.id), 20_000)
 watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true })
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
-const canQueue = computed(() => !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
+const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
 const canRelease = computed(() => editable.value && !!props.item && can('releases.write', props.project.id))
 const releaseView = computed(() => props.nativeReleases?.get(props.item?.id ?? ''))
 const journeys = useJourney()
@@ -600,8 +600,8 @@ defineExpose({
   >
     <TicketHeaderBar
       ref="header"
-      :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :can-repeat="mayRepeat" :can-edit-recurrence="mayEditRecurrence" :recurrence-label="originRecurrence && item?.recurrence && !item.recurrence.retired ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :level-name="item?.level_name" :level-icon="item?.level_icon" :position="position" :mode="mode" :can-write="editable"
+      :can-delete="deletable" :can-move="movable && ['work','ticket'].includes(item?.kind_slug ?? '')" :can-repeat="mayRepeat" :can-edit-recurrence="mayEditRecurrence" :recurrence-label="originRecurrence && item?.recurrence && !item.recurrence.retired ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
       :can-work-actions="item?.kind_slug === 'work' && editable && humanCheckPerson"
        :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
@@ -652,7 +652,7 @@ defineExpose({
             <button
               type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'status'" :aria-labelledby="`${uid}-status ${uid}-status-value`"
               @click="openEditMenu('status', $event)" @keydown="editMenuKeys('status', $event)"
-            ><StatusIcon :state="draft.state" /><span :id="`${uid}-status-value`" class="pick-value">{{ statusMeta(draft.state).label }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+            ><StatusIcon :state="draft.state" /><span :id="`${uid}-status-value`" class="pick-value">{{ item.status_derived ? (item.work_children_count ? `Follows its ${item.work_children_count} children` : 'Follows its children') : statusMeta(draft.state).label }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
           </div>
           <div class="edit-prop"><span :id="`${uid}-priority`" class="prop-label">Priority</span>
             <button
@@ -673,7 +673,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-ac"><h3 id="edit-ac" class="eyebrow">Acceptance criteria</h3>
           <MarkdownEditor v-model="draft.acceptance" label="Acceptance criteria" bare :split="mode === 'full'" :min-rows="4" :attachment-id="attachmentId" placeholder="- [ ] What must be true when this is done" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <section v-if="['ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
+        <section v-if="['work','ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
@@ -695,7 +695,7 @@ defineExpose({
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
             <div class="q-card-acts">
               <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queue.firstShared(project.id)?.ticket_id === item.id" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
-              <button type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
+              <button v-if="item.is_leaf !== false" type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
               <button type="button" class="btn sm ghost" :disabled="!canQueue || queue.busy" @click="queue.remove(project.id, item.id).catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="close" :size="13" />Remove</button>
               <button type="button" class="btn sm ghost" @click="queueAnchor = $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="13" />Open the queue</button>
             </div>
@@ -733,12 +733,12 @@ defineExpose({
             <TicketBenefits v-if="['ticket', 'work'].includes(item.kind_slug)" class="ws-benefits" :fields="item.fields" :parent="item.estimate?.is_parent" :node-id="item.id" @generated="ticket.refresh()" :done="completedTicketState(item.state, rowStore.kindSchema(item.kind_id))" :editable="editable" @edit="startEdit('benefit')" />
           </div>
 
-          <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
-          <TicketOutcomes v-if="item.kind_slug === 'ticket'" class="ws-block" :node-id="item.id" />
-          <TicketReviews v-if="item.kind_slug === 'ticket' || item.kind_slug === 'task'" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
+          <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
+          <TicketOutcomes v-if="['work', 'ticket'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" />
+          <TicketReviews v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
-            :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
+            :child-label="item.kind_slug === 'work' ? 'work item' : item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"
             @open="openLinked"
           />
           <!-- Relations, then activity: both wait for the relations, so neither jumps. -->
@@ -798,14 +798,14 @@ defineExpose({
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <AssigneeMenu v-if="menu?.kind === 'assignee' && item" :row="item" :project-id="project.id" :anchor="menu.anchor" :people="assigneeOptions" :can-assign="editable" @choose="chooseAssignee" @changed="emit('assigned')" @close="closeMenu" />
     <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" @close="restore => { const anchor = queueAnchor; queueAnchor = null; if (restore) anchor?.focus() }" @open="key => { queueAnchor = null; openLinked(key) }" @filter="() => { queueAnchor = null; void routerToQueued() }" />
-    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :derived="item.status_derived" :children-count="item.work_children_count" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <RelationPicker
       v-if="linkAnchor && item" :anchor="linkAnchor" :subject="item.key" :self-id="item.id" :project-key="project.routeKey"
       :related="ticket.related.value" :link="ticket.link" @close="closeLink"
     />
-    <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="item.parent?.kind_slug === 'epic' ? item.parent.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
+    <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="['work','epic'].includes(item.parent?.kind_slug ?? '') ? item.parent!.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
     <ReleasePicker v-if="menu?.kind === 'release' && item" :anchor="menu.anchor" :project-id="project.id" :subject="item.key" @choose="chooseRelease" @close="closeMenu" />
   </component>
 </template>

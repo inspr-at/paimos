@@ -14,7 +14,7 @@ import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
-export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check'
+export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
 export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
@@ -36,6 +36,8 @@ export interface ListFilters {
   cost: string[]
   release: string[]
   human_check: string[]
+  shape: string[]
+  depth: string[]
   date: DateFilter | null
   showClosed: boolean
   hideStates?: HideState[]
@@ -53,10 +55,12 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'status', title: 'Status', facet: 'state', primary: true, none: '' },
   { key: 'priority', title: 'Priority', facet: 'priority', primary: true, none: 'No priority' },
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
-  { key: 'type', title: 'Type', facet: 'kind', primary: true, none: '' },
+  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: true, none: '' },
+  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '' },
+  { key: 'type', title: 'Legacy type', facet: 'kind', primary: true, none: '' },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
   { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
-  { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
+  { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native journey membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
@@ -133,6 +137,8 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
       ? { statusScope: query.status_scope as ListFilters['statusScope'] } : {}),
     priority: list(query.priority),
     assignee: list(query.assignee),
+    shape: list(query.shape).filter(v => ['parent', 'leaf'].includes(bare(v))),
+    depth: list(query.depth).filter(v => /^[1-9][0-9]{0,4}$/.test(bare(v)) && Number(bare(v)) <= 50000),
     type: list(query.type).filter(kind => WORK_KINDS.includes(bare(kind))),
     tag: list(query.tag),
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
@@ -174,7 +180,7 @@ export function hasFilters(filters: ListFilters): boolean {
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
-  return { q: '', status: [], statusScope: undefined, hideRestore: undefined, priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], date: null }
+  return { q: '', status: [], statusScope: undefined, hideRestore: undefined, priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], shape: [], depth: [], date: null }
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
@@ -298,7 +304,8 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
   const bounds = dateBounds(filters.date, options.now)
   return {
     within,
-    kind: omit === 'type' ? WORK_KINDS : kindsFor(filters.type),
+    shape: take('shape'), depth: take('depth'),
+    kind: omit === 'type' ? WORK_KINDS : [...kindsFor(filters.type), ...excluded(filters.type).map(kind => `!${kind}`)],
     state: filters.statusScope && omit !== 'status' ? [] : [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
     ...(status.length && filters.statusScope === 'canonical' ? { work_state: status } : {}),
     ...(status.length && filters.statusScope && filters.statusScope !== 'canonical'
@@ -375,15 +382,17 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
     return [...PRIORITIES.map(p => ({ value: p.value as string, label: p.label as string })), { value: 'none', label: 'No priority' }]
       .map(option => ({ ...option, count: counts[option.value] ?? 0 }))
   }
+  if (dimension === 'shape') return [{ value: 'parent', label: 'Parents', count: counts.parent ?? 0 }, { value: 'leaf', label: 'Leaves', count: counts.leaf ?? 0 }]
+  if (dimension === 'depth') return [...new Set([...Object.keys(counts), ...selected, '1', '2', '3'])].sort((a,b) => Number(a)-Number(b)).map(value => ({ value, label: `Level ${value}`, count: counts[value] ?? 0 }))
   if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.label, count: counts[kind.value] ?? 0 }))
   if (dimension === 'tag' || dimension === 'cost' || dimension === 'release') return labelOptions(dimension, counts, selectedValues, context.colors)
   if (dimension === 'epic') {
     const epics = context.epics ?? []
     const known = new Set(epics.map(e => e.id))
     return [
-      { value: 'none', label: 'No epic' },
+      { value: 'none', label: 'No parent' },
       ...epics.map(e => ({ value: e.id, label: e.title, hint: e.key })),
-      ...selected.filter(id => id !== 'none' && !known.has(id)).map(id => ({ value: id, label: names.get(id) ?? 'Epic', hint: '' })),
+      ...selected.filter(id => id !== 'none' && !known.has(id)).map(id => ({ value: id, label: names.get(id) ?? 'Parent', hint: '' })),
     ]
   }
   const ids = [...new Set([...Object.keys(counts), ...selected])].filter(id => id !== 'none')
@@ -400,9 +409,11 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
     case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
     case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
+    case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'
+    case 'depth': return `Level ${value}`
     case 'type': return kindLabel(value)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
-    case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'An epic'
+    case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'A parent'
     default: return value
   }
 }
@@ -477,7 +488,7 @@ export function epicOf(row: ListItem, byId: Map<string, ListItem>): EpicRef | nu
   if (row.epic !== undefined) return row.epic
   let parent = row.parent
   for (let depth = 0; parent && depth < 8; depth++) {
-    if (parent.kind_slug === 'epic') return { id: parent.id, key: parent.key, title: parent.title }
+    if (['work','epic'].includes(parent.kind_slug)) return { id: parent.id, key: parent.key, title: parent.title }
     const loaded = byId.get(parent.id)
     parent = loaded?.parent ?? null
   }
@@ -530,7 +541,7 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
   if (group === 'epic') {
     const byId = new Map(rows.map(row => [row.id, row]))
     const groups = new Map<string, RowGroup>()
-    const none: RowGroup = { key: 'none', label: 'No epic', rows: [], total: 0 }
+    const none: RowGroup = { key: 'none', label: 'No parent', rows: [], total: 0 }
     for (const row of rows) {
       const placed = layout(row)
       const epic = epicOf(placed, byId)

@@ -20,6 +20,7 @@ const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
   queue_stale?: boolean
+  is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string; work_children_count?: number; status_derived?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
   recurrence?: import('../src/lib/api').NodeRecurrence
@@ -168,7 +169,9 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
-    queue_stale: node.queue_stale, id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
+    queue_stale: node.queue_stale,
+    ...(node.is_leaf === undefined ? {} : { is_leaf: node.is_leaf, depth: node.depth, level_name: node.level_name, level_icon: node.level_icon, work_children_count: node.work_children_count, status_derived: node.status_derived }),
+    id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
     kind_slug: node.kind_slug, kind_label: node.kind_slug[0].toUpperCase() + node.kind_slug.slice(1),
     priority: typeof node.fields.priority === 'string' ? node.fields.priority : null, assignee,
@@ -280,7 +283,7 @@ function shownAssignee(data: Fixtures, node: MockNode): string {
 }
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
-  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
+  if (!['work', 'ticket'].includes(node.kind_slug) || completedTicketState(node.state) || !completedTicketState(nextState)) return null
   const issues = benefitIssues(fields)
   if (!issues.length) return null
   return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }
@@ -587,6 +590,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       // ids (AEON-326): only those nodes, every other filter still applied.
       const onlyIds = listParam(query, 'ids')
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+        .filter(n => passes(listParam(query, 'shape'), v => v === (n.is_leaf === false ? 'parent' : 'leaf')))
+        .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
