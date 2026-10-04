@@ -30,6 +30,8 @@ func TestPreferencesArePrivateSmallObjectsPerPerson(t *testing.T) {
 	must(db.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', 'carol') RETURNING id::text`, otherTenantID).Scan(&carolID))
 
 	mux := http.NewServeMux()
+	var baseline int
+	must(db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&baseline))
 	New(db.App).Mount(mux)
 	request := func(tenantID, principalID, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -92,7 +94,7 @@ func TestPreferencesArePrivateSmallObjectsPerPerson(t *testing.T) {
 	// No events for preferences.
 	var events int
 	must(db.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&events))
-	if events != 0 {
-		t.Fatalf("preferences appended %d events", events)
+	if events != baseline {
+		t.Fatalf("preferences appended %d events", events-baseline)
 	}
 }

@@ -95,6 +95,11 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 				stage = "blocked"
 				reason := strings.ReplaceAll(d.Reason, "_", " ")
 				switch d.Reason {
+				case PairingSyncFailed:
+					reason = "pairing synchronization failed"
+					if detail := SafePairingDetail(d.ReasonDetail); detail != "" {
+						reason += ": " + detail
+					}
 				case "login_required":
 					if detail := SafeProbeDetail(d.Reason, d.ReasonDetail); detail != "" {
 						reason = detail

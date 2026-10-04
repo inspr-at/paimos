@@ -15,14 +15,22 @@ const (
 	ProbeIdentityMissing      = "the approved account identity is missing"
 	ProbeEmailMissing         = "the sign-in answer did not identify the account"
 	ProbeSignedOut            = "the approved account is signed out in the daemon's view"
+	ProbeDifferentIdentity    = "the signed-in account differs from the approved identity"
+	ProbeAPIKeyLogin          = "the sign-in command reported an API key instead of the approved subscription"
 	ProbeExitFailed           = "the sign-in command exited unsuccessfully"
 )
 
 const maxProbeDetail = 160
 
 func SafeProbeDetail(reason, detail string) string {
-	if reason == "login_required" && detail == ProbeSignedOut {
-		return detail
+	if reason == PairingSyncFailed {
+		return SafePairingDetail(detail)
+	}
+	if reason == "login_required" {
+		switch detail {
+		case ProbeSignedOut, ProbeDifferentIdentity, ProbeAPIKeyLogin:
+			return detail
+		}
 	}
 	if reason != "probe_failed" || len(detail) > maxProbeDetail {
 		return ""

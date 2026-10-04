@@ -197,7 +197,7 @@ async function drop(w: AllowanceWindow) {
       <div class="fact">
         <dt>Name</dt>
         <dd v-if="!renaming" class="name-line">
-          <span class="nm" :title="name">{{ name }}</span>
+          <span class="nm">{{ name }}</span>
           <button v-if="mayManage" ref="nameButton" type="button" class="icon-btn flat sm" :aria-label="`Rename ${name}`" data-tip="Rename" @click="startRename()"><AppIcon name="edit" :size="14" /></button>
         </dd>
         <dd v-else>
@@ -312,8 +312,9 @@ b.num { font-weight: 650; }
 .sep, .src, .by, .quiet { color: var(--ink-2); }
 .src { font-size: 12.5px; }
 .window.frozen dd { color: var(--ink-2); }
-.name-line { display: flex; align-items: center; gap: 4px; min-height: 28px; padding-top: 0; }
-.nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.name-line { display: flex; align-items: flex-start; gap: 4px; min-height: 28px; padding-top: 0; }
+.name-line .icon-btn { flex: none; }
+.nm { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
 .rename { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .rename .field { flex: 1 1 200px; max-width: 320px; height: 30px; }
 .readings { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; padding: 0; list-style: none; }
