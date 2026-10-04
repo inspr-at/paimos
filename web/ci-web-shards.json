@@ -20,6 +20,7 @@
     }
   },
   "integrationNotes": [
+    "AEON-676: OPS-257 runner/workflow and coverage guard integrated from dc61efd76ad7263749c3b70a515aad5e40df60ba. The clipped-names-and-preferences group gates clip-tip, aeon-632b-clip, key-trim and model-prefs once, with no clip-tip exclusion. The touch layout fix passed six variants x20 locally; hosted execution of this integrated revision still needs coordinator CI. Weights for these 247 tests remain scheduling estimates: clip-tip uses the complete local serial run plus a 20 percent margin; the other three use native test counts. Hosted runtimes remain unmeasured.",
     "OPS: group remaining-ui is ungated (gate:false). These 164 specs were never part of the CI gate and have no measured timing; the gate keeps today's measured coverage so the merge queue gets faster, not wider. Run them with --all (ci:web:shard -- --all i/N); a follow-up ticket measures them and decides whether they gate.",
     "The old workflow discovers no full-suite step: it explicitly selects 48 UI specs (37 in web). The manifest covers all 213 UI specs once; 165 have no measured CI step duration.",
     "Remove the replaced browser invocations, including overlaps in footer/status/e2e jobs, when wiring the full UI shards. Keep their other checks and collect evidence from the shards. Otherwise those old jobs still duplicate manifest coverage.",
@@ -1190,6 +1191,58 @@
       ]
     },
     {
+      "id": "clipped-names-and-preferences",
+      "gate": true,
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/aeon-632b-clip.spec.ts",
+          "weightSeconds": 86.560976,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 39
+        },
+        {
+          "file": "tests/clip-tip.spec.ts",
+          "weightSeconds": 199,
+          "weightSource": "local-serial-runtime-estimate",
+          "listedTests": 159,
+          "timingEstimate": {
+            "command": "npm test -- tests/clip-tip.spec.ts --workers=1 --retries=0 --reporter=line,json",
+            "platform": "darwin",
+            "workers": 1,
+            "passed": 159,
+            "failed": 0,
+            "skipped": 0,
+            "flaky": 0,
+            "durationMs": 165459.95,
+            "marginPercent": 20,
+            "reportSha256": "5ea979ac66d2b4576cff1eb8a47d1c5d954a89d399325808b105ee3fad20496f",
+            "note": "Full local one-worker runtime plus 20 percent scheduling margin; conservative for the group with two workers. Scheduling estimate only; hosted runtime remains unmeasured."
+          }
+        },
+        {
+          "file": "tests/key-trim.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/model-prefs.spec.ts",
+          "weightSeconds": 93.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 42
+        }
+      ]
+    },
+    {
       "id": "remaining-ui",
       "gate": false,
       "config": "playwright.ui.config.ts",
@@ -1430,6 +1483,12 @@
           "listedTests": 16
         },
         {
+          "file": "tests/decision-text.spec.ts",
+          "weightSeconds": 79.902439,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 36
+        },
+        {
           "file": "tests/delivery-guarantee.spec.ts",
           "weightSeconds": 17.756098,
           "weightSource": "unmeasured-test-rate",
@@ -1536,6 +1595,12 @@
           "weightSeconds": 46.609756,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 21
+        },
+        {
+          "file": "tests/headings.spec.ts",
+          "weightSeconds": 199.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 90
         },
         {
           "file": "tests/hours-edit.spec.ts",
@@ -2235,5 +2300,6 @@
     "test:unit": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
     "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
     "e2e": "node ../scripts/playwright-safe.mjs"
-  }
+  },
+  "exclusions": []
 }
