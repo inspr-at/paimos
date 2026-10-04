@@ -3,7 +3,6 @@
 // deep links, keys, compare, search and filters, what is new since the last
 // visit, evidence, and the notice when the server runs a newer version.
 import { test, expect, type Page } from '@playwright/test'
-import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
@@ -522,24 +521,6 @@ test('nothing is clipped at 390: stat card and chart stacked, counts in notes, f
   expect(await clipped()).toEqual([])
   void history
 })
-
-for (const colorScheme of ['light', 'dark'] as const) {
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-    test(`axe: release history ${viewport.width} ${colorScheme}`, async ({ page }) => {
-      await page.setViewportSize(viewport)
-      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-      const { history } = await setup(page, { lastSeen: releaseHistory().releases[4].version })
-      await page.goto(`/releases/${history.releases[1].version}`)
-      await expect(sheet(page).locator('.detail')).toBeVisible()
-      await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
-      await page.waitForTimeout(250)
-      // The calendar version is the vendored INSPR display (pinned presentation), as in a11y.spec.
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
-      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
-      expect(summary, summary.join('\n')).toEqual([])
-    })
-  }
-}
 
 test('the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })

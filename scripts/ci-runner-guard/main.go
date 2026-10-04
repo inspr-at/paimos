@@ -433,7 +433,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run", "release-list-comparison"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
@@ -454,7 +454,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		switch id {
 		case "go-test":
 			condition += " && needs.runner-route.result == 'success'"
-		case "web-shard", "release-list-comparison":
+		case "web-shard":
 			condition += " && needs.web-setup.result == 'success'"
 		}
 		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") || !hasNeed(job["needs"], "tree-reuse") {

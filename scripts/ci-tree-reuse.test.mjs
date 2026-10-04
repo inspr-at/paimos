@@ -42,6 +42,23 @@ test('found: an exact-SHA successful merge-group full suite reuses with source n
   assert(!f.calls.some(p => /git\/|compare\/|pulls\/|statuses\//.test(p)));
 });
 
+test('the full suite reuses without the retired comparison job and still requires every surviving job', async () => {
+  const f = fixture();
+  // Do not inherit the verifier's obsolete requirement through the fixture.
+  f.jobs.jobs = f.jobs.jobs.filter(j => j.name !== 'release-list-comparison');
+  f.jobs.total_count = f.jobs.jobs.length;
+  assert.deepEqual(await verifyRun(repository, 123, f.api, sha), { run: 123, attempt: 1, sha });
+  assert.deepEqual(await check(f), { reuse: 'merge_group', run: 123, reason: 'reused merge_group run 123' });
+
+  const fullJobs = f.jobs.jobs;
+  for (const { name } of fullJobs.filter(j => !['cache-prime', 'tree-reuse'].includes(j.name))) {
+    f.jobs.jobs = fullJobs.filter(j => j.name !== name);
+    f.jobs.total_count = f.jobs.jobs.length;
+    await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing or failed suite job/, name);
+    assert.equal((await check(f)).reuse, 'none', name);
+  }
+});
+
 test('not found: a direct main push runs the full suite', async () => {
   const f = fixture(); f.listed.workflow_runs = []; f.listed.total_count = 0;
   assert.equal((await check(f)).reuse, 'none');
