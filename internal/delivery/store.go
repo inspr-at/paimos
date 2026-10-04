@@ -378,7 +378,9 @@ func (w *write) rank(c Container, slot Slot, exclude string, items bool) (string
 		if items {
 			query += ` AND k.slug IN ('epic','ticket','task')`
 		} else {
-			query += ` AND k.slug='release'`
+			// A caller-selected anchor must still be Upcoming at commit. Terminal
+			// ranks remain occupied in the separate physical-neighbour seeks.
+			query += ` AND k.slug='release' AND p.state IN ('planned','building','frozen')`
 		}
 		args := []any{c.TenantID, c.ProjectID, id}
 		if items {

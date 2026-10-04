@@ -9,11 +9,12 @@ const a=rid(1),b=rid(2),frozen=rid(3),work=rid(101),peer=rid(102),nextPeer=rid(1
 const long='Langfristige Verbesserungen für nachvollziehbare und gemeinsame Releaseplanung'
 const release=(id:string,rank:string,title:string,state:PlanningRelease['state']='planned'):PlanningRelease=>({release_id:id,project_id:'p-pharos',rank,title,display_name:title,state,visibility:'internal',revision:1,rollup:{units:2,completed:0,open_hours:3},build_summary:{budget_outlook:'unknown'}})
 const item=(id:string,key:string,releaseId:string|undefined,rank:string|undefined):PlanningItem=>({item_id:id,project_id:'p-pharos',release_id:releaseId,rank,key,title:`${long} · ${key}`,kind:'ticket',state:'backlog',revision:rank?1:0,node_revision:'2026-10-03T12:00:00Z',created_at:'2026-10-03T12:00:00Z',estimated_hours:2,expedite:false,due_on:null})
-async function setup(page:Page,options:{theme?:string;agent?:boolean;refuse?:boolean;rows?:number}={}) {
+async function setup(page:Page,options:{theme?:string;agent?:boolean;refuse?:boolean;rows?:number;terminal?:boolean}={}) {
  const data=fixtures();data.preferences.theme={choice:options.theme??'light'};data.preferences['header-graph']={enabled:false}
  await mockWork(page,data,{principalKind:options.agent?'agent':'person'})
  const errors=watchErrors(page),writes:{path:string;body:Record<string,unknown>}[]=[],undos:number[]=[]
  const releases=[release(a,'B','Current work'),release(b,'D',long),release(frozen,'F','Frozen work','frozen')]
+ if(options.terminal)releases.push(release(rid(4),'H','Delivered work','released'))
  const items=[item(work,'PHAROS-101',a,'V'),item(peer,'PHAROS-102',b,'V'),item(nextPeer,'PHAROS-103',b,'X'),item(rid(104),'PHAROS-104',undefined,undefined)]
  if(options.rows)items.push(...Array.from({length:options.rows},(_,i)=>item(rid(200+i),`PHAROS-${200+i}`,b,`Y${String(i).padStart(3,'1')}V`)))
  let receipt=700,previous:PlanningItem|undefined
@@ -27,7 +28,7 @@ async function setup(page:Page,options:{theme?:string;agent?:boolean;refuse?:boo
   }
   const offset=Number(query.get('cursor')??0),limit=Number(query.get('limit')??200)
   const count=(list:PlanningItem[])=>({matched_count:list.length,shown_count:list.length,hidden_count:0,hidden_finished:0,hidden_exit:0,incomplete:false})
-  if(path.endsWith('/overview'))return route.fulfill({json:{active:releases,released:{items:[]},backlog:{ranked:items.filter(i=>!i.release_id&&i.rank).length,tail:1},abandoned:0,counts_incomplete:false,matches:count(items)}})
+  if(path.endsWith('/overview'))return route.fulfill({json:{active:releases.filter(r=>r.state!=='released'),released:{items:releases.filter(r=>r.state==='released')},backlog:{ranked:items.filter(i=>!i.release_id&&i.rank).length,tail:1},abandoned:0,counts_incomplete:false,matches:count(items)}})
   if(path.endsWith('/releases'))return route.fulfill({json:{items:releases.filter(r=>!query.get('q')||r.title.includes(query.get('q')!))}})
   if(path.endsWith('/items')||path.endsWith('/backlog')){
    const source=path.endsWith('/items')?path.split('/').at(-2):undefined
@@ -136,4 +137,30 @@ test('position choice pages remain bounded and explicit before saving',async({pa
  await row(page,work).getByRole('button',{name:'Move PHAROS-101',exact:true}).click();const sheet=page.getByRole('dialog',{name:'Release for PHAROS-101'})
  await sheet.getByLabel('Move destination',{exact:true}).selectOption(b);await sheet.getByLabel('Move position',{exact:true}).selectOption('after');await expect(sheet.getByLabel('Move anchor',{exact:true}).locator('option')).toHaveCount(201)
  await sheet.getByLabel('Move anchor',{exact:true}).selectOption(peer);await sheet.getByRole('button',{name:'More work',exact:true}).click();await expect(sheet.getByLabel('Move anchor',{exact:true}).locator('option')).toHaveCount(9);await expect(sheet.getByLabel('Move anchor',{exact:true})).toHaveValue(peer);await expect(sheet.locator('.move-body')).toContainText('After PHAROS-102');await sheet.getByLabel('Move anchor',{exact:true}).selectOption(rid(404));await sheet.getByRole('button',{name:/Save move/}).click();await expect.poll(()=>world.writes.length).toBe(1);expect(world.writes[0]!.body.after_id).toBe(rid(404));expect(world.errors).toEqual([])
+})
+
+for(const width of [390,1024,1440])for(const theme of ['light','dark'])test(`terminal release hover refuses without moving controls ${width} ${theme}`,async({page})=>{
+ await page.setViewportSize({width,height:1000});const world=await setup(page,{terminal:true,theme})
+ const source=block(page,b).getByRole('button',{name:`Reorder ${long}`,exact:true}),terminal=block(page,rid(4)).locator('.release-row')
+ await terminal.scrollIntoViewIfNeeded();await expect(source).toBeInViewport();await expect(terminal).toBeInViewport()
+ const sourceBox=await source.boundingBox(),terminalBox=await terminal.boundingBox();expect(sourceBox).toBeTruthy();expect(terminalBox).toBeTruthy()
+ const x=sourceBox!.x+sourceBox!.width/2,y=sourceBox!.y+sourceBox!.height/2,tx=terminalBox!.x+120,ty=terminalBox!.y+terminalBox!.height/2
+ expect(await page.evaluate(({tx,ty})=>document.elementFromPoint(tx,ty)?.closest<HTMLElement>('[data-planning-block]')?.dataset.planningBlock,{tx,ty})).toBe(rid(4))
+ const feedback=page.locator('.move-feedback')
+ await expectStableControls({controls:{source,terminal,expand:page.getByRole('button',{name:'Expand all',exact:true})},interactions:[{name:width===390?'touch terminal target':'mouse terminal target',run:async()=>{
+  if(width===390){
+   await page.clock.install();await page.clock.pauseAt(await page.evaluate(()=>Date.now()+1000))
+   await page.evaluate(()=>{HTMLElement.prototype.setPointerCapture=function(){}})
+   await source.dispatchEvent('pointerdown',{pointerId:19,pointerType:'touch',button:0,clientX:x,clientY:y,bubbles:true})
+   await page.clock.runFor(500);await expect(page.locator('.move-ghost')).toBeVisible()
+   await source.dispatchEvent('pointermove',{pointerId:19,pointerType:'touch',button:0,clientX:tx,clientY:ty,bubbles:true})
+  }else{
+   await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+12,y+12);await page.mouse.move(tx,ty)
+  }
+  await expect(feedback).toHaveText('Only upcoming releases can be reordered.')
+  await expect(block(page,rid(4))).toHaveClass(/move-refused/);await expect(page.locator('.move-line')).toHaveCount(0)
+  mkdirSync('test-results/aeon-596-p6c-fix2',{recursive:true});await page.screenshot({path:`test-results/aeon-596-p6c-fix2/terminal-refusal-${width}-${theme}.png`})
+  if(width===390){await source.dispatchEvent('pointerup',{pointerId:19,pointerType:'touch',button:0,clientX:tx,clientY:ty,bubbles:true});await page.clock.resume()}else await page.mouse.up()
+ }}]})
+ await expect(page.locator('.move-ghost')).toHaveCount(0);await expect(feedback).toHaveText('Only upcoming releases can be reordered.');expect(world.writes).toEqual([]);expect(world.errors).toEqual([])
 })

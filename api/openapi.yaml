@@ -288,7 +288,7 @@ paths:
     post:
       security: [{session: []}, {agentKey: []}]
       operationId: rankProjectRelease
-      description: Person-only rank change; published rank must preserve sequence order.
+      description: Person-only rank change; published rank must preserve sequence order. Direct anchors must still be Upcoming (planned, building or frozen) in the final transaction; terminal ranks remain occupied physical neighbours.
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -387,7 +387,7 @@ paths:
     put:
       security: [{session: []}, {agentKey: []}]
       operationId: placeShipsIn
-      description: Final-transaction authorization, project/row/release CAS, no agent promotion, deadline/freeze checks and pending-total cap.
+      description: Final-transaction authorization, project/row/release CAS, no agent promotion, deadline/freeze checks and pending-total cap. Frozen releases refuse moves in, out or within them, including Undo.
       parameters:
         - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementRequest'}}}}

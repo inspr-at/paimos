@@ -25,6 +25,9 @@ type Conflict struct {
 
 func (e *Conflict) Error() string { return e.Message }
 
+// ConflictReason preserves the delivery refusal through the event Undo API.
+func (e *Conflict) ConflictReason() string { return e.Message }
+
 var (
 	ErrInvalidRank        = errors.New("rank must have 1–32 base-62 digits and no trailing zero")
 	ErrRankBounds         = errors.New("lower rank must precede upper rank")

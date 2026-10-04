@@ -408,6 +408,13 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		if err != nil {
 			return nil, nil, err
 		}
+		// Scope and order stay frozen for forward moves and Undo alike. Flag-only
+		// maintenance keeps its existing authority; lifecycle rollover has its
+		// own explicit path. Both containers come from the final fenced locks.
+		if (releases[old.ReleaseID].State == "frozen" || dest.State == "frozen") &&
+			(old.ReleaseID != next.ReleaseID || old.Rank != next.Rank) {
+			return nil, nil, ErrFrozen
+		}
 		if w.p.Kind == tenant.Agent {
 			if old.Expedite != next.Expedite || !sameDate(old.DueOn, next.DueOn) {
 				return nil, nil, ErrPromotion

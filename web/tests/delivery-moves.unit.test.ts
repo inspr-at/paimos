@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
 import { APIError } from '../src/lib/api'
 import { moveAdvice, refusal, visibleGap, type MoveSubject } from '../src/lib/deliveryMoves'
@@ -7,6 +7,7 @@ import { usePlanningMoves } from '../src/lib/usePlanningMoves'
 import type { PlanningItem, PlanningRelease } from '../src/lib/deliveryPlanning'
 const item=(id:string,release='a',rank='V'):PlanningItem=>({item_id:id,project_id:'project',release_id:release,rank,revision:rank?1:0,node_revision:'node',title:id,key:id,kind:'ticket',state:'open',created_at:'',estimated_hours:null,expedite:false,due_on:null})
 const release=(id:string,rank:string):PlanningRelease=>({release_id:id,project_id:'project',rank,revision:1,visibility:'internal',state:'planned',title:id,rollup:{units:1,completed:0,open_hours:1},build_summary:{}})
+afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals()})
 describe('canonical placement',()=>{
  it('sends one anchor across hidden gaps and partial page boundaries',()=>{
   const rows=[item('a'),item('b'),item('moved')]
@@ -37,5 +38,50 @@ describe('canonical placement',()=>{
   rows.value=[{...item('work'),revision:2}];state.confirm({release:null,slot:{}});expect(state.feedback.value).toContain('changed');expect(commit).not.toHaveBeenCalled()
   identity.value='another-person';await nextTick();expect(state.draft.value).toBeNull();expect(state.feedback.value).toBe('')
   scope.stop();vi.unstubAllGlobals()
+ })
+})
+
+describe('pickup refusal before resolving a gap',()=>{
+ for(const terminalState of ['released','abandoned'] as const)it(`explains a ${terminalState} target without an exception`,()=>{
+  vi.useFakeTimers()
+  const source=release('source','B'),terminal={...release('terminal','D'),state:terminalState}
+  const box={x:0,y:100,top:100,bottom:140,width:300,height:40}
+  class FakeElement {
+   dataset:Record<string,string>
+   constructor(id:string){this.dataset={planningRelease:id,planningBlock:id}}
+   closest(selector:string){return ['[data-planning-release]','[data-planning-block]','[data-move-handle]'].includes(selector)?this:null}
+   querySelector(){return this}
+   getBoundingClientRect(){return box}
+  }
+  const sourceElement=new FakeElement('source'),terminalElement=new FakeElement('terminal')
+  vi.stubGlobal('Element',FakeElement);vi.stubGlobal('document',{elementFromPoint:()=>terminalElement})
+  vi.stubGlobal('requestAnimationFrame',vi.fn(()=>1));vi.stubGlobal('cancelAnimationFrame',vi.fn())
+  const scope=effectScope(),root={contains:()=>true,setPointerCapture:vi.fn()},commit=vi.fn()
+  const state=scope.run(()=>usePlanningMoves({root:ref(root as unknown as HTMLElement),identity:()=> 'owner',releases:()=>[source,terminal],items:()=>[],scroll:()=>null,agent:()=>false,allowed:()=>true,stale:()=>false,actions:{identity:()=> 'owner',begin:()=> 'owner',commit,failed:vi.fn(),receipt:vi.fn()}}))!
+  try{
+   state.down({button:0,pointerId:1,pointerType:'touch',clientX:10,clientY:120,target:sourceElement} as unknown as PointerEvent)
+   expect(()=>vi.advanceTimersByTime(500)).not.toThrow()
+   expect(state.feedback.value).toBe('Only upcoming releases can be reordered.');expect(state.refused.value).toBe(true);expect(state.highlight.value).toBe('terminal');expect(state.line.value).toBeNull();expect(commit).not.toHaveBeenCalled()
+  }finally{scope.stop()}
+ })
+ it('discards a stale item gap with feedback and no target',()=>{
+  vi.useFakeTimers()
+  const source=item('source'),anchor=item('anchor','b'),releases=[release('a','B'),release('b','D')]
+  class FakeElement {
+   constructor(public dataset:Record<string,string>){ }
+   closest(selector:string){return ['[data-planning-item]','[data-move-handle]'].includes(selector)?this:null}
+   getBoundingClientRect(){return {x:0,y:100,top:100,bottom:140,width:300,height:40}}
+  }
+  let resolving=false,reads=0
+  const sourceElement=new FakeElement({planningItem:'source'}),anchorElement=new FakeElement({planningItem:'anchor'})
+  vi.stubGlobal('Element',FakeElement);vi.stubGlobal('document',{elementFromPoint:()=>{resolving=true;return anchorElement}})
+  vi.stubGlobal('requestAnimationFrame',vi.fn(()=>1));vi.stubGlobal('cancelAnimationFrame',vi.fn())
+  const scope=effectScope(),root={contains:()=>true,setPointerCapture:vi.fn()}
+  const state=scope.run(()=>usePlanningMoves({root:ref(root as unknown as HTMLElement),identity:()=> 'owner',releases:()=>releases,items:()=>resolving&&++reads>1?[source]:[source,anchor],scroll:()=>null,agent:()=>false,allowed:()=>true,stale:()=>false}))!
+  try{
+   state.down({button:0,pointerId:1,pointerType:'touch',clientX:10,clientY:120,target:sourceElement} as unknown as PointerEvent)
+   expect(()=>vi.advanceTimersByTime(500)).not.toThrow()
+   expect(state.feedback.value).toBe('The anchor changed. Reopen the move.');expect(state.refused.value).toBe(true);expect(state.target.value).toBeNull();expect(state.line.value).toBeNull()
+  }finally{scope.stop()}
  })
 })

@@ -65,6 +65,10 @@ export function usePlanningMoves(options: { root: Ref<HTMLElement | undefined>; 
   }
   function confirm(to: MoveTarget) { if (draft.value) void save(draft.value, to, draftIdentity) }
   function cancel() { clearTimeout(timer); pending = null; drag.value = null; target.value = null; line.value = null; highlight.value = ''; refused.value = false; if(frame) cancelAnimationFrame(frame); frame = 0 }
+  function resolveGap(...args: Parameters<typeof visibleGap>) {
+    try { return visibleGap(...args) }
+    catch (e) { refused.value = true; feedback.value = refusal(e); return null }
+  }
   function resolve(x: number, y: number) {
     line.value = null; highlight.value = ''; target.value = null; refused.value = false
     const value = drag.value, el = document.elementFromPoint(x,y)
@@ -75,9 +79,15 @@ export function usePlanningMoves(options: { root: Ref<HTMLElement | undefined>; 
       const block = el.closest<HTMLElement>('[data-planning-block]'), id = block?.dataset.planningBlock
       dest = options.releases().find(r => r.release_id === id) ?? null
       if (!dest || dest.release_id === value.record.release_id) return
+      // Explain terminal/permission refusals before excluding those rows from
+      // the Upcoming gap population. A refused hover never becomes a target.
+      const reason = advice(value, { release: dest, slot: {} })
+      if (reason) { refused.value = true; feedback.value = reason; highlight.value = dest.release_id; return }
       box = (block!.querySelector('.release-row') ?? block!).getBoundingClientRect()
       const after = y > box.top + box.height/2
-      slot = visibleGap(options.releases().filter(r => !['released','abandoned'].includes(r.state)), dest.release_id, after, value.record.release_id)
+      const gap = resolveGap(options.releases().filter(r => !['released','abandoned'].includes(r.state)), dest.release_id, after, value.record.release_id)
+      if (!gap) return
+      slot = gap
       gapY = after ? box.bottom : box.top
     } else if (itemRow) {
       const anchor = rows().find(r => r.item_id === itemRow.dataset.planningItem)
@@ -86,7 +96,9 @@ export function usePlanningMoves(options: { root: Ref<HTMLElement | undefined>; 
       box = itemRow.getBoundingClientRect()
       if (anchor.rank) {
         const after = y > box.top + box.height/2
-        slot = visibleGap(rows().filter(r => r.release_id === anchor.release_id), anchor.item_id, after, value.record.item_id)
+        const gap = resolveGap(rows().filter(r => r.release_id === anchor.release_id), anchor.item_id, after, value.record.item_id)
+        if (!gap) return
+        slot = gap
         gapY = after ? box.bottom : box.top
       } // Tail-zone explicitly appends; tail rows are never anchors.
     } else {
