@@ -41,7 +41,7 @@ func TestWorkRoutingUpgradePreservesResidencyAndPins(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrate(t.Context(), d.App); err != nil {
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {

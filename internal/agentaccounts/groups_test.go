@@ -200,10 +200,16 @@ func TestMigratedWorkRetainsAndEditsAccountPins(t *testing.T) {
 			} else {
 				pin["group_id"] = group.ID
 			}
-			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/pins", encoded(t, pin), 204, nil)
-			// Reproduce the kind replacement while retaining the original pin and run.
+			// Seed a legacy pin through the real guard, then restore canonical work.
+			// The full pre-1215 upgrade is covered by the database migration test.
 			seed(t, admin, func(tx pgx.Tx) error {
-				_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE slug='work') WHERE id=$1`, ticket)
+				if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET slug='ticket' WHERE slug='work'`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_ticket_pins(tenant_id,ticket_id,harness,account_id,group_id) VALUES($1,$2,'codex',$3,$4)`, admin.TenantID, ticket, pin["account_id"], pin["group_id"]); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET slug='work' WHERE slug='ticket'`)
 				return err
 			})
 			seedUsed(t, admin, pinned.ID, 80)
@@ -291,7 +297,7 @@ func insertTreeRun(t *testing.T, person, agent tenant.Principal, profileID, titl
 			if err := tx.QueryRow(t.Context(), `
 				INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id)
 				SELECT $1::uuid, aeon_next_node_key($1::uuid, k.short_prefix), k.id, 'Ticket', $2::uuid
-				FROM node_kinds k WHERE k.slug = 'ticket'
+				FROM node_kinds k WHERE k.slug = 'work'
 				RETURNING id::text`, person.TenantID, project).Scan(&ticket); err != nil {
 				return err
 			}

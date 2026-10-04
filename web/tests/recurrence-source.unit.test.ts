@@ -105,7 +105,7 @@ ${block}
     vue: Vue,
     fixture: { item, props, ticket: { gone: Vue.ref(false), readOnly: Vue.ref(false) }, can: (_permission: string, projectId: string) => projectId === project.id ? manage.value : true, getRecurrence: get, useIdentityScope: identityScope, recurrenceName: Recurrences.recurrenceName, toast: vi.fn(), queueRouter: { push: vi.fn() } },
   })
-  return { item, state, get, manage }
+  return { item, props, state, get, manage }
 }
 
 it('editable metadata cannot create source-edit state without authoritative provenance', () => {
@@ -197,7 +197,7 @@ it('source permission revocation cancels an in-flight edit even after regrant', 
 })
 
 it('canonical leaves and parents can repeat, and identity changes close the bound snapshot', async () => {
-  const { item, state } = ticket({}, null)
+  const { item, props, state } = ticket({}, null)
   for (const is_leaf of [true, false]) {
     item.value = { ...item.value, kind_slug: 'work', is_leaf, work_children_count: is_leaf ? 0 : 2, fields: { description: 'Original' } }
     expect(state.mayRepeat.value).toBe(true)
@@ -208,6 +208,7 @@ it('canonical leaves and parents can repeat, and identity changes close the boun
     expect(state.repeatSource.value!.fields.description).toBe('Original')
   }
   item.value = { ...item.value, id: 'next-work' }
+  props.item = item.value
   await settle()
   expect(state.repeatSource.value).toBeNull()
 })
