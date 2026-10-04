@@ -245,5 +245,74 @@
       "runnerMinutes": null,
       "runnerMinutesNote": "Hosted scheduling/runtime savings still require measurement; removing planner setup/full history is not a measured timing claim."
     }
+  },
+  "mergeMain": {
+    "sourceMainSHA": "7ba4b51c621a7d53c9c4595cadda9a39180d9c7c",
+    "mergeCommit": "728388662b0a9d33980105ebf2bbf9c8617aadc1",
+    "reviewedBranchSHA": "1f4e4c6b5263f83b626164bb56a492a21afba174",
+    "goCases": 3526,
+    "newMainCasesClassifiedNightly": 33,
+    "browserCases": 3434,
+    "unitCases": 1560,
+    "retainedEssential": {
+      "go": 331,
+      "browser": 52,
+      "unit": 155
+    },
+    "checks": {
+      "sanitizedNodeTests": {
+        "passed": 157,
+        "failed": 0,
+        "files": [
+          "scripts/ci-pr-plan.test.mjs",
+          "scripts/ci-tree-reuse.test.mjs",
+          "scripts/ci-runner-route.test.mjs",
+          "scripts/test-tiers/test-tiers.test.mjs",
+          "scripts/check-migrations.test.mjs",
+          "web/scripts/ci-web-shard.test.mjs",
+          "web/scripts/aeon-676-ci.test.mjs"
+        ]
+      },
+      "sanitizedNativeSelectors": {
+        "passed": 2,
+        "failed": 0,
+        "file": "web/scripts/aeon-681-ci.test.mjs",
+        "browserLaunches": 0
+      },
+      "localGoRunnerGuard": {
+        "package": "./scripts/ci-runner-guard",
+        "passed": true
+      },
+      "migrationGuard": {
+        "passed": true,
+        "baseRef": "v261003095616.0.0",
+        "uniqueNumbers": 239
+      },
+      "automaticMergePreservation": {
+        "files": 40,
+        "identicalToMain": true
+      }
+    },
+    "remoteValidation": {
+      "attempted": true,
+      "started": false,
+      "exitCode": 3,
+      "reason": "Presence guard: Mailina is the console user",
+      "pendingGoPackages": [
+        "./scripts/releaseworkflow",
+        "./scripts/ci-go-shards",
+        "./scripts/test-tier-go",
+        "./internal/reportercontract",
+        "./internal/authz",
+        "./internal/db",
+        "./internal/chat",
+        "./internal/harness",
+        "./internal/inbox"
+      ],
+      "pendingRemoteNodeAndMigrationChecks": true,
+      "pendingOpenAPIChecks": true
+    },
+    "hostedCI": "Not run: no origin push authorized",
+    "noOriginPushOrDeploy": true
   }
 }

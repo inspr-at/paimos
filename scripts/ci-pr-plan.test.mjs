@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { classifyPaths, classifyPR, requireResults, validatePath } from './ci-pr-plan.mjs';
@@ -239,3 +239,43 @@ for (const id of ['release-check', 'e2e']) {
     }
   });
 }
+
+// Exercise the merged YAML commands with process stubs: no browser or build.
+// A new unclassified spec must still reach the spec-only command, while a
+// full-lane run uses tiers. Both branches must retain a child failure.
+test('merged web commands keep spec-only independent of tiers and propagate failures in both lanes', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const script = (id, name) => {
+    const job = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:|$(?![\\s\\S]))`, 'm').exec(workflow)[1];
+    const step = job.split(`      - name: ${name}\n`)[1].split(/\n      - /)[0];
+    return step.split('        run: |\n')[1].replace(/^          /gm, '')
+      .replaceAll('${{ matrix.shard }}', '1').replaceAll('${{ strategy.job-total }}', '2');
+  };
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-681-lanes-'))), bin = join(home, 'bin');
+  mkdirSync(bin);
+  for (const tool of ['npm', 'node']) {
+    const path = join(bin, tool);
+    writeFileSync(path, `#!/bin/bash\nprintf '%s\\n' '${tool} '"$*" >> "$CALL_LOG"\nexit "$CHILD_CODE"\n`);
+    chmodSync(path, 0o755);
+  }
+  for (const lane of ['spec-only', 'full']) {
+    for (const code of ['0', '7']) {
+      for (const [id, name] of [['web-setup', 'Web unit checks (once)'], ['web-shard', 'Run selected UI cases without retries']]) {
+        const log = join(home, `${id}-${lane}-${code}`);
+        writeFileSync(log, '');
+        const result = spawnSync('/bin/bash', ['-e', '-c', script(id, name)], { encoding: 'utf8', cwd: home,
+          env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, CI_LANE: lane, CHILD_CODE: code, CALL_LOG: log,
+            CI_CHANGED_SPECS: '["web/tests/new-unclassified.spec.ts"]' } });
+        assert.equal(result.status, Number(code), result.stderr);
+        const calls = readFileSync(log, 'utf8');
+        if (lane === 'spec-only') {
+          assert.doesNotMatch(calls, /test-tiers|aeon-681-ci/);
+          if (id === 'web-shard') assert.match(calls, /npm --prefix web run ci:web:shard -- 1\/1 --reporter=line,json/);
+          else if (code === '0') assert.match(calls, /npm run test:unit:core/);
+        } else if (id === 'web-shard' || code === '0') {
+          assert.match(calls, /test-tiers\/cli\.mjs run web/);
+        }
+      }
+    }
+  }
+});
