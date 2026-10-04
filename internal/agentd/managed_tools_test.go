@@ -554,11 +554,14 @@ func TestTerminalGitChecksUseBoundProbe(t *testing.T) {
 }
 
 func TestClaudeEnvironmentDoesNotInheritDaemonSettings(t *testing.T) {
+	for _, name := range []string{"USER", "LOGNAME", "TMPDIR"} {
+		t.Setenv(name, "login-session-fixture")
+	}
 	for _, name := range []string{"AEON_DATABASE_URL", "AEON_TEST_DATABASE_URL", "AEON_RUNTIME_KEY", "DATABASE_URL", "ANTHROPIC_API_KEY", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "PATH", "HOME", "CLAUDE_CONFIG_DIR"} {
 		t.Setenv(name, "inherited-fixture-value")
 	}
 	values := claudeEnvironment("/fixture/account", "/fixture/node/bin/node", "/fixture/claude/bin/claude")
-	if len(values) != 5 {
+	if len(values) != 8 {
 		t.Fatal("unexpected bridge environment surface")
 	}
 	for _, value := range values {

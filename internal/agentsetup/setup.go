@@ -123,6 +123,7 @@ type Progress struct {
 	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
 	HarnessDetails        map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses       map[string]string        `json:"harness_statuses,omitempty"`
+	AccountStatuses       map[string]HarnessDetail `json:"account_statuses,omitempty"`
 	VersionStatus         string                   `json:"version_status,omitempty"`
 	AccountingState       string                   `json:"accounting_state,omitempty"`
 	Schema                string                   `json:"schema"`
@@ -156,7 +157,7 @@ type LocalStatus struct {
 
 // SavedOptions exposes only noncredential choices to resume the local command.
 func (e *Engine) SavedOptions() (Options, error) {
-	s, err := e.load()
+	s, err := e.loadSnapshot(true)
 	if err != nil {
 		return Options{}, err
 	}
@@ -229,7 +230,7 @@ func (e *Engine) loadSnapshot(readOnly bool) (*snapshot, error) {
 	}
 	var s snapshot
 	if json.Unmarshal(raw, &s) != nil || s.Schema != "aeon.agent-setup.private.v1" || !uuidPattern.MatchString(s.Request.RequestID) || (!s.ComputerCleaned && (!hashPattern.MatchString(string(s.Device)) || !hashPattern.MatchString(string(s.Runtime)))) || !hashPattern.MatchString(string(s.Lifecycle)) {
-		return nil, errors.New("private pairing state corrupt; no authority was restored")
+		return nil, fmt.Errorf("private pairing state %s corrupt; no authority was restored", filepath.Join(e.Store.Path(), snapshotName))
 	}
 	if s.Removed == nil {
 		s.Removed = map[string]bool{}
@@ -583,18 +584,23 @@ func validateView(s *snapshot, v View, request bool) error {
 			return errors.New("invalid enrollment identity")
 		}
 		seen[a.AccountID] = true
+		if a.State != "connected" && a.State != "draining" && a.State != "revoked" {
+			return errors.New("unknown enrollment lifecycle state")
+		}
+		// Revoked enrollments are historical tombstones, not execution
+		// authority. Their old local candidate may no longer exist.
+		if a.State == "revoked" {
+			continue
+		}
 		known := false
 		for _, c := range s.Candidates {
-			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
+			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness {
 				known = true
 				break
 			}
 		}
 		if !known {
-			return errors.New("response contains an unapproved account")
-		}
-		if a.State != "connected" && a.State != "draining" && a.State != "revoked" {
-			return errors.New("unknown enrollment lifecycle state")
+			return ErrUnapprovedAccount
 		}
 	}
 	if request && v.ExistingComputerID != s.Request.ExistingComputerID {
@@ -673,7 +679,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		seen[a.AccountID] = true
 		found := false
 		for _, c := range s.Candidates {
-			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
+			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness {
 				if a.Harness == "grok" {
 					v := c.Candidate
 					v.Path, v.Home, v.Identity, v.Grok = c.Path, c.Home, c.Identity, c.Candidate.Grok
@@ -757,7 +763,7 @@ func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 	}
 	var c RuntimeConfig
 	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
-		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
+		return RuntimeConfig{}, fmt.Errorf("private runtime configuration %s invalid", filepath.Join(s.Path(), RuntimeName))
 	}
 	if s.vault != nil {
 		// Public disk state cannot redirect the signed daemon into disclosing a
@@ -769,7 +775,7 @@ func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 			return RuntimeConfig{}, err
 		}
 		if paired.ComputerCleaned || c.Origin != paired.Origin || c.TenantID != paired.View.TenantID || c.ComputerID != paired.View.ComputerID || c.PrincipalID != paired.View.PrincipalID || c.DaemonID != paired.View.DaemonID || c.Workspace != paired.Request.Workspace || c.LocalAuthKeyID != paired.LocalAuthKeyID {
-			return RuntimeConfig{}, errors.New("runtime configuration differs from protected pairing")
+			return RuntimeConfig{}, fmt.Errorf("runtime configuration %s differs from protected pairing", filepath.Join(s.Path(), RuntimeName))
 		}
 	}
 	return c, nil
@@ -823,7 +829,7 @@ func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 		return c, "", err
 	}
 	if !regexp.MustCompile(`^aeon_[A-Za-z0-9_-]{1,64}_[0-9a-f]{64}$`).Match(key) {
-		return c, "", errors.New("private runtime credential invalid")
+		return c, "", fmt.Errorf("private runtime credential %s invalid", filepath.Join(root, "runtime.key"))
 	}
 	return c, secret(key), nil
 }

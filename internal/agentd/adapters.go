@@ -75,6 +75,14 @@ func claudeEnvironment(home, nodePath, claudePath string) []string {
 	if userHome, err := os.UserHomeDir(); err == nil && home == filepath.Join(userHome, ".claude") {
 		accountEnv = []string{"HOME=" + userHome}
 	}
+	// macOS Claude selects its Keychain account using USER. Preserve the
+	// login-session context also supplied by launchd/vendor CLI invocations,
+	// without inheriting credentials, provider overrides or loader settings.
+	for _, name := range []string{"USER", "LOGNAME", "TMPDIR"} {
+		if value := os.Getenv(name); value != "" {
+			accountEnv = append(accountEnv, name+"="+value)
+		}
+	}
 	return append(accountEnv,
 		"PATH="+strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
 		"LANG=C", "LC_ALL=C")

@@ -145,3 +145,28 @@ test("CI expressions keep PRs and stale attempts on seven hosted shards", () => 
     assert.deepEqual(evaluate(shardExpression, github, outputs), [1, 2, 3, 4, 5, 6, 7]);
   }
 });
+
+test("key dialog CI uses the hosted shards and covers the shared access markup", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const setup = workflow.split("  web-setup:\n")[1].split("\n  web-shard:")[0];
+  assert.match(setup, /sudo apt-get install -y -qq fish zsh/);
+  assert.ok(setup.indexOf("Install shells used by command round-trip unit tests") < setup.indexOf("Web unit checks (once)"));
+  assert.match(setup, /run: npm run test:unit/);
+  assert.doesNotMatch(workflow, /Key dialog layout regression|playwright .*tests\/key-layout\.spec\.ts/);
+  const shardJob = workflow.split("  web-shard:\n")[1].split("\n  web:")[0];
+  assert.match(shardJob, /runs-on: ubuntu-latest/);
+  assert.match(shardJob, /npm --prefix web run ci:web:shard/);
+  const manifest = JSON.parse(readFileSync(new URL("../web/ci-web-shards.json", import.meta.url), "utf8"));
+  const layoutGroups = manifest.groups.filter(group => group.specs.some(spec => spec.file === "tests/key-layout.spec.ts"));
+  assert.equal(layoutGroups.length, 1);
+  const layout = layoutGroups[0];
+  assert.notEqual(layout.gate, false);
+  assert.equal(layout.hostedOnly, true);
+  assert.equal(layout.config, "playwright.ui.config.ts");
+  assert.deepEqual(layout.flags, ["--workers=1"]);
+  const access = manifest.groups.find(group => group.id === "access-dialogs");
+  assert.equal(access.hostedOnly, true);
+  for (const file of ["tests/access.spec.ts", "tests/key-dialog.spec.ts"]) {
+    assert.ok(access.specs.some(spec => spec.file === file));
+  }
+});
