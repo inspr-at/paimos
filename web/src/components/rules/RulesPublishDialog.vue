@@ -52,7 +52,7 @@ const changeKey = (change: RuleChange) => `${change.about ?? 'rule'}:${change.ki
         <details class="item">
           <summary>
             <BizIcon name="chevron-right" :size="13" class="chev" />
-            <span class="names"><span class="name">{{ item.name }}</span><span class="where">{{ item.where }}</span></span>
+            <span class="names"><span v-clip-tip="item.name" class="name">{{ item.name }}</span><span class="where">{{ item.where }}</span></span>
             <span class="what">{{ summary(item) }}</span>
           </summary>
           <template v-if="item.state === 'new'">
@@ -143,6 +143,11 @@ const changeKey = (change: RuleChange) => `${change.about ?? 'rule'}:${change.ki
 .note textarea { height: auto; padding: 8px 12px; font-weight: 450; resize: vertical; }
 .error { display: flex; gap: 6px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--danger); font-size: 13px; }
 .error svg { flex: none; margin-top: 2px; }
+@media (max-width: 720px) {
+  .name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .item summary { align-items: flex-start; }
+  .where { overflow-wrap: anywhere; }
+}
 @media (max-width: 600px) {
   .item summary { flex-wrap: wrap; row-gap: 0; }
   .names { flex-direction: column; gap: 0; }
