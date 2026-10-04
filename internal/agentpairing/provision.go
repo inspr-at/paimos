@@ -393,7 +393,8 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
   ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting') ORDER BY r.id),
  CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expired_at IS NOT NULL THEN 'expired' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
  coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),''),
- coalesce((SELECT verification_unavailable_reason FROM agent_runs WHERE id=e.verification_run_id),'')
+ coalesce((SELECT verification_unavailable_reason FROM agent_runs WHERE id=e.verification_run_id),''),
+ coalesce(e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes',false)
   FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 ORDER BY a.created_at,a.id`, *rec.ComputerID)
 	if err != nil {
 		return v, err
@@ -401,9 +402,10 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	defer rows.Close()
 	for rows.Next() {
 		var e Enrollment
-		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError, &e.VerificationReason); err != nil {
+		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError, &e.VerificationReason, &e.VerificationExpiredReady); err != nil {
 			return v, err
 		}
+		e.VerificationExpiredReady = e.VerificationState == "expired" && e.VerificationExpiredReady
 		if e.VerificationReason != "" {
 			e.VerificationError = "verification_unavailable"
 		}
