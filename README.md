@@ -337,6 +337,23 @@ why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
 commands are read-only; role-only `model resolve build` retains its existing
 advisory response.
 
+In the web app, open **Model preferences** from the Agents gear or a project's
+agents popover. The **Why this model?** planning cell opens its kind of work.
+Choose Automatic, follow new versions or pin a version at Default, You or
+Project. Kinds can be added or removed at Default and Project; system kinds stay.
+Row locks have a Set by menu and an Option/Alt-click shortcut. A looser provider
+choice below a lock is allowed with a warning. Retired versions are hidden;
+review qualification and provider evidence explain disabled picker choices.
+Save progress, failures and refreshed conflicts appear beside the pinned footer
+actions, in a reserved two-line slot that wraps and scrolls for longer messages.
+Opening reset confirmation clears stale feedback and announces the reset scope.
+Keyboard resets return focus to the row’s model chip; removing a kind returns
+focus to Everything else. Adding a kind retains focus during save and returns
+focus to Add a kind of work afterward.
+
+Model-cell hovers retain the planned and measured details and show the
+**Why this model?** action. These buttons do not add sequential tab stops to the list.
+
 The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
 `/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
 Use a level's returned `revision` for edits and the DELETE `revision` query
@@ -2045,6 +2062,17 @@ menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
+
+Clipped names using the shared clip-tip reveal their full text on mouse hover
+or keyboard focus. On touch, tapping performs the row or link's action; holding
+for 500 ms reveals the text without selecting or navigating. Moving more than
+8 px, scrolling or cancelling the pointer before that threshold cancels the
+hold. A clipped-name hold takes precedence over phone row selection; a hold
+elsewhere on the row can still start selection. The next tap keeps its normal action.
+The revealed text remains until an outside tap or Escape. Phone list and
+picker names use two lines; picker rows retain their fixed height.
+Project links also bind each pointer gesture to its starting record and name;
+a record change before release cancels navigation.
 
 Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
 4096 pixels per side, with a square crop up to 2048 pixels. Attachment images

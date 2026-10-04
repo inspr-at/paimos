@@ -61,6 +61,8 @@
 @media (prefers-reduced-motion: reduce) { .j-flash { animation: none; } }
 @media (max-width: 1080px) { .j-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {
+  .j-rows > li:has(.clip-name) { align-items: flex-start; padding-block: 8px; }
+  .j-rows .grow.clip-name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .j-card { padding: 12px 12px 14px; }
   .j-card .btn.sm { min-height: 44px; }
   .j-card-head { flex-wrap: wrap; row-gap: 6px; }

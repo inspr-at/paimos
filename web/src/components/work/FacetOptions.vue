@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { valueState, type Dimension, type FacetOption } from '../../lib/ticketList'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
@@ -55,7 +56,7 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
         <AppIcon v-else-if="dimension === 'human_check'" name="person-check" :size="14" class="faint" />
         <AppIcon v-else name="box" :size="14" class="faint" />
         <span v-if="valueState(selected, option.value) === 'out'" class="not-tag">not</span>
-        <span class="option-label">{{ option.label }}</span>
+        <span v-clip-tip class="option-label">{{ option.label }}</span>
         <span v-if="option.hint" class="hint mono">{{ option.hint }}</span>
         <span v-if="option.count !== undefined" class="count mono">{{ option.count }}</span>
       </label>
@@ -71,7 +72,7 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
 
 <style scoped>
 .queue-glyph { color: var(--teal-ink); }
-.facet-options { display: grid; gap: 1px; }
+.facet-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .facet-option { position: relative; display: flex; align-items: center; min-height: 32px; border-radius: 8px; }
 .facet-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: inherit; padding: 0 6px 0 10px; font-size: 13.5px; cursor: pointer; }
 @media (hover: hover) { .facet-option:hover { background: var(--row-hover); } }
@@ -100,4 +101,10 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
 .tag-dot[data-color="purple"] { background: #8a6cc2; }
 .tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
 .tag-dot[data-color="pink"] { background: #c7679a; }
+
+@media (max-width: 720px) {
+  .facet-option { height: 52px; min-height: 52px; }
+  .option-label { line-height: 18px; }
+  .option-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
+}
 </style>
