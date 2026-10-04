@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPolicyEditor, PolicyFailure, policyError } from '../src/lib/policyEditor.ts'
+import { createPolicyEditor, PolicyFailure, policyError, policyJSON } from '../src/lib/policyEditor.ts'
 import { preferenceRequest, compensatePreferences, preferenceScalars, writePreferences, writeLadder, validateLadder, type PreferenceSnapshot, type PreferenceMutation, type EditableLadder } from '../src/lib/policyModels.ts'
 function barrier<T>() { let resolve!: (value:T)=>void; const promise=new Promise<T>(yes=>{resolve=yes}); return {promise,resolve} }
 type Snapshot={person:string;revision:number;value:string}
@@ -86,4 +86,24 @@ test('ladder role CAS, expiry-clear Undo and actual normalized token',async()=>{
  assert.equal(requests[0]!.path,'/api/models/routes?role=build&expiry_policy=clear');assert.equal((requests[0]!.init.headers as Record<string,string>)['If-Match'],token);assert.equal(result.edit_token,next);assert.equal(result.routes[0]!.state,'available')
  await assert.rejects(writeLadder({...before,truncated:true},[route],false,new AbortController().signal),/complete/);assert.throws(()=>validateLadder({...before,edit_token:'short'},'build'),/Invalid/)
  }finally{globalThis.fetch=original}
+})
+test('level writes remain serialized across two row editors and retain each captured revision',async()=>{
+ const gate=barrier<Snapshot>(),started=barrier<void>(),writes:number[]=[]
+ const wire={read:async()=>({person:'p',revision:2,value:'before'}),write:async(before:Snapshot,_desired:string)=>{writes.push(before.revision);started.resolve();if(writes.length===1)return gate.promise;return {person:'p',revision:4,value:'second'}},writeKey:()=> 'shared-level',identity:(s:Snapshot)=>s.person,compensate:(s:Snapshot)=>s.value}
+ const first=createPolicyEditor<Snapshot,string>(()=>'row-one',wire),second=createPolicyEditor<Snapshot,string>(()=>'row-two',wire);await first.load();await second.load();first.edit('one');second.edit('two');const a=first.submit();await started.promise;const b=second.submit();assert.deepEqual(writes,[2]);gate.resolve({person:'p',revision:3,value:'first'});await a;await b;assert.deepEqual(writes,[2,2])
+})
+
+test('response byte bounds precede JSON parsing',async()=>{
+ await assert.rejects(policyJSON(new Response('"'+'x'.repeat(32)+'"'),8),/exceeds the editor limit/)
+ assert.deepEqual(await policyJSON(new Response('{"ok":true}'),64),{ok:true})
+})
+for(const status of [401,403])test(`confirmed save followed by denied preview ${status} clears private snapshot and Undo`,async()=>{
+ let reads=0,writes=0
+ const editor=createPolicyEditor<Snapshot,string>(()=>'owner',{
+  read:async()=>{if(++reads>1)throw new PolicyFailure(status,'permission_denied','source refused');return {person:'p',revision:2,value:'before'}},
+  write:async()=>{writes++;return {person:'p',revision:3,value:'saved'}},identity:s=>s.person,compensate:s=>s.value,
+ })
+ await editor.load();editor.edit('desired');await editor.submit()
+ assert.equal(editor.snapshot.value,null);assert.equal(editor.undo.value,null);assert.equal(editor.draft.value,null);assert.equal(editor.needsReload.value,true);assert.equal(editor.phase.value,'saved');assert.match(editor.message.value,/Saved\. Current preview could not be refreshed/)
+ await editor.submit(true);assert.equal(writes,1)
 })

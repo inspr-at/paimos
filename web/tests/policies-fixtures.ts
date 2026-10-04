@@ -25,7 +25,7 @@ export async function mockPolicies(page: Page, theme: 'light' | 'dark', restrict
   const data = { mode: 'loaded' as 'loaded' | 'failed' | 'denied' | 'unseeded', count: 2, calls: [] as string[], grants: restricted ? ['settings.read'] : ['models.read', 'roles.read', 'members.read', 'audit.read', 'rules.read', 'account.read', 'approvals.read', 'harness.read'] }
   let next: { until: ReturnType<typeof barrier>; started: ReturnType<typeof barrier> } | null = null
   await page.route('**/api/me/permissions*', route => {
-    const answer = mockEffectivePermissions(restricted ? 'member' : 'admin')
+    const answer = mockEffectivePermissions(restricted ? 'member' : 'admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions = [...data.grants]
     return route.fulfill({ json: answer })
   })

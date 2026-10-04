@@ -19,7 +19,8 @@ const selected = ref(0), profiles = ref<PolicyStep['profile'][]>([]), profileErr
 const scope = createScope(() => `${props.owner}/${props.role}`)
 const rows = computed(() => phase.value === 'saving' && draft.value ? draft.value : snapshot.value?.routes ?? [])
 const editable = computed(() => props.person && !!snapshot.value?.can_edit && !!snapshot.value?.edit_token && !snapshot.value.truncated && snapshot.value.setup)
-const route = computed(() => draft.value?.[selected.value])
+const displayed = computed(() => draft.value ?? snapshot.value?.routes ?? [])
+const route = computed(() => displayed.value[selected.value])
 const opened = ref(false)
 function cancel() { if (!busy.value) { editor.cancel(); opened.value = false } }
 async function load() {
@@ -32,7 +33,7 @@ function edit() {
   if (!editable.value || !snapshot.value || busy.value) return
   opened.value = true
   editor.edit(draft.value ?? snapshot.value.routes)
-  if (!profiles.value.length) void scope.run(({ after, signal }) => after(policyRequest('/models', { signal }).then(r => policyJSON(r)), value => {
+  if (!profiles.value.length) void scope.run(({ after, signal }) => after(policyRequest('/models', { signal }).then(r => policyJSON<PolicyStep['profile'][]>(r)), value => {
     if (!Array.isArray(value)) throw new Error('Invalid model catalog')
     catalogTruncated.value = value.length > 256; profiles.value = value.slice(0, 256)
   }), { failed: () => { profileError.value = 'Model choices could not be loaded. Existing steps can still be reordered.' } })
@@ -72,18 +73,18 @@ function submit() { if (editable.value) void editor.submit() }
     <PolicyEditorFrame :active="opened" title="Saved job order" @save="submit" @cancel="cancel" @undo="editor.submit(true)" @edit="edit">
       <template #actions="{ submitKey }"><PolicyEditorActions :editable="editable" :editing="!!draft" :closable="opened" :busy="busy || loading" :reload-required="needsReload" :undoable="!!undo" :submit-key="submitKey" @edit="edit" @save="submit" @cancel="cancel" @undo="editor.submit(true)" @reload="editor.load" /></template>
       <template #status>{{ message || (loading ? 'Loading the saved order…' : snapshot?.truncated ? 'The complete order is needed before it can be changed.' : !editable ? 'A person with See models and Manage models may change a complete order.' : 'Model registry owns this order. Save changes only the selected job role.') }}<span v-if="draft && !draft.length"> The empty order leaves no configured fallback for this role.</span></template>
-      <div v-if="draft" class="ladder-fields">
-        <label>Step<select :value="selected" aria-label="Selected ladder step" :disabled="busy" @change="selected = Number(($event.target as HTMLSelectElement).value)"><option v-for="(item,index) in draft" :key="index" :value="index">{{ index + 1 }} · {{ name(item.profile_id) }}</option></select></label>
-        <label>Position<input aria-label="Ladder position" type="number" min="1" :max="draft.length || 1" :value="selected + 1" :disabled="busy || !route" @change="move(Number(($event.target as HTMLInputElement).value))" /></label>
-        <label>Availability<select aria-label="Ladder availability" :value="route?.state ?? 'available'" :disabled="busy || !route" @change="update('state', ($event.target as HTMLSelectElement).value)"><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="conserved">Conserved</option><option value="budget_limited">Budget limited</option></select></label>
-        <label>Add a model<select aria-label="Add ladder model" :disabled="busy || draft.length >= 50" value="" @change="add"><option value="">Choose a profile</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id" :disabled="draft.some(row => row.profile_id === profile.id)">{{ profile.display_name || profile.model }} · {{ profile.harness }} · {{ profile.effort }}</option></select></label>
-        <label>Reason<input aria-label="Hold reason" maxlength="500" :value="route?.reason ?? ''" :disabled="busy || !route || route.state === 'available'" @input="update('reason', ($event.target as HTMLInputElement).value)" /></label>
-        <label>Expiry (UTC ISO timestamp)<input aria-label="Hold expiry" placeholder="2099-10-04T12:00:00Z" :value="route?.valid_until ?? ''" :disabled="busy || !route || route.state === 'available'" @input="update('valid_until', ($event.target as HTMLInputElement).value)" /></label>
-        <button class="btn" type="button" :disabled="busy || !route" @click="remove">Remove selected step</button>
+      <div class="ladder-fields">
+        <label>Step<select :value="selected" aria-label="Selected ladder step" :disabled="busy || !draft" @change="selected = Number(($event.target as HTMLSelectElement).value)"><option v-for="(item,index) in displayed" :key="index" :value="index">{{ index + 1 }} · {{ name(item.profile_id) }}</option></select></label>
+        <label>Position<input aria-label="Ladder position" type="number" min="1" :max="displayed.length || 1" :value="selected + 1" :disabled="busy || !draft || !route" @change="move(Number(($event.target as HTMLInputElement).value))" /></label>
+        <label>Availability<select aria-label="Ladder availability" :value="route?.state ?? 'available'" :disabled="busy || !draft || !route" @change="update('state', ($event.target as HTMLSelectElement).value)"><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="conserved">Conserved</option><option value="budget_limited">Budget limited</option></select></label>
+        <label>Add a model<select aria-label="Add ladder model" :disabled="busy || !draft || displayed.length >= 50" value="" @change="add"><option value="">Choose a profile</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id" :disabled="displayed.some(row => row.profile_id === profile.id)">{{ profile.display_name || profile.model }} · {{ profile.harness }} · {{ profile.effort }}</option></select></label>
+        <label>Reason<input aria-label="Hold reason" maxlength="500" :value="route?.reason ?? ''" :disabled="busy || !draft || !route || route.state === 'available'" @input="update('reason', ($event.target as HTMLInputElement).value)" /></label>
+        <label>Expiry (UTC ISO timestamp)<input aria-label="Hold expiry" placeholder="2099-10-04T12:00:00Z" :value="route?.valid_until ?? ''" :disabled="busy || !draft || !route || route.state === 'available'" @input="update('valid_until', ($event.target as HTMLInputElement).value)" /></label>
+        <button class="btn" type="button" :disabled="busy || !draft || !route" @click="remove">Remove selected step</button>
         <p class="wide">New or renewed holds need a reason and a future expiry. An unchanged expired hold can stay in a reorder; Undo keeps expired holds available.</p>
         <p v-if="profileError || catalogTruncated" class="wide">{{ profileError || 'Only the first 256 model choices are shown; existing steps remain intact.' }}</p>
       </div>
-      <div v-else class="read-help"><p>CLI follows this priority and harness health. Dispatch qualifies accounts, platform and preferences separately.</p><p v-if="role === 'review-gate'">Command-line order. Managed review currently retains its built-in family fallback; minimum review checks still apply.</p><p>Use a numbered position to move a step. Holds record a reason and expiry; no drag gesture is required.</p></div>
+      <div class="read-help"><p>CLI follows this priority and harness health. Dispatch qualifies accounts, platform and preferences separately.</p><p v-if="role === 'review-gate'">Command-line order. Managed review currently retains its built-in family fallback; minimum review checks still apply.</p><p>Use a numbered position to move a step. Holds record a reason and expiry; no drag gesture is required.</p></div>
     </PolicyEditorFrame>
     <p v-if="snapshot && !snapshot.setup">The model registry is not set up yet.</p>
     <p v-if="snapshot?.truncated">{{ truncatedLadder() }}</p>
@@ -98,6 +99,7 @@ function submit() { if (editable.value) void editor.submit() }
 .ladder-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
 label { display: grid; gap: 5px; font-size: 12px; min-width: 0; color: var(--ink-2); }
 input,select { width: 100%; min-width: 0; box-sizing: border-box; height: 36px; background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); border-radius: 3px; padding: 6px; }
+.ladder-fields .btn { border-radius:3px; box-shadow:none; transform:none; }
 .wide { grid-column: 1/-1; }
 p { font-size: 12px; color: var(--ink-2); line-height: 1.6; margin: 4px 0 8px; overflow-wrap: anywhere; }
 .order { padding: 0; margin: 0; list-style: none; }

@@ -342,7 +342,7 @@ test('Policies tabs always reference an existing panel and phone selectors use t
 test('Policies announces state transitions through a persistent live region', async ({ page }) => {
   const mock = await mockPolicies(page, 'light')
   await page.goto('/settings/policies')
-  const panel = page.locator('.policies'), status = panel.getByRole('status')
+  const panel = page.locator('.policies'), status = panel.getByTestId('policies-announcement')
   await expect(panel.locator('.ladder')).toBeVisible()
   await expect(status).toHaveCount(1)
   const original = await status.elementHandle()

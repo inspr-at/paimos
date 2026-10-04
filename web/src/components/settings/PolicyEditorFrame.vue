@@ -7,7 +7,7 @@ const dialog = ref<HTMLDialogElement | null>(null)
 function focusAction() { dialog.value?.querySelector<HTMLButtonElement>('[data-policy-save]')?.focus({ preventScroll: true }) }
 const phone = ref(false)
 const mac = /Mac|iPhone|iPad/.test(navigator.platform)
-const submitKey = mac ? '⌘↵' : 'Ctrl+↵'
+const submitKey = mac ? 'Command+Enter' : 'Ctrl+Enter'
 let invoking: HTMLElement | null = null
 let media: MediaQueryList
 async function mode() {
@@ -60,7 +60,6 @@ h3 { margin: 0; font-size: 15px; line-height: 22px; overflow-wrap: anywhere; hei
 .editor-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 36px; }
 .editor-feedback { overflow-y: auto; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; padding-block: 6px; color: var(--ink-2); }
 .editor-body { min-height: 0; overflow: auto; padding-bottom: 12px; overscroll-behavior: contain; }
-.phone-actions { display: none; }
 @media (max-width:600px) {
   .editor-reservation { height: 370px; }
   .phone-open .editor-frame { position: fixed; inset: 0; margin: 0; inline-size: 100%; block-size: 100dvh; background: var(--surface); padding: max(14px,env(safe-area-inset-top)) 16px 0; grid-template-rows: auto 80px minmax(0,1fr) auto; }

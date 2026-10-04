@@ -12,8 +12,8 @@ images use explicit release versions; there is no `latest` tag.
 
 ## Policies
 
-Settings → Policies (`/settings/policies`) reads existing rules without storing
-or changing them. Each tab follows its source permission: review ladders need
+Settings → Policies (`/settings/policies`) explains existing rules and provides
+scoped editors for saved job orders and model preferences. Each tab follows its source permission: review ladders need
 `models.read`; agent key limits read the permission registry with `roles.read`
 and a person session; ownership and advisory rules are visible to signed-in
 people. Links lead only to existing screens the person may open.
@@ -28,6 +28,37 @@ Review family ordering and qualification floors are shown only for Review gate.
 Suspension expiry includes an explicit UTC time and date. A late server refusal
 clears the private rows while keeping the existing selector and detail link in
 place; a person without the source permission sees only its permission sentence.
+
+People with `models.read` and `models.manage` can edit one complete role order,
+using its quoted `If-Match` token. Truncated snapshots remain read-only. The
+current base retains managed review's built-in family fallback, so the ordinary
+review editor explicitly labels its command-line ordering effect. Saved-order
+managed dispatch activation belongs to the separate 633g integration.
+
+Model preferences use Default, You and an explicitly visible Project, with the
+source GET/write permissions. Project-only management also needs workspace
+model visibility to use this screen. Each mutation carries the GET's canonical
+`If-Prefs-Person` and the addressed level revision. Row edits preserve both
+complexity buckets and the row lock; Reset affects only that selected row.
+Provider and section-lock writes send only the three scalar fields, never
+`rows`; neither Save nor Undo issues whole-level DELETE. Archived and sibling
+work-kind settings therefore remain stored by these UI operations.
+
+Save is provisional until the source confirms its actual result. Undo is a
+conditional compensating source write with the confirmed token/revision, not an
+event deletion. Ladder Undo uses `expiry_policy=clear`; expired holds stay
+available. Newer changes, revoked permissions, linked-person changes and retired
+kinds refuse honestly without retrying the old draft. Unknown outcomes require
+reconciliation; an equal value alone never certifies success. Provider Undo does
+not lower requirements already stamped on existing runs. Navigation discards
+local drafts and Undo; it does not promise to roll back an in-flight server write.
+
+Editors reserve useful read/help space above the previews and keep long content
+inside scrolling bodies. Phone editors use full-height sheets with safe-area
+action bars. Save keycaps follow the platform; Escape first leaves a field, then
+closes the editor. Browser geometry and request-contract coverage lives in
+`web/tests/policy-editors.spec.ts`; screenshot evidence is generated locally in
+`web/test-results/aeon-633web/` and is not committed.
 
 ## Code health audits
 

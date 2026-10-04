@@ -60,7 +60,7 @@ function tabKey(event: KeyboardEvent, index: number) {
         <span>{{ item.label }}</span><small>{{ item.note }}</small>
       </button>
     </div>
-    <p role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
+    <p data-testid="policies-announcement" role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
     <template v-for="panelTab in POLICY_TABS" :key="panelTab.id">
       <div v-if="tab !== panelTab.id" :id="`policy-panel-${panelTab.id}`" role="tabpanel" :aria-labelledby="`policy-tab-${panelTab.id}`" hidden />
     </template>

@@ -29,6 +29,7 @@ const effectiveRow = computed(() => view.value?.rows.find(row => row.kind_id ===
 const lockedAbove = computed(() => !!effectiveRow.value?.locked_by && effectiveRow.value.locked_by !== level.value)
 const editable = computed(() => props.person && !!document.value?.person_id && !!document.value.can[`edit_${level.value}`] && (mode.value !== 'row' || !!currentKind.value && currentKind.value.slug !== 'security' && !lockedAbove.value))
 const rowDraft = computed(() => draft.value?.unit === 'row' ? draft.value.value : null)
+const rowForDisplay = computed(() => rowDraft.value ?? currentLevel.value?.rows.find(row => row.kind_id === kind.value) ?? { kind_id: kind.value, normal: effectiveRow.value?.normal.selector ?? { mode: 'auto' as const }, complex: effectiveRow.value?.complex.selector ?? { mode: 'auto' as const }, locked: false })
 const scalarDraft = computed(() => draft.value?.unit === 'scalars' ? draft.value.value : null)
 const displayScalars = computed(() => scalarDraft.value ?? currentLevel.value)
 const contextReady = computed(() => level.value !== 'project' || !!project.value && permissionsKnown(project.value) && can('nodes.read', project.value))
@@ -44,7 +45,7 @@ async function load() {
 watch(() => [props.owner, level.value, project.value, kind.value, mode.value, contextReady.value], () => { void load() }, { immediate: true, flush: 'sync' })
 watch(() => props.owner, () => {
   scope.reset(); projects.value = []; projectError.value = ''; project.value = ''; kind.value = ''
-  if (props.owner && props.person) void scope.run(({ after, signal }) => after(policyRequest('/projects', { signal }).then(r => policyJSON(r)), result => {
+  if (props.owner && props.person) void scope.run(({ after, signal }) => after(policyRequest('/projects', { signal }).then(r => policyJSON<{ items: { id: string; title: string; key: string }[] }>(r)), result => {
     if (!Array.isArray(result.items) || result.items.length > 500) throw new Error('Incomplete projects')
     projects.value = result.items
   }), { failed: () => { projectError.value = 'Visible projects could not be loaded. Default and You remain available.' } })
@@ -70,7 +71,7 @@ function cellMode(bucket: 'normal' | 'complex', value: string) {
   if (choice && (value === 'latest' || value === 'pinned')) updateCell(bucket, selectorFor(choice, value))
 }
 function chosen(bucket: 'normal' | 'complex') {
-  const selector = rowDraft.value?.[bucket]
+  const selector = rowForDisplay.value[bucket]
   if (!selector || selector.mode === 'auto') return ''
   return view.value?.choices.find(choice => selector.mode === 'pinned' ? choice.profile.id === selector.profile_id : choice.profile.family === selector.family && choice.line === selector.line && choice.profile.effort === selector.effort && (!selector.harness || choice.profile.harness === selector.harness))?.profile.id ?? ''
 }
@@ -107,19 +108,20 @@ const displayedRow = (id: string) => {
     <PolicyEditorFrame :active="opened" title="Model preferences" @save="submit" @cancel="cancel" @undo="editor.submit(true)" @edit="edit">
       <template #actions="{ submitKey }"><PolicyEditorActions :editable="editable" :editing="!!draft" :closable="opened" :busy="busy || loading" :reload-required="needsReload" :undoable="!!undo" :submit-key="submitKey" @edit="edit" @save="submit" @cancel="cancel" @undo="editor.submit(true)" @reload="editor.load" /></template>
       <template #status>
-        {{ message || (loading ? 'Loading model preferences…' : !contextReady ? 'Choose a visible project; project editing also needs workspace model visibility.' : lockedAbove && mode === 'row' ? `Model choices are locked by ${effectiveRow?.locked_by}.` : currentKind?.slug === 'security' && mode === 'row' ? 'Security review setup is unavailable here. Minimum checks cannot be replaced.' : !editable ? 'Choose a work kind. Changes require the owning source’s read and write permissions.' : 'Preferred models are advisory; minimum review checks still apply.') }}
+        <strong v-if="mode === 'row' && currentKind">{{ currentKind.label }}. </strong>{{ message || (loading ? 'Loading model preferences…' : !contextReady ? 'Choose a visible project; project editing also needs workspace model visibility.' : lockedAbove && mode === 'row' ? `Model choices are locked by ${effectiveRow?.locked_by}.` : currentKind?.slug === 'security' && mode === 'row' ? 'Security review setup is unavailable here. Minimum checks cannot be replaced.' : !editable ? 'Choose a work kind. Changes require the owning source’s read and write permissions.' : 'Preferred models are advisory; minimum review checks still apply.') }}
         <span v-if="scalarDraft"> Existing runs keep stricter provider requirements. Looser choices below a lock are warnings, not permission changes.</span>
       </template>
-      <div v-if="draft?.unit === 'row'" class="row-fields">
-        <template v-if="rowDraft">
+      <button class="btn reset-row" data-testid="preference-row-reset" :aria-disabled="mode !== 'row' || !editable || busy || !currentLevel?.rows.some(row => row.kind_id === kind)" @click="resetRow">{{ resetLabel }}</button>
+      <div v-if="mode === 'row'" class="row-fields">
+        <template v-if="rowForDisplay">
           <div v-for="bucket in (['normal','complex'] as const)" :key="bucket" class="bucket">
-            <label>{{ bucket === 'normal' ? 'Normally' : 'If complex' }}<select :aria-label="`${bucket} preference mode`" :value="rowDraft[bucket].mode" :disabled="busy" @change="cellMode(bucket, ($event.target as HTMLSelectElement).value)"><option value="auto">Automatic</option><option value="latest" :disabled="!view?.choices.some(choice => !choiceDisabled(choice, currentKind?.slug ?? ''))">Follow latest</option><option value="pinned" :disabled="!view?.choices.some(choice => !choiceDisabled(choice, currentKind?.slug ?? ''))">Pin a version</option></select></label>
-            <label>Model profile<select :aria-label="`${bucket} model profile`" :value="chosen(bucket)" :disabled="busy || rowDraft[bucket].mode === 'auto'" @change="choose(bucket, ($event.target as HTMLSelectElement).value)"><option value="">{{ rowDraft[bucket].mode === 'auto' ? 'Automatic routing' : 'Choose a qualifying profile' }}</option><option v-for="choice in view?.choices" :key="choice.profile.id" :value="choice.profile.id" :disabled="choiceDisabled(choice, currentKind?.slug ?? '')">{{ choice.profile.display_name || choice.profile.model }} · {{ choice.model_version }} · {{ choice.profile.harness }} · {{ choice.profile.effort }}{{ choice.residency_routes === 0 ? ' · no provider route' : choice.review_reason && currentKind?.slug === 'review' ? ` · ${choice.review_reason}` : '' }}</option></select></label>
+            <label>{{ bucket === 'normal' ? 'Normally' : 'If complex' }}<select :aria-label="`${bucket} preference mode`" :value="rowForDisplay[bucket].mode" :disabled="busy || !rowDraft" @change="cellMode(bucket, ($event.target as HTMLSelectElement).value)"><option value="auto">Automatic</option><option value="latest" :disabled="!view?.choices.some(choice => !choiceDisabled(choice, currentKind?.slug ?? ''))">Follow latest</option><option value="pinned" :disabled="!view?.choices.some(choice => !choiceDisabled(choice, currentKind?.slug ?? ''))">Pin a version</option></select></label>
+            <label>Model profile<select :aria-label="`${bucket} model profile`" :value="chosen(bucket)" :disabled="busy || !rowDraft || rowForDisplay[bucket].mode === 'auto'" @change="choose(bucket, ($event.target as HTMLSelectElement).value)"><option value="">{{ rowForDisplay[bucket].mode === 'auto' ? 'Automatic routing' : 'Choose a qualifying profile' }}</option><option v-for="choice in view?.choices" :key="choice.profile.id" :value="choice.profile.id" :disabled="choiceDisabled(choice, currentKind?.slug ?? '')">{{ choice.profile.display_name || choice.profile.model }} · {{ choice.model_version }} · {{ choice.profile.harness }} · {{ choice.profile.effort }}{{ choice.residency_routes === 0 ? ' · no provider route' : choice.review_reason && currentKind?.slug === 'review' ? ` · ${choice.review_reason}` : '' }}</option></select></label>
           </div>
-          <label class="check"><input type="checkbox" :checked="rowDraft.locked" :disabled="busy || level === 'project'" @change="rowLock(($event.target as HTMLInputElement).checked)" />Lock this work kind for narrower levels</label>
+          <label class="check"><input type="checkbox" :checked="rowForDisplay.locked" :disabled="busy || !rowDraft || level === 'project'" @change="rowLock(($event.target as HTMLInputElement).checked)" />Lock this work kind for narrower levels</label>
           <p>Locking an inherited row copies both current bucket selectors. Automatic is an explicit choice; Reset removes the stored row.</p>
         </template>
-        <p v-else>Reset removes both buckets and this row’s lock. Providers, section locks and other work kinds stay stored. Save to confirm.</p>
+        <p v-if="draft?.unit === 'row' && !draft.value">Reset removes both buckets and this row’s lock. Providers, section locks and other work kinds stay stored. Save to confirm.</p>
       </div>
       <div v-else-if="mode === 'scalars' && displayScalars" class="scalar-fields">
         <label>Provider requirement<select aria-label="Provider requirement" :value="displayScalars.residency ?? ''" :disabled="!scalarDraft || busy" @change="scalar('residency', ($event.target as HTMLSelectElement).value)"><option value="">Inherit</option><option value="any">Any provider</option><option value="eu">EU-hosted only</option><option value="local">Local only</option></select></label>
@@ -128,13 +130,14 @@ const displayedRow = (id: string) => {
         <p>{{ view?.residency.qualifying_routes ?? 0 }} qualifying routes{{ view?.choices_truncated ? ' among the shown choices' : '' }}. <span v-if="!view?.residency.qualifying_routes">No qualifying route today; work will wait.</span></p>
         <p v-if="view?.residency.loosened_lock">Warning: this provider requirement is looser than a broader lock.</p>
       </div>
-      <div v-else class="preview">
+      <div class="preview">
+        <p v-if="mode === 'row' && rowForDisplay.normal.mode !== 'auto'">Normally: {{ view?.choices.find(choice => choice.profile.id === chosen('normal'))?.profile.display_name || view?.choices.find(choice => choice.profile.id === chosen('normal'))?.profile.model }}.</p>
+        <p v-if="mode === 'row' && rowForDisplay.complex.mode !== 'auto'">If complex: {{ view?.choices.find(choice => choice.profile.id === chosen('complex'))?.profile.display_name || view?.choices.find(choice => choice.profile.id === chosen('complex'))?.profile.model }}.</p>
         <p v-if="effectiveRow"><strong>{{ currentKind?.label }}</strong> · source: {{ effectiveRow.set_by || 'Automatic' }}{{ effectiveRow.locked_by ? ` · locked by ${effectiveRow.locked_by}` : '' }}</p>
         <p v-if="effectiveRow">Normally: {{ effectiveRow.normal.label }} {{ effectiveRow.normal.today_version }}. If complex: {{ effectiveRow.complex.label }} {{ effectiveRow.complex.today_version }}.</p>
         <p v-if="effectiveRow?.warnings.length">{{ effectiveRow.warnings.join(' ') }}</p>
         <p>{{ view?.changes ?? 0 }} changes at this level. Choose Models for both complexity buckets, or Providers &amp; locks for level settings.</p>
       </div>
-      <button class="btn reset-row" data-testid="preference-row-reset" :aria-disabled="mode !== 'row' || !editable || busy || !currentLevel?.rows.some(row => row.kind_id === kind)" @click="resetRow">{{ resetLabel }}</button>
       <p>Reset removes both buckets and the selected row’s lock. Hidden archived settings are preserved.</p>
       <p v-if="view?.choices_truncated">Model choices are incomplete; only the first 256 are shown.</p><p v-if="view?.resolution_truncated">The model preview is incomplete. Live routing remains authoritative.</p>
     </PolicyEditorFrame>
@@ -160,7 +163,7 @@ select { width:100%; height:36px; min-width:0; box-sizing:border-box; padding:6p
 .check input { flex:none; }
 p { margin: 8px 0; font-size:12px; line-height:1.6; color:var(--ink-2); overflow-wrap:anywhere; }
 .row-fields > p,.row-fields > .check { grid-column:1/-1; }
-.reset-row { font-size:12px; min-height:36px; margin-top:10px; white-space:normal; text-align:left; }
+.reset-row { font-size:12px; min-height:44px; width:100%; margin:0 0 12px; white-space:normal; text-align:left; justify-content:flex-start; border:0; border-radius:0; background:transparent; box-shadow:none; color:var(--teal-ink); transform:none; }
 button[aria-disabled="true"] { opacity:.5; cursor:default; }
 .kind-list { border-top:1px solid var(--line); }
 .kind-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 12px; width:100%; height:96px; text-align:left; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); padding:12px 0; }

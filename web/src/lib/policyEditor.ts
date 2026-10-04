@@ -8,7 +8,7 @@ export class PolicyFailure extends Error {
   readonly code: string
   constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code }
 }
-export async function policyJSON(response: Response, maxBytes = 2 * 1024 * 1024): Promise<any> {
+export async function policyJSON<T = unknown>(response: Response, maxBytes = 2 * 1024 * 1024): Promise<T> {
   const reader = response.body?.getReader()
   if (!reader) throw new Error('Missing response body')
   const chunks: Uint8Array[] = []; let size = 0
@@ -23,7 +23,7 @@ export async function policyJSON(response: Response, maxBytes = 2 * 1024 * 1024)
   } finally { await reader.cancel().catch(() => {}) }
   const bytes = new Uint8Array(size); let offset = 0
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
-  return JSON.parse(new TextDecoder().decode(bytes))
+  return JSON.parse(new TextDecoder().decode(bytes)) as T
 }
 const writing = new Map<string, Promise<void>>()
 async function serializedWrite<T>(key: string, signal: AbortSignal, work: () => Promise<T>) {
@@ -41,7 +41,7 @@ async function serializedWrite<T>(key: string, signal: AbortSignal, work: () => 
 export async function policyRequest(path: string, init: RequestInit = {}) {
   const response = await api(path, init, 30_000)
   if (!response.ok) {
-    const body = await policyJSON(response, 64 * 1024).catch(() => ({}))
+    const body: { code?: string; error?: string } = await policyJSON<{ code?: string; error?: string }>(response, 64 * 1024).catch(() => ({}))
     throw new PolicyFailure(response.status, body.code ?? '', body.error ?? `Request refused (${response.status}).`)
   }
   return response
@@ -83,7 +83,7 @@ export function createPolicyEditor<T, D>(owner: () => string, wire: EditorWire<T
     await reads.run(({ after, signal }) => after(wire.read(signal), result => {
       if (snapshot.value && wire.identity(snapshot.value) !== wire.identity(result)) { draft.value = null; baseline = null; undo.value = null }
       snapshot.value = result; needsReload.value = false
-    }), { failed: error => { needsReload.value = true; message.value = error instanceof PolicyFailure ? policyError(error) : 'Could not load the current setting. Reload before editing.' }, settled: () => { loading.value = false } })
+    }), { failed: error => { if (error instanceof PolicyFailure && [401,403].includes(error.status)) { snapshot.value = null; undo.value = null }; needsReload.value = true; message.value = error instanceof PolicyFailure ? policyError(error) : 'Could not load the current setting. Reload before editing.' }, settled: () => { loading.value = false } })
   }
   function edit(value: D) {
     if (busy.value || loading.value || needsReload.value || !snapshot.value) return
@@ -117,7 +117,7 @@ export function createPolicyEditor<T, D>(owner: () => string, wire: EditorWire<T
           message.value = 'Your linked person changed. Make a new choice.'
         }
         snapshot.value = current
-      }).catch(error => after(Promise.resolve(error), () => { needsReload.value = true; message.value += ' Current preview could not be refreshed; reload before editing.' }))
+      }).catch(error => after(Promise.resolve(error), () => { if (error instanceof PolicyFailure && [401,403].includes(error.status)) { snapshot.value = null; undo.value = null }; needsReload.value = true; message.value += ' Current preview could not be refreshed; reload before editing.' }))
     }, {
       failed: error => {
         const identityChanged = error instanceof PolicyFailure && error.code === 'preference_person_changed'
@@ -129,7 +129,7 @@ export function createPolicyEditor<T, D>(owner: () => string, wire: EditorWire<T
         void reads.run(({ after, signal }) => after(wire.read(signal), current => {
           if (wire.identity(current) !== wire.identity(before)) { draft.value = null; baseline = null }
           snapshot.value = current; needsReload.value = false
-        }), { failed: () => { message.value += ' Current value could not be loaded; reload before editing.' } })
+        }), { failed: error => { if (error instanceof PolicyFailure && [401,403].includes(error.status)) snapshot.value = null; message.value += ' Current value could not be loaded; reload before editing.' } })
       }, settled: () => { busy.value = false },
     })
   }
