@@ -13,6 +13,7 @@ import (
 type parentPlacement struct {
 	ParentID  string  `json:"parent_node_id"`
 	ReleaseID *string `json:"release_node_id"`
+	Exists    bool    `json:"exists,omitempty"`
 }
 
 // Match the paired tree writers: pairing -> tree -> tenant access fence ->
@@ -98,12 +99,13 @@ func placeParents(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, r
 		if err != nil && err != pgx.ErrNoRows {
 			return err
 		}
+		old.Exists = err == nil
 		if _, err = tx.Exec(ctx, `INSERT INTO work_parent_releases(tenant_id,parent_node_id,project_node_id,release_node_id) VALUES($1,$2,$3,$4)
    ON CONFLICT(tenant_id,parent_node_id) DO UPDATE SET project_node_id=excluded.project_node_id,release_node_id=excluded.release_node_id`, p.TenantID, id, project, release); err != nil {
 			return err
 		}
 		before.Parents = append(before.Parents, old)
-		after.Parents = append(after.Parents, parentPlacement{ParentID: id, ReleaseID: &release})
+		after.Parents = append(after.Parents, parentPlacement{ParentID: id, ReleaseID: &release, Exists: true})
 	}
 	return nil
 }

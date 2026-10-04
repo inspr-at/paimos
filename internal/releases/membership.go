@@ -52,6 +52,64 @@ type memberState struct {
 	Position      int     `json:"walker_position"`
 	ScopeRequired bool    `json:"scope_revision_required"`
 }
+
+type membershipCandidate struct {
+	ProjectID string
+	Kind      string
+	Status    string
+	FeatureID *string
+	Member    memberState
+}
+
+// Load the bounded leaf set in two queries while holding the write fences.
+// Keep row locks and validation, without thousands of serial read round trips.
+func loadMembershipCandidates(ctx context.Context, tx pgx.Tx, project string, ids []string) (map[string]membershipCandidate, error) {
+	out := make(map[string]membershipCandidate, len(ids))
+	rows, err := tx.Query(ctx, `SELECT n.id::text,n.project_id::text,k.slug,n.state,
+ CASE WHEN ek.slug IN ('work','epic') THEN e.id::text ELSE NULL END
+ FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ LEFT JOIN nodes e ON e.tenant_id=n.tenant_id AND e.id=n.parent_id AND e.deleted_at IS NULL
+ LEFT JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
+ WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL ORDER BY n.id FOR SHARE OF n`, ids)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var candidate membershipCandidate
+		if err := rows.Scan(&id, &candidate.ProjectID, &candidate.Kind, &candidate.Status, &candidate.FeatureID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidate.Member.TicketID = id
+		out[id] = candidate
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	rows, err = tx.Query(ctx, `SELECT ticket_node_id::text,release_node_id::text,walker_position,scope_revision_required
+ FROM journey_tickets WHERE project_node_id=$1 AND ticket_node_id=ANY($2::uuid[]) ORDER BY ticket_node_id FOR UPDATE`, project, ids)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		member := memberState{Exists: true}
+		if err := rows.Scan(&member.TicketID, &member.ReleaseID, &member.Position, &member.ScopeRequired); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if candidate, found := out[member.TicketID]; found {
+			candidate.Member = member
+			out[member.TicketID] = candidate
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	return out, err
+}
+
 type membershipSnapshot struct {
 	ProjectID       string            `json:"project_node_id"`
 	ReleaseID       string            `json:"release_node_id"`
@@ -212,40 +270,38 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		return result, err
 	}
 	in.IDs = leaves
+	candidates, err := loadMembershipCandidates(ctx, tx, project, leaves)
+	if err != nil {
+		return result, err
+	}
 	before := membershipSnapshot{ProjectID: project, ReleaseID: release, ProjectRevision: projectRev, ReleaseRevision: rev, Members: make([]memberState, 0, len(in.IDs))}
 	after := before
 	after.Members = make([]memberState, 0, len(in.IDs))
 	after.ProjectRevision++
 	after.ReleaseRevision++
 	oldReleases := map[string]bool{}
+	registeredFeatures := map[string]bool{}
+	var nextPosition int
+	if err := tx.QueryRow(ctx, `SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$1`, project).Scan(&nextPosition); err != nil {
+		return result, err
+	}
+	// Expansion can produce 1,000 leaves. Keep all validation under the same
+	// fences, but send their bounded writes together instead of a round trip
+	// per leaf. No event is appended until every batch result succeeds.
+	batch := &pgx.Batch{}
 	for _, id := range in.IDs {
-		var nodeProject, kind, status string
-		var feature *string
-		err := tx.QueryRow(ctx, `SELECT n.project_id::text,k.slug,n.state,
-    CASE WHEN ek.slug IN ('work','epic') THEN e.id::text ELSE NULL END
-    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-    LEFT JOIN nodes e ON e.tenant_id=n.tenant_id AND e.id=n.parent_id AND e.deleted_at IS NULL
-    LEFT JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
-    WHERE n.id=$1 AND n.deleted_at IS NULL FOR SHARE OF n`, id).Scan(&nodeProject, &kind, &status, &feature)
-		if err == pgx.ErrNoRows {
+		candidate, found := candidates[id]
+		if !found {
 			return result, fail(404, "ticket not found")
 		}
-		if err != nil {
-			return result, err
-		}
-		if nodeProject != project || (kind != "ticket" && kind != "work") {
+		if candidate.ProjectID != project || (candidate.Kind != "ticket" && candidate.Kind != "work") {
 			return result, fail(404, "ticket not found in project")
 		}
-		if closedTicketState(status) && !fromParents[id] {
+		if closedTicketState(candidate.Status) && !fromParents[id] {
 			return result, fail(409, "closed tickets cannot be added")
 		}
-		old := memberState{TicketID: id}
-		var existingFeature *string
-		err = tx.QueryRow(ctx, `SELECT release_node_id::text,walker_position,scope_revision_required,feature_node_id::text FROM journey_tickets WHERE project_node_id=$1 AND ticket_node_id=$2 FOR UPDATE`, project, id).Scan(&old.ReleaseID, &old.Position, &old.ScopeRequired, &existingFeature)
-		if err != nil && err != pgx.ErrNoRows {
-			return result, err
-		}
-		old.Exists = err == nil
+		old := candidate.Member
+		feature := candidate.FeatureID
 		if old.ReleaseID != nil {
 			if *old.ReleaseID == release {
 				if !fromParents[id] {
@@ -255,14 +311,16 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 				after.Members = append(after.Members, old)
 				continue
 			}
-			var oldState string
-			if err := tx.QueryRow(ctx, `SELECT r.state FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL WHERE r.project_node_id=$1 AND r.release_node_id=$2 FOR UPDATE OF r`, project, *old.ReleaseID).Scan(&oldState); err == pgx.ErrNoRows {
-				return result, fail(409, "source release is unavailable")
-			} else if err != nil {
-				return result, err
-			}
-			if oldState != "planning" {
-				return result, fail(409, "released or active tickets cannot move")
+			if !oldReleases[*old.ReleaseID] {
+				var oldState string
+				if err := tx.QueryRow(ctx, `SELECT r.state FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL WHERE r.project_node_id=$1 AND r.release_node_id=$2 FOR UPDATE OF r`, project, *old.ReleaseID).Scan(&oldState); err == pgx.ErrNoRows {
+					return result, fail(409, "source release is unavailable")
+				} else if err != nil {
+					return result, err
+				}
+				if oldState != "planning" {
+					return result, fail(409, "released or active tickets cannot move")
+				}
 			}
 			if !in.ConfirmMove {
 				return result, fail(409, "confirm_move required to move a ticket from another release")
@@ -272,30 +330,36 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		if !old.Exists {
 			// Only an epic registered for this journey may be projected as a feature.
 			if feature != nil {
-				var registered bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_features WHERE project_node_id=$1 AND feature_node_id=$2)`, project, *feature).Scan(&registered); err != nil {
-					return result, err
+				registered, cached := registeredFeatures[*feature]
+				if !cached {
+					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_features WHERE project_node_id=$1 AND feature_node_id=$2)`, project, *feature).Scan(&registered); err != nil {
+						return result, err
+					}
+					registeredFeatures[*feature] = registered
 				}
 				if !registered {
 					feature = nil
 				}
 			}
-			var pos int
-			if err := tx.QueryRow(ctx, `SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$1`, project).Scan(&pos); err != nil {
-				return result, err
-			}
-			_, err = tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,walker_position,source,scope_revision_required) VALUES($1,$2,$3,$4,$5,$6,'manual',true)`, p.TenantID, id, project, feature, release, pos)
-			if err != nil {
-				return result, err
-			}
+			pos := nextPosition
+			nextPosition++
+			batch.Queue(`INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,walker_position,source,scope_revision_required) VALUES($1,$2,$3,$4,$5,$6,'manual',true)`, p.TenantID, id, project, feature, release, pos)
 			after.Members = append(after.Members, memberState{TicketID: id, Exists: true, ReleaseID: &release, Position: pos, ScopeRequired: true})
 		} else {
-			if _, err := tx.Exec(ctx, `UPDATE journey_tickets SET release_node_id=$2,scope_revision_required=true WHERE ticket_node_id=$1`, id, release); err != nil {
-				return result, err
-			}
+			batch.Queue(`UPDATE journey_tickets SET release_node_id=$2,scope_revision_required=true WHERE ticket_node_id=$1`, id, release)
 			after.Members = append(after.Members, memberState{TicketID: id, Exists: true, ReleaseID: &release, Position: old.Position, ScopeRequired: true})
 		}
 		before.Members = append(before.Members, old)
+	}
+	results := tx.SendBatch(ctx, batch)
+	for range batch.Len() {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return result, err
+		}
+	}
+	if err := results.Close(); err != nil {
+		return result, err
 	}
 	if err := placeParents(ctx, tx, p, project, release, parents, &before, &after); err != nil {
 		return result, err

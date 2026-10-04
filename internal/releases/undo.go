@@ -88,7 +88,9 @@ func undoMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events
 		}
 	}
 	for _, old := range before.Parents {
-		if old.ReleaseID == nil {
+		// Legacy snapshots use non-null release IDs to imply existence. A new
+		// explicit backlog intent also exists and owns retained metadata.
+		if old.ReleaseID == nil && !old.Exists {
 			if _, err := tx.Exec(ctx, `DELETE FROM work_parent_releases WHERE parent_node_id=$1`, old.ParentID); err != nil {
 				return events.Change{}, err
 			}

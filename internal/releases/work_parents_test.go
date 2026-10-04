@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -414,6 +416,42 @@ func TestWorkParentPlacementThousandLeavesWithNestedParents(t *testing.T) {
 	}
 }
 
+func TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf(t *testing.T) {
+	f := ticketSetup(t)
+	a := f.existing("work", f.feature, "First leaf", "open")
+	b := f.existing("work", f.feature, "Second leaf", "open")
+	c := f.existing("work", f.feature, "Unlinked leaf", "open")
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'screen','Screen','SCR','screen')`, f.person.TenantID)
+		return err
+	})
+	screen := f.existing("screen", f.project, "Shared screen", "open")
+	other := f.existing("screen", f.project, "Second screen", "open")
+	deleted := f.existing("screen", f.project, "Deleted screen", "open")
+	memory := f.existing("memory", f.project, "Non-screen", "open")
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type)
+ VALUES($1,$2,$5,'implements'),($1,$5,$2,'cites'),($1,$3,$5,'implements'),($1,$6,$3,'implements'),($1,$2,$7,'implements'),($1,$4,$8,'implements')`, f.person.TenantID, a, b, c, screen, other, memory, deleted); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted)
+		return err
+	})
+	out := membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	bScreens := []string{screen, other}
+	sort.Strings(bScreens)
+	want := map[string][]string{a: {screen}, b: bScreens, c: {}}
+	if len(out.Walker.Tickets) != len(want) {
+		t.Fatalf("walker lost leaves: %+v", out.Walker.Tickets)
+	}
+	for _, ticket := range out.Walker.Tickets {
+		expected, ok := want[ticket.NodeID]
+		if !ok || !slices.Equal(ticket.ScreenIDs, expected) {
+			t.Fatalf("screen links crossed leaves or included deleted/non-screen nodes: %+v want %v", ticket, expected)
+		}
+	}
+}
+
 func TestFormerParentPlanRemovalAndUndoRespectsBacklog(t *testing.T) {
 	for _, undo := range []bool{false, true} {
 		t.Run(fmt.Sprint("undo=", undo), func(t *testing.T) {
@@ -474,6 +512,65 @@ func TestFormerParentPlanRemovalAndUndoRespectsBacklog(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestParentPlacementUndoPreservesRetainedBacklogProjection(t *testing.T) {
+	f := ticketSetup(t)
+	former := f.existing("work", f.feature, "Estimated former parent", "open")
+	membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET feature_node_id=$2,source='requirements',estimated_hours=7.25,access_change=true,scope_revision_required=false,walker_position=42 WHERE ticket_node_id=$1`, former, f.feature)
+		return err
+	})
+	child := f.existing("work", former, "Temporary child", "open")
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, child); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET release_node_id=NULL WHERE ticket_node_id=$1`, former)
+		return err
+	})
+	var backlog []byte
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT to_jsonb(t) FROM journey_tickets t WHERE ticket_node_id=$1`, former).Scan(&backlog)
+	})
+	fresh := f.existing("work", former, "Unassigned child", "open")
+	second := f.existing("release", f.project, "Temporary choice", "open")
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,2)`, f.person.TenantID, second, f.project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET current_release_node_id=$2 WHERE project_node_id=$1`, f.project, second)
+		return err
+	})
+	out := membershipOK(t, f.request(f.person, http.MethodPost, "/api/projects/"+f.project+"/releases/"+second+"/membership", fmt.Sprintf(`{"expected_revision":1,"ticket_node_ids":[%q]}`, former)))
+	events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
+	if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", out.EventID), ""); w.Code != 201 {
+		t.Fatalf("undo temporary parent placement: %d %s", w.Code, w.Body.String())
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var intent *string
+		if err := tx.QueryRow(t.Context(), `SELECT release_node_id::text FROM work_parent_releases WHERE parent_node_id=$1`, former).Scan(&intent); err != nil {
+			if err == pgx.ErrNoRows {
+				t.Fatal("Undo erased the retained backlog projection")
+			}
+			return err
+		}
+		if intent != nil {
+			t.Error("Undo lost explicit backlog intent")
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, fresh); err != nil {
+			return err
+		}
+		var restored []byte
+		if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(t) FROM journey_tickets t WHERE ticket_node_id=$1`, former).Scan(&restored); err != nil {
+			return err
+		}
+		if string(restored) != string(backlog) {
+			t.Fatalf("parent-placement Undo lost retained backlog metadata: before=%s after=%s", backlog, restored)
+		}
+		return nil
+	})
 }
 
 func TestParentReleaseSummaryReportsPartialCoverage(t *testing.T) {
