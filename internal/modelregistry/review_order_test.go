@@ -437,3 +437,55 @@ func TestReviewOrderFinalRevocationAndConcurrentCAS(t *testing.T) {
 		})
 	}
 }
+
+// Catalog v3 must distinguish an explicitly saved v2 default from an untouched
+// fallback; equality with the historical rows does not undo opt-in ownership.
+func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "saved-v2-upgrade", "person", "Owner", []string{"admin"})
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		slugs := append([]string(nil), v2Ladders["review-gate"]...)
+		slugs = append(slugs, "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default")
+		for i, slug := range slugs {
+			var seed seedProfile
+			for _, candidate := range catalogProfiles() {
+				if candidate.Slug == slug {
+					seed = candidate
+				}
+			}
+			if seed.Slug == "" {
+				t.Fatalf("missing historical seed %s", slug)
+			}
+			profile, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: slug, Version: "2", Harness: seed.Harness, Family: seed.Family, Model: seed.Model, Effort: seed.Effort, Tier: seed.Tier})
+			if err != nil {
+				return err
+			}
+			if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate", Priority: i + 1, ProfileID: profile.ID, State: "available"}); err != nil {
+				return err
+			}
+		}
+		return saveReviewOrder(t.Context(), tx, p.TenantID, reviewOrderSaved)
+	})
+	before := roleRoutes("review-gate", registryRoutes(t, p))
+	if len(before) != 6 {
+		t.Fatal("historical default fixture lost its rows")
+	}
+	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	after := roleRoutes("review-gate", registryRoutes(t, p))
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("catalog upgrade replaced saved review order: before=%+v after=%+v", before, after)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		mode, err := storedReviewOrder(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if mode != reviewOrderSaved {
+			t.Fatal("catalog upgrade deactivated saved review mode")
+		}
+		return requireCatalog(t.Context(), tx)
+	})
+	if eventCount(t, p, "model.catalog_upgraded") != 1 {
+		t.Fatal("catalog upgrade did not run")
+	}
+}

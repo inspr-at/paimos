@@ -78,9 +78,14 @@ func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) (
 	}
 	changed := []string{}
 	for _, role := range roleLadder {
-		steps, err := loadLadder(ctx, tx, role.name)
+		steps, mode, err := loadLadderSnapshot(ctx, tx, role.name, 0)
 		if err != nil {
 			return nil, err
+		}
+		// An explicit ordinary review save remains tenant policy even when
+		// its rows happen to match the historical default byte-for-byte.
+		if role.name == "review-gate" && mode == reviewOrderSaved {
+			continue
 		}
 		if !matchesV2(role.name, steps) {
 			continue
