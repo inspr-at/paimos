@@ -66,6 +66,11 @@ jobs:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
+      - name: Node for merge-queue flake control
+        if: github.event_name == 'merge_group'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
       - name: Locate Go build cache
         id: go-cache-path
         run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
@@ -96,11 +101,27 @@ jobs:
           GOFLAGS: -count=1
         run: |
           set -euo pipefail
-          go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          # ci-flake-report.mjs reads the guard summaries; keep them even when this step fails.
+          mkdir -p "$RUNNER_TEMP/ci-flake-evidence"
+          trap 'cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/ci-flake-evidence/go-test-${{ matrix.shard }}.md" || true' EXIT
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            node scripts/ci-flake-guard.mjs --kind go -- go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          else
+            go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          fi
           cached=$(grep -cE '^ok[[:space:]].*\(cached\)$' "$RUNNER_TEMP/go-test.log" || true)
           packages=$(grep -cE '^ok[[:space:]]' "$RUNNER_TEMP/go-test.log" || true)
           printf 'Go shard %s/%s: %s successful package invocations, %s cached\n' "${{ matrix.shard }}" "$AEON_GO_SHARD_COUNT" "$packages" "$cached" >> "$GITHUB_STEP_SUMMARY"
           test "$cached" -eq 0
+      - name: Preserve flake-guard summaries
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: go-test-${{ matrix.shard }}-flake-evidence
+          path: ${{ runner.temp }}/ci-flake-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in
@@ -200,38 +221,184 @@ jobs:
           test "${GO_STATIC}" = success
           test "${GO_TIMING}" = success
 
-  web:
+  # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
+  # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
+  # model-settings step ran specs that the shards now own (groups footer,
+  # status-help, status-autopilot, model-settings); their unit tests run once in
+  # web-setup via npm run test:unit.
+  web-setup:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      browser-cache-key: ${{ steps.web-cache-keys.outputs.browsers }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Resolve lockfile and Playwright cache keys
+        id: web-cache-keys
+        env:
+          LOCKFILE_HASH: ${{ hashFiles('web/package-lock.json') }}
+        run: |
+          set -euo pipefail
+          pw_version="$(node -p "require('./web/package-lock.json').packages['node_modules/@playwright/test'].version")"
+          echo "dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
+          echo "browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
+      - name: Cache installed web dependencies
+        id: web-dependencies
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: web/node_modules
+          key: ${{ steps.web-cache-keys.outputs.dependencies }}
+      - name: Install web dependencies
+        if: steps.web-dependencies.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npm ci
       - name: Check Docker web inputs without Docker
         run: node --test scripts/docker-web-inputs.test.mjs
-      - working-directory: web
-        run: npm ci
       - name: Install shells used by command round-trip unit tests
-        run: sudo apt-get update && sudo apt-get install -y fish zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
       - working-directory: web
         run: npm run lint
-      # AEON-488: the dock adapter, list, version/header and release-entry regressions
-      # run on hosted CI, keeping browser suites off the operator workstation.
-      - name: Install shells for command round-trip unit tests
-        run: sudo apt-get update && sudo apt-get install -y fish zsh
-      - working-directory: web
-        run: npm run test:unit
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      # AEON-478: measure allowance and briefing regressions once Chromium is installed.
-      - name: Usage dashboard and morning briefing regressions
+      - name: Web unit checks (once)
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1
+        run: npm run test:unit
+      - name: Browser runner safety (no browsers)
+        working-directory: web
+        run: npm run test:browser-safety
+      - name: Build web
+        working-directory: web
+        run: npm run build
+      - name: Cache Playwright browsers
+        id: web-browsers
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.web-cache-keys.outputs.browsers }}
+      - name: Install Playwright browsers
+        if: steps.web-browsers.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install chromium
+      # Tar preserves executable bits, symlinks and hidden dependency files.
+      # Build output is run-specific; never replay a dist cache for another commit.
+      - name: Pack web runtime for shards
+        run: tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist
+      - name: Share web runtime with shards
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime.tar
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
+  web-shard:
+    needs: web-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON('[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
+    env:
+      PW_RETRIES: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime
+      - name: Restore web runtime
+        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Restore Playwright browsers
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ needs.web-setup.outputs.browser-cache-key }}
+          fail-on-cache-miss: true
+      # OS libraries are per runner; browser downloads and npm ci are shared.
+      - name: Install Chromium system dependencies
+        working-directory: web
+        run: npx playwright install-deps chromium
+      - name: Run balanced UI shard with merge-queue flake control
+        env:
+          RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
+          AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
+          ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
+          ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
+          # The guard needs the wrapper's merged JSON report to see every group, including one that never started.
+          CI_FLAKE_REQUIRE_JSON: '1'
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-flake-evidence"
+          code=0
+          node scripts/ci-flake-guard.mjs --kind playwright -- npm --prefix web run ci:web:shard -- ${{ matrix.shard }}/12 --reporter=line,json || code=$?
+          # ci-flake-report.mjs reads these summaries; keep them with the shard evidence.
+          cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/ci-flake-evidence/web-shard-${{ matrix.shard }}.md" || true
+          exit "$code"
+      - name: Preserve shard traces and screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-shard-${{ matrix.shard }}-evidence
+          path: |
+            web/test-results/
+            web/playwright-report/
+            .agent-shots/planning/
+            .agent-shots/queue/
+            ${{ runner.temp }}/aeon-release-list-shots/
+            ${{ runner.temp }}/aeon-desk-shots/
+            ${{ runner.temp }}/aeon-attach-shots/
+            ${{ runner.temp }}/aeon-521a-shots/
+            ${{ runner.temp }}/status-autopilot-shots/
+            ${{ runner.temp }}/ci-flake-evidence/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
+  # AEON-488 evidence, kept from the old web job: the immutable round-6 release list rendered with the
+  # current screenshot fixture, next to the current one. Not part of the required `web` aggregate.
+  release-list-comparison:
+    needs: web-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime
+      - name: Restore web runtime
+        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Restore Playwright browsers
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ needs.web-setup.outputs.browser-cache-key }}
+          fail-on-cache-miss: true
+      - name: Install Chromium system dependencies
+        working-directory: web
+        run: npx playwright install-deps chromium
       - name: Capture the round-6 release list for comparison
         id: release-list-before
         working-directory: web
@@ -246,223 +413,35 @@ jobs:
           git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue
           git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue
           npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
-      - working-directory: web
+      - name: Capture the current release list
+        working-directory: web
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
+        run: npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
       - name: Upload release list comparison screenshots
         if: always() && steps.release-list-before.outcome != 'skipped'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aeon-488-release-list-comparison
           path: ${{ runner.temp }}/aeon-release-list-shots
           if-no-files-found: error
-      - working-directory: web
-        run: npm run test:unit
-      - name: Browser runner safety (no browsers)
-        working-directory: web
-        run: npm run test:browser-safety
-      - name: Service tier controls and layout stability
-        working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1
-      - working-directory: web
-        run: npm run build
-      - name: Install shells for generated account command unit checks
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
-      - name: Web unit checks
-        working-directory: web
-        run: npm run test:unit
-      - name: Access scope and role helper tests
-        working-directory: web
-        run: node --experimental-strip-types --test tests/access.test.ts tests/agent-login.test.ts
-      - name: Install browser for access dialog regressions
-        working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Access dialog regressions (hosted only)
-        working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/key-full-access.spec.ts tests/scope-codes.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
-      - name: Preserve failed access dialog traces
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: access-dialog-failures
-          path: web/test-results/
-          retention-days: 7
-      - name: Install shells for account command tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
-      - working-directory: web
-        run: npm run test:unit
-      - name: Planning columns regression and theme screenshots
-        working-directory: web
-        run: npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2
-      - name: Planning screenshot evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: planning-columns-${{ github.sha }}
-          path: .agent-shots/planning/*.png
-          include-hidden-files: true
-          if-no-files-found: ignore
 
-      - name: Work queue regressions and theme screenshots
-        working-directory: web
-        run: npx playwright test tests/work-queue.spec.ts -c playwright.ui.config.ts --workers=1
-      - name: Work queue screenshot evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: work-queue-${{ github.sha }}
-          path: .agent-shots/queue/*.png
-          include-hidden-files: true
-          if-no-files-found: ignore
-      - name: Ticket dispatch, panel and worker regressions
-        working-directory: web
-        run: npx playwright test tests/start-agent.spec.ts tests/ticket-panel.spec.ts tests/ticket-workers.spec.ts -c playwright.ui.config.ts --workers=2
-
-      - name: Session linking unit checks
-        working-directory: web
-        run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts tests/account-link.test.ts
-      - name: Morning briefing unit checks
-        working-directory: web
-        run: npx vitest run tests/morning-briefing.unit.test.ts tests/ticket-outcomes.unit.test.ts --maxWorkers=1
-
-      - name: Additional harness brands and pairing vocabulary
-        working-directory: web
-        run: node --experimental-strip-types --test tests/brandMarks.test.ts tests/agent-pairing.test.ts
-      - name: Scope code wire and ceiling checks
-        working-directory: web
-        run: node --experimental-strip-types --test tests/scope-code.test.ts tests/access.test.ts
-      - name: Install browser for session linking regressions
-        working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Controls stay put and affected dialog regressions (AEON-541)
-        working-directory: web
-        run: >-
-          npx playwright test -c playwright.ui.config.ts --workers=2 --trace=retain-on-failure
-          tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
-          tests/accounts-computers.spec.ts tests/agents-top.spec.ts
-          tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
-      - name: Decision Desk keyboard, protected adapters and geometry (AEON-567)
-        working-directory: web
-        env:
-          AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
-        run: npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure
-      - name: Upload Decision Desk captures
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: aeon-567-desk-shots
-          path: ${{ runner.temp }}/aeon-desk-shots
-          if-no-files-found: ignore
-      - name: Session linking, approval and security regressions
-        working-directory: web
-        env:
-          ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-          ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2
-      - name: Preserve account linking screenshots and failures
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: account-link-browser-evidence
-          path: web/test-results/
-          retention-days: 7
-      - name: Scope proposals and key management regressions
-        working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
-
-  # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
-  footer-ui:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - name: Install shells for web command tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
-      - name: Web unit tests
-        working-directory: web
-        run: npm run test:unit
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Footer and affected release/brand integration checks
-        working-directory: web
-        env:
-          AEON_SCREENSHOTS_DIR: test-results/footer-release-pill
-        run: >-
-          npx playwright test -c playwright.ui.config.ts --workers=2
-          tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts
-          tests/release-codenames.spec.ts tests/version-reveal.spec.ts
-          tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts
-          tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts
-      - name: Desktop light screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-desktop-light
-          path: web/test-results/footer-release-pill/desktop-light.png
-          if-no-files-found: error
-      - name: Desktop dark screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-desktop-dark
-          path: web/test-results/footer-release-pill/desktop-dark.png
-          if-no-files-found: error
-      - name: Phone light screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-phone-light
-          path: web/test-results/footer-release-pill/phone-light.png
-          if-no-files-found: error
-      - name: Phone dark screenshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: footer-phone-dark
-          path: web/test-results/footer-release-pill/phone-dark.png
-          if-no-files-found: error
-
-  status-help-ui:
+  # Preserve the ruleset's required check identity, including failed/skipped setup.
+  web:
+    name: web
+    if: always()
+    needs: [web-setup, web-shard]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - name: Status definitions and human-check unit tests
-        working-directory: web
-        run: node --experimental-strip-types --test tests/status-definitions.test.ts tests/work.test.ts tests/activity.test.ts
-      - name: Human-check action permission regressions
-        working-directory: web
-        run: npx vitest run tests/live-ticket.unit.test.ts --maxWorkers=1 --no-file-parallelism
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Status help and human-check browser regressions
-        working-directory: web
+      - name: Require setup and every web shard
         env:
-          AEON_521A_SHOTS: ${{ runner.temp }}/aeon-521a-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: aeon-521a-status-help
-          path: |
-            ${{ runner.temp }}/aeon-521a-shots
-            web/test-results
-          if-no-files-found: warn
-          retention-days: 14
+          WEB_SETUP: ${{ needs.web-setup.result }}
+          WEB_SHARD: ${{ needs.web-shard.result }}
+        run: |
+          set -euo pipefail
+          echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
+          test "${WEB_SETUP}" = success
+          test "${WEB_SHARD}" = success
 
   release-check:
     runs-on: ubuntu-latest
@@ -479,6 +458,7 @@ jobs:
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
+      - run: node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
       - run: node --test scripts/release-pin-pr.test.mjs
       - name: Offline code-health audit toolkit and slice ownership
@@ -564,35 +544,6 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
-      - name: Test workspace model provider and catalog refresh controls
-        working-directory: web
-        run: npm test -- tests/model-provider.spec.ts tests/model-refresh.spec.ts --workers=1
-
-  status-autopilot-ui:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - working-directory: web
-        run: npm ci
-      - working-directory: web
-        run: node --experimental-strip-types --test tests/status-autopilot.test.ts
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
-      - working-directory: web
-        env:
-          STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
-          AGENT_ACTIVITY_SHOTS: ${{ runner.temp }}/status-autopilot-shots/activity
-        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: status-autopilot-screenshots
-          path: ${{ runner.temp }}/status-autopilot-shots
 
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
   migration-compat:
