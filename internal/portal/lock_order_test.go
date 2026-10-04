@@ -38,7 +38,7 @@ func TestPortalWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 			product := insertNode(t, f.d, tid, "PPR-1", "portal_product", "Product", "summary", "published", "", "{}")
 			configureFixtureProduct(t, f.d, tid, product, "first", "legacy", true)
 			wish := insertNode(t, f.d, tid, "PWS-1", "portal_wish", "Wish", "summary", "published", product, "{}")
-			ticket := insertNode(t, f.d, tid, "TKT-1", "ticket", "Ticket", "", "open", "", "{}")
+			ticket := insertNode(t, f.d, tid, "TKT-1", "work", "Ticket", "", "open", "", "{}")
 			project := insertNode(t, f.d, tid, "PRJ-1", "project", "Project", "", "open", "", "{}")
 			setPortal(t, f.d, tid, true)
 			var kind string
@@ -49,7 +49,12 @@ func TestPortalWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO portal_competitors(tenant_id,product_id,name,published,position) VALUES($1,$2,'Northwind',true,1)`, tid, product); err != nil {
 					return err
 				}
-				return tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='ticket'`).Scan(&kind)
+				if name == "node-convert" {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema) VALUES($1,'build','Build','BLD','task','{"type":"object","issue_family":true}')`, tid); err != nil {
+						return err
+					}
+				}
+				return tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='work'`).Scan(&kind)
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -92,8 +97,8 @@ func TestPortalWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 				method, path, body = "POST", "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q],"priority":"high"}`, ticket)
 				event, effect = "node.bulk_changed", `SELECT count(*) FROM nodes WHERE fields->>'priority'='high'`
 			case "node-convert":
-				method, path, body = "POST", "/api/nodes/"+ticket+"/convert", `{"to_kind":"task"}`
-				event, effect = "node.kind_changed", `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='task'`
+				method, path, body = "POST", "/api/nodes/"+ticket+"/convert", `{"to_kind":"build"}`
+				event, effect = "node.kind_changed", `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='build'`
 			case "wish-legacy", "wish-product":
 				person = false
 				method, path, body, status = "POST", base+"/wishes", `{"title":"New wish","summary":"New summary"}`, http.StatusCreated

@@ -133,7 +133,7 @@ func TestEstimatedTicketSuggestionsAndConfirmation(t *testing.T) {
 func TestReleaseTextEditPreservesMissingRouteHints(t *testing.T) {
 	p := newPrincipal(t, "release-text-routes")
 	agent := estimateAgent(t, p)
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Docker deployment","body":"Keep this body","fields":{"estimate_hours":4,"priority":"high","hide_from_release_notes":true,"notes":{"nested":["keep",42]},"pill_en":"Old release text","pill_de":"Alter kurzer Text","benefit_en":"Old benefit.","benefit_de":"Alter Nutzen."}}`, kind.ID))
 	// Seed an existing estimated ticket from before route suggestions existed.
 	// Keep its real estimate provenance so a replacement document is not a new estimate.

@@ -400,24 +400,28 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		// Match handlers that enter pairing before tree/access, including
-		// Knowledge Undo. Take the whole prefix before the per-event lock in
-		// both flag states, so ordinary writes and activation cannot invert it.
-		// Use the shared SQL key here: agentpairing itself depends on events.
+		// Match the shared tenant -> pairing -> tree prefix before taking the
+		// per-event lock. NO KEY UPDATE allows concurrent event FK shares.
+		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
+		// agentpairing depends on events, so use its shared SQL key directly.
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`); err != nil {
 			return err
 		}
 		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
-			return err
-		}
-		if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.RouteScope(r.Context())); err != nil {
-			if errors.Is(err, authz.ErrForbidden) {
-				return ErrForbidden
+		// Causal Undo resolves and checks every current project target in
+		// causalChange under these same fences. A workspace-scope check here
+		// would reject legitimate project grants before resolving hidden causes.
+		if e.Type != derivedStatusEvent {
+			if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.RouteScope(r.Context())); err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					return ErrForbidden
+				}
+				return err
 			}
-			return err
 		}
 		// Serialize attempts on this original event without modifying history or
 		// taking the event counter before a resource lock (writers take it last).

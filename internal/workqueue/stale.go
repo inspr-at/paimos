@@ -18,7 +18,7 @@ func Progress(state string) bool {
 }
 
 // Stale returns only idle progress tickets from a bounded node set without
-// revealing worker identities. Mutation callers hold the pairing/tree/tenant
+// revealing worker identities. Mutation callers hold the tenant/pairing/tree
 // fences and the ticket row. exceptRun excludes Undo's own still-queued run.
 func Stale(ctx context.Context, tx pgx.Tx, ids []string, exceptRun ...string) (map[string]bool, error) {
 	if len(ids) > 1000 || len(exceptRun) > 1 {
@@ -33,7 +33,9 @@ func Stale(ctx context.Context, tx pgx.Tx, ids []string, exceptRun ...string) (m
 	}
 	rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')
+ WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL AND (k.slug IN ('ticket','task') OR (k.slug='work' AND NOT EXISTS(
+ SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+ WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')))
  AND replace(replace(lower(btrim(n.state)),' ','_'),'-','_') IN ('in_progress','progress','active')
  AND coalesce(btrim(CASE
    WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')

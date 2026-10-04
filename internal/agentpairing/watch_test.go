@@ -76,7 +76,7 @@ func watchFixtureWithHarness(t *testing.T, publicKey, harness string) (*fixture,
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='ticket'`, f.tenantID, ticket, project)
+		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='work'`, f.tenantID, ticket, project)
 		return err
 	})
 	if err != nil {

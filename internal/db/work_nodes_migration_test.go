@@ -699,7 +699,8 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 		t.Fatal("fixture already includes later schema")
 	}
 	tid := workSeed(t, d, "release-122-upgrade")
-	preserved := `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n)-ARRAY['kind_id','benefit_generation'] ORDER BY key) FROM nodes n),'sessions',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM harness_sessions s),'questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q))`
+	// 1117 adds desk_answers after release 122; compare every pre-existing column.
+	preserved := `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n)-ARRAY['kind_id','benefit_generation'] ORDER BY key) FROM nodes n),'sessions',(SELECT jsonb_agg(to_jsonb(s)-'desk_answers' ORDER BY id) FROM harness_sessions s),'questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q))`
 	before := workSnapshot(t, d, tid, preserved)
 	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
 		t.Fatal(err)

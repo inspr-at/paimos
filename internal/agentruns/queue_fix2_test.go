@@ -23,7 +23,7 @@ func (f *fixture) apiQueueTicket(t *testing.T, parent *string) string {
 	var kinds struct{ Items []struct{ ID, Slug string } }
 	f.call(t, f.person, "GET", "/api/kinds", nil, 200, &kinds)
 	for _, kind := range kinds.Items {
-		if kind.Slug != "ticket" {
+		if kind.Slug != "work" {
 			continue
 		}
 		var node struct{ ID string }
@@ -33,7 +33,7 @@ func (f *fixture) apiQueueTicket(t *testing.T, parent *string) string {
 		}, 201, &node)
 		return node.ID
 	}
-	t.Fatal("ticket kind missing")
+	t.Fatal("work kind missing")
 	return ""
 }
 

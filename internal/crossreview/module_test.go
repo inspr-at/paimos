@@ -95,12 +95,7 @@ func newFixture(t *testing.T) *fixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',10000000)`, tid, f.account); err != nil {
 			return err
 		}
-		// Preserve explicit legacy fixtures, then exercise migration in regressions.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema)
-			VALUES($1,'ticket','Ticket','TKT','ticket','{"type":"object","issue_family":true}') ON CONFLICT (tenant_id,slug) DO NOTHING`, tid); err != nil {
-			return err
-		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='ticket' RETURNING id::text`, tid).Scan(&f.ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, tid).Scan(&f.ticket)
 	})
 	prefix, secret := strings.ReplaceAll(testID(), "-", ""), testID()
 	sum := sha256.Sum256([]byte(secret))
