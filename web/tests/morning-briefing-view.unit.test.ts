@@ -27,7 +27,7 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean; partialAllowance?: boolean; truncatedAllowance?: boolean } = {}, setupPrelude = '') {
+async function mount(options: { canonical?: boolean; workOrder?: boolean; hiddenParent?: boolean; denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean; partialAllowance?: boolean; truncatedAllowance?: boolean } = {}, setupPrelude = '') {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
   const can = (permission: string, project?: string) => !(options.noDecide && permission === 'approvals.decide') && (permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed'))
@@ -55,7 +55,10 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
   }
   const modules: Record<string, unknown> = {
     vue: { ...Vue, vModelText: {} },
-    '../lib/api': { APIError, listNodes: async () => { if (options.detailsFailure) throw new APIError(500, 'failed'); return { items: options.autopilot || options.merge ? [{ id: 'ticket', key: 'AEON-454', kind_slug: 'ticket', project: { id: 'allowed' } }] : [] } } },
+    '../lib/api': { APIError, listNodes: async (params: { ids: string[] }) => { if (options.detailsFailure) throw new APIError(500, 'failed'); return { items: options.autopilot || options.merge ? [
+      { id: 'ticket', key: 'AEON-454', kind_slug: options.canonical ? 'work' : 'ticket', project: { id: 'allowed' } },
+      ...(options.workOrder ? [{ id: 'order', key: 'WO-454', kind_slug: 'work_order', parent: { id: 'ticket', kind_slug: options.canonical ? 'work' : 'ticket' }, project: { id: 'allowed' } }] : []),
+    ].filter(row => params.ids.includes(row.id) && !(options.hiddenParent && row.id === 'ticket')) : [] } } },
     '../lib/authz': { can, ensurePermissions: async () => 'known', refreshPermissions: async () => {}, onAccessChange: () => () => {} },
     '../lib/identityScope': Scope, '../lib/agentState': AgentState,
     '../lib/usageDashboard': { loadUsageDashboard: async (params: { project?: string }) => { paths.push(`/usage/dashboard${params.project ? `?project=${params.project}` : ''}`); return dashboard } },
@@ -69,7 +72,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
       loadBriefingEvents: async (_range: unknown, _signal: unknown, autopilot: unknown) => {
         paths.push(`events:${JSON.stringify(autopilot)}`)
         if (autopilot && options.autopilotFailure) throw new APIError(500, 'failed')
-        const base = { node_id: 'ticket', at: START }
+        const base = { node_id: options.workOrder ? 'order' : 'ticket', at: START }
         return { items: autopilot && options.autopilot ? [
           { ...base, id: 454, type: 'status_autopilot.changed', before: { state: 'done' }, after: { state: 'delivered' } },
           { ...base, id: 455, type: 'status_autopilot.skipped', before: { state: 'done', human_check: 'Touch ID' }, after: { state: 'done', human_check: 'Touch ID' } },
@@ -78,7 +81,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
       loadBriefingWindow: async () => {
         if (options.ticketLogFailure) throw new APIError(500, 'failed')
         return { range: { from: START, to: END, first: false, capped: false }, events: { items: options.merge ? [
-          { id: 456, node_id: 'ticket', type: 'node.updated', before: { state: 'done', fields: {} }, after: { state: 'done', fields: { merge_commit: 'abcdef1234567', pr_url: 'https://github.com/example/repo/pull/1' } }, at: START },
+          { id: 456, node_id: options.workOrder ? 'order' : 'ticket', type: 'node.updated', before: { state: 'done', fields: {} }, after: { state: 'done', fields: { merge_commit: 'abcdef1234567', pr_url: 'https://github.com/example/repo/pull/1' } }, at: START },
         ] : [], truncated: false } }
       },
     },
@@ -253,4 +256,23 @@ it.each([false, true])('shows returned partial allowance windows and coverage (t
   expect(text).toContain(usageAllowanceWindow().label)
   expect(text).not.toContain('No account budget windows recorded.')
   expect(text).toContain(truncatedAllowance ? 'Account budget windows are truncated.' : 'Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
+})
+
+
+it.each([false, true])('canonical work briefing preserves merge facts, delivery and human checks (work-order=%s)', async workOrder => {
+  const { root, saves } = await mount({ canonical: true, workOrder, merge: true, autopilot: true, projectCost: true })
+  const text = textOf(root)
+  expect(text).toContain('AEON-454 · Merge reported')
+  expect(text).toContain('AEON-454 · Marked delivered')
+  expect(text).toContain('AEON-454 · Human check')
+  expect(text).toContain('Touch ID')
+  expect(text).not.toContain('WO-454 ·')
+  expect(flatten(root).filter(el => el.tag === 'a' && textOf(el).startsWith('AEON-454 ·')).every(el => el.props.href === '/p/allowed/AEON-454')).toBe(true)
+  expect(saves[0]?.last_visit).toBe(END)
+})
+it('canonical work-order facts do not expose a parent omitted by visibility', async () => {
+  const { root } = await mount({ canonical: true, workOrder: true, hiddenParent: true, merge: true, autopilot: true })
+  expect(textOf(root)).not.toContain('Merge reported')
+  expect(textOf(root)).not.toContain('Human check')
+  expect(textOf(root)).not.toContain('Touch ID')
 })
