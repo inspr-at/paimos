@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { validate, select, shard, key, exactPattern, webGraph } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -99,7 +99,7 @@ test('known-flaky committed cases retain exact owners and cannot be promoted by 
     const manifest=manifests.find(manifest=>manifest.tests.some(row=>key(row)===entry.key))
     assert.ok(manifest,`Stale known-flaky case: ${entry.key}`)
     const row=manifest.tests.find(row=>key(row)===entry.key)
-    assert.equal(row.tier,'NIGHTLY',entry.key)
+    assert.equal(row.tier,'GATED-FULL',entry.key)
     assert.ok(select(manifest.tests,{event:'schedule',paths:[]}).tests.some(row=>key(row)===entry.key))
     const promoted=structuredClone(manifest)
     promoted.tests.find(row=>key(row)===entry.key).tier='ESSENTIAL'
@@ -151,38 +151,38 @@ test('fan-out chooses full shard counts for uncertain and deleted paths, small c
   assert.equal(schedulingMode('schedule',['README.md']),'full')
 })
 
-test('uncertain infrastructure changes preserve the existing browser gate plus promoted essentials',()=>{
+test('uncertain infrastructure changes preserve the classified gate plus promoted essentials',()=>{
   const browser=(file,name,tier='NIGHTLY')=>({kind:'browser',file,name,tier})
-  const rows=[...cases,browser('tests/gated.spec.ts','guard'),browser('tests/optional.spec.ts','core','ESSENTIAL'),
+  const rows=[...cases.map(row=>({...row,tier:row.tier==='NIGHTLY'?'GATED-FULL':row.tier})),browser('tests/gated.spec.ts','guard','GATED-FULL'),browser('tests/optional.spec.ts','core','ESSENTIAL'),
     browser('tests/optional.spec.ts','gallery')]
   for(const event of ['pull_request','merge_group','push']) {
-    const picked=select(rows,{event,paths:['.github/workflows/ci.yml','web/package.json','web/playwright.ui.config.ts'],browserGateFiles:['tests/gated.spec.ts']})
+    const picked=select(rows,{event,paths:['.github/workflows/ci.yml','web/package.json','web/playwright.ui.config.ts']})
     assert.equal(picked.full,true)
     assert.deepEqual(picked.tests,rows.slice(0,-1))
-    assert.equal(picked.scope,'browser-gate')
+    assert.equal(picked.scope,'gated-full')
     assert.equal(picked.deferredBrowserCases,1)
   }
-  for(const options of [{event:'schedule'},{event:'workflow_dispatch'},{event:'pull_request',fullCatalogue:true}]) {
-    const picked=select(rows,{...options,paths:['.github/workflows/ci.yml'],browserGateFiles:['tests/gated.spec.ts']})
+  for(const options of [{event:'schedule'},{event:'workflow_dispatch',forceAll:true},{event:'pull_request',forceAll:true}]) {
+    const picked=select(rows,{...options,paths:['.github/workflows/ci.yml']})
     assert.deepEqual(picked.tests,rows)
     assert.equal(picked.scope,'catalogue')
     assert.equal(picked.deferredBrowserCases,0)
   }
 })
 
-test('optional changed browser cases survive infrastructure widening and unknown web impact widens the catalogue',()=>{
+test('optional changed browser cases run in changed-area selection; uncertain impact widens only to the gate',()=>{
   const rows=[{kind:'browser',file:'tests/optional.spec.ts',name:'race',tier:'NIGHTLY'},
-    {kind:'browser',file:'tests/other.spec.ts',name:'other',tier:'NIGHTLY'}]
+    {kind:'browser',file:'tests/other.spec.ts',name:'other',tier:'GATED-FULL'}]
   const webImports={'src/store.ts':[],'tests/optional.spec.ts':['src/store.ts'],'tests/other.spec.ts':[]}
   for(const path of ['web/tests/optional.spec.ts','web/src/store.ts']) {
-    const picked=select(rows,{event:'merge_group',paths:['scripts/ci-pr-plan.mjs',path],browserGateFiles:[],webImports})
+    const picked=select(rows,{event:'merge_group',paths:[path],webImports})
     assert.deepEqual(picked.tests,[rows[0]])
-    assert.equal(picked.deferredBrowserCases,1)
+    assert.equal(picked.full,false)
   }
   for(const path of ['web/src/deleted.ts','web/src/Unmapped.vue']) {
-    const picked=select(rows,{event:'pull_request',paths:[path],browserGateFiles:[],webImports:{...webImports,'src/Unmapped.vue':[]}})
-    assert.deepEqual(picked.tests,rows,path)
-    assert.equal(picked.deferredBrowserCases,0,path)
+    const picked=select(rows,{event:'pull_request',paths:[path],webImports:{...webImports,'src/Unmapped.vue':[]}})
+    assert.deepEqual(picked.tests,[rows[1]],path)
+    assert.equal(picked.deferredBrowserCases,1,path)
   }
 })
 
@@ -307,16 +307,16 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   for(const manifest of [go,web]) {
     const reconciled=validate(manifest,manifest.tests)
     assert.deepEqual(reconciled.map(key).sort(),manifest.tests.map(key).sort())
-    for(const tier of ['ESSENTIAL','NIGHTLY']) assert.ok(reconciled.some(row=>row.tier===tier),tier)
+    for(const tier of ['ESSENTIAL','GATED-FULL']) assert.ok(reconciled.some(row=>row.tier===tier),tier)
   }
   for(const helper of ['TestFakeVendorProcess','TestNoOutboundServerHelper'])assert.equal(go.tests.find(row=>row.name===helper).tier,'ESSENTIAL')
   const known=JSON.parse(readFileSync(new URL('../ci/known-flaky.json',import.meta.url)))
   const guards=web.tests.filter(row=>row.file==='tests/no-shift.spec.ts'&&known.entries.some(entry=>entry.key===key(row)))
   assert.deepEqual(guards.map(key).sort(),known.entries.filter(entry=>entry.key.startsWith('browser:tests/no-shift.spec.ts:')).map(entry=>entry.key).sort())
-  assert.ok(guards.every(row=>row.tier==='NIGHTLY'))
+  assert.ok(guards.every(row=>row.tier==='GATED-FULL'))
   assert.ok(go.tests.some(row=>row.tags?.includes('delete-candidate')))
   assert.ok(go.tests.some(row=>row.lane==='timing'))
-  assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='NIGHTLY'))
+  assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
 })
 
 test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
@@ -336,7 +336,7 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   const nightly=read('nightly-full.yml'),ci=read('ci.yml')
   assert.match(nightly,/schedule:\n\s+- cron:/);assert.match(nightly,/workflow_dispatch:/)
   assert.doesNotMatch(nightly,/pull_request:|merge_group:|runner-route:/)
-  for(const command of ['run go --full --shard','run web --full --unit','run web --full --shard'])assert.ok(nightly.includes(command))
+  for(const command of ['run go --all --shard','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
   assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan\]/)
   assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-setup, web-shard, tree-reuse, cache-prime, tier-plan\]/)
@@ -345,7 +345,7 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
 })
 
 test('full-execution proof binds actual complete outcomes to this run, attempt and SHA',()=>{
-  const report={...reportCases(cases,cases.map(row=>({key:key(row),status:'passed',started:true})),1,'go-test-1'),full:true,exitCode:0,runId:'123',attempt:'2',sha:'a'}
+  const report={...reportCases(cases,cases.map(row=>({key:key(row),status:'passed',started:true})),1,'go-test-1'),full:true,scope:'catalogue',exitCode:0,runId:'123',attempt:'2',sha:'a'}
   const env={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'}
   assert.equal(checkFull(report,env),true)
   for(const change of [{full:false},{exitCode:1},{attempt:'1'},{sha:'b'},{classes:{...report.classes,NIGHTLY:{...report.classes.NIGHTLY,notRun:1}}}])assert.throws(()=>checkFull({...report,...change},env),/Full execution/)
@@ -358,4 +358,80 @@ test('browser registrations blocked before execution remain notRun rather than c
   assert.equal(report.classes.ESSENTIAL.notRun,1)
   assert.equal(report.classes.ESSENTIAL.run,0)
   assert.equal(report.classes.ESSENTIAL.failed,0)
+})
+
+test('three-tier full is exactly ESSENTIAL plus GATED-FULL even for unknown impact and explicit full',()=>{
+  const rows=[g('internal/auth','TestCore','ESSENTIAL'),g('internal/auth','TestExisting','GATED-FULL'),
+    g('internal/auth','TestUnclassified'),
+    {kind:'browser',file:'tests/gated.spec.ts',name:'gate',tier:'GATED-FULL'},
+    {kind:'browser',file:'tests/optional.spec.ts',name:'gallery',tier:'NIGHTLY'}]
+  for(const event of ['pull_request','merge_group','push','workflow_dispatch']) {
+    for(const paths of [undefined,['.github/workflows/ci.yml'],['web/src/deleted.ts'],['scripts/check.mjs','web/tests/optional.spec.ts']]) {
+      for(const forceFull of [false,true]) {
+        const selection=select(rows,{event,paths,forceFull})
+        assert.deepEqual(selection.tests,[rows[0],rows[1],rows[3]],`${event} ${paths} explicit=${forceFull}`)
+        assert.equal(selection.scope,'gated-full')
+        assert.equal(selection.deferredBrowserCases,1)
+      }
+    }
+  }
+  for(const options of [{event:'schedule'},{event:'pull_request',forceAll:true},{event:'workflow_dispatch',forceAll:true}]) {
+    const selection=select(rows,{...options,paths:['README.md']})
+    assert.deepEqual(selection.tests,rows)
+    assert.equal(selection.full,true)
+    assert.equal(selection.scope,'catalogue')
+    assert.equal(selection.deferredBrowserCases,0)
+  }
+  // The changed-area lane still exercises optional tests when their area changes.
+  for(const event of ['pull_request','merge_group']) assert.deepEqual(
+    select(rows,{event,paths:['web/tests/optional.spec.ts'],webImports:{'tests/optional.spec.ts':[]}}).tests,[rows[0],rows[4]])
+})
+
+test('three-tier validation and reports retain GATED-FULL results and deletion candidates',()=>{
+  const rows=[g('internal/auth','TestCore','ESSENTIAL'),{...g('internal/auth','TestExisting','GATED-FULL'),tags:['delete-candidate']},g('internal/auth','TestNew')]
+  const manifest={version:1,tests:rows}
+  assert.doesNotThrow(()=>validate(manifest,rows,noFlaky))
+  assert.deepEqual(validate(manifest,rows,noFlaky),rows)
+  assert.deepEqual(counts(rows),{ESSENTIAL:1,'GATED-FULL':1,NIGHTLY:1})
+  const report=reportCases(rows,[{key:key(rows[0]),status:'passed',started:true},{key:key(rows[1]),status:'failed',started:true}],1,'go-test-1')
+  assert.equal(report.classes['GATED-FULL'].failed,1)
+  assert.equal(report.classes['GATED-FULL'].run,1)
+  assert.equal(report.classes.NIGHTLY.notRun,1)
+  const known={version:1,entries:[{key:key(rows[1]),owner:'AEON-675'}]}
+  assert.deepEqual(validate(manifest,rows,known),rows)
+  const promoted=rows.map(row=>({...row,tier:'ESSENTIAL',tags:[]}))
+  assert.throws(()=>validate({version:1,tests:promoted},rows,known),/Known-flaky case cannot be ESSENTIAL/)
+})
+
+test('three-tier manifests preserve the old Go and unit gates and never promote ungated browser cases',()=>{
+  const policy=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
+  const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  for(const row of [...go.tests,...web.tests]) {
+    if(row.tier==='ESSENTIAL')continue
+    assert.equal(row.tier,row.kind!=='browser'||gated.has(row.file)?'GATED-FULL':'NIGHTLY',key(row))
+  }
+  assert.ok(web.tests.some(row=>row.kind==='browser'&&row.tier==='NIGHTLY'))
+  assert.ok(web.tests.some(row=>row.kind==='browser'&&row.tier==='GATED-FULL'))
+})
+
+test('three-tier nightly explicitly requests all cases and remains outside required CI jobs',()=>{
+  const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
+  const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  for(const command of ['run go --all --shard','run go --all --timing','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command),command)
+  assert.doesNotMatch(nightly,/cli\.mjs run (?:go|web) --full/)
+  assert.doesNotMatch(ci,/cli\.mjs run (?:go|web) --all|needs:.*nightly-/)
+})
+
+test('three-tier full proof rejects incomplete gated results and old two-tier evidence',()=>{
+  const empty={selected:0,run:0,passed:0,skipped:0,failed:0,notRun:0,platformInactive:0}
+  const report={version:1,full:true,scope:'gated-full',exitCode:0,runId:'123',attempt:'2',sha:'a',
+    classes:{ESSENTIAL:{...empty},'GATED-FULL':{...empty,selected:1,run:1,passed:1},NIGHTLY:{...empty}}}
+  const env={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'}
+  assert.equal(checkFull(report,env),true)
+  for(const scope of [undefined,'changed-area','browser-gate'])assert.throws(()=>checkFull({...report,scope},env),/Full execution/)
+  const {['GATED-FULL']:gated,...oldClasses}=report.classes
+  assert.throws(()=>checkFull({...report,classes:oldClasses},env),/Full execution/)
+  for(const counts of [{...gated,notRun:1},{...gated,failed:1}])assert.throws(()=>checkFull({...report,classes:{...report.classes,'GATED-FULL':counts}},env),/Full execution/)
 })

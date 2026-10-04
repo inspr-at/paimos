@@ -14,13 +14,12 @@ export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
 const target = kind => kind==='go' ? collectGo() : collectWeb()
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,timing=false}={}) {
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
   const inventory=target(kind)
   const all=validate(load(kind),inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const selection=select(all,{event,paths,imports:inventory.imports,
-    forceFull:full||schedulingMode(event,paths)==='full',fullCatalogue:full,
-    browserGateFiles:browserPolicy?.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)),
+    forceFull:full||schedulingMode(event,paths)==='full',forceAll:catalogue,
     webImports:kind==='web'?webGraph(web):{}})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
@@ -107,7 +106,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   if(kind==='web'&&!unit) {
     if(env.RUNNER_ENVIRONMENT!=='github-hosted') throw new Error('Tier browser execution requires hosted CI; collection is safe locally')
     // Original OPS-257 configuration/env owns launches. Only the case list is
-    // replaced. Tests in ungated groups are promoted without changing policy.
+    // replaced. Nightly/changed-area cases retain their original launch policy.
     const policy=loadBrowserPolicy()
     for(const group of policy.groups) {
       const files=new Set(group.specs.map(spec=>spec.file))
@@ -147,11 +146,11 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
 
 export async function main(args) {
   const [mode,kind,...flags]=args
-  if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
-  const options={unit:false,full:false,job:`${kind}-tiers`}
+  if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full | --all] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
+  const options={unit:false,full:false,all:false,job:`${kind}-tiers`}
   for(let i=0;i<flags.length;i++) {
     const flag=flags[i]
-    if(flag==='--full'||flag==='--unit') options[flag.slice(2)]=true
+    if(flag==='--full'||flag==='--all'||flag==='--unit') options[flag.slice(2)]=true
     else if(flag==='--paths') options.paths=JSON.parse(flags[++i])
     else if(flag==='--event') options.event=flags[++i]
     else if(flag==='--job') options.job=flags[++i]

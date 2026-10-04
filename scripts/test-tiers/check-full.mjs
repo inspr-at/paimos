@@ -2,14 +2,16 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { tiers } from './core.mjs'
 
 export function checkFull(report, env=process.env) {
   if(report.version!==1||report.full!==true||report.exitCode!==0)throw new Error('Full execution was not successful')
+  if(!['gated-full','catalogue'].includes(report.scope))throw new Error('Full execution scope is not proven')
   for(const field of ['runId','attempt','sha']) {
     const value=env[{runId:'GITHUB_RUN_ID',attempt:'GITHUB_RUN_ATTEMPT',sha:'GITHUB_SHA'}[field]]
     if(value===undefined||report[field]!==value)throw new Error('Full execution report has a different run identity')
   }
-  if(!report.classes?.ESSENTIAL||!report.classes?.NIGHTLY||Object.values(report.classes).some(row=>row.failed||row.notRun))throw new Error('Full execution report is incomplete')
+  if(tiers.some(tier=>!report.classes?.[tier])||Object.values(report.classes).some(row=>row.failed||row.notRun))throw new Error('Full execution report is incomplete')
   return true
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

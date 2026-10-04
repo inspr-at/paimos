@@ -13,13 +13,14 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
   const selection=plan('web',options)
   const browser=selection.all.filter(row=>row.kind==='browser')
-  const expected=browser.filter(row=>gated.has(row.file)||row.tier==='ESSENTIAL')
+  const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
+  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.has(key(row))))
   assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
   assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
   assert.equal(selection.full,true)
-  assert.equal(selection.scope,'browser-gate')
+  assert.equal(selection.scope,'gated-full')
   assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
-  // Exercise the workflow's env contract: full fan-out does not mean --full.
+  // Workflow fan-out and explicit --full both retain the established gate.
   const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
   try {
     process.env.AEON_TEST_TIER_MODE='full'
@@ -27,12 +28,18 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
     assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
     assert.equal(output.at(-1).kinds.browser,expected.length)
     assert.equal(output.at(-1).deferredBrowserCases,browser.length-expected.length)
+    assert.equal(await main(['plan','web','--full','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
+    assert.equal(output.at(-1).kinds.browser,expected.length)
+    assert.equal(output.at(-1).scope,'gated-full')
+    assert.equal(await main(['plan','web','--all','--event','workflow_dispatch','--paths','[]']),0)
+    assert.equal(output.at(-1).kinds.browser,browser.length)
+    assert.equal(output.at(-1).scope,'catalogue')
   } finally {
     console.log=log
     if(original===undefined) delete process.env.AEON_TEST_TIER_MODE
     else process.env.AEON_TEST_TIER_MODE=original
   }
-  const nightly=plan('web',{...options,full:true})
+  const nightly=plan('web',{...options,event:'schedule'})
   assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
   assert.equal(nightly.scope,'catalogue')
   assert.equal(nightly.deferredBrowserCases,0)
@@ -61,8 +68,9 @@ test('native Node and Vitest selectors execute the requested registrations, rath
   assert.equal(report.classes.ESSENTIAL.passed,2)
   assert.equal(report.classes.ESSENTIAL.skipped,0)
   assert.equal(report.classes.ESSENTIAL.notRun,0)
-  assert.equal(report.classes.NIGHTLY.passed,1)
-  assert.equal(report.classes.NIGHTLY.notRun,0)
+  assert.equal(report.classes['GATED-FULL'].passed,1)
+  assert.equal(report.classes['GATED-FULL'].notRun,0)
+  assert.equal(report.classes.NIGHTLY.selected,0)
 })
 
 // --list imports registration code but never opens a browser. This exercises
@@ -81,12 +89,13 @@ test('native browser selectors cover reconciled essentials and every collected f
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
-  for(const full of [false,true]) {
+  for(const mode of ['essential','full','all']) {
     let total=0
     for(const group of groups) {
-      const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&(full||tiers.get(key(row))==='ESSENTIAL'))
+      const included=row=>mode==='all'||tiers.get(key(row))==='ESSENTIAL'||(mode==='full'&&tiers.get(key(row))==='GATED-FULL')
+      const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&included(row))
       if(!rows.length) continue
-      const list=resolve(evidence,`regression-${full?'full':'essential'}-${group.id}.txt`)
+      const list=resolve(evidence,`regression-${mode}-${group.id}.txt`)
       writeFileSync(list,browserList(rows,all).join('\n')+'\n')
       const env={...process.env,...Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',evidence)]))}
       const listed=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
@@ -94,6 +103,6 @@ test('native browser selectors cover reconciled essentials and every collected f
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
       total+=listed.length
     }
-    assert.equal(total,full?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL').length)
+    assert.equal(total,mode==='all'?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL'||(mode==='full'&&row.tier==='GATED-FULL')).length)
   }
 })

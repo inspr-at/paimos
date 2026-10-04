@@ -683,37 +683,41 @@ keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
 Test tiers (AEON-681): full-lane PRs and merge groups run ESSENTIAL plus changed-area
-cases; Go reverse dependencies add at most 300 extra cases. Shared inputs or
-uncertain impact select full. For browser tests, routine full CI preserves the
-OPS-257 gated specs plus promoted ESSENTIAL cases; it does not promote every
-`gate:false` catalogue spec into a daily gate. Changed specs and their mapped
-importers still run, including optional cases. Unknown browser-source impact
-widens to the complete catalogue. Reports name the selection `scope` and count
+cases; Go reverse dependencies add at most 300 extra cases. There are three tiers:
+ESSENTIAL is the approved core; GATED-FULL retains the other previously gated Go,
+unit and browser cases; NIGHTLY includes the never-gated browser catalogue.
+Shared inputs, uncertain impact, main/manual CI and explicit `--full` select
+exactly ESSENTIAL + GATED-FULL. Browser gate membership comes from OPS-257's
+`gate:true` groups in `web/ci-web-shards.json`, with approved ESSENTIAL promotions
+preserved. Mapped changed-area selection still includes optional cases in the
+affected area. Unknown impact widens to the established full gate.
+Reports name the selection `scope` (`gated-full`, `catalogue` or `changed-area`) and count
 `deferredBrowserCases`; deferred cases are not reported as passes or skips.
 Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
 and [web manifest](scripts/ci/web-test-tiers.json). Use
 `node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
 then `check`. CI reconciles manifests at runtime: unlisted cases default to
 NIGHTLY, stale entries are dropped, and named Actions warnings report the drift.
-New cases retain changed-area and full/nightly coverage without requiring
+New cases retain changed-area and nightly coverage without requiring
 manifest edits in each PR. A separate scheduled classification check runs
 `check go --strict` and `check web --strict` to report cases needing classification;
 it does not gate PRs or the nightly test jobs. Remove stale entries when updating
 the stored manifests. Malformed entries and known-flaky ESSENTIAL cases still
 fail validation. New browser specs also need a
 launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
-remain NIGHTLY, including candidate groups whose exact members need review.
+remain on nonessential cases, including candidate groups whose exact members need review.
 The [known-flaky registry](scripts/ci/known-flaky.json) names exact case keys
 and owner tickets; its validator rejects any ESSENTIAL entry. The nine cases
-identified in AEON-675/676/683 temporarily run as NIGHTLY, retaining changed-area
-and full-run coverage, until their owner fixes land and verify cleanly.
-Scheduled/manual `nightly-full.yml` and explicit `--full` runs execute every
+identified in AEON-675/676/683 stay outside ESSENTIAL and retain their prior
+full-gate membership as GATED-FULL, plus changed-area and nightly coverage.
+Scheduled/manual `nightly-full.yml` uses `--all` to execute every
 case, including the optional browser catalogue; main/manual CI runs the full gate
 unless exact-SHA full-suite reuse is verified below. The main-push run is the
 FULL gate after merge; a full premerge run is required only when impact is
 uncertain. Releases require a green full main-push gate (or full nightly run) on the
-exact freeze SHA, in addition to the release rehearsal. A red nightly opens
-a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
+exact freeze SHA, in addition to the release rehearsal. Nightly is separate from
+the required PR/main checks; its failures remain visible for classification.
+A red nightly needs a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
 ticket creation, ownership and budget wiring. Migration compatibility
 always runs fresh; timing, static and smoke gates stay outside tier impact
 filtering within the full CI lane. Stability cases retain their manifest tiers
@@ -739,7 +743,7 @@ test-fixture paths requires full coverage. PRs changing only top-level
 `web/tests/*.spec.ts` run exactly those specs in one hosted job, including specs
 outside the shard map, with their group's config and flags. Spec renames or
 deletions, mixed changes and unavailable classification retain full coverage.
-Main pushes and manual runs execute all tiers; merge groups use tier selection
+Main pushes and manual CI runs execute ESSENTIAL + GATED-FULL; merge groups use tier selection
 within the full CI lane. Docs-only and spec-only classification applies only to PRs.
 
 The separate release rehearsal already cancels superseded runs per ref. Release

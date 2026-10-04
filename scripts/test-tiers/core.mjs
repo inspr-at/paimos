@@ -5,6 +5,7 @@ import { dirname, extname, resolve, relative } from 'node:path'
 export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export const exactPattern = names => `^(?:${names.map(escapeRE).join('|')})$`
+export const tiers = ['ESSENTIAL', 'GATED-FULL', 'NIGHTLY']
 
 export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8')), { strict = false, warn = console.warn } = {}) {
   if (manifest.version !== 1 || !Array.isArray(manifest.tests) || !manifest.tests.length) throw new Error('Expected nonempty tier manifest version 1')
@@ -17,13 +18,13 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
   }
   const declared = new Map()
   for(const group of manifest.deleteCandidateGroups??[]) {
-    if(group.tag!=='delete-candidate'||!manifest.tests.some(row=>row.file===group.file&&row.tier==='NIGHTLY'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
+    if(group.tag!=='delete-candidate'||!manifest.tests.some(row=>row.file===group.file&&row.tier!=='ESSENTIAL'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
   }
   for (const row of manifest.tests) {
-    if (!['ESSENTIAL', 'NIGHTLY'].includes(row.tier) || typeof row.name !== 'string' || !row.name ||
+    if (!tiers.includes(row.tier) || typeof row.name !== 'string' || !row.name ||
         !['go', 'node', 'vitest', 'browser'].includes(row.kind) ||
         (row.tags ?? []).some(tag => tag !== 'delete-candidate') ||
-        (row.tags?.includes('delete-candidate') && row.tier !== 'NIGHTLY')) throw new Error(`Invalid classification: ${key(row)}`)
+        (row.tags?.includes('delete-candidate') && row.tier === 'ESSENTIAL')) throw new Error(`Invalid classification: ${key(row)}`)
     if(row.kind==='go' ? !/^(?:internal|cmd|scripts)(?:\/[a-zA-Z0-9_-]+)+$/.test(row.package??'') :
       !/^tests\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+\.(?:spec|test)\.ts$/.test(row.file??'')) throw new Error(`Invalid test owner: ${key(row)}`)
     if(row.occurrence!==undefined && (!Number.isInteger(row.occurrence)||row.occurrence<1)) throw new Error(`Invalid occurrence: ${key(row)}`)
@@ -71,23 +72,16 @@ export function reverseDependants(changed, imports) {
 
 // A missing diff, unmapped source, or shared input widens selection. Both PRs
 // and merge groups use this same union; neither has an essential-only shortcut.
-export function select(tests, { event, paths, imports = {}, webImports = {}, browserGateFiles, forceFull = false, fullCatalogue = false }) {
+export function select(tests, { event, paths, imports = {}, webImports = {}, forceFull = false, forceAll = false }) {
   const full = reason => {
-    // OPS-257's gate:false catalogue is not a new daily gate (approved zb-web).
-    // Explicit full/nightly runs retain it all. Changed browser inputs still
-    // run their optional cases; missing web impact metadata widens safely.
-    const catalogue = fullCatalogue || !browserGateFiles || ['schedule', 'workflow_dispatch'].includes(event)
-    const changed = (paths ?? []).filter(path => /^web\/(?:src|tests|e2e)\//.test(path)).map(path => path.slice(4))
-    const affected = reverseDependants(new Set(changed), webImports)
-    const unknownWeb = changed.some(file => !Object.hasOwn(webImports, file) ||
-      (file.startsWith('src/') && !tests.some(row => affected.has(row.file))))
-    const gated = new Set(browserGateFiles)
-    const selected = catalogue || unknownWeb ? tests : tests.filter(row =>
-      row.kind !== 'browser' || row.tier === 'ESSENTIAL' || gated.has(row.file) || affected.has(row.file))
-    return { full: true, reason, scope: catalogue || unknownWeb ? 'catalogue' : 'browser-gate',
-      deferredBrowserCases: tests.length - selected.length, tests: selected }
+    // Full CI retains the established gate. Only nightly/--all widens to the
+    // entire catalogue; missing impact data must not promote ungated cases.
+    const catalogue = forceAll || event === 'schedule'
+    const selected = catalogue ? tests : tests.filter(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL')
+    return { full: true, reason, scope: catalogue ? 'catalogue' : 'gated-full',
+      deferredBrowserCases: tests.filter(row => row.kind === 'browser').length - selected.filter(row => row.kind === 'browser').length, tests: selected }
   }
-  if (forceFull || !['pull_request', 'merge_group'].includes(event) || !Array.isArray(paths) || paths.some(uncertain)) {
+  if (forceAll || forceFull || !['pull_request', 'merge_group'].includes(event) || !Array.isArray(paths) || paths.some(uncertain)) {
     return full('full event or uncertain impact')
   }
   const packages = new Set([...tests.filter(t => t.kind === 'go').map(t => t.package), ...Object.keys(imports)])
@@ -165,5 +159,5 @@ export function webGraph(root) {
 }
 
 export function counts(rows) {
-  return Object.fromEntries(['ESSENTIAL','NIGHTLY'].map(tier => [tier, rows.filter(row => row.tier === tier).length]))
+  return Object.fromEntries(tiers.map(tier => [tier, rows.filter(row => row.tier === tier).length]))
 }

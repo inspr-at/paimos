@@ -369,9 +369,10 @@ func checkNightlyFull(workflow map[string]any) error {
 		}
 	}
 	for _, spec := range []struct{ id, command string }{
-		{"nightly-go-test", "cli.mjs run go --full --shard"},
-		{"nightly-web-setup", "cli.mjs run web --full --unit"},
-		{"nightly-web-shard", "cli.mjs run web --full --shard"},
+		{"nightly-go-test", "cli.mjs run go --all --shard"},
+		{"nightly-go-timing", "cli.mjs run go --all --timing"},
+		{"nightly-web-setup", "cli.mjs run web --all --unit"},
+		{"nightly-web-shard", "cli.mjs run web --all --shard"},
 	} {
 		body, _ := yaml.Marshal(jobs[spec.id])
 		if !strings.Contains(string(body), spec.command) {

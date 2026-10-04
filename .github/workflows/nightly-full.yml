@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 name: Nightly full
+# All three tiers, including never-gated browser cases. This separate workflow
+# reports failures for classification without becoming a PR/main required check.
 # A red nightly opens a ticket with the failing case and exact tested SHA.
 # Automated ticket creation, ownership and budget wiring belong to OPS step 2.
 
@@ -78,7 +80,7 @@ jobs:
       - name: Test this shard (essential plus changed area, or full on main)
         env:
           GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --full --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
+        run: node scripts/test-tiers/cli.mjs run go --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
       - name: Preserve test tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -130,7 +132,7 @@ jobs:
       - name: Timing budgets, alone
         env:
           GOFLAGS: -count=1
-        run: node scripts/test-tiers/cli.mjs run go --full --timing --job go-timing
+        run: node scripts/test-tiers/cli.mjs run go --all --timing --job go-timing
       - name: Preserve isolated timing measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -258,7 +260,7 @@ jobs:
         working-directory: web
         run: |
           npm run ci:web:shard:test
-          node ../scripts/test-tiers/cli.mjs run web --full --unit --job web-unit
+          node ../scripts/test-tiers/cli.mjs run web --all --unit --job web-unit
       - name: Preserve unit tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -370,7 +372,7 @@ jobs:
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: node scripts/test-tiers/cli.mjs run web --full --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
+        run: node scripts/test-tiers/cli.mjs run web --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
       - name: Preserve browser tier measurements
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
