@@ -4,6 +4,7 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -252,59 +254,99 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 }
 
 func TestSourceRequestCapAndDelay(t *testing.T) {
-	var active, peak atomic.Int32
-	var mu sync.Mutex
-	var starts []time.Time
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := active.Add(1)
-		for {
-			old := peak.Load()
-			if n <= old || peak.CompareAndSwap(old, n) {
-				break
-			}
-		}
-		mu.Lock()
-		starts = append(starts, time.Now())
-		mu.Unlock()
-		time.Sleep(25 * time.Millisecond)
-		active.Add(-1)
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
 	file := filepath.Join(t.TempDir(), "key")
 	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	source, err := NewHTTPSource(server.URL, file, server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := source.Configure(2, 15*time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	for n := 0; n < 8; n++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var rows []Record
-			if err := source.get(context.Background(), "/probe", &rows); err != nil {
-				t.Error(err)
-			}
-		}()
-	}
-	wg.Wait()
-	if peak.Load() > 2 || peak.Load() < 2 {
-		t.Fatalf("peak requests = %d", peak.Load())
-	}
-	if len(starts) != 8 {
-		t.Fatalf("request starts = %d", len(starts))
-	}
-	for n := 1; n < len(starts); n++ {
-		if gap := starts[n].Sub(starts[n-1]); gap < 10*time.Millisecond {
-			t.Fatalf("request spacing = %s", gap)
+	newSource := func(t *testing.T, transport roundTripFunc, delay time.Duration) *HTTPSource {
+		t.Helper()
+		source, err := NewHTTPSource("http://source.test", file, &http.Client{Transport: transport})
+		if err != nil {
+			t.Fatal(err)
 		}
+		if err := source.Configure(2, delay); err != nil {
+			t.Fatal(err)
+		}
+		return source
 	}
+	response := func() *http.Response {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`))}
+	}
+
+	t.Run("cap", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var active, peak, requests atomic.Int32
+			release := make(chan struct{})
+			var wg sync.WaitGroup
+			// Keep requests in flight until the cap has been observed, rather
+			// than hoping a handler sleep overlaps another request.
+			defer func() {
+				close(release)
+				wg.Wait()
+			}()
+			source := newSource(t, func(r *http.Request) (*http.Response, error) {
+				n := active.Add(1)
+				defer active.Add(-1)
+				for {
+					old := peak.Load()
+					if n <= old || peak.CompareAndSwap(old, n) {
+						break
+					}
+				}
+				requests.Add(1)
+				<-release
+				return response(), nil
+			}, 0)
+			for range 8 {
+				wg.Go(func() {
+					var rows []Record
+					if err := source.get(t.Context(), "/probe", &rows); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			synctest.Wait()
+			if active.Load() != 2 || requests.Load() != 2 {
+				t.Fatalf("blocked requests: active=%d, started=%d, want 2 each", active.Load(), requests.Load())
+			}
+			// Release one slot and prove exactly one queued request replaces it.
+			release <- struct{}{}
+			synctest.Wait()
+			if active.Load() != 2 || requests.Load() != 3 {
+				t.Fatalf("refilled cap: active=%d, started=%d, want 2 and 3", active.Load(), requests.Load())
+			}
+			for range 7 {
+				release <- struct{}{}
+			}
+			wg.Wait()
+			if peak.Load() != 2 || requests.Load() != 8 || active.Load() != 0 {
+				t.Fatalf("completed requests: peak=%d, started=%d, active=%d", peak.Load(), requests.Load(), active.Load())
+			}
+		})
+	})
+
+	t.Run("delay", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			const delay = 15 * time.Millisecond
+			var starts []time.Time
+			source := newSource(t, func(r *http.Request) (*http.Response, error) {
+				starts = append(starts, time.Now())
+				return response(), nil
+			}, delay)
+			start := time.Now()
+			for n := range 8 {
+				var rows []Record
+				if err := source.get(t.Context(), "/probe", &rows); err != nil {
+					t.Fatal(err)
+				}
+				// synctest advances only virtual time: assert the full configured
+				// delay, including an immediate first request, without tolerance.
+				if got, want := starts[n].Sub(start), time.Duration(n)*delay; got != want {
+					t.Fatalf("request %d start = %s, want %s", n, got, want)
+				}
+			}
+		})
+	})
 }
 
 func TestSourceSkipsDeletedProjectAndPurgedIssues(t *testing.T) {
