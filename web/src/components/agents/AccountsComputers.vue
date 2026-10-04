@@ -89,7 +89,7 @@ async function verifyAgain(line: AccountLine, card: ComputerCard) {
     const currentEnrollment = current?.enrollments.find(e => e.account_id === account)
     if (identityKey.value !== owner || current?.revision !== revision || !currentEnrollment?.can_verify || ![priorRun, created.run_id].includes(currentEnrollment.verification_run_id)) return
     toast(`Verification requested for ${line.vendor} on ${card.name}.`)
-    const result = await capacity.refreshCapacity()
+    const result = await capacity.refreshComputers()
     if (identityKey.value === owner && !result.ok) toast('Verification was queued, but the account list could not refresh.', { tone: 'error' })
   } catch (error) {
     if (identityKey.value === owner) toast(error instanceof Error ? error.message : 'Verification could not be requested.', { tone: 'error' })
@@ -741,6 +741,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
   .acct { grid-template-columns: minmax(0, 1fr) auto 36px; grid-template-areas: "who ready more" "cap cap cap"; gap: 10px 14px; }
   .acct-who { grid-area: who; }
   .acct-ready { grid-area: ready; align-items: flex-end; }
+  /* The auto column grows leftward with its status; anchor the action at its right edge. */
+  .readiness-actions { align-self: flex-end; align-items: flex-end; }
   .acct-cap { grid-area: cap; padding-left: 48px; }
   .row-more { grid-area: more; }
 }
@@ -757,6 +759,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
   .notice { margin-top: 12px; }
   .acct { grid-template-columns: minmax(0, 1fr) 40px; grid-template-areas: "who more" "ready ready" "cap cap"; gap: 10px; padding: 14px 0; }
   .acct-ready { align-items: flex-start; }
+  .readiness-actions { align-self: flex-start; align-items: flex-start; }
   .acct-cap { padding-left: 0; }
   .more { width: 44px; height: 44px; }
   .legend-row .fine { width: 100%; margin-left: 0; }

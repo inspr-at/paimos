@@ -312,7 +312,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       expect(route.request().postDataJSON()).toEqual({ expected_revision: 1, expected_verification_run_id: e.verification_run_id })
       attempts++
       if (attempts === 1) return route.fulfill({ status: 403, json: { code: 'forbidden' } })
-      e.verification_run_id = 'b0000000-0000-4000-8000-000000000685'
+      e.verification_run_id = `b0000000-0000-4000-8000-${String(683 + attempts).padStart(12, '0')}`
       e.verification_state = 'queued'
       e.verification_expired_ready = false
       return route.fulfill({ json: { account_id: e.account_id, run_id: e.verification_run_id, expires_at: '2026-10-01T13:00:00Z' } })
@@ -330,10 +330,47 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       interactions: [
         { name: 'denied verification', run: async () => { await button.click(); await expect(page.getByText('Only the account owner may verify it again.', { exact: true })).toBeVisible(); await expect(row.getByText('Ready', { exact: true })).toBeVisible() } },
         { name: 'queued verification', run: async () => { await button.click(); await expect(row.getByText('Verification queued', { exact: true })).toBeVisible() } },
+        { name: 'retry binds to the refreshed run', run: async () => { await expect(button).toBeEnabled(); await button.click(); await expect(button).toBeEnabled(); await expect(row.getByText('Verification queued', { exact: true })).toBeVisible() } },
       ],
     })
-    expect(attempts).toBe(2)
+    expect(attempts).toBe(3)
     mkdirSync('test-results/aeon-685', { recursive: true })
     await panel(page).screenshot({ path: `test-results/aeon-685/accounts-${width}-${theme}.png`, animations: 'disabled' })
   })
 }
+
+test('AEON-685: tablet verification control is independent of the status label width', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 1100 })
+  const { capacity } = await setup(page)
+  const c = capacity.computers[0] as unknown as PairingView
+  const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+  Object.assign(e, { can_verify: true, verification_state: 'expired', verification_expired_ready: true })
+  Object.assign(c, { revision: 1, harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready' } }, verification_capabilities: { claude: { supported: true, policy: 'read_only', reason: '' } } })
+  await open(page)
+  const row = panel(page).locator(`[data-account="${ACCOUNTS.claude}"]`)
+  const button = row.getByRole('button', { name: 'Verify again', exact: true })
+  await expect(row.getByText('Ready', { exact: true })).toBeVisible()
+  expect(await row.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(3)
+  await expectStableControls({
+    controls: { verify: button, more: row.getByRole('button', { name: /^More for/ }), clickedRow: row },
+    scrollAreas: { panel: panel(page) },
+    interactions: [{ name: 'server status changes', run: async () => {
+      Object.assign(e, { verification_state: 'queued', verification_expired_ready: false })
+      await page.reload()
+      await expect(row.getByText('Verification queued', { exact: true })).toBeVisible()
+    } }],
+  })
+})
+
+test('AEON-685: queued verification reports a failed pairing refresh', async ({ page }) => {
+  const { capacity } = await setup(page)
+  const c = capacity.computers[0] as unknown as PairingView
+  const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+  Object.assign(e, { can_verify: true, verification_state: 'expired', verification_expired_ready: true })
+  Object.assign(c, { revision: 1, harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready' } }, verification_capabilities: { claude: { supported: true, policy: 'read_only', reason: '' } } })
+  await open(page)
+  await page.route('**/api/agent-pairing/computers', route => route.fulfill({ status: 500, json: { error: 'pairing unavailable' } }))
+  await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', route => route.fulfill({ json: { account_id: e.account_id, run_id: 'b0000000-0000-4000-8000-000000000685' } }))
+  await panel(page).locator(`[data-account="${ACCOUNTS.claude}"]`).getByRole('button', { name: 'Verify again', exact: true }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Verification was queued, but the account list could not refresh.' })).toBeVisible()
+})
