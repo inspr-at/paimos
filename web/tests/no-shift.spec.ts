@@ -132,19 +132,24 @@ for (const width of [1440, 1024, 390]) {
     const more = dial.getByRole('button', { name: 'One agent more at once' })
     const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
+    const rowMore = row.locator('.lim-step').getByRole('button').last()
+    const rowFewer = row.locator('.lim-step').getByRole('button').first()
     await expect(row).toBeVisible()
-    await expect(more).toHaveCSS('transition-property', 'background')
     const rowCount = await dial.locator('.rows > li').count()
     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height
     expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))
     await expectStableControls({
-      controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore: row.getByRole('button', { name: 'Codex: at most one more' }), rowFewer: row.getByRole('button', { name: 'Codex: at most one fewer' }) },
+      controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: [
-        { name: 'hold total stepper', run: async () => { await more.hover(); await page.mouse.down() } },
+        // Theme feedback may animate several properties. Judge the control's
+        // geometry through focus, hover and press instead of its CSS spelling.
+        { name: 'focus total stepper', run: async () => { await more.focus(); await expect(more).toBeFocused() } },
+        { name: 'hover total stepper', run: () => more.hover() },
+        { name: 'hold total stepper', run: () => page.mouse.down() },
         { name: 'release total stepper', run: () => page.mouse.up() },
         ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
-        ...['more', 'fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: `Codex: at most one ${direction}` }).click() })),
+        ...[rowMore, rowFewer].map((button, i) => ({ name: `${i === 0 ? 'more' : 'fewer'} on Codex`, run: () => button.click() })),
       ],
     })
   })

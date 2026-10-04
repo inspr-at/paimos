@@ -132,10 +132,16 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   await expect(page).toHaveURL(/status=queued/)
   await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(2)
   expect(calls.filter(call => call.path === '/api/nodes').every(call => !call.query.get('state')?.includes('queued'))).toBe(true)
+  // Filtering leaves the queue open so it can be toggled back. Close it before
+  // acting on the list: its position may overlap the row in another header layout.
+  await expect(panel.getByRole('button', { name: 'Showing queued in the list' })).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
   await row(page, 'PHAROS-13').locator('.title-text').click()
   const drawer = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(drawer.getByRole('button', { name: 'Move to top', exact: true })).toBeDisabled()
   await drawer.getByRole('button', { name: 'Close ticket details' }).click()
+  await expect(drawer).toHaveCount(0)
   await row(page, 'PHAROS-14').locator('.title-text').click()
   await drawer.getByRole('button', { name: 'Move to top', exact: true }).click()
   expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
@@ -267,6 +273,10 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     await expect(page.getByRole('complementary', { name: 'Ticket details' }).locator('.q-card')).toBeVisible()
     await page.screenshot({ path: join(shots, `drawer-${theme}.png`) })
     await page.getByRole('button', { name: 'Close ticket details' }).click()
+    // Closing navigates asynchronously. Test the phone queue on the settled
+    // list, without a still-open ticket covering the header.
+    await expect(page.getByRole('complementary', { name: 'Ticket details' })).toHaveCount(0)
+    await expect(page).toHaveURL(/\/p\/PHAROS\/tickets(?:\?|$)/)
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390)
     await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()

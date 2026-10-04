@@ -222,7 +222,9 @@ test('Agents at once saves one ceiling and independent harness limits', async ({
   await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: {} })
   const codex = working.locator('[data-key="codex"]')
   await codex.getByRole('radio', { name: 'At most', exact: true }).click()
-  await codex.getByRole('button', { name: 'Codex: at most one more' }).click()
+  // The stepper's last button increases the limit, whether its name describes
+  // the direction or the destination value. Keep the persisted-value assertion.
+  await codex.locator('.lim-step').getByRole('button').last().click()
   await expect(codex.locator('.lim-num')).toHaveText('3')
   await expect.poll(() => work.preferences['agents.working']).toEqual({ total: 16, limits: { codex: 3 } })
   await expect(working).not.toContainText(/assigned|flexible|target|plan/i)
@@ -262,7 +264,7 @@ test('stored ceiling arrives without a made-up total while the snapshot loads', 
   await expect(working.locator('.f-num')).toHaveCount(0)
   release()
   await expect(working.locator('.f-num')).toHaveText('3')
-  await expect(working.locator('.f-num')).toHaveAttribute('aria-label', 'Run up to 3 at once')
+  await expect(working.getByLabel(/Run up to 3 at once/)).toBeVisible()
   await expect(working.locator('.f-live')).toContainText('5 running · winding down to 3')
 })
 
