@@ -314,5 +314,114 @@
     },
     "hostedCI": "Not run: no origin push authorized",
     "noOriginPushOrDeploy": true
+  },
+  "fixRound2": {
+    "reviewedCommit": "d17be7aaa",
+    "implementationCommit": "1d57dd54b4fde08171e67b9671e3009cf38a6f38",
+    "mergeCommit": "3444c402591738fd6b6670c1a778e5a8d9cfa1ba",
+    "sourceMainSHA": "8be8b8681b8d33f82826021e1cde5dbe784e525b",
+    "policy": "Runtime-only reconciliation defaults new cases to NIGHTLY and drops stale rows with named, escaped Actions warnings. Stored manifests are unchanged. Invalid classifications, duplicate identities, browser launch configuration drift and known-flaky ESSENTIAL cases still fail. Dedicated scheduled-only strict maintenance reports classification work without gating PRs or full nightly execution. Native selectors compare reconciled identities and tiers rather than fixed manifest counts.",
+    "regressionBefore": {
+      "sourceCommit": "d17be7aaa",
+      "reconciliationTestsFailed": 2,
+      "reason": "Both final runtime-reconciliation tests fail with Unclassified test against the original core, not missing-import or setup errors.",
+      "nativeBrowserTestFailed": 1,
+      "nativeFailure": "Original browser selector assertion fails: 3439 collected registrations versus 3434 stored registrations; no browsers launched."
+    },
+    "checks": {
+      "ciSelectorPlannerReuseRouting": {
+        "passed": 112,
+        "failed": 0
+      },
+      "nativeSelectorsBeforeMainMerge": {
+        "passed": 2,
+        "failed": 0,
+        "browserLaunches": 0,
+        "representativeUnitsPassed": 3
+      },
+      "webCISetupAfterMainMerge": {
+        "command": "npm run ci:web:shard:test --prefix web",
+        "passed": 25,
+        "failed": 0,
+        "launchPolicyCheck": "passed",
+        "browserLaunches": 0
+      },
+      "normalWebCheckAfterMainMerge": {
+        "exitCode": 0,
+        "inventory": {
+          "ESSENTIAL": 207,
+          "NIGHTLY": 4799
+        },
+        "warnings": [
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key PHAROS-14 follows the canonical record AEON-2 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key AEON-1 follows the canonical record PHAROS-17 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the route changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the person changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/ticket-peek.unit.test.ts:the route owns the panel even when a stale peek query survives navigation",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a plain click follows the routed ticket and a modified click opens the URL",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key PHAROS-14 follows AEON-2 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key AEON-1 follows PHAROS-17 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in light",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in dark",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with lookup answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with list answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:the routed panel keeps usable list space and stable controls",
+          "Stale manifest entry (dropped): browser:tests/markdown-ticket-links.spec.ts:a plain click opens the ticket peek and a modified click opens the URL"
+        ]
+      },
+      "strictWebCheckAfterMainMerge": {
+        "exitCode": 1,
+        "expectedFailure": true,
+        "report": [
+          "Tier manifest drift; classify these:",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key PHAROS-14 follows the canonical record AEON-2 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key AEON-1 follows the canonical record PHAROS-17 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the route changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the person changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/ticket-peek.unit.test.ts:the route owns the panel even when a stale peek query survives navigation",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a plain click follows the routed ticket and a modified click opens the URL",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key PHAROS-14 follows AEON-2 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key AEON-1 follows PHAROS-17 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in light",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in dark",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with lookup answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with list answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:the routed panel keeps usable list space and stable controls",
+          "Stale manifest entry (dropped): browser:tests/markdown-ticket-links.spec.ts:a plain click opens the ticket peek and a modified click opens the URL"
+        ],
+        "note": "Correctly reports the current classification drift; not a failed execution gate."
+      },
+      "localGo": {
+        "package": "./scripts/releaseworkflow",
+        "passed": true,
+        "goVersion": "1.26.8",
+        "GOMAXPROCS": 2,
+        "packageParallelism": 2
+      },
+      "mainMergePreservation": {
+        "conflicts": 0,
+        "filesFromMain": 3,
+        "filesIdenticalToMain": true
+      },
+      "diffWhitespace": "passed"
+    },
+    "remoteValidation": {
+      "goAttempts": 2,
+      "started": false,
+      "exitCode": 3,
+      "reason": "Presence guard: Mailina is the console user",
+      "requestedPackages": [
+        "./scripts/test-tier-go",
+        "./scripts/ci-go-shards",
+        "./scripts/releaseworkflow"
+      ],
+      "browserStarted": false,
+      "browserExitCode": 3,
+      "browserReason": "OPS-247 bootstrap and approved launcher pending; no SSH or browser installation attempted",
+      "pending": "Coordinator CI/offload: remaining Go packages, full web unit/build checks and hosted Linux Chromium execution. No broad local fallback and no origin push."
+    },
+    "approvedDesignConflicts": [],
+    "noOriginPushOrDeploy": true,
+    "reviewOwnership": "Consolidated gate remains with coordinator; no model CLIs or package review invoked."
   }
 }
