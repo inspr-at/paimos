@@ -43,7 +43,7 @@ func workStateCategoryCTE() string {
                     CASE WHEN jsonb_typeof(k.field_schema->'states')='array' THEN k.field_schema->'states' ELSE '[]'::jsonb END
                 ) elem
                 WHERE k.tenant_id=current_setting('aeon.tenant_id')::uuid
-                    AND k.slug IN ('ticket','task','epic')
+                    AND k.slug IN ('work','ticket','task','epic')
                     AND jsonb_typeof(elem)='object'
                     AND btrim(coalesce(elem->>'state',''))<>''
                     AND btrim(coalesce(elem->>'category',''))<>''

@@ -325,7 +325,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const kind = facets.value.kind
     if (kind) kind[item.kind_slug] = (kind[item.kind_slug] ?? 0) + 1
     const state = facets.value.state
-    if (state) state[item.state] = (state[item.state] ?? 0) + 1
+    if (state && !item.estimate?.is_parent) state[item.state] = (state[item.state] ?? 0) + 1
   }
   // Only a row the row store knows deleted leaves (a restore since keeps it).
   function removeRow(id: string) {
@@ -335,7 +335,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const kind = facets.value.kind
     if (kind?.[row.kind_slug]) kind[row.kind_slug]--
     const state = facets.value.state
-    if (state?.[row.state]) state[row.state]--
+    if (state?.[row.state] && !row.estimate?.is_parent) state[row.state]--
   }
 
   return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }

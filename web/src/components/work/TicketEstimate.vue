@@ -9,7 +9,7 @@ import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ item: ListItem; editable: boolean; save?: (hours: number | null) => Promise<SaveResult> }>()
 const view = computed(() => estimateDisplay(props.item))
 const editLabel = computed(() => estimateControlLabel(props.item))
-const canEdit = computed(() => props.editable && props.item.kind_slug !== 'epic' && !!props.save)
+const canEdit = computed(() => props.editable && !!props.save)
 const editing = ref(false), saving = ref(false), draft = ref(''), error = ref('')
 const input = ref<HTMLInputElement | null>(null)
 const control = ref<HTMLButtonElement | null>(null)
@@ -17,7 +17,8 @@ const errorId = useId()
 async function closeEdit() { editing.value = false; await nextTick(); control.value?.focus() }
 watch(() => props.item.id, () => { editing.value = false; error.value = '' })
 async function edit() {
-  draft.value = view.value.hours === null ? '' : String(view.value.hours)
+  const hours = props.item.estimate?.is_parent ? props.item.estimate.planned_hours : view.value.hours
+  draft.value = hours == null ? '' : String(hours)
   error.value = ''; editing.value = true
   await nextTick(); input.value?.focus(); input.value?.select()
 }
@@ -38,17 +39,17 @@ async function submit() {
 
 <template>
   <div v-if="canEdit || view.text || item.estimate?.open_children" class="prop estimate-prop">
-    <dt>Estimate</dt>
+    <dt>{{ item.estimate?.is_parent ? 'Parent estimate' : 'Estimate' }}</dt>
     <dd>
       <form v-if="editing" class="estimate-editor" @submit.prevent="submit" @keydown.esc.stop.prevent="closeEdit">
-        <label class="estimate-label">Agent hours<input ref="input" v-model="draft" aria-label="Estimate in agent hours" placeholder="2h or 30m" :disabled="saving" :aria-invalid="!!error" :aria-describedby="error ? errorId : undefined" autocomplete="off" @input="error = ''" /></label>
+        <label class="estimate-label">{{ item.estimate?.is_parent ? 'Planned agent hours' : 'Agent hours' }}<input ref="input" v-model="draft" aria-label="Estimate in agent hours" placeholder="2h or 30m" :disabled="saving" :aria-invalid="!!error" :aria-describedby="error ? errorId : undefined" autocomplete="off" @input="error = ''" /></label>
         <div class="estimate-actions"><button class="save-estimate" type="submit" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button><button type="button" :disabled="saving" @click="closeEdit">Cancel</button></div>
         <p v-if="error" :id="errorId" role="alert">{{ error }}</p>
       </form>
-      <button v-else-if="canEdit" ref="control" type="button" class="prop-btn" :class="{ 'estimate-draft': view.draft }" :data-tip="view.tip" :aria-label="editLabel" @click="edit">
+      <button v-else-if="canEdit" ref="control" type="button" class="prop-btn" :class="{ 'estimate-draft': view.draft, 'parent-estimate': item.estimate?.is_parent }" :data-tip="view.tip" :aria-label="editLabel" @click="edit">
         <span class="inline-label">Estimate</span><span v-if="view.text" class="mono">{{ view.text }}</span><span v-else>Add</span><span v-if="view.draft" class="estimate-mark">est.</span><AppIcon name="chevron" :size="12" class="chev" />
       </button>
-      <span v-else class="prop-static" :class="{ 'estimate-draft': view.draft }" :data-tip="view.tip"><span class="inline-label">Estimate</span><span class="mono">{{ view.text || '—' }}</span><span v-if="view.draft" class="estimate-mark">est.</span></span>
+      <span v-else class="prop-static" :class="{ 'estimate-draft': view.draft, 'parent-estimate': item.estimate?.is_parent }" :data-tip="view.tip"><span class="inline-label">Estimate</span><span class="mono">{{ view.text || '—' }}</span><span v-if="view.draft" class="estimate-mark">est.</span></span>
     </dd>
   </div>
 </template>
@@ -63,6 +64,7 @@ async function submit() {
 .mono { font: 11.5px var(--mono); font-variant-numeric: tabular-nums; }
 .chev { color: var(--ink-3); }
 @media (max-width: 720px) { .prop-btn, .prop-static { min-height: 34px; } }
+.parent-estimate { white-space: normal; flex-wrap: wrap; border-radius: 0; background: transparent; box-shadow: none; text-align: left; }
 .estimate-draft { color: var(--ink-3); }
 .estimate-mark { font-size: 10px; }
 .estimate-editor { display: grid; gap: 8px; max-width: 260px; padding: 8px 0; }

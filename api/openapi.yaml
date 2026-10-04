@@ -14700,7 +14700,7 @@ components:
             output_mix: {type: number}
     TicketEta:
       type: object
-      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent, except finished, which is always stated.
+      description: Ready and live estimates for a work node. Parents use the latest ETA of open leaves and estimate-weighted leaf progress. Missing estimates are explicit coverage; without estimates progress counts leaves. Deleted and archived work is excluded; cancelled leaves are excluded from progress and ETA. Traversal has no depth cutoff. Historical worker completion remains separate from workflow status.
       required: [finished]
       properties:
         has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
@@ -14709,6 +14709,14 @@ components:
         finished_by: {type: string, description: 'Name of that worker, when known. Present with finished.'}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
+        leaf_count: {type: integer, minimum: 0, description: Non-archived non-cancelled leaves contributing to progress.}
+        estimated_leaves: {type: integer, minimum: 0}
+        progress_basis: {type: string, enum: [estimate, leaves]}
+        open_leaves: {type: integer, minimum: 0}
+        ready_leaves: {type: integer, minimum: 0}
+        live_leaves: {type: integer, minimum: 0}
+        ready_partial: {type: boolean, description: Some open leaves have no ready ETA.}
+        live_partial: {type: boolean, description: Some open leaves have no live ETA.}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
         ready_reported_at: {type: string, format: date-time}
         live_reported_at: {type: string, format: date-time}
@@ -16963,9 +16971,13 @@ components:
     TicketEstimate:
       type: object
       required: [hours, estimated_children, open_children]
-      description: Read-only estimate view on node creates, reads and lists, omitted when there are no hours and no open children. Epics sum direct visible open ticket/task children using configured state categories, excluding deleted children. Null hours means no child has an estimate. Other work uses fields.estimate_hours; legacy invalid values are unknown. Counts are zero outside epics.
+      description: Read-only leaf estimate sum. A parent's own typed estimate is planned_hours and is never added to the sum. Archived, cancelled and deleted leaves are excluded. Existing estimated_children/open_children fields remain compatibility aliases for estimated_leaves/leaf_count. Counts include done leaves so regrouping cannot alter the total.
       properties:
         hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        planned_hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        is_parent: {type: boolean}
+        estimated_leaves: {type: integer, minimum: 0}
+        leaf_count: {type: integer, minimum: 0}
         estimated_children: {type: integer, minimum: 0}
         open_children: {type: integer, minimum: 0}
         by: {type: object, properties: {id: {type: string, format: uuid}, name: {type: string}}}

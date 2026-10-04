@@ -54,11 +54,9 @@ func filteredPlanPlacements(ctx context.Context, tx pgx.Tx, q listQuery) ([]plan
 	prefix, args := listFilterSQL(q, false)
 	args = append(args, planningViewer(ctx, tx))
 	viewer := fmt.Sprintf("$%d", len(args))
-	sql := prefix + `, ` + planningStatesCTE() + `, plan_targets AS (
- SELECT id FROM filtered WHERE kind_slug IN ('ticket','task')
- UNION SELECT c.id FROM filtered e JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid
-  AND c.parent_id=e.id` + planningOpenChild("c") + `
- WHERE e.kind_slug='epic' AND ` + planningOpenWhere("c") + `
+	sql := prefix + `, plan_targets AS (
+ SELECT DISTINCT id FROM aeon_work_scope(ARRAY(SELECT id FROM filtered WHERE kind_slug IN ('work','ticket','task','epic')))
+ WHERE is_leaf AND bucket NOT IN ('cancelled','archived')
  ) SELECT DISTINCT ` + planPlacementColumns(viewer) + `
  FROM plan_targets t JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=t.id` + assigneeJoin + `
  LIMIT ` + fmt.Sprint(maxPlanPlacements+1)

@@ -142,7 +142,7 @@ const present = computed(() => {
     assigned: props.showAssignee || !!queue.snapshots[props.projectId]?.items.length,
     suggested: rows.some(row => ['delivered', 'accepted', 'done', 'in_progress', 'in-progress', 'qa'].includes(row.state) || !!queued(row)),
     workers: listed.some(row => workersOf(row).length > 0 || !!row.lead_worker?.name),
-    estimate: rows.some(row => row.kind_slug === 'ticket' || row.kind_slug === 'task' || !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
+    estimate: rows.some(row => row.kind_slug === 'work' || row.kind_slug === 'ticket' || row.kind_slug === 'task' || !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
     progress: listed.some(row => progressOf(row) != null),
@@ -156,7 +156,8 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   if (!eta || typeof eta.progress !== 'number') return null
   const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
   const stale = !!eta.stale || !!props.liveStale
-  const label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone)
+  let label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone)
+  if (row.eta?.leaf_count && row.eta.leaf_count > 1) label += `; ${row.eta.estimated_leaves ?? 0} of ${row.eta.leaf_count} leaves estimated${row.eta.progress_basis === 'leaves' ? '; progress counts leaves' : ''}`
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
@@ -280,7 +281,7 @@ watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
 function estimate(row: ListItem) { return estimateDisplay(row).text }
 // An epic with open children and no hours still has coverage to explain.
 function emptyEstimateTip(row: ListItem) {
-  if (row.kind_slug !== 'epic' || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return 'No estimate yet'
+  if (!(row.estimate?.is_parent ?? row.kind_slug === 'epic') || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return 'No estimate yet'
   return estimateDisplay(row).tip
 }
 const grid = ref<HTMLTableElement>()

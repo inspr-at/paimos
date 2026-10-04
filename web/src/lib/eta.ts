@@ -12,9 +12,11 @@ export interface EtaSide {
   by?: string | null
   stale?: boolean
   kind: EtaKind
+  partial?: boolean
 }
 
 export interface EtaInput {
+  coverage?: { total: number; estimated: number; basis: string }
   ready?: EtaSide | null
   live?: EtaSide | null
   progress?: number | null
@@ -25,6 +27,14 @@ export interface EtaInput {
 }
 
 export interface TicketEta {
+  leaf_count?: number
+  estimated_leaves?: number
+  progress_basis?: 'estimate' | 'leaves'
+  open_leaves?: number
+  ready_leaves?: number
+  live_leaves?: number
+  ready_partial?: boolean
+  live_partial?: boolean
   has_working_session?: boolean
   eta_ready_at?: string | null
   eta_live_at?: string | null
@@ -59,12 +69,12 @@ export interface EtaView {
 
 type EtaReading = Omit<TicketEta, 'finished'> & { finished?: boolean }
 function etaInput(eta: EtaReading): EtaInput | null {
-  const ready = eta.eta_ready_at ? { at: eta.eta_ready_at, reported_at: eta.ready_reported_at, by: eta.ready_by, stale: eta.ready_stale, kind: 'Ready' as const } : null
-  const live = eta.eta_live_at ? { at: eta.eta_live_at, reported_at: eta.live_reported_at, by: eta.live_by, stale: eta.live_stale, kind: 'Live' as const } : null
+  const ready = eta.eta_ready_at ? { at: eta.eta_ready_at, reported_at: eta.ready_reported_at, by: eta.ready_by, stale: eta.ready_stale, partial: eta.ready_partial, kind: 'Ready' as const } : null
+  const live = eta.eta_live_at ? { at: eta.eta_live_at, reported_at: eta.live_reported_at, by: eta.live_by, stale: eta.live_stale, partial: eta.live_partial, kind: 'Live' as const } : null
   const progress = typeof eta.progress_pct === 'number' ? eta.progress_pct : null
   const finished = eta.finished ? { at: eta.finished_at, by: eta.finished_by } : null
   if (!ready && !live && progress == null && !finished) return null
-  return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), finished }
+  return { ready, live, progress, coverage: typeof eta.leaf_count === 'number' ? { total: eta.leaf_count, estimated: eta.estimated_leaves ?? 0, basis: eta.progress_basis ?? 'leaves' } : undefined, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale), finished }
 }
 
 export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | null {
@@ -152,9 +162,11 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
   if (connectionStale) {
     tip.splice(0, tip.length, STALE_LIST_TIP, ...sides.map(side => `Last ${side.kind.toLowerCase()} estimate: ${clock(side.at, now, timeZone)}`))
   }
+  if (input.coverage && input.coverage.total > 1) tip.push(`${input.coverage.estimated} of ${input.coverage.total} leaves estimated${input.coverage.basis === 'leaves' ? '; progress counts leaves' : '; progress weighted by estimate'}`)
+  if (sides.some(side => side.partial)) tip.push('Partial ETA: some open leaves have no estimate')
   return {
     kind: main?.kind ?? null,
-    text: main ? (connectionStale ? `Last ${clock(main.at, now, timeZone)}` : mode === 'clock' ? clock(main.at, now, timeZone) : relative(main.at, now)) : null,
+    text: main ? (connectionStale ? `Last ${clock(main.at, now, timeZone)}` : mode === 'clock' ? clock(main.at, now, timeZone) : relative(main.at, now)) + (main.partial ? ' · partial' : '') : null,
     hover: main && mode === 'both' && !connectionStale ? clock(main.at, now, timeZone) : null,
     progress: pct != null ? `${pct}%` : null,
     pct,

@@ -14,6 +14,10 @@ import (
 )
 
 type estimateView struct {
+	PlannedHours      *float64        `json:"planned_hours"`
+	IsParent          bool            `json:"is_parent"`
+	LeafCount         int             `json:"leaf_count"`
+	EstimatedLeaves   int             `json:"estimated_leaves"`
 	Hours             *float64        `json:"hours"`
 	EstimatedChildren int             `json:"estimated_children"`
 	OpenChildren      int             `json:"open_children"`
@@ -101,23 +105,14 @@ func estimateHoursSQL(fields string) string {
 	return `CASE WHEN jsonb_typeof(` + fields + `->'estimate_hours')='number' THEN CASE WHEN (` + fields + `->>'estimate_hours')::numeric>0 AND (` + fields + `->>'estimate_hours')::numeric<=200 THEN (` + fields + `->>'estimate_hours')::numeric END END`
 }
 
-// source selects id, fields, kind_slug inside the tenant transaction. Direct
-// ticket/task children avoid counting both a ticket and its nested tasks.
+// source selects id, fields and kind_slug. One scope traversal supplies all
+// requested totals, with the parent's typed estimate separate from its leaves.
 func estimateSQL(source string) string {
-	return `WITH ` + workStateCategoryCTE() + `
- SELECT n.id, CASE WHEN n.kind_slug='epic' THEN roll.hours ELSE ` + estimateHoursSQL("n.fields") + ` END AS hours,
- coalesce(roll.estimated,0)::int AS estimated_children,coalesce(roll.total,0)::int AS open_children,
- author.id::text,author.name
- FROM (` + source + `) n
- LEFT JOIN LATERAL (
-  SELECT sum(v.hours) AS hours,count(v.hours) AS estimated,count(*) AS total
-  FROM (SELECT ` + estimateHoursSQL("c.fields") + ` AS hours FROM nodes c
-   JOIN node_kinds ck ON ck.id=c.kind_id AND ck.tenant_id=c.tenant_id
-   LEFT JOIN configured cfg ON cfg.kind_id=c.kind_id AND cfg.norm=` + workStateNormSQL("c.state") + `
-   WHERE n.kind_slug='epic' AND c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=n.id AND c.deleted_at IS NULL
-   AND ck.slug IN ('ticket','task') AND ` + workNotClosedSQL("c.state", "cfg") + `) v
- ) roll ON n.kind_slug='epic'
- LEFT JOIN principals author ON n.kind_slug<>'epic' AND author.tenant_id=current_setting('aeon.tenant_id')::uuid
+	return `WITH source AS MATERIALIZED (` + source + `)
+ SELECT n.id,a.hours,a.estimated_leaves,a.leaf_count,author.id::text,author.name,
+ a.planned_hours,a.is_parent,a.leaf_count,a.estimated_leaves
+ FROM source n JOIN aeon_work_aggregates(ARRAY(SELECT id FROM source)) a ON a.id=n.id
+ LEFT JOIN principals author ON author.tenant_id=current_setting('aeon.tenant_id')::uuid
  AND author.id=CASE WHEN n.fields->>'estimate_by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN (n.fields->>'estimate_by')::uuid END`
 }
 
@@ -132,13 +127,13 @@ func loadEstimates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*es
 		var id string
 		var byID, byName *string
 		view := &estimateView{}
-		if err := rows.Scan(&id, &view.Hours, &view.EstimatedChildren, &view.OpenChildren, &byID, &byName); err != nil {
+		if err := rows.Scan(&id, &view.Hours, &view.EstimatedChildren, &view.OpenChildren, &byID, &byName, &view.PlannedHours, &view.IsParent, &view.LeafCount, &view.EstimatedLeaves); err != nil {
 			return nil, err
 		}
 		if byID != nil && byName != nil {
 			view.By = &estimatePerson{*byID, *byName}
 		}
-		if view.Hours != nil || view.OpenChildren > 0 {
+		if view.Hours != nil || view.OpenChildren > 0 || view.PlannedHours != nil || view.IsParent {
 			out[id] = view
 		}
 	}

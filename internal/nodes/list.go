@@ -1141,7 +1141,7 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
 			// The number the cell shows: a finished ticket is 100, like its ETA view.
-			parts = append(parts, eta.ProgressSQL("eta", "fin")+" IS NULL ASC", eta.ProgressSQL("eta", "fin")+" "+dir)
+			parts = append(parts, eta.ProgressSQL("eta", "eta")+" IS NULL ASC", eta.ProgressSQL("eta", "eta")+" "+dir)
 		case "model":
 			// Full model name and version, independent of the person's display choices.
 			parts = append(parts, "route.name IS NULL ASC", "route.name "+dir)
@@ -1198,7 +1198,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
-		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta_progress(f.id) eta ON true ` + eta.CompletionJoin("f.id", "fin")
+		etaJoin = ` LEFT JOIN work_values eta ON eta.id=f.id`
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {
@@ -1229,9 +1229,13 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 		moneyCols = `, ` + usdMicrosTextSQL("pm.list_spent_micros") + `, ` + usdMicrosTextSQL("pm.list_est_micros") + `, ` + usdMicrosTextSQL("pm.paid_spent_micros") + `, ` + usdMicrosTextSQL("pm.paid_est_micros")
 	}
 	if sortsBy(q, "estimate") {
-		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
+		estimateJoin = ` LEFT JOIN work_values est ON est.id=f.id`
 	}
-	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
+	aggregateCTE := ""
+	if etaJoin != "" || estimateJoin != "" {
+		aggregateCTE = `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
+	}
+	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
@@ -1305,6 +1309,10 @@ func facetSQL(q listQuery) (string, []any) {
 	}
 	sql := prefix + `, facet_values AS (
     SELECT 'state' AS name,f.state AS value FROM filtered f
+ WHERE f.kind_slug NOT IN ('work','ticket','task','epic') OR NOT EXISTS (
+ SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+ WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=f.id AND c.deleted_at IS NULL
+ AND ck.slug IN ('work','ticket','task','epic'))
     UNION ALL SELECT 'kind',f.kind_slug FROM filtered f
     UNION ALL SELECT 'priority',f.priority FROM filtered f
     UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
@@ -1530,17 +1538,20 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                     AND c.parent_id=s.node_id AND c.deleted_at IS NULL
             ), `+workStateCategoryCTE()+`, counted AS (
                 SELECT p.id,p.key,p.title,p.state,s.depth,k.slug,s.updated_at,
+                    NOT EXISTS (SELECT 1 FROM nodes ch JOIN node_kinds ck ON ck.tenant_id=ch.tenant_id AND ck.id=ch.kind_id
+                    WHERE ch.tenant_id=current_setting('aeon.tenant_id')::uuid AND ch.parent_id=s.node_id AND ch.deleted_at IS NULL
+                    AND ck.slug IN ('work','ticket','task','epic')) AS is_leaf,
                     `+workCountBucketSQL("s.state", "c")+` AS bucket
                 FROM projects p JOIN subtree s ON s.project_id=p.id
                 JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
                 LEFT JOIN configured c ON c.kind_id=s.kind_id AND c.norm=`+workStateNormSQL("s.state")+`
             ), summary AS (
                 SELECT id,key,title,state,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='open')::int AS open,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='done')::int AS done,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic'))::int AS total,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='open')::int AS open,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='done')::int AS done,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic'))::int AS total,
                     max(updated_at) AS last_activity
                 FROM counted
                 GROUP BY id,key,title,state
