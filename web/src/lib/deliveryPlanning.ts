@@ -15,6 +15,7 @@ export interface PlanningRelease {
   visibility: 'published' | 'internal'; state: 'planned' | 'building' | 'frozen' | 'released' | 'abandoned'
   rank: string; revision: number; entry_closes_at?: string | null; version?: string; version_scheme?: string
   rollup: { units: number; completed: number; open_hours: number }
+  rollup_stale?: boolean
   matches?: MatchCounts
   build_summary: { budget_outlook?: string; agents?: number; waiting?: number; agents_incomplete?: boolean }
 }

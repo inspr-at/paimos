@@ -31,6 +31,24 @@ describe('release planning query', () => {
   })
 })
 describe('bounded release reads', () => {
+  it('applies recovered completed work to rollups without inserting hidden/unsearched rows or exposing foreign reads', async () => {
+    const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview(2)); await settle()
+    h.state.expand('0'); h.requests[1]!.resolve({ ...page(0), matches:counts(0) }); await settle()
+    const recovered = { ...page(1,'recovered').items[0]!, release_id:'1', state:'done' }
+    h.state.committed({ kind:'placement', recovered:[recovered], undoable:false, result:{ items:[{...recovered,release_id:'0',revision:2}], release_revisions:{'0':2}, undo_event_id:9 } })
+    expect(h.state.overview.value?.active[0]?.rollup).toEqual({units:2,completed:1,open_hours:1})
+    expect(h.state.overview.value?.active[1]?.rollup).toEqual({units:0,completed:0,open_hours:1})
+    expect(h.state.work['release:0']?.items).toEqual([]); expect(h.state.overview.value?.counts_incomplete).toBe(true)
+    expect(h.requests).toHaveLength(2); h.state.dispose()
+  })
+  it('moves its own closed row to Released while leaving foreign containers for explicit Refresh', async () => {
+    const h = harness(); h.state.reset(context); const initial=overview(2); initial.active[0]!.rollup={units:3,completed:2,open_hours:1}; h.requests[0]!.resolve(initial); await settle()
+    h.state.committed({kind:'lifecycle',result:{...initial.active[0]!,state:'released',revision:2}})
+    expect(h.state.overview.value?.active.map(row=>row.release_id)).toEqual(['1'])
+    expect(h.state.overview.value?.released.items[0]?.rollup_stale).toBe(true)
+    expect(h.state.overview.value?.active[0]?.rollup).toEqual({units:1,completed:0,open_hours:1})
+    expect(h.state.overview.value?.counts_incomplete).toBe(true); expect(h.requests).toHaveLength(1); h.state.dispose()
+  })
   it('serialized Backlog receipts clear release identity and Undo restores rollups without reads', async () => {
     const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview(1)); await settle()
     h.state.expand('0'); h.state.expand('backlog')

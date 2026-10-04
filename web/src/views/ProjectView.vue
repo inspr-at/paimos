@@ -1502,6 +1502,7 @@ function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
   if ((knowledgeActive.value || releasesActive.value) && !ticketKey.value) {
+    if (releasesActive.value && event.key === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.defaultPrevented && !typing(event.target) && !document.querySelector('dialog[open], .floating')) { event.preventDefault(); planningView.value?.planRelease() }
     if (releasesActive.value && event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.defaultPrevented && !typing(event.target) && !document.querySelector('dialog[open], .floating')) { event.preventDefault(); toolbar.value?.focusSearch() }
     return
   }

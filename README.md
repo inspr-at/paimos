@@ -56,8 +56,23 @@ in a reserved feedback slot without changing row layout. On phones, holding for
 existing list. Escape cancels pickup without a write. Single-letter g/t/m work
 outside fields; the header's g-place chord remains available through the move
 sheet. Save from a field uses the platform's Command/Ctrl+Enter.
-Lifecycle sheets and the journey adoption card remain assigned to other P6
-packages.
+Release menus explain person/agent rights before an action. Settings use the
+captured release revision; the optional entry deadline can be set or cleared
+only while planned, independently of build limits. Override/reset controls
+stay in place. Lifecycle changes confirm before saving and offer no Undo;
+Cut reserves its explicit scheme/version permanently. Other projects require
+a person's reservation reference for Publish; the product checks its history.
+Freeze lists completed unplaced work and completed work in later releases,
+with at most 200 checkboxes on screen. All follows keyset pages; unchecked
+rows stay out. Include is person-only, sends batches of at most 100 with
+captured item/project revisions, and carries each committed destination
+revision into the next page. It stops on refusal or the 1,000-item capacity
+and reports placed and remaining counts, including partial/unknown outcomes.
+Include pages correlate their own event receipts without offering a blanket
+Undo. Phone sheets pin the actions above the safe area. Rollover updates the
+source row immediately; Refresh explicitly reads destination membership/counts
+without automatically exposing held foreign edits. The journey adoption card
+remains assigned to P6e.
 
 `GET /api/knowledge?project_id=<project>&ships_in=none` reads deduplicated,
 one-hop visible `relates` context of effective Backlog work in either direction,

@@ -17610,6 +17610,7 @@ components:
       required: [project_id, mode, revision]
       properties:
         project_id: {type: string, format: uuid}
+        product_project: {type: boolean, description: "True only for the server's explicit tenant/project product binding. Publication uses history verification there and person attestation elsewhere; branding and project titles do not define this authority."}
         mode: {type: string, enum: [journey, releases]}
         revision: {type: integer, minimum: 0}
         next_sequence: {type: integer, minimum: 1}

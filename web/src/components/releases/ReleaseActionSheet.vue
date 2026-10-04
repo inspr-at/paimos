@@ -40,7 +40,11 @@ const entries = computed(() => [
   { action: record.value.state === 'building' ? 'planned' : 'building', label: record.value.state === 'building' ? 'Return to planned' : 'Mark building', key: 'l' },
   { action: 'notes', label: 'Notes', key: 'n' }, { action: 'top', label: 'Move to top', key: 't' }, { action: 'after', label: 'Move after…', key: 'm' }, { action: 'abandon', label: 'Abandon', key: 'x' },
 ] as { action: ReleaseAction; label: string; key: string }[])
-const notes = shallowRef<{ frozen?: boolean; unavailable?: boolean; reason?: string; tickets?: { key: string; unavailable?: string; fields: Record<string, string> }[] } | null>(null)
+type NoteFields = { pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string; hide_from_release_notes?: boolean }
+type Notes = { project_node_id?: string; release_node_id?: string; frozen?: boolean; backfilled?: boolean; label?: string; source?: string; fallback?: string; written_after_release?: boolean; gaps?: string[]; tickets?: { key: string; unavailable?: string; fields: NoteFields | null }[]; items?: (NoteFields & { key: string })[] }
+const notes = shallowRef<Notes | null>(null)
+const noteEntries = computed(() => notes.value?.tickets?.filter(entry => entry.fields?.hide_from_release_notes !== true) ?? notes.value?.items?.map(entry => ({ key: entry.key, fields: entry, unavailable: '' })) ?? [])
+const noteLabel = computed(() => notes.value?.source === 'unavailable' ? 'Notes are unavailable.' : notes.value?.written_after_release || notes.value?.backfilled || notes.value?.label === 'backfilled' ? 'Notes written after release.' : notes.value?.fallback === 'historical-tag-headline' ? 'Historical tag headline.' : notes.value?.frozen || record.value.state === 'released' ? 'Stored publication notes.' : 'Draft · cumulative notes preview. Nothing is published yet.')
 const abandoned = shallowRef<PlanningRelease[]>([]), abandonedCursor = ref('')
 function explain(action: ReleaseAction) { hint.value = actionReason(action, record.value, props.rights) || (action === 'freeze' && !props.rights.person ? 'An agent’s freeze includes no completed work.' : lifecycleCopy[action] ?? '') }
 function assertCurrent() { if (!current()) throw new Error('The project, person or release changed. Reopen this sheet.') }
@@ -69,13 +73,18 @@ async function choose(action: ReleaseAction) {
       const project = await requestRelease(`/projects/${encodeURIComponent(captured.project_id)}/delivery`, { signal: controller.signal }) as { project_id: string; build_defaults?: Settings }
       assertCurrent(); if (project.project_id !== captured.project_id) throw new Error('Invalid project settings.'); defaults.value = project.build_defaults ?? {}
     }
-    if (action === 'notes') notes.value = await requestRelease(`${releasePath(captured.project_id, captured.release_id)}/note-snapshot`, { signal: controller.signal }) as typeof notes.value
+    if (action === 'notes') {
+      const answer = await requestRelease(`${releasePath(captured.project_id, captured.release_id)}/note-snapshot`, { signal: controller.signal }) as Notes
+      assertCurrent()
+      if (answer.project_node_id && answer.project_node_id !== captured.project_id || answer.release_node_id && answer.release_node_id !== captured.release_id || (answer.tickets?.length ?? answer.items?.length ?? 0) > 5000 || (answer.gaps?.length ?? 0) > 5000) throw new Error('Invalid release notes response.')
+      notes.value = answer
+    }
     assertCurrent(); loaded.value = true
     if (action === 'freeze' || ['cut','close','publish'].includes(action)) await recovery.load()
   } catch (e) { if (current() && token === generation) error.value = refusal(e) }
   finally { if (token === generation) busy.value = false }
 }
-function setOverride(key: typeof settingsFields[number]['key'], enabled: boolean) { override.value[key] = enabled; values.value[key] = enabled ? settings.value[key] ?? resolved.value[key] ?? 1 : resolved.value[key] ?? undefined }
+function setOverride(key: typeof settingsFields[number]['key'], enabled: boolean) { override.value[key] = enabled; values.value[key] = enabled ? settings.value[key] ?? defaults.value[key] ?? 1 : defaults.value[key] ?? undefined }
 function settingsPayload(): Settings {
   const next: Settings = {}
   for (const field of settingsFields) if (override.value[field.key]) {
@@ -105,7 +114,7 @@ async function submit() {
       const bytes = new TextEncoder()
       if (!title.value.trim() || bytes.encode(title.value.trim()).length > 512 || bytes.encode(body.value).length > 65536) throw new Error('Use a name up to 512 bytes and a brief up to 64 KiB.')
       if (action === 'plan') { path = releasePath(captured.project_id); payload = { title: title.value.trim(), visibility: visibility.value, entry_closes_at: deadlineValue(deadline.value), creation_key: creationKey } }
-      else { method = 'PATCH'; payload.title = title.value.trim(); payload.body = body.value; payload.build_settings = settingsPayload(); if (record.value.state === 'planned') { payload.visibility = visibility.value; payload.entry_closes_at = deadlineValue(deadline.value) } }
+      else { method = 'PATCH'; payload.title = title.value.trim(); payload.body = body.value; payload.build_settings = settingsPayload(); if (record.value.state === 'planned') { payload.visibility = visibility.value; if (deadline.value !== localDeadline(record.value.entry_closes_at)) payload.entry_closes_at = deadlineValue(deadline.value) } }
     } else if (['freeze','unfreeze','abandon','building','planned'].includes(action)) {
       path += '/state'; payload.to = ({ freeze: 'frozen', unfreeze: 'building', abandon: 'abandoned', building: 'building', planned: 'planned' } as Record<string, string>)[action]
     } else {
@@ -117,11 +126,20 @@ async function submit() {
     const answer = await requestRelease(path, { method, signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) as ReleaseRecord & { recovery?: { completed_unplaced: number; completed_later: number; incomplete: boolean } }
     assertCurrent()
     if (answer.project_id !== captured.project_id || !answer.release_id || action !== 'plan' && answer.release_id !== captured.release_id || !Number.isSafeInteger(answer.revision) || answer.revision < recovery.revision.value) throw new Error('Invalid release result. Reload before continuing.')
-    const updated = { ...record.value, ...(action === 'settings' || action === 'plan' ? { title: title.value.trim(), display_name: props.rights.product && visibility.value === 'published' ? record.value.display_name : title.value.trim(), body: body.value, visibility: visibility.value } : {}), ...answer }
+    const updated = { ...record.value, ...(action === 'settings' || action === 'plan' ? { title: title.value.trim(), display_name: props.rights.product && visibility.value === 'published' ? record.value.display_name : title.value.trim(), body: body.value, visibility: visibility.value } : {}), ...answer, rollup: answer.rollup ?? { ...record.value.rollup, units: record.value.rollup.units + recovery.placedCount.value, completed: record.value.rollup.completed + recovery.placedCount.value } }
+    let nameWarning = ''
+    if (action === 'plan' && props.rights.product && updated.visibility === 'published') {
+      try {
+        const named = await requestRelease(releasePath(captured.project_id, updated.release_id), { signal: controller.signal }) as ReleaseRecord
+        assertCurrent()
+        if (named.project_id !== updated.project_id || named.release_id !== updated.release_id || named.revision !== updated.revision || !named.display_name) throw new Error('The release name could not be read.')
+        updated.display_name = named.display_name
+      } catch { assertCurrent(); updated.display_name = 'Planned release'; nameWarning = ' The marketing name could not be read; Refresh to read it.' }
+    }
     if (actions && identity && !actions.commit(identity, { kind: 'lifecycle', result: updated })) throw new Error('The action belongs to a previous view; its result was discarded.')
     emit('saved', updated)
     const remaining = answer.recovery ? answer.recovery.completed_unplaced + answer.recovery.completed_later : undefined
-    emit('feedback', `${names[action]} saved for ${releaseName(updated)}.${remaining === undefined ? '' : ` ${answer.recovery?.incomplete ? 'At least ' : ''}${remaining} completed items left out.`}`)
+    emit('feedback', `${names[action]} saved for ${releaseName(updated)}.${remaining === undefined ? '' : ` ${answer.recovery?.incomplete ? 'At least ' : ''}${remaining} completed items left out.`}${nameWarning}`)
     emit('close')
   } catch (e) { if (identity) actions?.failed(identity); if (current()) error.value = refusal(e) }
   finally { busy.value = false }
@@ -153,7 +171,7 @@ onBeforeUnmount(() => { disposed = true; generation++; controller.abort() })
 <template>
   <dialog ref="dialog" class="release-sheet" :class="{ long: screen === 'freeze' }" :aria-label="label" @keydown="keys" @cancel.prevent="close">
     <div class="sheet-frame">
-      <header><h2 v-clip-tip="label">{{ label }}</h2></header>
+      <header><h2 tabindex="0" :data-tip="label">{{ label }}</h2></header>
       <div class="sheet-actions" :class="{ 'freeze-actions': screen === 'freeze' }" role="group" aria-label="Release sheet actions">
         <button type="button" data-cancel @click="close">{{ ['menu','notes','abandoned'].includes(screen) ? 'Done' : 'Cancel' }} <KeyCap k="Esc" /></button>
         <template v-if="screen === 'freeze'"><button type="button" :disabled="locked || !ready || !selected || !rights.person || !rights.write" @click="recovery.include">Include ({{ selected }})</button><button type="button" class="primary" :disabled="saveDisabled || !loaded" @click="submit">Freeze <KeyCap k="mod" /><KeyCap k="enter" /></button></template>
@@ -162,7 +180,7 @@ onBeforeUnmount(() => { disposed = true; generation++; controller.abort() })
       </div>
       <div class="sheet-body" :aria-busy="locked">
         <div v-if="screen === 'menu'" class="menu-options" role="group" aria-label="Release actions">
-          <button v-for="entry in entries" :key="entry.action" type="button" :aria-disabled="!!actionReason(entry.action, record, rights)" :data-tip="actionReason(entry.action, record, rights)" @focus="explain(entry.action)" @pointerenter="explain(entry.action)" @click="choose(entry.action)"><span>{{ entry.label }}</span><KeyCap :k="entry.key" /></button>
+          <button v-for="entry in entries" :key="entry.action" type="button" :aria-label="entry.label" :aria-keyshortcuts="entry.key" :aria-disabled="!!actionReason(entry.action, record, rights)" :data-tip="actionReason(entry.action, record, rights)" @focus="explain(entry.action)" @pointerenter="explain(entry.action)" @click="choose(entry.action)"><span>{{ entry.label }}</span><KeyCap :k="entry.key" /></button>
         </div>
         <template v-if="screen === 'settings' || screen === 'plan'">
           <div class="settings-controls" role="group" aria-label="Release settings">
@@ -201,11 +219,11 @@ onBeforeUnmount(() => { disposed = true; generation++; controller.abort() })
           <label v-if="screen === 'publish' && !rights.product" class="brief">Reservation PR or tag URL<input v-model="reservation" aria-label="Reservation reference" maxlength="512" :disabled="locked" /></label>
           <div class="copy"><p>{{ lifecycleCopy[screen as ReleaseAction] }}</p><p>Confirming applies immediately. This action has no Undo.</p><p v-if="['cut','close','publish'].includes(screen)">{{ ready ? `${incomplete ? 'At least ' : ''}${total} completed items remain outside this release. They are left out; this warning does not block the action.` : 'The completed-work warning could not be read. No recovery work is included by this action.' }}</p><p v-if="screen === 'publish' && !rights.product">This reservation is attested by the person publishing it. It is not verified against the product’s history.</p><p v-if="record.reservation_basis">Reservation {{ record.reservation_basis }}{{ record.released_by ? ` by ${record.released_by}` : '' }}.</p></div>
         </template>
-        <template v-if="screen === 'notes'"><p class="copy">{{ notes?.unavailable ? notes.reason || 'Notes are unavailable.' : notes?.frozen ? 'Stored publication notes.' : 'Draft · cumulative notes preview. Nothing is published yet.' }}</p><article v-for="entry in notes?.tickets ?? []" :key="entry.key" class="note"><h3>{{ entry.key }} · {{ entry.fields?.pill_en || entry.fields?.pill_de || entry.key }}</h3><p>{{ entry.unavailable || entry.fields?.benefit_en || entry.fields?.benefit_de || 'No release-note text recorded.' }}</p></article><p v-if="loaded && !notes?.tickets?.length && !notes?.unavailable" class="empty">No visible note entries.</p></template>
+        <template v-if="screen === 'notes'"><p v-if="loaded" class="copy">{{ noteLabel }}</p><p v-for="gap in notes?.gaps ?? []" :key="gap" class="copy">{{ gap }}</p><article v-for="entry in noteEntries" :key="entry.key" class="note"><h3>{{ entry.key }} · {{ entry.fields?.pill_en || entry.fields?.pill_de || entry.key }}</h3><p>{{ entry.unavailable || entry.fields?.benefit_en || entry.fields?.benefit_de || 'No release-note text recorded.' }}</p></article><p v-if="loaded && !noteEntries.length && notes?.source !== 'unavailable'" class="empty">No visible note entries.</p></template>
         <template v-if="screen === 'abandoned'"><p class="copy">Finished for good. Names and versions stay reserved; abandoned releases hold no work.</p><article v-for="release in abandoned" :key="release.release_id" class="note"><h3>{{ releaseName(release) }}</h3><p v-if="release.version">{{ release.version }} · remains reserved</p></article><p v-if="loaded && !abandoned.length" class="empty">No abandoned releases on this page.</p></template>
         <p v-if="screen === 'menu'" class="menu-explanation" role="status">{{ hint || 'Moves have Undo. Lifecycle actions ask for confirmation and have no Undo.' }}</p>
       </div>
-      <div class="sheet-feedback" role="status" aria-live="polite"><span>{{ error || blocked || recoveryError || recoveryResult || (locked ? 'Working…' : '') }}</span><button v-if="screen === 'freeze'" type="button" :disabled="locked" @click="recovery.load">Refresh list</button><button v-if="screen === 'abandoned'" type="button" :disabled="locked" @click="loadAbandoned()">Retry</button></div>
+      <div class="sheet-feedback" role="status" aria-live="polite"><span>{{ error || blocked || recoveryError || (locked ? 'Working…' : '') }}<template v-if="recoveryResult"><br v-if="error || blocked || recoveryError || locked" />{{ recoveryResult }}</template></span><button v-if="screen === 'freeze'" type="button" :disabled="locked" @click="recovery.load">Refresh list</button><button v-if="screen === 'abandoned'" type="button" :disabled="locked" @click="loadAbandoned()">Retry</button></div>
     </div>
   </dialog>
 </template>

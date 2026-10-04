@@ -10,13 +10,17 @@ type RecoverySource = 'unplaced' | 'later'
 export function useReleaseRecovery(options: { release: ReleaseRecord; current: () => boolean; allowed: () => boolean; actions?: DeliveryActions; request?: ReleaseRequest; signal: AbortSignal }) {
   const request = options.request ?? requestRelease, initial = { ...options.release }
   const revision = ref(initial.revision), room = ref(Math.max(0, 1000 - initial.rollup.units))
+  const placedCount = ref(0)
   const rows = shallowRef<Record<RecoverySource, PlanningItem[]>>({ unplaced: [], later: [] })
   const counts = ref({ unplaced: 0, later: 0 }), cursors = ref({ unplaced: '', later: '' })
   const ready = ref(false), incomplete = ref(false), busy = ref(false), error = ref(''), result = ref(''), all = ref(true)
   const excluded = ref(new Set<string>()), included = new Set<string>()
+  const firstPages: Partial<Record<RecoverySource, ItemPage>> = {}
+  const archived = shallowRef<Record<RecoverySource, PlanningItem[]>>({ unplaced: [], later: [] })
   const total = computed(() => counts.value.unplaced + counts.value.later)
   const visible = computed(() => [...rows.value.unplaced, ...rows.value.later])
-  const selected = computed(() => all.value && !incomplete.value ? Math.max(0, total.value - excluded.value.size) : visible.value.filter(row => !excluded.value.has(row.item_id)).length)
+  const selectedRows = (source: RecoverySource) => [...new Map([...(incomplete.value ? [] : archived.value[source]), ...rows.value[source]].filter(row => !included.has(row.item_id) && !excluded.value.has(row.item_id)).map(row => [row.item_id, row])).values()]
+  const selected = computed(() => all.value && !incomplete.value ? Math.max(0, total.value - excluded.value.size) : selectedRows('unplaced').length + selectedRows('later').length)
   function checkCurrent() { if (!options.current() || options.signal.aborted) throw new Error('The project, person or release changed. Reopen Freeze.') }
   const pagePath = (source: RecoverySource, cursor: string) => {
     if (cursor.length > 2048) throw new Error('Invalid recovery cursor.')
@@ -40,17 +44,27 @@ export function useReleaseRecovery(options: { release: ReleaseRecord; current: (
     busy.value = true; ready.value = false; error.value = ''
     try {
       const unplaced = await read('unplaced'), later = await read('later')
+      firstPages.unplaced = unplaced; firstPages.later = later; archived.value = { unplaced: [], later: [] }
       rows.value = { unplaced: unplaced.items, later: later.items }; cursors.value = { unplaced: unplaced.next_cursor ?? '', later: later.next_cursor ?? '' }; ready.value = true
     } catch (e) { if (options.current()) error.value = refusal(e) }
     finally { busy.value = false }
   }
   function checked(id: string, on: boolean) { const next = new Set(excluded.value); if (on) next.delete(id); else next.add(id); excluded.value = next }
-  function toggleAll(on: boolean) { all.value = on; excluded.value = on ? new Set() : new Set(visible.value.map(row => row.item_id)) }
+  function toggleAll(on: boolean) { all.value = on; archived.value = { unplaced: [], later: [] }; excluded.value = on ? new Set() : new Set(visible.value.map(row => row.item_id)) }
   // Replace a displayed page; never accumulate more than 200 rendered rows.
   async function more(source: RecoverySource) {
     if (busy.value || !cursors.value[source]) return
     busy.value = true; error.value = ''
-    try { const page = await read(source, cursors.value[source]); rows.value = { ...rows.value, [source]: page.items.filter(row => !included.has(row.item_id)) }; cursors.value[source] = page.next_cursor ?? ''; if (!all.value) for (const row of page.items) checked(row.item_id, false) }
+    try {
+      const page = await read(source, cursors.value[source])
+      if (!all.value && !incomplete.value) {
+        const retained = selectedRows(source)
+        if (retained.length + selectedRows(source === 'unplaced' ? 'later' : 'unplaced').length > 5000) throw new Error('Selection is limited to 5,000 rows.')
+        archived.value = { ...archived.value, [source]: retained }
+      }
+      rows.value = { ...rows.value, [source]: page.items.filter(row => !included.has(row.item_id)) }; cursors.value[source] = page.next_cursor ?? ''
+      if (!all.value) for (const row of page.items) checked(row.item_id, false)
+    }
     catch (e) { if (options.current()) error.value = refusal(e) }
     finally { busy.value = false }
   }
@@ -58,12 +72,14 @@ export function useReleaseRecovery(options: { release: ReleaseRecord; current: (
     if (busy.value || !ready.value || !selected.value || !options.allowed()) return
     busy.value = true; error.value = ''; result.value = ''
     const requested = selected.value
-    let placed = 0, visited = 0
+    let placed = 0, visited = 0, outcomeUnknown = false
     const seen = new Set<string>(), identity = options.actions?.identity()
     try {
       checkCurrent()
       for (const source of ['unplaced', 'later'] as const) {
-        let items = rows.value[source], cursor = cursors.value[source]
+        const whole = all.value && !incomplete.value
+        const local = whole ? [] : selectedRows(source)
+        let items = whole ? firstPages[source]?.items ?? [] : local.splice(0,100), cursor = whole ? firstPages[source]?.next_cursor ?? '' : ''
         const visitedCursors = new Set<string>()
         for (;;) {
           checkCurrent()
@@ -76,20 +92,23 @@ export function useReleaseRecovery(options: { release: ReleaseRecord; current: (
             const captured = options.actions?.begin()
             let receipt: PlacementReceipt
             try {
+              outcomeUnknown = true
               receipt = await request(`/projects/${encodeURIComponent(initial.project_id)}/ships-in/batch`, { method: 'POST', signal: options.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: chosen.map(row => ({ id: row.item_id, expected_revision: row.revision })), release_id: initial.release_id, expected_release_revision: revision.value, position: 'append' }) }) as PlacementReceipt
               checkCurrent()
               if (identity && identity !== options.actions?.identity()) throw new Error('The record on screen changed; the result was discarded.')
-              if (receipt.items?.length !== chosen.length || receipt.items.some(row => row.project_id !== initial.project_id || row.release_id !== initial.release_id || !chosen.some(item => item.item_id === row.item_id)) || !Number.isSafeInteger(receipt.release_revision) || receipt.release_revision! <= revision.value) throw new Error('Invalid Include receipt. Reload before continuing.')
+              if (receipt.items?.length !== chosen.length || new Set(receipt.items.map(row => row.item_id)).size !== chosen.length || receipt.items.some(row => row.project_id !== initial.project_id || row.release_id !== initial.release_id || !chosen.some(item => item.item_id === row.item_id)) || !Number.isSafeInteger(receipt.release_revision) || receipt.release_revision! <= revision.value) throw new Error('Invalid Include receipt. Reload before continuing.')
+              outcomeUnknown = false
               // Every page has its own committed event; Include never offers a
               // blanket Undo across pages. Preserve exact own SSE correlation.
-              if (captured && options.actions && !options.actions.commit(captured, { kind: 'placement', result: receipt, undoable: false })) throw new Error('The Include result belongs to a previous view.')
-            } catch (e) { if (captured) options.actions?.failed(captured); throw e }
-            revision.value = receipt.release_revision!; room.value -= chosen.length; placed += chosen.length
+              if (captured && options.actions && !options.actions.commit(captured, { kind: 'placement', result: { ...receipt, release_revisions: { ...receipt.release_revisions, [initial.release_id]: receipt.release_revision! } }, undoable: false, recovered: chosen })) throw new Error('The Include result belongs to a previous view.')
+            } catch (e) { if (e instanceof APIError && e.status >= 400 && e.status < 500) outcomeUnknown = false; if (captured) options.actions?.failed(captured); throw e }
+            revision.value = receipt.release_revision!; room.value -= chosen.length; placed += chosen.length; placedCount.value += chosen.length
             counts.value[source] = Math.max(0, counts.value[source] - chosen.length)
             for (const row of chosen) { included.add(row.item_id); checked(row.item_id, true) }
             rows.value = { ...rows.value, [source]: rows.value[source].filter(row => !included.has(row.item_id)) }
           }
           if (!room.value && placed < requested) throw new Error('This release is full (1,000 items).')
+          if (!whole) { if (!local.length) break; items = local.splice(0,100); continue }
           if (!all.value || incomplete.value || !cursor) break
           if (visitedCursors.has(cursor)) throw new Error('The recovery cursor repeated; remaining work stays listed.')
           visitedCursors.add(cursor)
@@ -98,11 +117,11 @@ export function useReleaseRecovery(options: { release: ReleaseRecord; current: (
           items = page.items; cursor = page.next_cursor ?? ''; cursors.value[source] = cursor
         }
       }
-    } catch (e) { if (options.current()) { error.value = refusal(e); if (e instanceof APIError && [403,409].includes(e.status)) ready.value = false } }
+    } catch (e) { if (options.current()) { error.value = refusal(e); if (outcomeUnknown || e instanceof APIError && [403,409].includes(e.status)) ready.value = false } }
     finally {
-      if (options.current()) result.value = `${placed} placed · ${incomplete.value ? 'at least ' : ''}${total.value} remain listed${placed < requested ? ' · Include stopped' : ''}.`
+      if (options.current()) result.value = outcomeUnknown ? `${placed} confirmed placed · last batch outcome and remaining count unknown. Include stopped; reopen Freeze before continuing.` : `${placed} placed · ${incomplete.value ? 'at least ' : ''}${total.value} remain listed${placed < requested ? ' · Include stopped' : ''}.`
       busy.value = false
     }
   }
-  return { revision, room, rows, counts, cursors, ready, incomplete, busy, error, result, all, total, visible, selected, excluded, load, more, include, checked, toggleAll }
+  return { revision, room, placedCount, rows, counts, cursors, ready, incomplete, busy, error, result, all, total, visible, selected, excluded, load, more, include, checked, toggleAll }
 }

@@ -14,13 +14,14 @@ import (
 )
 
 type DeliveryStatus struct {
-	ProjectID     string        `json:"project_id"`
-	Title         string        `json:"title,omitempty"`
-	Mode          string        `json:"mode"`
-	Revision      int64         `json:"revision"`
-	NextSequence  int           `json:"next_sequence,omitempty"`
-	BuildDefaults BuildSettings `json:"build_defaults"`
-	Adoption      *AdoptionJob  `json:"adoption"`
+	ProjectID      string        `json:"project_id"`
+	ProductProject bool          `json:"product_project"`
+	Title          string        `json:"title,omitempty"`
+	Mode           string        `json:"mode"`
+	Revision       int64         `json:"revision"`
+	NextSequence   int           `json:"next_sequence,omitempty"`
+	BuildDefaults  BuildSettings `json:"build_defaults"`
+	Adoption       *AdoptionJob  `json:"adoption"`
 }
 
 const adoptionColumns = `j.state,j.revision,j.attempts,coalesce(j.reason_code,''),j.reason_message,j.last_checked_at,j.next_attempt_at,j.lease_until,coalesce(j.report_ref,''),coalesce(j.report_digest,''),coalesce(j.source_fingerprint,''),j.report_counts,j.report_incomplete,coalesce(j.backup_ref,''),j.backup_verified_at,j.cleanup_state,j.next_reconcile_at,j.reserved_backup_bytes,j.reserved_restore_slots`
@@ -92,6 +93,7 @@ func (s *Store) Status(ctx context.Context, p tenant.Principal, project string) 
 	err := s.adoptionRead(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		out, err = inventoryStatusTx(ctx, tx, p, project, true)
+		out.ProductProject = s.productTenant == p.TenantID && s.productProject == project
 		return err
 	})
 	return out, err
@@ -234,6 +236,7 @@ func (s *Store) Adoptions(ctx context.Context, p tenant.Principal, opt ReadOptio
 			if e != nil {
 				return e
 			}
+			v.ProductProject = s.productTenant == p.TenantID && s.productProject == id
 			out.Items = append(out.Items, v)
 		}
 		if attention {

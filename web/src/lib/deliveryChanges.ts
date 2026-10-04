@@ -8,7 +8,7 @@ export interface PlacementReceipt {
   items: { item_id: string; project_id: string; release_id?: string; rank?: string; revision: number; expedite: boolean; due_on: string | null }[]
   release_revision?: number; release_ranks?: Record<string, string>; release_revisions?: Record<string, number>; undo_event_id: number | null
 }
-export type DeliveryCommit = { kind: 'placement'; result: PlacementReceipt; undoable?: boolean } | { kind: 'rank'; result: Pick<PlanningRelease, 'release_id' | 'project_id' | 'revision' | 'rank'> & Partial<PlanningRelease> & { undo_event_id: number | null } } | { kind: 'lifecycle'; result?: PlanningRelease }
+export type DeliveryCommit = { kind: 'placement'; result: PlacementReceipt; undoable?: boolean; recovered?: PlanningItem[] } | { kind: 'rank'; result: Pick<PlanningRelease, 'release_id' | 'project_id' | 'revision' | 'rank'> & Partial<PlanningRelease> & { undo_event_id: number | null } } | { kind: 'lifecycle'; result?: PlanningRelease }
 export interface DeliveryActions {
   identity(): string
   begin(): string

@@ -182,7 +182,11 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
       // containers; keep their held snapshot and disclose that a refresh is
       // needed instead of inventing their new counts or reading foreign edits.
       const rollover = updated.state === 'abandoned' || updated.state === 'released' || !before?.version && !!updated.version
-      if (rollover) { delete work[`release:${updated.release_id}`]; overview.value.counts_incomplete = true }
+      if (rollover) {
+        updated.rollup_stale = true
+        for (const row of active) if (row.release_id !== updated.release_id && row.visibility === updated.visibility && row.rank > updated.rank) row.rollup_stale = true
+        delete work[`release:${updated.release_id}`]; updated.matches = undefined; overview.value.counts_incomplete = true
+      }
       overview.value = { ...overview.value, active, released: { ...overview.value.released, items: released }, abandoned: overview.value.abandoned + Number(updated.state === 'abandoned' && before?.state !== 'abandoned') }
       return
     }
@@ -200,7 +204,8 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
     }
     for (const placement of change.result.items) {
       if (placement.project_id !== context.project) continue
-      const known = Object.values(work).flatMap(state => state.items).find(it => it.item_id === placement.item_id) ?? ownRows.get(placement.item_id)
+      const displayed = Object.values(work).flatMap(state => state.items).find(it => it.item_id === placement.item_id) ?? ownRows.get(placement.item_id)
+      const known = displayed ?? change.recovered?.find(it => it.item_id === placement.item_id)
       if (!known) continue
       if (ownRows.size >= 101 && !ownRows.has(placement.item_id)) ownRows.delete(ownRows.keys().next().value!)
       // Go omits empty placement fields. Their absence clears the old value,
@@ -211,17 +216,17 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
       const destination: PlanningSource = placement.release_id ? `release:${placement.release_id}` : placement.rank ? 'backlog:ranked' : 'backlog:tail'
       for (const state of Object.values(work)) state.items = state.items.filter(it => it.item_id !== placement.item_id)
       const target = work[destination]
-      if (target?.loaded && rendered.value < WORK_RENDER_LIMIT) {
+      if (displayed && target?.loaded && rendered.value < WORK_RENDER_LIMIT) {
         target.items.push(updated)
         target.items.sort((a, b) => compare(destination === 'backlog:tail' ? a.created_at : a.rank ?? '', destination === 'backlog:tail' ? b.created_at : b.rank ?? '') || compare(a.item_id, b.item_id))
       }
       if (source !== destination) {
         for (const [key, delta] of [[source, -1], [destination, 1]] as const) {
           const state = work[key]
-          if (state) { state.count = Math.max(0, state.count + delta); if (state.matches) state.matches = { ...state.matches, matched_count: Math.max(0, state.matches.matched_count + delta), shown_count: Math.max(0, state.matches.shown_count + delta) } }
+          if (state) { state.count = Math.max(0, state.count + delta); if (state.matches) state.matches = displayed ? { ...state.matches, matched_count: Math.max(0, state.matches.matched_count + delta), shown_count: Math.max(0, state.matches.shown_count + delta) } : { ...state.matches, incomplete: true } }
           const row = rows().find(r => `release:${r.release_id}` === key)
           if (row) {
-            if (row.matches) row.matches = { ...row.matches, matched_count: Math.max(0, row.matches.matched_count + delta), shown_count: Math.max(0, row.matches.shown_count + delta) }
+            if (row.matches) row.matches = displayed ? { ...row.matches, matched_count: Math.max(0, row.matches.matched_count + delta), shown_count: Math.max(0, row.matches.shown_count + delta) } : { ...row.matches, incomplete: true }
             const completed = ['done', 'accepted', 'delivered'].includes(known.state), canceled = ['cancelled', 'canceled'].includes(known.state)
             if (['ticket','task'].includes(known.kind) && !canceled) row.rollup = { units: Math.max(0, row.rollup.units + delta), completed: Math.max(0, row.rollup.completed + (completed ? delta : 0)), open_hours: Math.max(0, row.rollup.open_hours + (completed ? 0 : (known.estimated_hours ?? 0) * delta)) }
           } else if (key.startsWith('backlog:')) {
@@ -233,6 +238,7 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
         }
       }
     }
+    if (change.recovered?.length) overview.value.counts_incomplete = true
     for (const row of rows()) {
       const revision = change.result.release_revisions?.[row.release_id]
       if (revision) row.revision = revision

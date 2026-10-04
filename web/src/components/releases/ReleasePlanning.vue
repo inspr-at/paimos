@@ -39,6 +39,7 @@ const { overview, expanded, work, loading, stale, error, pageError, pending: pen
 const pendingExpansion = ref(false)
 const pending = computed(() => pendingPages.value + Number(pendingExpansion.value))
 const mode = ref<'checking' | 'journey' | 'releases' | 'error'>('checking')
+const productProject = ref(false)
 const modeError = ref(''), preferenceError = ref('')
 const owner = computed(() => JSON.stringify([props.projectId, props.person]))
 const parsedQuery = computed(() => {
@@ -52,7 +53,7 @@ const session = useSession()
 const deliveryActions = inject(DELIVERY_ACTIONS, undefined)
 const sheet = ref<{ release: ReleaseRecord; identity: string; screen: 'menu' | 'plan' | 'abandoned'; anchor?: HTMLElement } | null>(null)
 const sheetFeedback = ref(''), lifecycleRefresh = ref(false)
-const sheetRights = computed(() => ({ person: session.identity?.principal.kind === 'person', read: can('releases.read', props.projectId), write: can('releases.write', props.projectId), deploy: can('releases.deploy', props.projectId), product: props.projectKey.toUpperCase() === 'AEON' }))
+const sheetRights = computed(() => ({ person: session.identity?.principal.kind === 'person', read: can('releases.read', props.projectId), write: can('releases.write', props.projectId), deploy: can('releases.deploy', props.projectId), product: productProject.value }))
 function menu(id: string, anchor: HTMLElement) {
   const release = [...overview.value?.active ?? [], ...overview.value?.released.items ?? []].find(row => row.release_id === id)
   if (release && !stale.value) sheet.value = { release: { ...release, rollup: { ...release.rollup }, build_summary: { ...release.build_summary } }, identity: identity.value, screen: 'menu', anchor }
@@ -75,7 +76,7 @@ const prefKey = () => `releases-expanded:${props.projectId}`
 async function loadMode(preserve = false) {
   statusAbort?.abort(); statusAbort = new AbortController()
   const signal = statusAbort.signal, captured = owner.value
-  if (!preserve) { mode.value = 'checking'; preferenceError.value = ''; touched = false; savedIds = []; readyOwner = ''; pendingExpansion.value = false; planning.reset(null) }
+  if (!preserve) { mode.value = 'checking'; productProject.value = false; preferenceError.value = ''; touched = false; savedIds = []; readyOwner = ''; pendingExpansion.value = false; planning.reset(null) }
   modeError.value = ''
   // Expansion preference is separate from Outline and scoped by the authenticated
   // person on the server. Capture ownership before either asynchronous read.
@@ -92,6 +93,7 @@ async function loadMode(preserve = false) {
     if (disposed || captured !== owner.value || signal.aborted) return
     if (status.project_id !== props.projectId || !['journey', 'releases'].includes(status.mode)) throw new Error('Invalid delivery status')
     const unchanged = mode.value === status.mode
+    productProject.value = status.product_project === true
     mode.value = status.mode
     if (preserve && unchanged && status.mode === 'releases') planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value })
   } catch (e) {
@@ -186,7 +188,7 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
         <button type="button" class="btn sm ghost" :disabled="!pending" @click="flush(true)">Show loaded</button>
       </div>
     </div>
-    <div class="move-feedback" role="status" aria-live="polite">{{ sheetFeedback || moveFeedback }}{{ lifecycleRefresh ? ' Refresh to update rollover destinations and counts.' : '' }}</div>
+    <div class="move-feedback" role="status" aria-live="polite">{{ sheetFeedback || moveFeedback }}{{ lifecycleRefresh ? ' Refresh for current membership and counts.' : '' }}</div>
     <div class="planning-feedback" role="status" aria-live="polite">
       <span v-if="queryError || modeError || error || pageError || preferenceError" class="error">{{ queryError || modeError || error || pageError || preferenceError }}{{ stale ? ' · showing previous data' : '' }}</span>
       <span v-else-if="pending">{{ pending }} {{ pendingExpansion ? 'updates' : 'pages' }} ready · Show loaded to insert them now{{ stale ? ' · previous query still shown' : '' }}</span>
@@ -196,7 +198,7 @@ defineExpose({ committed, planRelease, reload: () => mode.value === 'error' ? lo
       <span v-else-if="queued || inFlight">{{ inFlight }} reads running · {{ queued }} pages waiting</span>
       <span v-else-if="overview?.counts_incomplete">Counts are a lower bound; more matches may exist.</span>
       <span v-else-if="overview">{{ overview.active.length }} upcoming · {{ overview.released.items.length }} released loaded</span>
-      <button type="button" class="retry" :disabled="!(modeError || error || pageError || lifecycleRefresh)" @click="refreshPlanning">Refresh</button>
+      <button type="button" class="retry" :disabled="mode === 'checking' || loading" @click="refreshPlanning">Refresh</button>
     </div>
     <slot v-if="mode === 'journey'" name="journey"><p class="journey-placeholder">This project is still using its journey.</p></slot>
     <template v-if="overview">

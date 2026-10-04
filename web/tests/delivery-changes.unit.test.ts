@@ -12,6 +12,16 @@ function setup() {
   return { scope, project, owner, live, changes, apply }
 }
 describe('exact own receipts and held changes', () => {
+  it('Include retains exact own correlation without offering multi-page Undo, and lifecycle clears a prior move', () => {
+    const h = setup(), captured = h.live.actions.begin()
+    h.live.receive(event(7)); h.live.receive(event(8))
+    h.live.actions.commit(captured, { kind:'placement', result:move(7), undoable:false })
+    expect(h.live.undo.value).toBeNull(); expect(h.live.pending.value).toBe(1)
+    h.live.receive(event(7)); expect(h.live.pending.value).toBe(1)
+    h.live.actions.commit(h.live.actions.begin(), { kind:'placement', result:move(9) }); expect(h.live.undo.value?.id).toBe(9)
+    h.live.actions.commit(h.live.actions.begin(), { kind:'lifecycle' }); expect(h.live.undo.value).toBeNull(); expect(h.live.pending.value).toBe(1)
+    h.scope.stop()
+  })
   it('reconciles a pending Undo after a newer move, preserving that move receipt and foreign events', async () => {
     const h = setup(); h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move(17) })
     let finish!: (response: Response) => void

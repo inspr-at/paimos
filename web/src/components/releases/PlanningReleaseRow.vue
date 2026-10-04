@@ -22,8 +22,8 @@ const agents = computed(() => typeof props.release.build_summary.agents === 'num
       </button>
     </div>
     <span class="release-status" :data-state="release.state">{{ releaseState(release) }}</span>
-    <span class="release-hours mono">{{ Number(release.rollup.open_hours.toFixed(1)) }}h<span class="phone-word"> open</span></span>
-    <span class="release-progress" :data-tip="`${release.rollup.completed} of ${release.rollup.units} finished`"><span class="bar" aria-hidden="true"><i :style="{ width: `${progress}%` }" /></span><span class="mono">{{ release.rollup.completed }} of {{ release.rollup.units }}</span></span>
+    <span class="release-hours mono" :data-tip="release.rollup_stale ? 'Refresh for current rollover counts.' : undefined">{{ release.rollup_stale ? '—' : `${Number(release.rollup.open_hours.toFixed(1))}h` }}<span class="phone-word"> open</span></span>
+    <span class="release-progress" :data-tip="release.rollup_stale ? 'Refresh for current rollover counts.' : `${release.rollup.completed} of ${release.rollup.units} finished`"><span class="bar" aria-hidden="true"><i :style="{ width: `${release.rollup_stale ? 0 : progress}%` }" /></span><span class="mono">{{ release.rollup_stale ? 'Refresh' : `${release.rollup.completed} of ${release.rollup.units}` }}</span></span>
     <span class="release-outlook" :data-tip="outlook">{{ outlook }}</span>
     <span class="release-agents" :data-tip="agents === '—' ? 'Agent activity not reported' : agents">{{ agents }}</span>
     <button type="button" class="release-more" :disabled="!actionsAvailable || disabled" :aria-label="`Actions for ${name}`" :data-tip="actionsAvailable ? 'Release actions' : 'Release actions unavailable'" @click="emit('menu', $event.currentTarget as HTMLElement)"><AppIcon name="more" :size="15" /></button>

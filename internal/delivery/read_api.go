@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/releasehistory/codename"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workquery"
 	"github.com/jackc/pgx/v5"
@@ -160,6 +161,12 @@ func (s *Store) GetRelease(ctx context.Context, p tenant.Principal, project, rel
 	err := s.read(ctx, p, project, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		out, err = scanView(tx.QueryRow(ctx, releaseViewSQL+` AND r.release_node_id=$3`, p.TenantID, project, release))
+		if err == nil && s.productTenant == p.TenantID && s.productProject == project && out.Visibility == "published" {
+			if out.Sequence > 10000 {
+				return invalidInput("product sequence exceeds name read budget")
+			}
+			out.DisplayName = codename.Codename(out.Sequence)
+		}
 		return err
 	})
 	return out, err
