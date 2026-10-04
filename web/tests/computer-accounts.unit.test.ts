@@ -283,3 +283,30 @@ it('AEON-623: account cards keep different blocked causes and never borrow an un
     expect(line.readiness.hint ?? '').not.toContain(permission)
   }
 })
+
+describe('expired account verification', () => {
+  it('keeps a ready account ready without claiming that the expired check succeeded', () => {
+    const view = computer()
+    view.enrollments[0].verification_state = 'expired'
+    view.enrollments[0].verification_expired_ready = true
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'ready', text: 'Ready', tip: 'Verification expired; the live account probe is ready.' })
+    expect(readySummary(cards)?.text).toBe('2 of 2 ready')
+    expect(view.enrollments[0].verification_state).toBe('expired')
+  })
+  it('uses the server’s own probe rather than a ready sibling', () => {
+    const view = computer()
+    view.enrollments[0].verification_state = 'expired'
+    view.enrollments[0].verification_expired_ready = false
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(cards[0].accounts[0].readiness.kind).not.toBe('ready')
+  })
+  it('never borrows readiness from a sibling or stale report', () => {
+    for (const over of [{ connectivity: 'offline' as const }, { harness_statuses: { codex: 'blocked' as const, cursor: 'ready' as const } }, { harness_details: { codex: { state: 'ready' as const, attention_accounts: [{ account_id: CODEX, reason: 'authentication_failed' }], attention_count: 1 } } }]) {
+      const view = computer(over)
+      view.enrollments[0].verification_state = 'expired'
+      const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+      expect(cards[0].accounts[0].readiness.kind).not.toBe('ready')
+    }
+  })
+})

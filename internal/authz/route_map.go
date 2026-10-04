@@ -207,6 +207,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-pairing/computers/{computerId}":                                     "account.read",
 	"POST /api/agent-pairing/computers/{computerId}/disconnect":                         "account.manage",
 	"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": "account.manage",
+	"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/verify":     "account.manage",
 	"POST /api/agent-pairing/computers/{computerId}/remove":                             "account.manage",
 	"GET /api/agent-pairing/self":                                                       "run.claim",
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",

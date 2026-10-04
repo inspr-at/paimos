@@ -79,3 +79,28 @@ it('keeps a snapshot for a transient failure within the same identity', async ()
   expect(store.computers).toEqual(inventory)
   expect(store.computersStale).toBe(true)
 })
+
+it('refreshes pairing after a write without joining an older inventory read', async () => {
+  const store = useCapacity()
+  await store.load()
+  let release!: (value: typeof inventory) => void
+  mocks.computers.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  const older = store.load()
+  const fresh = [pairingView({ ...inventory[0]!, enrollments: [{ ...inventory[0]!.enrollments[0]!, verification_run_id: 'b0000000-0000-4000-8000-000000000685', verification_state: 'queued' }] })]
+  mocks.computers.mockResolvedValueOnce(fresh)
+  expect(await store.refreshComputers()).toEqual({ ok: true })
+  expect(store.computers).toEqual(fresh)
+  release(inventory)
+  await older
+  expect(store.computers).toEqual(fresh)
+  expect(mocks.computers).toHaveBeenCalledTimes(3)
+})
+
+it('reports a failed pairing refresh while retaining the current identity snapshot', async () => {
+  const store = useCapacity()
+  await store.load()
+  mocks.computers.mockRejectedValueOnce(new Error('pairing unavailable'))
+  expect(await store.refreshComputers()).toEqual({ ok: false, error: 'pairing unavailable' })
+  expect(store.computers).toEqual(inventory)
+  expect(store.computersStale).toBe(true)
+})
