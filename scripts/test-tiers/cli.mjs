@@ -17,11 +17,14 @@ const target = kind => kind==='go' ? collectGo() : collectWeb()
 export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,timing=false}={}) {
   const inventory=target(kind)
   const all=validate(load(kind),inventory.tests)
-  const selection=select(all,{event:full||schedulingMode(event,paths)==='full'?'schedule':event,paths,imports:inventory.imports,
+  const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
+  const selection=select(all,{event,paths,imports:inventory.imports,
+    forceFull:full||schedulingMode(event,paths)==='full',fullCatalogue:full,
+    browserGateFiles:browserPolicy?.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)),
     webImports:kind==='web'?webGraph(web):{}})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
-  if(kind==='web') for(const group of loadBrowserPolicy().groups) for(const spec of group.specs) weights[spec.file]=spec.weightSeconds
+  if(kind==='web') for(const group of browserPolicy.groups) for(const spec of group.specs) weights[spec.file]=spec.weightSeconds
   if(kind==='go') {
     for(const line of readFileSync(resolve(root,'scripts/ci/go-shards.txt'),'utf8').split('\n')) {
       const match=/^\d+ (\d+) github\.com\/inspr-at\/paimos\/(\S+)/.exec(line)
@@ -132,6 +135,8 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   report.sha=env.GITHUB_SHA
   report.full=selection.full
   report.reason=selection.reason
+  report.scope=selection.scope??'changed-area'
+  report.deferredBrowserCases=selection.deferredBrowserCases??0
   report.exitCode=code
   if(Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
   saveJSON(resolve(evidence,`${job}-measurement.json`),report)
@@ -143,7 +148,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
 export async function main(args) {
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
-  const options={unit:false,full:process.env.AEON_TEST_TIER_MODE!==undefined&&process.env.AEON_TEST_TIER_MODE!=='essential',job:`${kind}-tiers`}
+  const options={unit:false,full:false,job:`${kind}-tiers`}
   for(let i=0;i<flags.length;i++) {
     const flag=flags[i]
     if(flag==='--full'||flag==='--unit') options[flag.slice(2)]=true
@@ -183,7 +188,7 @@ export async function main(args) {
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
   const selection=plan(kind,options)
-  console.log(JSON.stringify({kind,full:selection.full,reason:selection.reason,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
+  console.log(JSON.stringify({kind,full:selection.full,reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
 }

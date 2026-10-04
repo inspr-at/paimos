@@ -151,6 +151,41 @@ test('fan-out chooses full shard counts for uncertain and deleted paths, small c
   assert.equal(schedulingMode('schedule',['README.md']),'full')
 })
 
+test('uncertain infrastructure changes preserve the existing browser gate plus promoted essentials',()=>{
+  const browser=(file,name,tier='NIGHTLY')=>({kind:'browser',file,name,tier})
+  const rows=[...cases,browser('tests/gated.spec.ts','guard'),browser('tests/optional.spec.ts','core','ESSENTIAL'),
+    browser('tests/optional.spec.ts','gallery')]
+  for(const event of ['pull_request','merge_group','push']) {
+    const picked=select(rows,{event,paths:['.github/workflows/ci.yml','web/package.json','web/playwright.ui.config.ts'],browserGateFiles:['tests/gated.spec.ts']})
+    assert.equal(picked.full,true)
+    assert.deepEqual(picked.tests,rows.slice(0,-1))
+    assert.equal(picked.scope,'browser-gate')
+    assert.equal(picked.deferredBrowserCases,1)
+  }
+  for(const options of [{event:'schedule'},{event:'workflow_dispatch'},{event:'pull_request',fullCatalogue:true}]) {
+    const picked=select(rows,{...options,paths:['.github/workflows/ci.yml'],browserGateFiles:['tests/gated.spec.ts']})
+    assert.deepEqual(picked.tests,rows)
+    assert.equal(picked.scope,'catalogue')
+    assert.equal(picked.deferredBrowserCases,0)
+  }
+})
+
+test('optional changed browser cases survive infrastructure widening and unknown web impact widens the catalogue',()=>{
+  const rows=[{kind:'browser',file:'tests/optional.spec.ts',name:'race',tier:'NIGHTLY'},
+    {kind:'browser',file:'tests/other.spec.ts',name:'other',tier:'NIGHTLY'}]
+  const webImports={'src/store.ts':[],'tests/optional.spec.ts':['src/store.ts'],'tests/other.spec.ts':[]}
+  for(const path of ['web/tests/optional.spec.ts','web/src/store.ts']) {
+    const picked=select(rows,{event:'merge_group',paths:['scripts/ci-pr-plan.mjs',path],browserGateFiles:[],webImports})
+    assert.deepEqual(picked.tests,[rows[0]])
+    assert.equal(picked.deferredBrowserCases,1)
+  }
+  for(const path of ['web/src/deleted.ts','web/src/Unmapped.vue']) {
+    const picked=select(rows,{event:'pull_request',paths:[path],browserGateFiles:[],webImports:{...webImports,'src/Unmapped.vue':[]}})
+    assert.deepEqual(picked.tests,rows,path)
+    assert.equal(picked.deferredBrowserCases,0,path)
+  }
+})
+
 test('lean planner fetches only the exact event base before diffing and widens on fetch failure',()=>{
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-tier-planner-'))
   const eventPath=resolve(directory,'event.json'),base='a'.repeat(40)

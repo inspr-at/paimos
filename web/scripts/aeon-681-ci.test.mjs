@@ -2,10 +2,41 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { run, browserList } from '../../scripts/test-tiers/cli.mjs'
+import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
 import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
 import { validate, key } from '../../scripts/test-tiers/core.mjs'
+
+test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
+  const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+  const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
+  const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
+  const selection=plan('web',options)
+  const browser=selection.all.filter(row=>row.kind==='browser')
+  const expected=browser.filter(row=>gated.has(row.file)||row.tier==='ESSENTIAL')
+  assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
+  assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
+  assert.equal(selection.full,true)
+  assert.equal(selection.scope,'browser-gate')
+  assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
+  // Exercise the workflow's env contract: full fan-out does not mean --full.
+  const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
+  try {
+    process.env.AEON_TEST_TIER_MODE='full'
+    console.log=value=>output.push(JSON.parse(value))
+    assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
+    assert.equal(output.at(-1).kinds.browser,expected.length)
+    assert.equal(output.at(-1).deferredBrowserCases,browser.length-expected.length)
+  } finally {
+    console.log=log
+    if(original===undefined) delete process.env.AEON_TEST_TIER_MODE
+    else process.env.AEON_TEST_TIER_MODE=original
+  }
+  const nightly=plan('web',{...options,full:true})
+  assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
+  assert.equal(nightly.scope,'catalogue')
+  assert.equal(nightly.deferredBrowserCases,0)
+})
 
 test('native Node and Vitest selectors execute the requested registrations, rather than skip them', async () => {
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))

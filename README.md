@@ -684,7 +684,13 @@ keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 
 Test tiers (AEON-681): full-lane PRs and merge groups run ESSENTIAL plus changed-area
 cases; Go reverse dependencies add at most 300 extra cases. Shared inputs or
-uncertain impact select full. Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
+uncertain impact select full. For browser tests, routine full CI preserves the
+OPS-257 gated specs plus promoted ESSENTIAL cases; it does not promote every
+`gate:false` catalogue spec into a daily gate. Changed specs and their mapped
+importers still run, including optional cases. Unknown browser-source impact
+widens to the complete catalogue. Reports name the selection `scope` and count
+`deferredBrowserCases`; deferred cases are not reported as passes or skips.
+Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
 and [web manifest](scripts/ci/web-test-tiers.json). Use
 `node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
 then `check`. CI reconciles manifests at runtime: unlisted cases default to
@@ -701,10 +707,11 @@ The [known-flaky registry](scripts/ci/known-flaky.json) names exact case keys
 and owner tickets; its validator rejects any ESSENTIAL entry. The nine cases
 identified in AEON-675/676/683 temporarily run as NIGHTLY, retaining changed-area
 and full-run coverage, until their owner fixes land and verify cleanly.
-Scheduled/manual `nightly-full.yml` runs every case; main/manual CI runs full
+Scheduled/manual `nightly-full.yml` and explicit `--full` runs execute every
+case, including the optional browser catalogue; main/manual CI runs the full gate
 unless exact-SHA full-suite reuse is verified below. The main-push run is the
 FULL gate after merge; a full premerge run is required only when impact is
-uncertain. Releases require a green full main-push (or nightly) run on the
+uncertain. Releases require a green full main-push gate (or full nightly run) on the
 exact freeze SHA, in addition to the release rehearsal. A red nightly opens
 a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
 ticket creation, ownership and budget wiring. Migration compatibility

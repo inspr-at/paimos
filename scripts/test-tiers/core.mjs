@@ -71,9 +71,24 @@ export function reverseDependants(changed, imports) {
 
 // A missing diff, unmapped source, or shared input widens selection. Both PRs
 // and merge groups use this same union; neither has an essential-only shortcut.
-export function select(tests, { event, paths, imports = {}, webImports = {} }) {
-  if (!['pull_request', 'merge_group'].includes(event) || !Array.isArray(paths) || paths.some(uncertain)) {
-    return { full: true, reason: 'full event or uncertain impact', tests }
+export function select(tests, { event, paths, imports = {}, webImports = {}, browserGateFiles, forceFull = false, fullCatalogue = false }) {
+  const full = reason => {
+    // OPS-257's gate:false catalogue is not a new daily gate (approved zb-web).
+    // Explicit full/nightly runs retain it all. Changed browser inputs still
+    // run their optional cases; missing web impact metadata widens safely.
+    const catalogue = fullCatalogue || !browserGateFiles || ['schedule', 'workflow_dispatch'].includes(event)
+    const changed = (paths ?? []).filter(path => /^web\/(?:src|tests|e2e)\//.test(path)).map(path => path.slice(4))
+    const affected = reverseDependants(new Set(changed), webImports)
+    const unknownWeb = changed.some(file => !Object.hasOwn(webImports, file) ||
+      (file.startsWith('src/') && !tests.some(row => affected.has(row.file))))
+    const gated = new Set(browserGateFiles)
+    const selected = catalogue || unknownWeb ? tests : tests.filter(row =>
+      row.kind !== 'browser' || row.tier === 'ESSENTIAL' || gated.has(row.file) || affected.has(row.file))
+    return { full: true, reason, scope: catalogue || unknownWeb ? 'catalogue' : 'browser-gate',
+      deferredBrowserCases: tests.length - selected.length, tests: selected }
+  }
+  if (forceFull || !['pull_request', 'merge_group'].includes(event) || !Array.isArray(paths) || paths.some(uncertain)) {
+    return full('full event or uncertain impact')
   }
   const packages = new Set([...tests.filter(t => t.kind === 'go').map(t => t.package), ...Object.keys(imports)])
   const hasGo=tests.some(t=>t.kind==='go'),hasWeb=tests.some(t=>t.kind!=='go')
@@ -83,12 +98,12 @@ export function select(tests, { event, paths, imports = {}, webImports = {} }) {
     if (/^(?:internal|cmd)\//.test(path)) {
       if(!hasGo) continue
       const owner = [...packages].filter(pkg => path.startsWith(`${pkg}/`)).sort((a,b) => b.length-a.length)[0]
-      if (!owner) return { full: true, reason: `unmapped Go input: ${path}`, tests }
+      if (!owner) return full(`unmapped Go input: ${path}`)
       changedGo.add(owner)
     } else if (/^web\/(?:src|tests|e2e)\//.test(path)) {
       if(hasWeb) changedWeb.add(path.slice(4))
     }
-    else return { full: true, reason: `unmapped input: ${path}`, tests }
+    else return full(`unmapped input: ${path}`)
   }
   const dependants = reverseDependants(changedGo, imports)
   // Test-import cycles can turn a tiny package edit into almost the whole
@@ -99,8 +114,8 @@ export function select(tests, { event, paths, imports = {}, webImports = {} }) {
   const go=boundedGo?changedGo:dependants
   const web = reverseDependants(changedWeb, webImports)
   // Deleted/unknown files cannot be analysed using only the candidate graph.
-  if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return { full: true, reason: 'missing web dependency metadata', tests }
-  if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return {full:true,reason:'web module has no mapped test importer',tests}
+  if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return full('missing web dependency metadata')
+  if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return full('web module has no mapped test importer')
   return { full: false, reason: boundedGo?`essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (${extraGoCases})`:'essential plus changed area and reverse dependencies',
     tests: tests.filter(t => t.tier === 'ESSENTIAL' || (t.kind === 'go' ? go.has(t.package) : web.has(t.file))) }
 }
