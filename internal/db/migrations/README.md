@@ -212,6 +212,101 @@ index with the first-line `aeon:no-transaction` marker. The runner accepts exact
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
 
+AEON-619 (1138) adds tenant-RLS product settings and per-product project links.
+It records the previously selected product as the explicit default, preserves
+published products in `legacy` participation, and binds existing browser ballots
+to their original product. New products are unpublished with participation
+`disabled`; registered activation is refused until B3+B8+B7's reviewed gate.
+Legacy portal/pacing tables and response fields remain. The old pace row mirrors
+into its bound product link; new writes keep the default's legacy adapter current.
+The tenant-loop backfill and mirror delete have an exact-byte policy exception
+for coordinator review. DSAR inventory is absent at this base; these new settings
+and link identifiers are tenant metadata, while ballot hashes remain pseudonymous
+personal data under the existing vote-table contract.
+
+AEON-619 fix round 2 keeps migration 1138 branch-only and updates its exact-byte
+exception for coordinator review. Nested and soft-deleted products are backfilled
+unpublished with participation disabled. Becoming an eligible root through move,
+restore or kind change registers settings idempotently; later moves and restores
+preserve the existing slug, default choice and participation settings.
+
+Catalog and participation responses expose `X-Portal-Binding` (`product UUID:settings
+revision`) without adding JSON fields. The public page echoes this binding on its
+policy read and every wish, correction and vote. Final writes compare it under the
+tenant/tree/product fences and return 409 without writing if the displayed product
+or settings revision changed. Older clients may omit it. Portal input decoders
+run before transaction locks and retain their byte limits, with a 10-second body
+read deadline; transactional authorization still runs under the tenant fence.
+
+Fix-round verification: regression-only commit `ccc537dd` keeps the production
+code at `090e1f87` and reproduces stale submissions, locked body reads, missing
+move registration and dormant backfill. The four new browser regressions also
+fail on that baseline. Fixed code at `9128e3b7` passes the remote portal suite,
+web build/lint and 1,332 web unit tests. The affected node/database/HTTP and strict
+reporter-contract suites pass at `4f31a2d2`; the migration guard and all 24 checker
+tests pass. The targeted local portal spec passes all 13 tests with no remaining
+owned processes. Remote browsers remain disabled pending OPS-247, so Linux
+Chromium and previous-binary runtime compatibility remain coordinator gates.
+These are local worker results, not merge, release, deployment or activation
+approval. No approved design decision was changed.
+
+AEON-619 lock-order round merged `origin/main` (`d94153bf`) normally at
+`1dd63b88`, then replaced branch-added tenant-before-tree fences with main's
+canonical helpers. Portal management, moderation, settings and public writes
+use `agentpairing.LockMutation` (pairing → tree → tenant); node tree/moderation
+entry points use `authz.LockProjectMutation` (tree → tenant, pairing first where
+required). Authorization remains inside the final fenced transaction, resource
+rows follow the fences, and the event counter remains last. The split portal
+locks and redundant intake tree acquisition were removed. Migration 1138 and
+its policy exception are unchanged in this round. Generic draft endpoints are
+not present in B1; stacked packages consume these shared entry-point fixes.
+
+Barrier regressions at `54df3190` reproduce tenant ownership while waiting for
+tree (`55P03` from a separate NOWAIT probe) on 13 node/admin/public paths, and
+detect missing tree serialization on two additional paths. Fixed code at
+`78e7597e` passes all 17 cases, checking durable mutations and exactly one
+matching audit event after the pairing fence resumes. The approved remote
+runner passes uncached nodes, portal, authz, agentpairing, agentruns and inbox
+suites, including `TestProjectWritesSerializeWithPairingTreeBeforeTenant`.
+The existing lock inventory now includes nodes and portal; its scanner and
+prior assertions are preserved. Evidence is retained locally in
+`tmp/aeon619-lock/negative-remote.log`, `positive-remote.log` and
+`static-lock-guard.log`. These are worker checks; consolidated review, push,
+merge and release remain coordinator work. No origin push or deployment ran.
+
+AEON-619 final repair round replaces the two node entry-point mutation fences
+with main's `authz.LockProjectWrite`. Its tenant SHARE lock excludes authority
+writes while permitting tenant FK key-share checks by concurrent comments and
+events. Pairing still precedes tree where required, tree precedes tenant, and
+authorization remains in the final write transaction. The lock inventory changes
+only the two node-helper expectations; shared helpers and their guards stay intact.
+No migration, policy exception, API contract or approved design decision changes.
+
+Regression-only commit `3b502ad4` preserves production code from `7b6a6e94`.
+Its two real HTTP comment/update and comment/delete cases pause after node SHARE
+and tenant-fence acquisition, then use PostgreSQL's wait graph to establish the
+edit's node-row wait before resuming the comment's tenant-referencing append.
+The approved remote run fails both cases on that baseline (update 409, delete
+500 with PostgreSQL `40P01`); the missing durable edit is also asserted.
+Repair `a782c0bd` passes both cases in the permitted single-package local check,
+including exactly one durable comment and edit audit event per case. Evidence:
+`tmp/aeon619-fix3/negative-remote.log` and `positive-targeted-local.log`.
+
+The approved remote runner exits 0 at `a782c0bd` for uncached full nodes, portal,
+authz, agentpairing, activity, events, relations and workqueue suites, followed
+by the web build, lint and all 1,396 web tests (655 Node tests and 741 Vitest
+tests; no Node skips). This includes the earlier pairing/tree barriers and the
+lock inventory's negative controls. The regression source is byte-identical to
+the failing baseline; shared helpers, three other main guards, contract,
+migration 1138 and its policy exception are unchanged. Retained evidence:
+`tmp/aeon619-fix3/positive-remote.log` and `preserved-artifacts.json`.
+
+The approved browser runner refuses the four portal specs with exit 3 because
+OPS-247's bootstrap and launcher remain pending (`remote-browser.log`). Linux
+Chromium verification remains a coordinator gate; no browser gate was bypassed
+and no origin push, deployment, model CLI or ticket status change ran. These
+results record worker validation, not merge or release approval.
+
 AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
 replacing unpublished migration 1136. The current shared ledger assigns
 1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
@@ -240,6 +335,31 @@ replaces it, while delayed readings remain blocked across reset transitions.
 Classify this table as personal quota telemetry, located by
 `(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
 
+AEON-619 merge-main round incorporates release-122 `origin/main` (`068611ab`)
+into reviewed branch head `769876fd` with a normal local merge. Both route maps
+and README sections are retained. Git-blob checks preserve all 282 main-only
+and 31 branch-only changed files; the shared OpenAPI preserves 1,036 path and
+component entries from both parents. The automatic migration-checker merge
+retains the quota reservation regression and portal exception assertions.
+Migration 1138, its exact-byte exception and the canonical lock helpers are
+unchanged; the guard confirms 232 unique migration numbers against published
+release `v261003095616.0.0`.
+
+Sequential local checks pass for authz, portal, nodes, agentpairing, db, auth,
+httpapi and reportercontract, including lock-order and concurrent-comment FK
+regressions. Web build/lint, all 1,469 unit tests (686 Node, 783 Vitest), 25
+migration-checker tests and all 24 tests across the four portal browser specs
+pass. Admin/roadmap initially hit ambiguous locators matching the hidden status
+help sheet; only their test locators were scoped, with all assertions retained,
+and those two specs pass on rerun. Each browser run leaves zero owned processes.
+The first authz attempt preceded creation of its maintenance database; the
+subsequent package run passes, and that worker-owned database is now removed.
+Evidence: `tmp/aeon619-merge-main/summary.json`, `preservation.json` and retained
+logs. Main's release metadata and presentation pin are retained. No feature
+changes were authored. mbp2606 was not accessed under the explicit hold; no
+ticket status change, push or deployment ran. Consolidated approval and release
+remain coordinator work.
+
 AEON-563's `1118_desk_matching.sql` adds an expression index over exact Q&A
 fingerprints and nullable per-asker source decision/revision pointers. Existing
 question/answer shapes and immutable human revisions remain available to older
@@ -252,3 +372,22 @@ ask callers identify their new membership by its original request ID.
 P3 must use each pending effect's deadline rather than the source answer's human
 grace deadline. Corrections retain the original per-asker reuse pointers. Active
 Always publication and post-dispatch corrections remain P4/P3 responsibilities.
+
+AEON-619 release-123 merge-main round retains latest main `9d81acc6` in normal
+local merge `0045620f`, after preserving the inherited pending main merge as
+`d0eebb41`. The three conflicts retain both README sections, all exact-byte
+migration exceptions and their explicit test expectations. Preservation checks
+confirm 296 main-only and 32 branch-only files byte-for-byte, 1,056 OpenAPI
+entries, both route maps and 239 unique migration numbers. Main's CI workflow
+and shard manifest are unchanged; all four portal specs already have entries.
+
+Local checks pass: 25 migration-checker tests, the migration guard against
+`v261003095616.0.0`, OpenAPI reporter-contract tests, strict 12-shard coverage
+and all 13 public-portal browser tests with zero remaining owned processes.
+The approved remote runner returned exit 3 before code transfer because
+Mailina was the console user. Affected-package Go validation remains pending
+for the coordinator on the approved remote lane or hosted CI; these local
+checks do not claim that validation. Evidence is retained in
+`tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
+`r123-*` logs. No feature change, origin push, deployment, migration renumbering,
+ticket status change or model review ran.
