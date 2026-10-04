@@ -22,10 +22,10 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 		"db.LockTenant":             {"auth/store.go", "db/fences.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
 		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
-		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
+		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
 		"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
 		"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go"},
-		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "nodes/portal_publish.go"},
+		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
 		"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "journey/operator.go", "operatoractor/actor.go"},
 		"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
 	}
