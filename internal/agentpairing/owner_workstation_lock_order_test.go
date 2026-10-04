@@ -24,7 +24,7 @@ func TestOwnerWorkstationAuthLockInventory(t *testing.T) {
 		"store.go:issueAgentKeyTx":                    "operator.Ensure tenant:UPDATE",
 		"store.go:grantJourneyScopes":                 "operator.Ensure",
 		"store.go:revokeAgentKey":                     "tenant:NO KEY UPDATE",
-		"store.go:revokeAgentKeyTx":                   "operator.Ensure",
+		"store.go:revokeAgentKeyTx":                   "tenant.NO_KEY_UPDATE operator.Ensure",
 		"store.go:rotateAgentKeyWithScopes":           "tenant:UPDATE",
 	}
 	files, err := filepath.Glob(filepath.Join("..", "auth", "*.go"))

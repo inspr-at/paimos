@@ -24,7 +24,7 @@ scoped editors for saved job orders and model preferences. Each tab follows its 
 and a person session; ownership and advisory rules are visible to signed-in
 people. Links lead only to existing screens the person may open.
 
-`GET /api/models/routes?role=review-gate` reads one of the five model roles,
+`GET /api/models/routes?role=review-gate` reads one of the six model roles,
 ordered by priority and profile id, with at most 50 steps and an explicit
 `truncated` flag. An unseeded registry returns `setup: false` without creating
 profiles or events. The read applies a five-second statement timeout and returns

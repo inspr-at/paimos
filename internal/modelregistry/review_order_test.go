@@ -305,7 +305,7 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !security.OwnerRequired || security.Profile != nil || security.Trace.OrderMode != "" || security.Trace.Blocked != "security review ladder not available (AEON-485)" {
+		if !security.OwnerRequired || security.Profile != nil || security.Trace.OrderMode != "" || security.Role != "review-gate-security" || len(security.Trace.Hard) != 1 || security.Trace.Hard[0] != "security_review" {
 			t.Fatal("saved order escaped security path", security)
 		}
 		// Preview caching must retain the same rows+mode even across later writes.
