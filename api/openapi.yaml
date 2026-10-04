@@ -6,6 +6,137 @@ info:
 servers:
   - url: /api
 paths:
+  /themes:
+    get:
+      operationId: listThemes
+      summary: List workspace themes and the caller's personal themes
+      description: >-
+        AEON-641. Requires profile.read (or profile.portal_read), including a project
+        self-service grant. Personal themes are visible only to their canonical owner,
+        including in events and SSE. Deleted themes are omitted. UUID keyset pagination.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Visible themes, content: {application/json: {schema: {$ref: '#/components/schemas/ThemePage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createTheme
+      description: >-
+        Creates a personal or workspace theme. A person with profile.write (or
+        profile.portal_write) creates personal themes; workspace themes require a
+        person with settings.manage. Agents cannot exercise person-only workspace
+        settings authority. Omitted values use Porcelain. Appends theme.created.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeCreate'}}}}
+      responses:
+        '201': {description: Created theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+  /themes/{themeId}:
+    parameters:
+      - {name: themeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getTheme
+      description: Read one visible, non-deleted theme. Requires profile.read or profile.portal_read. A foreign personal or tenant theme returns 404.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateTheme
+      description: >-
+        Rename or replace values under revision/CAS. Scope and ownership are immutable.
+        Personal writes require the owning person and profile.write or profile.portal_write;
+        workspace/default writes require a person with settings.manage. Rechecks authority
+        under the write fence. Identical values leave revision and events unchanged.
+        Colour contrast is advisory and never rejected. Appends theme.updated.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeUpdate'}}}}
+      responses:
+        '200': {description: Saved theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Revision changed}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+    delete:
+      operationId: deleteTheme
+      description: >-
+        Requires the current revision and the same write authority as PATCH. The
+        workspace default cannot be deleted (409). Appends theme.deleted. Deletion
+        retains the record for undo; selected users resolve to the workspace default
+        and receive a fallback_notice on GET /me/theme until choosing again. Undo
+        restores availability without overriding choices made since deletion.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: revision, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '204': {description: Deleted and fallback is effective}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Default theme or revision changed}
+  /themes/{themeId}/duplicate:
+    parameters:
+      - {name: themeId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: duplicateTheme
+      description: >-
+        Copies a visible source's exact values at the supplied revision, with a new
+        name and personal/workspace scope. Destination authority is the same as
+        POST /themes; read authority is also required. Appends theme.created.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeDuplicate'}}}}
+      responses:
+        '201': {description: Duplicated theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Source revision changed}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+  /me/theme:
+    get:
+      operationId: getActiveTheme
+      description: >-
+        Read the active theme, selection revision and deletion notice. Requires
+        profile.read or profile.portal_read. No saved choice (revision 0) follows the
+        default. Agents may read this endpoint and receive the workspace default.
+        Linked identities retain their original theme ownership and choice rows.
+        The canonical person's saved choice wins, including an explicit default;
+        otherwise the linked person's choice with the lowest principal UUID wins.
+        Edits update that winning choice row, preserving other choices for unlink.
+        A choice that becomes private after unlink resolves to the default without
+        exposing the inaccessible theme ID or name; its revision remains usable.
+        Accent dark null means derived by the appearance consumer (AEON-644);
+        agent ring/size null retain the style's existing drawn defaults (AEON-643).
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Active theme, content: {application/json: {schema: {$ref: '#/components/schemas/ActiveTheme'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: selectTheme
+      description: >-
+        Person-only own choice with profile.write or profile.portal_write and
+        revision/CAS; a null theme_id follows the workspace default. Selected themes
+        must be visible and not deleted. Appends theme.selected when changed.
+        Events support undo with current authorization and snapshot conflict checks.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeSelectionInput'}}}}
+      responses:
+        '200': {description: Active theme after commit, content: {application/json: {schema: {$ref: '#/components/schemas/ActiveTheme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Selection revision changed}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
   /settings/quota-warnings:
     get:
       summary: Workspace low-quota warning thresholds
@@ -226,8 +357,18 @@ paths:
       description: >-
         Requires questions.ask and questions.read in an accessible project. Authenticated principal
         is the asker; an optional session must be that principal's active generation in this project.
+        Ask writes revalidate current project permissions and authenticated key activity/scopes
+        inside the final transaction under access/key locks.
         Request IDs are scoped to tenant/project/asker. An identical retry returns the same question;
-        changed input returns 409. anyway_reason deliberately skips future matching, never permissions.
+        changed input returns 409. anyway_reason deliberately skips reuse and merging, never permissions.
+        Exact ordinary Q&A matches may join an open question or an active Always answer in the same
+        tenant/project/ticket scope. Option IDs and all option text must agree; option order may differ.
+        Context, findings, blocked work and effective outcome must agree. Source-linked requests and
+        requirement/doctrine suggestions never participate. No similarity-based answer is inferred.
+        Reused memberships carry From the record provenance and immediate inbox/comment deadlines;
+        no additional outcome effect or human-answer grace is created. Always publication belongs to P4.
+        Each matching item accepts at most 100 askers; a full item starts a separate question.
+        An anyway question stays separate while open; a later human-approved Always can be reused.
         Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
         Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
       security: [{session: []}, {agentKey: []}]
@@ -237,7 +378,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/QuestionInput'}
       responses:
-        '201': {description: Stored question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '201': {description: Stored asker membership in a fresh or matching question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '200': {description: Idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
@@ -2729,6 +2870,20 @@ paths:
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
         appear in URL paths or queries; approval links use a fragment removed by the web app.
+        If process memory lost the registration, an authenticated principal for a connected
+        computer with valid attach scope receives 403 with attach_refusal=poll_key_unknown.
+        This is distinct from an incorrect key, revoked pairing, draining enrollment or
+        foreign tenant, which never authorize automatic registration. The daemon may register
+        once and replay the rejected operation once, with serialized, bounded jittered backoff.
+        Registration still ends earlier approvals and watches; recovery never resumes them.
+        Unknown-key eligibility checks have a separate in-memory budget of 30 attempts per
+        minute per authenticated computer principal, checked before database eligibility reads.
+        Recovery does not spend the tenant-wide attach request budget. A capped recovery
+        returns 429 with code=attach_recovery_limited and Retry-After in seconds; it does
+        not authorize registration. The daemon honors valid Retry-After delays before any
+        further exchange or registration. The server retains at most 4096 live recovery
+        budgets across tenants; at capacity, new principals are refused until an existing
+        slot expires, including principals from other tenants (accepted AEON-608 limitation).
         Requests, activation and every poll
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
         be resurrected. The server pins the owner's consent_mode at person approval.
@@ -2751,11 +2906,11 @@ paths:
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
         Owner diagnostics are additive: errors retain their existing code and error fields
         and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
-        code_expired, draining, or enrollment_unavailable). Draining or removed enrollments
+        code_expired, draining, enrollment_unavailable, or poll_key_unknown). Draining or removed enrollments
         refuse new attachment authority, including status-only attachment of a running process.
         Registration authenticates the computer lifecycle proof before
-        reporting version mismatch; later operations authenticate the registered poll key
-        and computer principal before reporting a cause. Unauthenticated and foreign callers
+        reporting version mismatch; apart from poll_key_unknown, later operations authenticate
+        the registered poll key and computer principal before reporting a cause. Unauthenticated and foreign callers
         receive generic refusals without attach_refusal. Revoked bearer credentials remain
         unauthenticated; only the locally authenticated interactive helper offers pairing-repair guidance.
       requestBody:
@@ -2789,17 +2944,23 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
         '429':
           description: >-
-            Attempt or stream quota exceeded, or (error code attach_live_limit) the person
+            Attempt or stream quota exceeded, or (error code attach_recovery_limited) the
+            computer recovery budget is exhausted; honor Retry-After before retrying.
+            Alternatively (error code attach_live_limit) the person
             already has 32 attach requests waiting or approved. Declining, approving into a
             session or letting one expire frees a slot; a retry of an existing request is
             still answered. The daemon prints this case in plain words.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying a capped operation
+              schema: {type: string, pattern: '^[1-9][0-9]*$'}
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   error: {type: string}
-                  code: {type: string, examples: [attach_live_limit, rate_limited]}
+                  code: {type: string, examples: [attach_live_limit, attach_recovery_limited, rate_limited]}
   /agent-pairing/attach/lookup:
     post:
       operationId: lookupAttach
@@ -9682,6 +9843,101 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    ThemeAccent:
+      type: object
+      additionalProperties: false
+      required: [light, dark]
+      properties:
+        light: {type: string, pattern: '^#[0-9a-fA-F]{6}$'}
+        dark: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: 'Null means derived; explicit Porcelain dark preserves the current look'}
+    ThemeValues:
+      type: object
+      additionalProperties: false
+      required: [primary, secondary, recurring_marker, agents]
+      properties:
+        primary: {$ref: '#/components/schemas/ThemeAccent'}
+        secondary: {$ref: '#/components/schemas/ThemeAccent'}
+        recurring_marker:
+          type: object
+          additionalProperties: false
+          required: [source, custom]
+          properties:
+            source: {type: string, enum: [primary, secondary, neutral, custom]}
+            custom: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: Required and non-null when source is custom; retained when choosing another source}
+        agents:
+          type: object
+          additionalProperties: false
+          required: [avatar, ring, hover, size, palette]
+          properties:
+            avatar: {type: string, enum: [pulse, robot-1, robot-2, robot-3, robot-4, robot-5, orbit, quill, sprite]}
+            ring: {type: [string, 'null'], enum: [moving, still, off, null], description: Null retains the selected style's drawn ring}
+            hover: {type: boolean}
+            size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
+            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome]}
+    Theme:
+      type: object
+      required: [id, tenant_id, name, scope, owner_principal_id, values, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 80}
+        scope: {type: string, enum: [default, workspace, personal]}
+        owner_principal_id: {type: [string, 'null'], format: uuid, description: 'Person owning a personal theme (canonical at creation); preserved through linking and unlinking. Null means workspace-owned'}
+        values: {$ref: '#/components/schemas/ThemeValues'}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ThemePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Theme'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    ThemeCreate:
+      type: object
+      additionalProperties: false
+      required: [name, scope]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80, description: Trimmed name without control characters}
+        scope: {type: string, enum: [workspace, personal]}
+        values: {$ref: '#/components/schemas/ThemeValues', description: 'If omitted, use Porcelain'}
+    ThemeUpdate:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 80}
+        values: {$ref: '#/components/schemas/ThemeValues'}
+    ThemeDuplicate:
+      type: object
+      additionalProperties: false
+      required: [name, scope, revision]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        scope: {type: string, enum: [workspace, personal]}
+        revision: {type: integer, minimum: 1}
+    ThemeSelectionInput:
+      type: object
+      additionalProperties: false
+      required: [theme_id, revision]
+      properties:
+        theme_id: {type: [string, 'null'], format: uuid}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation from GET /api/me/theme. Use the returned value unchanged; do not increment it.'}
+    ActiveTheme:
+      type: object
+      required: [theme, default_theme_id, selected_theme_id, revision, fallback_notice]
+      properties:
+        theme: {$ref: '#/components/schemas/Theme'}
+        default_theme_id: {type: string, format: uuid}
+        selected_theme_id: {type: [string, 'null'], format: uuid}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation, independent of theme and physical row revisions. Zero means no choice row yet. Saved choices and undone absence have unique generations, including explicit default. Undo restores alias inheritance without reusing a generation. Link/unlink can change the winning generation.'}
+        fallback_notice:
+          type: [object, 'null']
+          required: [deleted_theme_id, deleted_theme_name]
+          properties:
+            deleted_theme_id: {type: string, format: uuid}
+            deleted_theme_name: {type: string}
     StepUpRequired:
       type: object
       additionalProperties: false
@@ -9756,6 +10012,15 @@ components:
         comment_node_id: {type: string, format: uuid, description: Linked ticket or the question node for ticketless asks}
         created_at: {type: string, format: date-time}
         input: {$ref: '#/components/schemas/QuestionInput'}
+        from_record: {$ref: '#/components/schemas/QuestionReuse'}
+    QuestionReuse:
+      type: object
+      description: Immutable per-asker provenance retained when the answer is later corrected. The active source decision reuse_count increments once per new membership, never on replay or delivery retry.
+      required: [label, decision_id, revision]
+      properties:
+        label: {type: string, const: From the record}
+        decision_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 2}
     QuestionAnswer:
       type: object
       required: [id, revision, answer, outcome, decided_by, created_at, deliver_after]
@@ -10216,8 +10481,8 @@ components:
         error: {type: string}
         attach_refusal:
           type: string
-          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable]
-          description: Optional fixed cause, disclosed only after authenticating this computer's proof and principal. Includes no identifiers or request contents.
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable, poll_key_unknown]
+          description: Optional fixed cause. Poll_key_unknown requires the owning computer principal and valid attach scope; other causes require the computer proof and principal. Includes no identifiers or request contents.
     AttachDeviceRequest:
       type: object
       additionalProperties: false
@@ -11235,7 +11500,7 @@ components:
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
     PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart", "permissions"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions. permissions: make the default Claude profile private; only offered for that fixed diagnostic."}
-    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. Only allowlisted reason_detail sentences cross the host boundary; no raw diagnostics or paths. A ready, blocked or login_required harness may include attention_accounts naming enrolled accounts that need a fix. A ready harness requires a proper subset; blocked and login_required may name every enrollment. Diagnostics are scoped by account id, never copied from a harness summary to multiple accounts. attention_count is the full size of that set. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that need a fix, including when every account is blocked. A ready harness requires a proper subset; blocked and login_required reports may include every enrollment. At most 32 entries are kept, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check or a confirmed sign-out in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check or a confirmed sign-out in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}
+    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout, pairing_sync_failed. pairing_sync_failed means lifecycle reconciliation or runtime refresh prevented polling; reason_detail carries only an allowlisted short cause, never a probe timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. Only allowlisted reason_detail sentences cross the host boundary; no raw diagnostics or paths. A ready, blocked or login_required harness may include attention_accounts naming enrolled accounts that need a fix. A ready harness requires a proper subset; blocked and login_required may name every enrollment. Diagnostics are scoped by account id, never copied from a harness summary to multiple accounts. attention_count is the full size of that set. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that need a fix, including when every account is blocked. A ready harness requires a proper subset; blocked and login_required reports may include every enrollment. At most 32 entries are kept, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check, confirmed sign-out, or pairing synchronization failure in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check, confirmed sign-out, or pairing synchronization failure in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}
     PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}}}}}
     PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
     PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}

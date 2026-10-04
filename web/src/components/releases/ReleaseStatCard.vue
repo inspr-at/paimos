@@ -128,17 +128,17 @@ const ICONS: Record<StatKey, string[]> = {
 .label,.size-label { display: flex; align-items: center; gap: 8px; margin: 0; padding-right: 108px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
 .icon,.size-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); }
 .value,.size-value { margin: 8px 0 0; font: 650 42px/1.05 var(--font); letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--ink); }
-.sub,.size-sub { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub,.size-sub { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); white-space: normal; overflow-wrap: anywhere; }
 .chips,.size-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .stat-chip,.size-stat-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 5%, transparent); color: var(--teal-ink); font: 600 11px/1.3 var(--font); white-space: nowrap; }
 .viz,.size-viz { margin-top: 12px; }
-.arrows { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; }
+.arrows { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 4px; }
 .nav { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); cursor: pointer; }
 .nav:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (hover: hover) { .nav:hover { background: var(--row-hover); color: var(--teal-ink); } }
 /* Arrows wait for hover or focus where there is a pointer; touch always shows them, at 44 px. */
 @media (hover: hover) and (pointer: fine) {
-  .stat-card:not(.compact) .arrows .nav { opacity: 0; transition: opacity .16s ease; }
+  .stat-card:not(.compact) .arrows .nav:not(.pause) { opacity: 0; transition: opacity .16s ease; }
   .stat-card:not(.compact):hover .arrows .nav, .stat-card:not(.compact):focus-within .arrows .nav { opacity: 1; }
 }
 .foot { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 14px; }
@@ -151,7 +151,7 @@ const ICONS: Record<StatKey, string[]> = {
 @media (hover: none), (pointer: coarse) { .nav { width: 44px; height: 44px; } }
 /* Phones: the arrows sit in the label row, always there, 44 px. */
 .compact { padding: 16px 10px 8px 16px; }
-.compact .label,.compact .size-label { padding-right: 132px; }
+.compact .label,.compact .size-label { padding-right: 136px; }
 .compact .arrows { top: 4px; right: 4px; gap: 0; }
 .compact .nav { width: 44px; height: 44px; }
 .compact .value,.compact .size-value { font-size: 34px; }

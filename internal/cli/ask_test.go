@@ -123,3 +123,25 @@ func TestAskOptionAndContextBounds(t *testing.T) {
 		t.Fatal("context not bounded before network")
 	}
 }
+
+func TestAskDisplaysReuseProvenance(t *testing.T) {
+	var out bytes.Buffer
+	rt := &runtime{stdout: &out}
+	q := questions.Question{ID: "question", State: "answered", Revision: 2,
+		Askers: []questions.Asker{{FromRecord: &questions.Reuse{Label: "From the record", DecisionID: "approved-decision", Revision: 2}}},
+		Answer: &questions.Answer{Answer: "Use local storage."}}
+	if err := rt.printQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "From the record: approved-decision (revision 2)") || !strings.Contains(out.String(), "answer: Use local storage.") {
+		t.Fatal("CLI omitted approved decision provenance/answer")
+	}
+	result, wire, err := questionToolResult(q)
+	if err != nil || result.IsError {
+		t.Fatal("MCP rejected reused Q&A", err)
+	}
+	data, err := json.Marshal(wire)
+	if err != nil || !strings.Contains(string(data), `"decision_id":"approved-decision"`) {
+		t.Fatal("MCP omitted structured provenance", err)
+	}
+}

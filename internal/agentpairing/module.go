@@ -34,6 +34,7 @@ type Module struct {
 	clients               map[string]rate
 	watch                 watchRelay
 	watchKeys             watchPollKeys
+	watchRecovery         watchRecoveryLimits
 	managed               *ManagedSetup
 	accountLinkPepper     []byte
 }

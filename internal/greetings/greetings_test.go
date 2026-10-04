@@ -108,6 +108,10 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var baseline int
+	if err := database.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantA).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
 	// 10:00 UTC is 03:00 in Los Angeles and 12:00 in Vienna.
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	m.now = func() time.Time { return now }
@@ -165,7 +169,7 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if own != 300 || foreign != 0 || eventCount != 0 {
+	if own != 300 || foreign != 0 || eventCount != baseline {
 		t.Fatalf("history own=%d foreign=%d events=%d", own, foreign, eventCount)
 	}
 	other := draw(tenantB, bobID, "UTC")

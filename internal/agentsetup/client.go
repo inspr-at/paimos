@@ -159,6 +159,7 @@ type PairingAPI interface {
 type APIError struct {
 	Code       string
 	RetryAfter time.Duration
+	StatusCode int
 }
 
 func (e *APIError) Error() string { return "pairing request failed: " + e.Code }
@@ -203,7 +204,7 @@ func (c HTTPClient) call(ctx context.Context, method, path string, token secret,
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	res, err := hc.Do(r)
 	if err != nil {
-		return errors.New("pairing server unreachable; retry the same setup to resume")
+		return &APIError{Code: "unreachable", RetryAfter: 5 * time.Second}
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
@@ -227,7 +228,7 @@ func (c HTTPClient) call(ctx context.Context, method, path string, token secret,
 			retry = time.Duration(n) * time.Second
 		}
 		// Remote error text is never displayed: it could reflect capabilities.
-		return &APIError{Code: code, RetryAfter: retry}
+		return &APIError{Code: code, RetryAfter: retry, StatusCode: res.StatusCode}
 	}
 	d := json.NewDecoder(io.LimitReader(res.Body, (128<<10)+1))
 	if d.Decode(out) != nil || d.Decode(&struct{}{}) != io.EOF {
