@@ -101,7 +101,7 @@ export async function decide({ event, ref, killSwitch, sha, repository, api }) {
         return { reuse: 'merge_group', run: verified.run, reason: `reused merge_group run ${verified.run}` };
       } catch { /* Failed, cancelled, partial rerun or stale candidate: try next. */ }
     }
-    return { reuse: 'none', reason: 'no verified successful merge_group run for this SHA' };
+    return { reuse: 'none', reason: `no verified successful merge_group run for this SHA in the bounded candidate list${found.total_count > found.workflow_runs.length ? '; search truncated' : ''}` };
   } catch {
     return { reuse: 'none', reason: 'merge_group lookup unavailable; full CI required' };
   }

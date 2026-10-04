@@ -141,6 +141,12 @@ test('network failure and invalid SHA fail closed', async () => {
   const f = fixture(); assert.equal((await check(f, { sha: 'invalid' })).reuse, 'none'); assert.deepEqual(f.calls, []);
 });
 
+test('a truncated candidate search reports truncation and falls back', async () => {
+  const f = fixture(); f.listed.total_count = 21; f.listed.workflow_runs = [];
+  const result = await check(f);
+  assert.equal(result.reuse, 'none'); assert.match(result.reason, /search truncated/);
+});
+
 test('invalid candidate does not hide a subsequent verified run', async () => {
   const f = fixture(); f.listed.workflow_runs.unshift({ id: 999, head_sha: sha, event: 'merge_group' }); f.listed.total_count++;
   assert.equal((await check(f)).run, 123);
