@@ -422,6 +422,41 @@
     },
     "approvedDesignConflicts": [],
     "noOriginPushOrDeploy": true,
-    "reviewOwnership": "Consolidated gate remains with coordinator; no model CLIs or package review invoked."
+    "reviewOwnership": "Consolidated gate remains with coordinator; no model CLIs or package review invoked.",
+    "newestMainMerge": {
+      "sourceMainSHA": "a352c5f2de47802a95f09e2a15e11157adeac4bb",
+      "mergeCommit": "4e30816545325a8cbd077c1a28235578ee049f54",
+      "conflicts": 0,
+      "changes": "AEON-593 deterministic regression updates; upstream Go, web source, browser/unit tests and QA evidence remain byte-identical to main. README automatically combines both changes.",
+      "upstreamFilesPreserved": true,
+      "goSourceCollection": {
+        "exitCode": 0,
+        "inventory": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 3202
+        },
+        "total": 3533,
+        "warnings": [
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/agentd:TestIdleChildCleanupStopsAndJoinsItsOwnedChild",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/agentd:TestIdleChildDelayedCleanupNeverSignalsReleasedIdentity",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/capacity:TestRelease11OracleRetainsHistoricalValidation",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/importer:TestSourceDispatchDelayUsesInjectedClock",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/importer:TestSourceRequestCapRefillAndConcurrentDelay",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/rules/doctrine:TestControlledDoctrineGuardCounts",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/rules/doctrine:TestDefaultDoctrineGuardIgnoresUnrelatedCheckouts"
+        ],
+        "nativeGoTestBodiesExecuted": false
+      },
+      "normalWebCheck": {
+        "exitCode": 0,
+        "inventory": {
+          "ESSENTIAL": 207,
+          "NIGHTLY": 4803
+        },
+        "warningCount": 18,
+        "note": "Complete native Node/Vitest and Playwright registration collection; no browser launches. New upstream registrations default to NIGHTLY."
+      },
+      "pending": "Upstream AEON-593 behavioral suites were already merged by the coordinator; no broad local retest. Remote/hosted Go and browser validation remains unavailable under the documented guards."
+    }
   }
 }
