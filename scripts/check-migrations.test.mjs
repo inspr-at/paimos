@@ -308,7 +308,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1141_chat_identity.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -363,6 +363,45 @@ test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review 
 
 });
 
+test('R1 chat identity has a pinned exception with bounded compatibility evidence', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const name = '1141_chat_identity.sql';
+  const entry = manifest.exceptions.find(entry => entry.file === name);
+  assert.ok(entry);
+  assert.equal(entry.ticket, 'AEON-618');
+  const sql = readFileSync(new URL(`../internal/db/migrations/${name}`, import.meta.url), 'utf8');
+  assert.equal(entry.sha256, createHash('sha256').update(sql).digest('hex'));
+  assert.equal(destructive(sql), true);
+  assert.match(entry.reason, /disabled by default/);
+  assert.match(entry.reason, /alias-only backfill create no owners, bindings or deliveries/);
+  assert.match(entry.reason, /not every legacy write/);
+  assert.match(entry.reason, /coordinator review before merge\/release/);
+  assert.match(entry.reason, /does not.*skip previous-binary compatibility/);
+
+  // Compare the shipped SQL registry, rather than assuming a replacement is
+  // additive: old permissions must survive exactly, with only chat appended.
+  const previous = readFileSync(new URL('../internal/db/migrations/0841_inbox_receipt.sql', import.meta.url), 'utf8');
+  const permissions = source => {
+    const registry = source.slice(source.indexOf('FUNCTION aeon_authz_registry_permission')).split('$$;')[0];
+    return [...registry.matchAll(/\('([a-z_]+)','([a-z_ ]+)'\)/g)]
+      .flatMap(([, resource, actions]) => actions.split(' ').map(action => `${resource}.${action}`)).sort();
+  };
+  const oldPermissions = permissions(previous);
+  assert.ok(oldPermissions.length > 0);
+  assert.deepEqual(permissions(sql), [...oldPermissions, 'chat.read', 'chat.send', 'chat.bind', 'chat.receive'].sort());
+
+  const exceptions = {schema: manifest.schema, exceptions: [entry]};
+  const check = files => checkMigrations(files, new Map(), null, {exceptions});
+  assert.deepEqual(check(new Map([[name, sql]])), []);
+  assert.match(checkMigrations(new Map([[name, sql]])).join('\n'), /1141_chat_identity.sql: non-allowlisted/);
+  // Even harmless byte drift invalidates the reviewed pin. The exception must
+  // never extend to another file or bypass published migration immutability.
+  assert.match(check(new Map([[name, sql + '\n']])).join('\n'), /1141_chat_identity.sql: exception migration changed/);
+  assert.match(check(new Map()).join('\n'), /1141_chat_identity.sql: exception migration removed/);
+  assert.match(check(new Map([[name, sql], ['1142_unreviewed.sql', sql]])).join('\n'), /1142_unreviewed.sql: non-allowlisted/);
+  assert.match(checkMigrations(new Map([[name, sql]]), new Map([[name, sql + '\n']]), null, {exceptions}).join('\n'), /1141_chat_identity.sql: published migration changed/);
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -371,7 +410,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql', '1114_owner_guard_access_fence.sql', '1141_chat_identity.sql', '1206_themes.sql', '1207_theme_principal_links.sql', '1208_theme_selection_generation.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 
