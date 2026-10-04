@@ -89,7 +89,7 @@ func (m *AttachManager) unchangedHarnessImage(observed attachObservation, before
 
 func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attachObservation, harness string) (os.FileInfo, error) {
 	approved := m.cfg.Executables[harness]
-	if approved == "" || harness != Claude && harness != Codex && harness != Cursor && harness != Grok {
+	if approved == "" || harness != Claude && harness != Codex && harness != Cursor && harness != Grok && harness != Gemini && harness != OpenCode {
 		return nil, attachIdentityError()
 	}
 	if harness == Cursor && runtime.GOOS == "darwin" {
@@ -99,7 +99,15 @@ func (m *AttachManager) validateHarnessImage(ctx context.Context, observed attac
 	if err != nil || physical != observed.Executable {
 		return nil, attachUnsafeImageError()
 	}
-	if harness == Grok {
+	if harness == Gemini || harness == OpenCode {
+		// Unsigned native installations need an explicitly recorded local root.
+		// A general-purpose Node image cannot match a Gemini package entrypoint.
+		// Do not infer identity from argv or weaken signed Claude/Codex checks.
+		identity, exists := m.cfg.Identities[harness]
+		if !exists || !identity.Matches(physical, info) {
+			return nil, attachIdentityError()
+		}
+	} else if harness == Grok {
 		// Grok remains outside AEON-435: preserve its exact-path contract.
 		pinned, err := filepath.EvalSymlinks(approved)
 		if err != nil || pinned != physical {

@@ -6,7 +6,7 @@
 # Inbox was measured locally and scaled to that run. Pairing tests added in release 14 were measured locally and scaled by the same ratio as the rest of that package.
 # A package added after that run is listed at 0ms until the next measurement.
 # A package absent from this file runs on the lightest shard. A split package's lowest shard skips tests assigned elsewhere, so a new Test, Example, or Fuzz still runs.
-# TestList6000Performance, TestList6000FiltersPerformance and TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, in the hosted go-timing job.
+# TestList6000FiltersPerformance, TestList6000Performance, TestList6000PerformanceWithStaleKindStatistics, TestPlanningBulkUsagePerformance are wall-clock budgets. Every shard skips them. They run once, with -p 1, in the hosted go-timing job.
 # Columns: shard milliseconds import-path [TestName]
 1 45276 github.com/inspr-at/paimos/internal/activity
 1 53121 github.com/inspr-at/paimos/internal/agentd
@@ -112,6 +112,7 @@
 1 113 github.com/inspr-at/paimos/internal/rulesimport
 1 3 github.com/inspr-at/paimos/internal/tenant
 2 0 github.com/inspr-at/paimos
+2 0 github.com/inspr-at/paimos/internal/agentactivity
 2 527 github.com/inspr-at/paimos/internal/agentdwire
 2 1783 github.com/inspr-at/paimos/internal/agentpairing TestAttachAttemptCap
 2 5191 github.com/inspr-at/paimos/internal/agentpairing TestAttachCannotRenewChangedSession
@@ -174,6 +175,7 @@
 2 2052 github.com/inspr-at/paimos/internal/harness TestManagedDeliveryFailureNotifiesSenderOnce
 2 3094 github.com/inspr-at/paimos/internal/harness TestManualReparentPermissionsAndUndo
 2 2377 github.com/inspr-at/paimos/internal/harness TestModelPricesThroughProductionAuth
+2 0 github.com/inspr-at/paimos/internal/harness TestModelReportsRequireWorkerLeaseAndStayInHarness
 2 4588 github.com/inspr-at/paimos/internal/harness TestProvenanceReportsReplaceOnlyTheKindsTheyCarry
 2 2577 github.com/inspr-at/paimos/internal/harness TestRebindClearsEstimate
 2 2168 github.com/inspr-at/paimos/internal/harness TestRecoveryAuthorizationFencingHistoryAndRetry
@@ -212,6 +214,7 @@
 2 2608 github.com/inspr-at/paimos/internal/intake
 2 16 github.com/inspr-at/paimos/internal/localjournal
 2 6749 github.com/inspr-at/paimos/internal/modelregistry
+2 0 github.com/inspr-at/paimos/internal/modelreport
 2 0 github.com/inspr-at/paimos/internal/nodes TestCanonicalRouteFields
 2 1256 github.com/inspr-at/paimos/internal/nodes TestConcurrentMovesPrecondition
 2 1819 github.com/inspr-at/paimos/internal/nodes TestConvertIssueKindMatrix
@@ -260,6 +263,7 @@
 2 0 github.com/inspr-at/paimos/internal/releasehistory/generate
 2 0 github.com/inspr-at/paimos/internal/releasehistory/packnotes
 2 58892 github.com/inspr-at/paimos/internal/rules/doctrine
+2 0 github.com/inspr-at/paimos/internal/scopecode
 2 42 github.com/inspr-at/paimos/internal/sessionusage
 2 0 github.com/inspr-at/paimos/internal/statusautopilot
 2 0 github.com/inspr-at/paimos/internal/systemactor
@@ -267,6 +271,7 @@
 2 22093 github.com/inspr-at/paimos/internal/ticketwork
 2 0 github.com/inspr-at/paimos/internal/version
 2 0 github.com/inspr-at/paimos/internal/workorders
+2 0 github.com/inspr-at/paimos/internal/workqueue
 2 0 github.com/inspr-at/paimos/scripts
 2 0 github.com/inspr-at/paimos/scripts/ci-runner-guard
 2 0 github.com/inspr-at/paimos/scripts/onboarding-platform

@@ -63,6 +63,10 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		allow       bool
 	}{
 		{"owner", "POST /api/nodes", true}, {"owner", "POST /api/roles", true},
+		{"owner", "POST /api/work-kinds", true}, {"admin", "POST /api/work-kinds", true},
+		{"member", "POST /api/work-kinds", false}, {"viewer", "POST /api/work-kinds", false},
+		{"member", "GET /api/model-preferences", true}, {"member", "GET /api/work-kinds", true},
+		{"admin", "POST /api/models/{id}/retire", true}, {"member", "POST /api/models/{id}/retire", false},
 		{"admin", "POST /api/roles", true}, {"admin", "POST /api/nodes", true},
 		{"member", "POST /api/nodes", true}, {"member", "POST /api/kinds", false},
 		{"member", "POST /api/roles", false}, {"member", "POST /api/approvals/{approvalId}/decision", true},
@@ -83,6 +87,26 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	// AEON-184: who is working where follows project visibility, so a
 	// project-only guest may ask; a customer never may.
 	checkIn("guest", guest, "GET /api/harness-sessions/live", Scope{AnyProject: true}, true)
+	reader := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'person','Project-only session reader') RETURNING id::text`, tid).Scan(&reader.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='viewer'`, tid, reader.ID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{"GET /api/me/host-labels", "PUT /api/me/host-labels"} {
+		check("project reader without project scope", reader, pattern, false)
+		checkIn("project reader", reader, pattern, Scope{AnyProject: true}, true)
+		// Seeing the guest live count alone does not grant harness.read.
+		checkIn("guest", guest, pattern, Scope{AnyProject: true}, false)
+		checkIn("customer", people["customer"], pattern, Scope{AnyProject: true}, false)
+		if !ProjectFilteredRoutes[pattern] {
+			t.Fatalf("own host labels must support project-only people: %s", pattern)
+		}
+	}
 	checkIn("customer", people["customer"], "GET /api/harness-sessions/live", Scope{AnyProject: true}, false)
 	check("member", people["member"], "GET /api/usage/dashboard", true)
 	checkIn("guest", guest, "GET /api/usage/dashboard", Scope{AnyProject: true}, false)
@@ -93,6 +117,28 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	checkIn("guest", guest, "GET /api/members", Scope{AnyProject: true}, false)
 	checkIn("guest", guest, "POST /api/nodes/{nodeId}/comments", Scope{ProjectID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, false)
 	checkIn("customer", people["customer"], "GET /api/nodes", Scope{AnyProject: true}, false)
+	// A person bound only to a project can reach the filtered pause/resume
+	// batches; the handlers still authorize each target project and owner.
+	projectMember := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'person','Project pause member') RETURNING id::text`, tid).Scan(&projectMember.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='member'`, tid, projectMember.ID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"pause", "resume"} {
+		pattern := "POST /api/harness-sessions/" + operation
+		scope, scoped, err := ResolveRouteScope(ctx, d.App, pattern, "/api/harness-sessions/"+operation)
+		if err != nil || !scoped || !scope.AnyProject {
+			t.Fatalf("pause batch scope: %+v scoped=%v err=%v", scope, scoped, err)
+		}
+		checkIn("project-only member", projectMember, pattern, scope, true)
+		checkIn("guest", guest, pattern, Scope{AnyProject: true}, false)
+		check("viewer", people["viewer"], pattern, false)
+	}
 	var agent tenant.Principal
 	agent.TenantID, agent.Kind = tid, tenant.Agent
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {

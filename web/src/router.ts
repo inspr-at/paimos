@@ -24,6 +24,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
+    { path: '/briefing', component: () => import('./views/MorningBriefingView.vue'), meta: { title: 'Morning briefing' } },
     // One record for the project page: its list, the open ticket and its Knowledge
     // tab and entries are children, so moving between them never remounts the page
     // (and its guards stay on the record that is matched throughout).
@@ -78,6 +79,7 @@ export const router = createRouter({
     { path: '/business/quotes/:quoteId/:rest(.*)+', redirect: '/business/quotes' },
     { path: '/business/:parked(organisations|crm)/:rest(.*)*', redirect: '/business/customers' },
     { path: '/crm', redirect: '/business/customers' },
+    { path: '/decision-desk', component: () => import('./views/DecisionDeskView.vue'), meta: { title: 'Decision Desk', fill: false } },
     { path: '/agents/usage', component: () => import('./views/UsageDashboardView.vue'), meta: { title: 'Usage' } },
     // Before :sessionId, or that param captures the public guide. Anonymous readers stay on this route.
     { path: '/agents/register-agent', component: () => import('./views/RegisterAgentView.vue'), meta: { title: 'Connect your machine', public: true } },
@@ -96,6 +98,7 @@ export const router = createRouter({
     { path: '/settings/:section(personal|developer|agent-rules|accounts|workspace|business|projects|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
+    { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/from-classic/:rest(.*)*', component: () => import('./views/FromClassicView.vue'), meta: { title: 'Finding your page' } },
     { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },

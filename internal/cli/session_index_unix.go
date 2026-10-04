@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"golang.org/x/sys/unix"
 )
 
@@ -687,4 +689,60 @@ func mkdirPrivate(abs string) error {
 	}
 	unix.Close(fd)
 	return nil
+}
+
+// writeHookActivity writes only a sanitized observation into the generation's
+// existing private state directory, never the worktree or another session.
+func writeHookActivity(vendor, session, text string) {
+	if !agentactivity.ValidAuto(text) {
+		return
+	}
+	dir := os.Getenv("AEON_SESSION_STATE_DIR")
+	if dir == "" && !hookSessionEnvSet() && validUUID(vendor) {
+		root, err := sessionIndexRoot()
+		if err != nil {
+			return
+		}
+		fd, err := openValidatedIndexDir(root)
+		if err != nil {
+			return
+		}
+		raw, err := readIndexFileAt(fd, strings.ToLower(vendor), 4096)
+		unix.Close(fd)
+		entry, ok := parseSessionIndexEntry(raw)
+		if err != nil || !ok || !ownerAlive(entry.OwnerPID, entry.OwnerStart) {
+			return
+		}
+		dir = entry.StateDir
+	}
+	if dir == "" {
+		return
+	}
+	fd, err := openValidatedIndexDir(dir)
+	if err != nil {
+		return
+	}
+	defer unix.Close(fd)
+	idRaw, err := readIndexFileAt(fd, "session.id", 256)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(string(idRaw)), session) {
+		return
+	}
+	stateRaw, err := readIndexFileAt(fd, "state.json", 1<<20)
+	var state heartbeatDisk
+	if err != nil || json.Unmarshal(stateRaw, &state) != nil || state.Schema != heartbeatSchema || !strings.EqualFold(state.SessionID, session) || state.Terminal || state.Closed {
+		return
+	}
+	raw, err := readIndexFileAt(fd, "activity-mode.json", 512)
+	var policy struct {
+		Session string `json:"session_id"`
+		Mode    string `json:"mode"`
+	}
+	if err != nil || json.Unmarshal(raw, &policy) != nil || policy.Session != session || !agentactivity.Mode(policy.Mode) || policy.Mode == agentactivity.Off {
+		return
+	}
+	value := hookActivity{Session: session, Activity: agentactivity.Activity{Text: text, Source: "auto", At: time.Now().UTC()}}
+	payload, err := json.Marshal(value)
+	if err == nil {
+		_ = writeExclusiveAt(fd, "activity.json", payload)
+	}
 }

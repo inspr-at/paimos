@@ -110,7 +110,10 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
+		// Email-based enrollment, including bootstrap authority, requires proof
+		// of mailbox ownership. Existing issuer/subject members resolved above
+		// keep signing in independently of this enrollment-only condition.
+		if !emailVerified || slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
 			// An invite enrolls only a verified email. The token may select which
 			// invite, but it never substitutes for that address.
 			if emailVerified {
@@ -130,6 +133,25 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 					return errImportedNotMember
 				}
 			}
+			return errNotMember
+		}
+		// Bootstrap is a one-time enrollment, not a standing mailbox grant.
+		// Serialize the check with enrollment and use the append-only binding
+		// event as its durable completion marker. Profile/role changes cannot
+		// reopen it. Existing and operator-pinned issuer/subject memberships
+		// have already resolved above; imported profiles are not OIDC members.
+		var lockedTenant string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
+			return err
+		}
+		var enrolled bool
+		if err := tx.QueryRow(ctx, `SELECT
+			EXISTS (SELECT 1 FROM events WHERE tenant_id=$1::uuid AND type='tenant.principal_bound') OR
+			EXISTS (SELECT 1 FROM principals p JOIN identities i ON i.id=p.identity_id
+				WHERE p.tenant_id=$1::uuid AND p.kind='person' AND i.issuer<>'paimos-classic')`, tenantID).Scan(&enrolled); err != nil {
+			return err
+		}
+		if enrolled {
 			return errNotMember
 		}
 		p, err = scanPrincipal(tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles)
@@ -400,7 +422,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 	}
 	var p tenant.Principal
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		var principalID, gotTenant string
+		var principalID, gotTenant, keyID string
 		var creatorID *string
 		var scopes pgtype.FlatArray[string]
 		err := tx.QueryRow(ctx, `
@@ -416,8 +438,8 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			    WHERE p.id = k.principal_id AND p.kind = 'agent' AND p.status='active'
 			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
 			  )
-			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text
-		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID)
+			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text, k.id::text
+		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID)
 		if err != nil {
 			return err
 		}
@@ -429,6 +451,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
 		p.Scopes = []string(scopes)
+		p.KeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}
@@ -463,15 +486,23 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 	var rec keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		rec, err = m.createAgentKeyTx(ctx, tx, p, name, principalID, scopes, expires)
+		rec, err = m.issueAgentKeyTx(ctx, tx, p, name, principalID, scopes, expires, agentKeyCreate)
 		return err
 	})
 	return rec, err
 }
 
-// createAgentKeyTx is shared by creation and atomic rotation; all grant and
-// creator-ceiling checks remain on this path. The caller owns db.InTenant.
-func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time) (keyRecord, error) {
+type agentKeyOperation uint8
+
+const (
+	agentKeyCreate agentKeyOperation = iota
+	agentKeyRotate
+)
+
+// issueAgentKeyTx shares identity, actor and key-insert checks. Only creation
+// may configure an agent binding; rotation validates existing grants without
+// writing roles, permissions or bindings. The caller owns db.InTenant.
+func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time, operation agentKeyOperation) (keyRecord, error) {
 	if scopes == nil {
 		scopes = []string{}
 	}
@@ -570,8 +601,14 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		if err := pairedIdentity(ctx, tx, principalID); err != nil {
 			return err
 		}
-		if err := ensureAgentBinding(ctx, tx, p, actorID, principalID, name, scopes); err != nil {
-			return err
+		if operation == agentKeyRotate {
+			if err := checkRotationScopesTx(ctx, tx, p, principalID, scopes); err != nil {
+				return err
+			}
+		} else {
+			if err := ensureAgentBinding(ctx, tx, p, actorID, principalID, name, scopes); err != nil {
+				return err
+			}
 		}
 		for attempt := 0; attempt < 5; attempt++ {
 			prefix, err := prefixFor(p.TenantID)
@@ -725,7 +762,7 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 		}
 		// Model discovery is part of every generated agent role. It does not
 		// add a key scope or bypass the key creator's live ceiling.
-		rolePermissions := []string{"models.read"}
+		rolePermissions := []string{"models.read", "models.report", "models.refresh"}
 		for key := range requested {
 			if !slices.Contains(rolePermissions, key) {
 				rolePermissions = append(rolePermissions, key)
@@ -873,6 +910,50 @@ func keySnapshot(rec keyRecord) map[string]any {
 var errKeyRevoked = errors.New("agent key already revoked")
 
 func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id string, expires *time.Time) (keyRecord, error) {
+	return m.rotateAgentKeyWithScopes(ctx, p, id, expires, nil)
+}
+
+func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, agentID string, scopes []string) error {
+	if actor.Kind != tenant.Person || actor.ID == "" {
+		return authz.ErrForbidden
+	}
+	creator, err := authz.EffectiveTx(ctx, tx, actor, "")
+	if err != nil {
+		return err
+	}
+	agent := tenant.Principal{ID: agentID, TenantID: actor.TenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: actor.ID}
+	// Shared roles combine live workspace/project grants. Generated private
+	// roles additionally cap rotation at their configured workspace permissions.
+	var privatePermissions []string
+	err = tx.QueryRow(ctx, `SELECT ARRAY(
+		SELECT permission FROM role_permissions WHERE tenant_id=r.tenant_id AND role_id=r.id
+	) FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+	WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace' AND NOT r.builtin AND r.key=$3`,
+		actor.TenantID, agentID, "agent_"+strings.ReplaceAll(agentID, "-", "")).Scan(&privatePermissions)
+	privateRole := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, agent)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		permission, known := authz.Lookup(scope)
+		if !known || !permission.AgentGrantable || !slices.Contains(creator.Workspace.Permissions, scope) || !slices.Contains(ceiling, scope) {
+			return authz.ErrForbidden
+		}
+		// Preserve the coordinator's derived, project-confined rules.read.
+		if privateRole && workspaceRolePermission(scopes, scope) && !slices.Contains(privatePermissions, scope) {
+			return authz.ErrForbidden
+		}
+	}
+	return nil
+}
+
+// A nil proposal preserves scopes; an explicit set (including empty) changes
+// only the replacement. Both recheck live grants without configuring roles.
+func (m *Module) rotateAgentKeyWithScopes(ctx context.Context, p tenant.Principal, id string, expires *time.Time, proposed []string) (keyRecord, error) {
 	var replacement keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// Match creation/access-management lock order: tenant, then resource.
@@ -891,11 +972,15 @@ func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id stri
 		if old.RevokedAt != nil {
 			return errKeyRevoked
 		}
-		scopes, err := cleanScopes(old.Scopes)
+		source := old.Scopes
+		if proposed != nil {
+			source = proposed
+		}
+		scopes, err := cleanScopes(source)
 		if err != nil {
 			return authz.ErrForbidden
 		}
-		replacement, err = m.createAgentKeyTx(ctx, tx, p, old.Name, old.PrincipalID, scopes, expires)
+		replacement, err = m.issueAgentKeyTx(ctx, tx, p, old.Name, old.PrincipalID, scopes, expires, agentKeyRotate)
 		if err != nil {
 			return err
 		}

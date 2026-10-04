@@ -11,8 +11,8 @@ type VerificationCapability = agentverification.Capability
 // Empty platform/arch is the guide's conservative global capability view.
 // Native Grok's two qualified variants are pinned again by the local runtime.
 func verificationCapabilities(platform, arch string) map[string]VerificationCapability {
-	capabilities := make(map[string]VerificationCapability, 5)
-	for _, harness := range []string{"claude", "codex", "cursor", "grok", "pi"} {
+	capabilities := make(map[string]VerificationCapability, len(agentverification.Harnesses()))
+	for _, harness := range agentverification.Harnesses() {
 		capabilities[harness] = agentverification.For(harness, platform, arch)
 	}
 	return capabilities
@@ -25,7 +25,7 @@ func VerificationTargets() []string {
 	var supported []string
 	for _, platform := range []string{"darwin", "linux"} {
 		for _, arch := range []string{"arm64", "amd64"} {
-			for _, h := range []string{"claude", "codex", "cursor", "grok", "pi"} {
+			for _, h := range agentverification.Harnesses() {
 				if verificationCapabilities(platform, arch)[h].Supported {
 					supported = append(supported, platform+"/"+arch+"/"+h)
 				}

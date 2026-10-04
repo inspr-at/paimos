@@ -289,6 +289,9 @@ func (s *Store) Takeover(ctx context.Context, tenant, project, sid string, expec
 		if _, err := tx.Exec(ctx, `UPDATE aithema_sessions SET worker_generation=$3 WHERE tenant_id=$1 AND sid=$2`, tenant, sid, st.Generation); err != nil {
 			return err
 		}
+		if err := clearUploads(ctx, tx, st); err != nil {
+			return err
+		}
 		out = state(st, s.now())
 		return nil
 	})
@@ -351,6 +354,9 @@ func (s *Store) Revoke(ctx context.Context, tenant, project, sid, action string)
 		}
 		auth["epoch"] = epoch
 		auth["withdrawn_at"] = s.now().Format("2006-01-02T15:04:05.000000Z")
+		if err := clearUploads(ctx, tx, st); err != nil {
+			return err
+		}
 		_, err = tx.Exec(ctx, `UPDATE aithema_sessions SET auth_epoch=$3,tombstone=true,authorization_bytes=$4 WHERE tenant_id=$1 AND sid=$2`, tenant, sid, epoch, marshal(auth))
 		return err
 	})

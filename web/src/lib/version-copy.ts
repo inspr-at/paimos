@@ -28,3 +28,8 @@ export async function copyToClipboard(text: string, view: Window = window): Prom
     return doc.execCommand('copy') === true
   } catch { return false } finally { area.remove() }
 }
+
+// Copy the renderer's canonical value, never its visible Pretty text.
+export function copyRenderedVersion(host: HTMLElement, view: Window = window): Promise<boolean> {
+  return host.dataset.canonical ? copyToClipboard(host.dataset.canonical, view) : Promise.resolve(false)
+}

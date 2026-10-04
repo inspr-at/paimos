@@ -35,6 +35,7 @@ type Module struct {
 	watch                 watchRelay
 	watchKeys             watchPollKeys
 	managed               *ManagedSetup
+	accountLinkPepper     []byte
 }
 type rate struct {
 	start time.Time
@@ -51,6 +52,7 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*confi
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
+	m.mountAccountLink(mux)
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
 	mux.HandleFunc("POST /api/agent-pairing/device", m.device)
 	mux.HandleFunc("POST /api/agent-pairing/redeem", m.redeem)
@@ -141,7 +143,7 @@ func (m *Module) person(permission string, fn func(http.ResponseWriter, *http.Re
 }
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+		if err := LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -149,14 +151,19 @@ func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error)
 }
 
 // Count attempts in its own committed transaction, even when the operation
-// subsequently fails. Only three bounded rows per tenant are ever allocated.
+// subsequently fails. Only predefined bounded buckets per tenant are allocated.
 func (m *Module) limit(ctx context.Context, tenantID, bucket string, max int) error {
 	var count int
+	table := "agent_pairing_limits"
+	switch bucket {
+	case "link_offer", "link_poll", "link_lookup", "link_approve":
+		table = "account_person_link_limits"
+	}
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO agent_pairing_limits(tenant_id,bucket,attempts) VALUES($1,$2,1)
+		return tx.QueryRow(ctx, `INSERT INTO `+table+`(tenant_id,bucket,attempts) VALUES($1,$2,1)
    ON CONFLICT(tenant_id,bucket) DO UPDATE SET
-    attempts=CASE WHEN agent_pairing_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE agent_pairing_limits.attempts+1 END,
-    starts_at=CASE WHEN agent_pairing_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE agent_pairing_limits.starts_at END
+    attempts=CASE WHEN `+table+`.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE `+table+`.attempts+1 END,
+    starts_at=CASE WHEN `+table+`.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE `+table+`.starts_at END
    RETURNING attempts`, tenantID, bucket).Scan(&count)
 	})
 	if err != nil {

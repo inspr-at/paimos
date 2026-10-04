@@ -16,6 +16,38 @@ import (
 	"github.com/inspr-at/paimos/internal/reportercontract"
 )
 
+func TestHeartbeatStatusNotesUseSharedPrivacyFilter(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "progress.json")
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(home)
+	o.StatusFile = path
+	session := heartbeatSession{id: transcriptSessionID, lease: "synthetic-generation-lease-0000000000"}
+	for _, note := range []string{"AKIAIOSFODNN7EXAMPLE", "https://user:pass@host/a", "FOO=secret", "FOO=example", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "s\u200bk-live", strings.Repeat("Reviewing the change. ", 8) + "AKIAIOSFODNN7EXAMPLE", "Reviewing the change", "Editing planning.ts"} {
+		raw, _ := json.Marshal(map[string]any{"note": note})
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
+			t.Fatal(err)
+		}
+		body := calls[len(calls)-1].body
+		if note == "Reviewing the change" || note == "Editing planning.ts" {
+			if body["activity_note"] != note {
+				t.Fatal("public status-file note was dropped")
+			}
+		} else if _, sent := body["activity_note"]; sent {
+			t.Fatal("unsafe status-file note was sent")
+		}
+	}
+}
+
 // The CLI's separate harness transport also accepts a response's new required
 // field when an older consumer type does not declare it.
 func TestHarnessLegacyDecoderIgnoresFinished(t *testing.T) {

@@ -1,10 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch, watchEffect } from 'vue'
 import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { rowStore } from '../../lib/rowStore'
 import { toast } from '../../lib/toast'
+import { queueable } from '../../lib/workQueue'
+import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket, type RelatedNode, type TicketChange } from '../../lib/useTicket'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
@@ -26,6 +29,7 @@ import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import StatusMenu from './StatusMenu.vue'
+import HumanCheck from './HumanCheck.vue'
 import RelationList from './RelationList.vue'
 import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
@@ -42,7 +46,13 @@ import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/
 import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
-import StartAgentDialog from '../agents/StartAgentDialog.vue'
+import QueueAction from './QueueAction.vue'
+import QueueDetails from './QueueDetails.vue'
+import QueueView from './QueueView.vue'
+import AssigneeMenu from './AssigneeMenu.vue'
+import { useWorkQueue } from '../../stores/workQueue'
+import { usePoller } from '../../lib/usePolledData'
+import { useSession } from '../../stores/session'
 
 // The ticket workspace: the same parts in the docked side panel and in the
 // full page. Every write goes through useTicket (precondition, conflicts).
@@ -93,6 +103,9 @@ function closeConvert() {
   void nextTick(() => header.value?.focusMore())
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
+const session = useSession()
+const humanCheckPerson = computed(() => session.identity?.principal.kind === 'person')
+const humanCheckEditable = computed(() => humanCheckPerson.value || !item.value?.fields.human_check_completed)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
 const movable = computed(() => props.canMove && !ticket.readOnly.value && !ticket.gone.value)
 const linkable = computed(() => props.canLink && !ticket.readOnly.value && !ticket.gone.value)
@@ -102,8 +115,18 @@ const commentDeletable = computed(() => props.canDeleteComment && !ticket.readOn
 const attachable = computed(() => props.canAttach && !ticket.readOnly.value && !ticket.gone.value)
 const attachments = useAttachments(computed(() => props.item?.id ?? null))
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>()
-const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
-const canStartAgent = computed(() => props.item?.kind_slug === 'ticket' && !ticket.gone.value && can('work_orders.write') && can('run.create'))
+const queueRouter = useRouter()
+function routerToQueued() { return queueRouter.push({ path: `/p/${encodeURIComponent(props.project.routeKey)}/tickets`, query: { status: 'queued' } }) }
+const queue = useWorkQueue()
+const queueAction = ref<InstanceType<typeof QueueAction>>()
+const queueAnchor = ref<HTMLElement | null>(null)
+const queueEntry = computed(() => item.value && queueable(item.value) ? queue.entry(props.project.id, item.value.id) : null)
+const queueGaps = computed(() => item.value ? queue.gaps(item.value) : [])
+const queuePoller = usePoller(() => queue.load(props.project.id), 20_000)
+watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true })
+onMounted(() => queuePoller.start())
+onBeforeUnmount(() => queuePoller.stop())
+const canQueue = computed(() => !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
 const canRelease = computed(() => editable.value && !!props.item && props.item.kind_slug !== 'epic' && can('releases.write', props.project.id))
 const releaseView = computed(() => props.item?.kind_slug === 'epic' ? { status: 'none' as const } : props.nativeReleases?.get(props.item?.id ?? ''))
 const journeys = useJourney()
@@ -135,7 +158,7 @@ const saving = ref(false)
 const benefitNotice = ref('')
 const benefitInvalidKey = ref('')
 const titleField = ref<HTMLTextAreaElement>()
-const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
+const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '', humanCheck: '' })
 let base = { ...draft }
 // The draft's values from one server copy: the editor's base (the copy its
 // save is checked against), never whatever object shows at the moment.
@@ -143,6 +166,7 @@ function snapshot(it: ListItem = ticket.base() ?? item.value!) {
   return {
     ...benefitDraft(it.fields), title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
     notes: typeof it.fields.notes === 'string' ? it.fields.notes : '', state: it.state, priority: it.priority && it.priority !== 'none' ? it.priority : '', assignee: it.assignee?.id ?? '',
+    humanCheck: it.human_check ?? '',
   }
 }
 const editDirty = computed(() => editing.value && (Object.keys(base) as (keyof typeof base)[]).some(key => draft[key] !== base[key]))
@@ -206,6 +230,14 @@ async function saveEdit() {
   if (draft.title.trim() !== base.title) patch.title = draft.title.trim()
   if (draft.body !== base.body) patch.body = draft.body
   if (draft.state !== base.state) patch.state = draft.state
+  if (draft.humanCheck.trim() !== base.humanCheck) {
+    if (!humanCheckPerson.value && (!draft.humanCheck.trim() || !humanCheckEditable.value)) {
+      toast(!draft.humanCheck.trim() ? 'Only a person can mark a human check checked.' : 'Only a person can undo a human check.', { tone: 'error' })
+      root.value?.querySelector<HTMLInputElement>('.edit-human-check')?.focus()
+      return
+    }
+    patch.human_check = draft.humanCheck.trim() || null
+  }
   const changed: Record<string, unknown> = {}
   const setField = (name: string, value: string, before: string) => { if (value === before) return; changed[name] = value.trim() ? value : undefined }
   setField('acceptance_criteria', draft.acceptance, base.acceptance)
@@ -335,6 +367,11 @@ const showNotes = ref(false)
 
 const acceptance = computed(() => typeof item.value?.fields.acceptance_criteria === 'string' ? item.value.fields.acceptance_criteria : '')
 const notes = computed(() => typeof item.value?.fields.notes === 'string' ? item.value.fields.notes : '')
+async function saveHumanCheck(text: string | null) {
+  const result = await ticket.patch({ human_check: text })
+  if (result === 'ok') { activity.load(); toast(text ? 'Human check restored' : 'Human check marked checked') }
+  return result
+}
 const hasChildren = computed(() => !!item.value && (item.value.kind_slug === 'epic' || item.value.children_count > 0 || ticket.children.value.length > 0))
 const priorityOptions: MenuOption[] = [{ value: 'high', label: 'High' }, { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }, { value: '', label: 'No priority' }]
 const assigneeOptions = computed<MenuOption[]>(() => {
@@ -348,13 +385,13 @@ const assigneeOptions = computed<MenuOption[]>(() => {
   ]
 })
 watch(() => props.item?.id, () => {
-  showAcceptance.value = false; showNotes.value = false; menu.value = null; linkAnchor.value = null
+  showAcceptance.value = false; showNotes.value = false; menu.value = null; linkAnchor.value = null; queueAnchor.value = null
   scroller.value?.scrollTo({ top: 0 })
 })
 
 function link() { return `${location.origin}/p/${encodeURIComponent(props.project.routeKey)}/${encodeURIComponent(props.item?.key ?? props.ticketKey)}` }
 function copy(text: string, label: string) {
-  navigator.clipboard.writeText(text).then(() => toast(`Copied ${label}`), () => toast(`${label} could not be copied`, { tone: 'error' }))
+  navigator.clipboard.writeText(text).then(() => toast(`${label} copied`), () => toast(`${label} could not be copied`, { tone: 'error' }))
 }
 // The visible control for a key: narrow and wide layouts both render some of them.
 function anchorFor(shortcut: string) {
@@ -362,7 +399,7 @@ function anchorFor(shortcut: string) {
 }
 function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
   if (!anchor) return
-  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : editable.value) menu.value = { kind, anchor }
+  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : kind === 'assignee' ? editable.value || canQueue.value : editable.value) menu.value = { kind, anchor }
 }
 async function chooseRelease(target: ReleaseTarget) {
   const it = item.value
@@ -460,6 +497,12 @@ function isDirty() {
   return editDirty.value || !!title.value?.isDirty() || sections.value.some(section => section.isDirty()) || !!composer.value?.isDirty() || !!timeline.value?.isDirty()
 }
 function focus() { root.value?.focus({ preventScroll: true }) }
+function queueKey(event: KeyboardEvent) {
+  if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !queueAction.value || document.querySelector('.floating')) return
+  const target = event.target as HTMLElement | null
+  if (target?.isContentEditable || target?.closest('input, textarea, select')) return
+  event.preventDefault(); event.stopPropagation(); void queueAction.value.toggle()
+}
 defineExpose({
   el: root, focus, isDirty,
   // An editor or a save is open: a live list waits with its structural updates.
@@ -468,6 +511,7 @@ defineExpose({
   startEdit, editing,
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
   openPriority: () => openMenu('priority', anchorFor('p')),
+  toggleQueue: () => queueAction.value?.toggle(),
   openAssignee: () => openMenu('assignee', anchorFor('a')),
   openRelease: () => openMenu('release', anchorFor('g')),
   openLink: () => openLink(anchorFor('r')),
@@ -478,20 +522,20 @@ defineExpose({
 <template>
   <component
     :is="mode === 'panel' ? 'aside' : 'article'" ref="root" class="ticket-ws" :class="[mode, { 'has-context': contextColumn && !editing, editing }]" aria-label="Ticket details" tabindex="-1"
-    @click.capture="rememberClick" @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles"
+    @click.capture="rememberClick" @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles" @keydown="queueKey"
   >
     <TicketHeaderBar
       ref="header"
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
-      :can-start-agent="canStartAgent" :open-in-project="openInProject" :back-label="backLabel"
+       :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @convert="convertOpen = true" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
-      @start-agent="item && startDialog?.open(item)"
-    />
-    <StartAgentDialog ref="startDialog" />
+    >
+      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
+    </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
     <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
@@ -547,6 +591,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-ac"><h3 id="edit-ac" class="eyebrow">Acceptance criteria</h3>
           <MarkdownEditor v-model="draft.acceptance" label="Acceptance criteria" bare :split="mode === 'full'" :min-rows="4" :attachment-id="attachmentId" placeholder="- [ ] What must be true when this is done" @save="saveEdit" @cancel="cancelEdit" />
         </section>
+        <section v-if="['ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
@@ -560,10 +605,26 @@ defineExpose({
           <InlineTitle ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
-            :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
+            :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :save-placement="fields => ticket.patch({ fields })" :queue-editable="canQueue" :queue-entry="queueEntry"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
+          <section v-if="queueEntry" class="q-card" :class="{ wait: queueEntry.waiting_reason }" aria-label="Work queue">
+            <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
+            <div class="q-card-acts">
+              <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queue.firstShared(project.id)?.ticket_id === item.id" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
+              <button type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
+              <button type="button" class="btn sm ghost" :disabled="!canQueue || queue.busy" @click="queue.remove(project.id, item.id).catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="close" :size="13" />Remove</button>
+              <button type="button" class="btn sm ghost" @click="queueAnchor = $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="13" />Open the queue</button>
+            </div>
+          </section>
+          <section v-else-if="canQueue && queueable(item) && queueGaps.length" class="q-card wait" aria-label="Not ready to queue">
+            <p class="eyebrow"><AppIcon name="alert" :size="14" />Not ready to queue</p>
+            <p>Missing {{ queueGaps.map(gap => gap === 'estimate' ? 'estimate' : gap === 'criteria' ? 'acceptance criteria' : 'a named blocker').join(', ') }}.</p>
+            <button type="button" class="btn sm" @click="queueAction?.toggle()"><AppIcon name="sparkle" :size="13" />Fix what is missing</button>
+          </section>
+          <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
+          <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
@@ -631,7 +692,7 @@ defineExpose({
           <div class="side-card">
             <TicketProperties
               :class="{ 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="column" :now="now"
-              :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
+              :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :save-placement="fields => ticket.patch({ fields })" :queue-editable="canQueue" :queue-entry="queueEntry"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
             />
@@ -651,8 +712,9 @@ defineExpose({
     <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="attachable" :set-caption="attachments.setCaption" :names="names" />
 
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
-    <OptionMenu v-if="menu?.kind === 'assignee' && item" :anchor="menu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="item.assignee?.id ?? ''" searchable @choose="chooseAssignee" @close="closeMenu" />
-    <StatusMenu v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <AssigneeMenu v-if="menu?.kind === 'assignee' && item" :row="item" :project-id="project.id" :anchor="menu.anchor" :people="assigneeOptions" :can-assign="editable" @choose="chooseAssignee" @changed="emit('assigned')" @close="closeMenu" />
+    <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" @close="restore => { const anchor = queueAnchor; queueAnchor = null; if (restore) anchor?.focus() }" @open="key => { queueAnchor = null; openLinked(key) }" @filter="() => { queueAnchor = null; void routerToQueued() }" />
+    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <RelationPicker
@@ -665,6 +727,9 @@ defineExpose({
 </template>
 
 <style scoped>
+.q-card { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
+.q-card.wait { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); }
+.q-card-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .ticket-ws { display: flex; flex-direction: column; min-height: 0; outline: none; }
 .ticket-ws.panel {
   position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: calc(var(--footer-h) + 10px); width: min(560px, calc(100vw - 20px));
@@ -717,6 +782,7 @@ defineExpose({
 }
 .edit-title.large { font-size: 28px; }
 .edit-title:focus { box-shadow: var(--focus-ring); }
+.hc-edit-hint { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
 .edit-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .edit-prop { display: grid; gap: 4px; }
 .prop-label { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }

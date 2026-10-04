@@ -10,7 +10,7 @@ import type { DeepReadonly } from './ledger.ts'
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
 export const HEARTBEAT_STALE_MS = 3 * 60_000
-export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok' }
+export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
 export type SessionGroup = 'needs' | 'awaiting' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
@@ -53,7 +53,8 @@ export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> |
   // History is read with a detail only. It stays until the next detail read replaces it,
   // so a panel does not blink between a list row and the detail that follows it.
   carry('metadata_history')
-  carry('activity_history')
+  carry('activity_history', incoming.agent_activity_mode === undefined || incoming.agent_activity_mode === 'agent_summary')
+  carry('current_activity_history', incoming.agent_activity_mode !== 'off')
   if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return { ...incoming, ...carried }
   return {
     ...incoming,

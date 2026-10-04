@@ -46,7 +46,8 @@ type approvalSnapshot struct {
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
-func (m *Module) list(ctx context.Context, p tenant.Principal, limit int) ([]Approval, error) {
+func (m *Module) list(ctx context.Context, p tenant.Principal, limit int, pendingOnly ...bool) ([]Approval, error) {
+	pending := len(pendingOnly) > 0 && pendingOnly[0]
 	if p.Kind != tenant.Person && p.Kind != tenant.Agent {
 		return nil, fail(http.StatusForbidden, "forbidden")
 	}
@@ -68,8 +69,9 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, limit int) ([]App
 			rows, err := tx.Query(ctx, approvalFrom+`
 			WHERE ($1::uuid IS NULL OR r.agent_principal_id = $1::uuid)
 			  AND ($3::bool OR aeon_visible_all() OR COALESCE(n.project_id, wn.project_id) = ANY (aeon_visible_projects()))
+			  AND (NOT $4::bool OR d.request_id IS NULL AND r.expires_at > now())
 			ORDER BY r.proposed_at DESC, r.id DESC
-			LIMIT 200 OFFSET $2`, agentID, offset, workspaceReader)
+			LIMIT 200 OFFSET $2`, agentID, offset, workspaceReader, pending)
 			if err != nil {
 				return err
 			}

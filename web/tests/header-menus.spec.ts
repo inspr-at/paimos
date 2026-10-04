@@ -12,6 +12,7 @@ import { mockGuestPermissions } from './authz-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 type Role = 'admin' | 'member' | 'guest'
 interface World { sent: Record<string, unknown>[]; ready: number | 'fail'; owner: boolean; business: boolean }
@@ -75,11 +76,13 @@ const names = (page: Page, menu: string) => page.getByRole('menu', { name: menu 
 // then read the settled URL and the heading that is actually on screen.
 async function expectFullHistory(page: Page) {
   const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-  await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(history.getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   await page.waitForLoadState('networkidle')
   await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
-  await expect(history.getByRole('heading', { level: 1, name: 'PAIMOS AEON releases' })).toBeVisible()
-  await expect(history.getByRole('option', { selected: true })).toHaveCount(0)
+  // AEON-488: the eyebrow names the product; the title is the live release's codename.
+  await expect(history.locator('.head .eyebrow')).toHaveText('PAIMOS AEON · RELEASE')
+  await expect(history.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(history.getByRole('row', { selected: true })).toHaveCount(0)
   return history
 }
 
@@ -103,13 +106,13 @@ test.describe('release history before the version has loaded', () => {
       const release = await holdReleaseApis(page)
       await page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-      const pill = page.locator('footer.app-footer .footer-name')
+      const pill = page.locator('footer.app-footer .version-pill')
       await expect(pill).toHaveAccessibleName('Release history')
       await pill.click()
       await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
       const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
       await expect(history).toBeVisible()
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      await expect(history.getByRole('row', { selected: true, includeHidden: true })).toHaveCount(0)
       // The list stays up until the running release is known. A phone must not
       // cover it with an empty detail while the history is still on its way.
       if (width < 600) {
@@ -120,8 +123,8 @@ test.describe('release history before the version has loaded', () => {
       await page.waitForLoadState('networkidle')
       const version = state.history.current
       await expect(page).toHaveURL(new RegExp(`[?&]releases=${version.replace(/\./g, '\\.')}(?:&|#|$)`))
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(1)
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
+      await expect(history.getByRole('row', { selected: true, includeHidden: true })).toHaveCount(1)
+      await expect(history.getByRole('row', { selected: true, includeHidden: true })).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
       // The running release's heading is its marketing name (AEON-430).
       const name = state.history.releases.find(r => r.version === version)!.codename!
       await expect(history.getByRole('heading', { level: 2, name })).toBeVisible()
@@ -149,7 +152,7 @@ test.describe('release history before the version has loaded', () => {
     const release = await holdReleaseApis(page, route => route.fulfill({ status: 503, json: { error: 'The release history could not be loaded.' } }))
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-    const pill = page.locator('footer.app-footer .footer-name')
+    const pill = page.locator('footer.app-footer .version-pill')
     await expect(pill).toHaveAccessibleName('Release history')
     await pill.click()
     await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
@@ -172,7 +175,7 @@ test.describe('release history before the version has loaded', () => {
     }))
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-    const pill = page.locator('footer.app-footer .footer-name')
+    const pill = page.locator('footer.app-footer .version-pill')
     await expect(pill).toHaveAccessibleName('Release history')
     await pill.click()
     await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
@@ -404,29 +407,41 @@ test.describe('phones', () => {
     await menu.getByRole('menuitem', { name: 'Release history', exact: true }).click()
     const history = await expectFullHistory(page)
     await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
-    await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+    await expect(history.getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   })
 
   // AEON-312: a ticket key stays whole beside the places, search, gear and avatar;
   // the moon stays in the header when there is room and otherwise leads the avatar sheet.
-  for (const width of [375, 390]) {
-    test(`with three places at ${width} the ticket key stays whole and the moon leads the avatar sheet`, async ({ page }) => {
+  for (const width of [375, 390]) for (const theme of ['light', 'dark'] as const) {
+    test(`with three places at ${width} ${theme} the ticket key stays whole and the moon leads the avatar sheet`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 })
-      await page.emulateMedia({ colorScheme: 'light' })
+      await page.emulateMedia({ colorScheme: theme })
       await signIn(page, 'admin', { business: true })
       await page.goto('/p/PHAROS/PHAROS-11?view=full')
       await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link')).toHaveCount(3)
       const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
       await expect(key).toHaveText('PHAROS-11')
       expect(await key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-      await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
+      const other = theme === 'light' ? 'dark' : 'light'
+      await expect(page.getByRole('button', { name: `Switch to ${other} theme` })).toBeHidden()
       const menu = await openAccount(page)
-      await expect(menu.getByRole('menuitem').first()).toHaveAccessibleName('Switch to dark theme')
-      await expect(menu.getByRole('menuitem').first()).toBeFocused()
-      await page.keyboard.press('Enter')
-      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-      await expect(menu.getByRole('menuitem').first()).toHaveAccessibleName('Switch to light theme')
-      await expect(menu.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true')
+      const quickTheme = menu.getByRole('menuitem').first()
+      await expect(quickTheme).toHaveAccessibleName(`Switch to ${other} theme`)
+      await expect(quickTheme).toBeFocused()
+      await expectStableControls({
+        controls: {
+          places: page.getByRole('navigation', { name: 'Places' }), key,
+          search: page.getByRole('button', { name: 'Search everything' }), gear: gear(page), avatar: avatar(page),
+          quickTheme, themes: menu.getByRole('group', { name: 'Theme' }),
+        },
+        interactions: [{ name: 'toggle the theme in the account sheet', run: async () => {
+          await page.keyboard.press('Enter')
+          await expect(page.locator('html')).toHaveAttribute('data-theme', other)
+          await expect(quickTheme).toHaveAccessibleName(`Switch to ${theme} theme`)
+          await expect(menu.getByRole('menuitemradio', { name: other === 'dark' ? 'Dark' : 'Light' })).toHaveAttribute('aria-checked', 'true')
+        } }],
+        scrollAreas: { header: page.locator('.app-header'), sheet: menu },
+      })
     })
   }
   // Measured, not counted: every width × Business on/off × home and a ticket page.

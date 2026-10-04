@@ -8,7 +8,7 @@ import { api, APIError, RequestFailure, StaleRequestError } from './api.ts'
 import { capacityWaitText, type CapacityWait } from './capacityWait.ts'
 import type { LimitUse } from './accountLimits.ts'
 
-export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode'
 export type OffDays = 'rest' | 'expire' | 'normal'
 export type NightModel = 'daynight' | 'shifts' | 'blocks'
 export type Override = '' | 'sprint' | 'hold' | 'away'
@@ -357,15 +357,20 @@ export interface AccountRow {
   sharedQuotaName?: string
   disconnecting?: boolean
 }
-export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
-export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
+export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi', gemini: 'Gemini CLI', opencode: 'OpenCode' }
+export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi', 'gemini', 'opencode']
 /** Stable IDs remain one shell word in fish, zsh and bash, regardless of the display label. */
 export function accountUseCommand(account: { id: string; harness: string }): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(account.id) || !POOL_ORDER.includes(account.harness)) return ''
   return `aeon use ${account.harness} ${account.id}`
 }
 /** The vendor's own sign-in command, shown to copy. Aeon never takes the password. */
-export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login' }
+export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login', gemini: 'gemini', opencode: 'opencode auth login' }
+/** These harnesses expose no quota reader; a first run cannot produce one. */
+export const hidesCapacityLimit = (harness: string) => ['cursor', 'grok', 'pi'].includes(harness)
+export const unreportedCapacity = (harness: string) => hidesCapacityLimit(harness)
+  ? `${HARNESS_NAME[harness] ?? harness} doesn't show its limit · one run at a time by day`
+  : harness === 'codex' ? 'No reading yet — readings need a managed run' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
 /** The long window is the bar; the 5-hour window, when there is another, is the small line under it. */
@@ -575,7 +580,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
   if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
   if (row.sharedQuotaName) return { kind: 'quiet', text: '' }
-  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : 'no reading yet' }
+  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : hidesCapacityLimit(row.harness) ? unreportedCapacity(row.harness) : 'no reading yet' }
   if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
   if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
   if (plan.dayOff && !plan.expiring) return { kind: 'quiet', text: 'day off' }
@@ -692,9 +697,8 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused' && first.disconnecting) return { segs: [b(`Disconnecting from ${first.host}.`), t(' Agents start nothing new on it.')] }
     if (first.state === 'paused') return { segs: [b('Paused in Settings / Accounts.'), t(' Turn “Agents may use it” back on there to resume.')] }
-    if (first.awaitingReading) return { segs: [b('No reading yet'), t(' — starts with the next run.')] }
-    if (first.learning && ['grok', 'cursor', 'pi'].includes(first.harness)) return { segs: [b(`${pool.name} doesn't show its limit.`), t(' One run at a time by day.')] }
-    return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
+    if (hidesCapacityLimit(first.harness)) return { segs: [t(unreportedCapacity(first.harness))] }
+    return { segs: [t(`${unreportedCapacity(first.harness)}.`)] }
   }
   if (pool.override === 'hold') {
     if (pool.overrideUntil) return { segs: [b(`On hold until ${at(pool.overrideUntil)}.`), t(` Agents leave ${pool.name} alone until then; today's share moves to the coming days.`)] }

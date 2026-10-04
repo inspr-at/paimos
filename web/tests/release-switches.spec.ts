@@ -21,7 +21,7 @@ const esc = (v: string) => v.replaceAll('.', '\\.')
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const detail = (page: Page) => sheet(page).locator('article.detail')
 const block = (page: Page, name: string) => detail(page).getByRole('article', { name })
-const rows = (page: Page) => sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const rows = (page: Page) => sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 const radio = (page: Page, name: 'EN' | 'DE' | 'Highlights' | 'Details') => sheet(page).getByRole('radio', { name, exact: true })
 const search = (page: Page) => sheet(page).getByRole('searchbox', { name: 'Search releases' })
 
@@ -287,7 +287,7 @@ test('a choice that moves a filtered selection lands in the address with it, and
   // The other way round: a release and a choice in the same moment both land.
   await openRelease(page, V105)
   await sheet(page).evaluate(dialog => {
-    dialog.querySelectorAll<HTMLElement>('[role="option"]')[1]!.click()
+    dialog.querySelectorAll<HTMLElement>('[role="row"]')[1]!.click()
     ;[...dialog.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(b => b.textContent?.trim() === 'Details')!.click()
   })
   await expect(page).toHaveURL(new RegExp(`/releases/${esc(V102)}\\?release_view=details$`))

@@ -14,13 +14,14 @@ import (
 )
 
 type step struct {
-	Name string
-	ID   string
-	Uses string
-	Run  string
-	If   string
-	With map[string]string
-	Env  map[string]string
+	Name            string
+	ID              string
+	Uses            string
+	Run             string
+	If              string
+	With            map[string]string
+	Env             map[string]string
+	ContinueOnError bool `yaml:"continue-on-error"`
 }
 
 type job struct {
@@ -108,6 +109,19 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	}
 	if _, ok := w.Jobs["homebrew-tap"]; ok {
 		t.Fatal("Homebrew must stay on AEON-356's separate post-publication workflow")
+	}
+}
+
+func TestRehearsalEmbedsItsCandidateVersion(t *testing.T) {
+	j := readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"]
+	historyIndex, history := named(t, j, "Release history fixture")
+	buildIndex, _ := named(t, j, "Build cached smoke image")
+	if historyIndex >= buildIndex || history.Env["VERSION"] != "${{ steps.version.outputs.version }}" || !strings.Contains(history.Run, `-candidate "$VERSION"`) {
+		t.Fatal("rehearsal image must embed its own reserved version before building")
+	}
+	_, published := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Release history")
+	if strings.Contains(published.Run, "-candidate") {
+		t.Fatal("tagged release builds must keep their normal history generation")
 	}
 }
 
@@ -203,13 +217,27 @@ func TestLoadedImageResolverFailsClosed(t *testing.T) {
 func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	release := readWorkflow(t, "release.yml")
 	dry := readWorkflow(t, "release-image-check.yml")
-	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) {
+	web := readWorkflow(t, "docker-web-check.yml")
+	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(web.Permissions, map[string]string{"contents": "read"}) {
 		t.Fatal("workflow defaults must be read-only")
+	}
+	if web.Jobs["docker-web-stage"].RunsOn != "ubuntu-24.04" {
+		t.Fatal("Docker web check must use the hosted ubuntu-24.04 runner")
+	}
+	paths := web.On["pull_request"].(map[string]any)["paths"].([]any)
+	for _, path := range []string{"web/**", "internal/**/*.json", "Dockerfile", "version.json", "scripts/**", "go.mod", "NOTICE", ".dockerignore"} {
+		found := false
+		for _, actual := range paths {
+			found = found || actual == path
+		}
+		if !found {
+			t.Fatalf("web check misses %s", path)
+		}
 	}
 	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["assets"].Permissions, map[string]string{"contents": "write"}) {
 		t.Fatal("token writes must be scoped to the image and assets jobs")
 	}
-	if release.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(release.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "read"}) {
+	if release.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(release.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "read", "actions": "read"}) {
 		t.Fatal("darwin signing boundary changed")
 	}
 	if _, ok := dry.On["workflow_dispatch"]; !ok {
@@ -228,7 +256,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 		t.Fatal("Homebrew must remain read-only and publication-triggered")
 	}
 	pin := regexp.MustCompile(`@[a-f0-9]{40}$`)
-	for _, w := range []workflow{release, dry, tap} {
+	for _, w := range []workflow{release, dry, tap, web} {
 		for _, j := range w.Jobs {
 			for _, s := range j.Steps {
 				if s.Uses != "" && !pin.MatchString(s.Uses) {
@@ -237,17 +265,26 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 			}
 		}
 	}
-	for _, j := range dry.Jobs {
-		if len(j.Permissions) != 0 || j.Environment != "" {
-			t.Fatal("dry run acquires privileged tokens or environments")
+	for _, name := range []string{"release-image-check.yml", "docker-web-check.yml"} {
+		data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", name))
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, s := range j.Steps {
-			if s.With["push"] == "true" || s.With["cache-to"] != "" || strings.Contains(s.Uses, "attest") || strings.Contains(s.Uses, "login-action") || strings.Contains(s.Run, "gh release") {
-				t.Fatalf("dry run has a publication side effect: %s", s.Name)
+		if strings.Contains(string(data), "secrets.") {
+			t.Fatalf("%s must not request secrets", name)
+		}
+		for _, j := range readWorkflow(t, name).Jobs {
+			if (len(j.Permissions) != 0 && !reflect.DeepEqual(j.Permissions, map[string]string{"contents": "read"})) || j.Environment != "" {
+				t.Fatal("dry run acquires privileged tokens or environments")
 			}
-			for _, v := range s.Env {
-				if strings.Contains(v, "secrets.") {
-					t.Fatal("dry run must not request secrets")
+			for _, s := range j.Steps {
+				if s.With["push"] == "true" || s.With["cache-to"] != "" || strings.Contains(s.Uses, "attest") || strings.Contains(s.Uses, "login-action") || strings.Contains(s.Run, "gh release") {
+					t.Fatalf("dry run has a publication side effect: %s", s.Name)
+				}
+				for _, v := range s.Env {
+					if strings.Contains(v, "secrets.") {
+						t.Fatal("dry run must not request secrets")
+					}
 				}
 			}
 		}
@@ -441,9 +478,21 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
 	image := w.Jobs["image"]
 	verifyIndex, _ := named(t, image, "Verify pushed image attestation")
+	recordIndex, record := named(t, image, "Record pushed digest")
 	pinIndex, pin := named(t, image, "Propose verified nixcfg deployment pin")
-	if pinIndex != verifyIndex+1 || pin.If != "" || pin.ID != "pin" {
-		t.Fatal("pin proposal must follow successful index verification immediately")
+	if recordIndex != verifyIndex+1 || pinIndex != recordIndex+1 || pin.If != "" || pin.ID != "pin" {
+		t.Fatal("record the verified digest before the optional pin proposal")
+	}
+	if record.Env["DIGEST"] != "${{ steps.push.outputs.digest }}" || !strings.Contains(record.Run, "ghcr.io/inspr-at/aeon@${DIGEST}") {
+		t.Fatal("digest summary must bind the verified release index")
+	}
+	if !pin.ContinueOnError {
+		t.Fatal("a pin proposal failure must not fail image or skip assets")
+	}
+	for _, s := range image.Steps {
+		if s.ID != "pin" && s.ContinueOnError {
+			t.Fatal("only the optional pin proposal may ignore failures")
+		}
 	}
 	if image.Environment != "release-pinning" || image.Outputs["pin_evidence"] != "${{ steps.pin.outputs.pin_evidence }}" {
 		t.Fatal("pin credentials and release evidence must use the documented boundary")
@@ -461,9 +510,14 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 			t.Fatalf("pin proposal input %s is not bound to the approved release", key)
 		}
 	}
-	for _, fragment := range []string{`if [ "$AEON_PIN_BOT_ENABLED" = true ]`, "node scripts/release-pin-pr.mjs --write", "else", "node scripts/release-pin-pr.mjs\n"} {
+	for _, fragment := range []string{`args=(scripts/release-pin-pr.mjs)`, `if [ "$AEON_PIN_BOT_ENABLED" = true ]`, `args+=(--write)`, `if ! node "${args[@]}"; then`} {
 		if !strings.Contains(pin.Run, fragment) {
 			t.Fatalf("pin proposal lacks explicit read-only/write routing: %s", fragment)
+		}
+	}
+	for _, fragment := range []string{"::warning::Deployment pin proposal failed", "Deployment pin proposal failed; release assets will still be built.", `>> "$GITHUB_STEP_SUMMARY"`, "exit 1"} {
+		if !strings.Contains(pin.Run, fragment) {
+			t.Fatalf("pin failure must retain its outcome, annotation and summary: %s", fragment)
 		}
 	}
 	_, draft := named(t, w.Jobs["assets"], "Create draft GitHub release with signed assets")

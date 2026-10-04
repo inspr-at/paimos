@@ -3,6 +3,7 @@
 export interface MenuOption { value: string; label: string; hint?: string }
 </script>
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -45,7 +46,7 @@ function move(event: KeyboardEvent) {
           <template v-if="kind === 'priority'"><PriorityIcon v-if="option.value" :priority="option.value" /><span v-else class="none-mark" /></template>
           <template v-else-if="kind === 'assignee'"><PersonAvatar v-if="option.value" :id="option.value" :name="option.label" :size="18" /><AppIcon v-else name="user" :size="14" class="faint-icon" /></template>
           <AppIcon v-else :name="option.value === 'epic' ? 'epic' : option.value === 'task' ? 'task' : 'ticket'" :size="14" :class="['kind-icon', option.value]" />
-          <span class="label">{{ option.label }}</span>
+          <span v-clip-tip class="label">{{ option.label }}</span>
           <span v-if="option.hint" class="hint">{{ option.hint }}</span>
           <AppIcon v-if="option.value === current" name="check" :size="14" class="tick" />
           <span v-else-if="!searchable && index < 9" class="digit keycap" aria-hidden="true">{{ index + 1 }}</span>
@@ -73,4 +74,10 @@ function move(event: KeyboardEvent) {
 .faint-icon, .kind-icon { color: var(--ink-3); }
 .kind-icon.epic { color: var(--gold); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
+
+@media (max-width: 720px) {
+  .menu-item { height: 52px; }
+  .label { line-height: 18px; }
+  .label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
+}
 </style>

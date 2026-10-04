@@ -20,7 +20,9 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type listPerson struct {
@@ -114,12 +116,14 @@ type listQuery struct {
 	PrioritiesNot []string `json:"priorities_not,omitempty"`
 	AssigneesNot  []string `json:"assignees_not,omitempty"`
 	// Tags, cost units and releases match by name or label, case-insensitively.
-	Tags         []string `json:"tags,omitempty"`
-	TagsNot      []string `json:"tags_not,omitempty"`
-	CostUnits    []string `json:"cost_units,omitempty"`
-	CostUnitsNot []string `json:"cost_units_not,omitempty"`
-	Releases     []string `json:"releases,omitempty"`
-	ReleasesNot  []string `json:"releases_not,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	TagsNot        []string `json:"tags_not,omitempty"`
+	CostUnits      []string `json:"cost_units,omitempty"`
+	CostUnitsNot   []string `json:"cost_units_not,omitempty"`
+	Releases       []string `json:"releases,omitempty"`
+	ReleasesNot    []string `json:"releases_not,omitempty"`
+	HumanChecks    []string `json:"human_checks,omitempty"`
+	HumanChecksNot []string `json:"human_checks_not,omitempty"`
 	// Epics match everything below an epic (its subtree, not the epic itself);
 	// "none" is work under no epic.
 	Epics    []string `json:"epics,omitempty"`
@@ -135,10 +139,12 @@ type listQuery struct {
 	IDs []string `json:"ids,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
-	seen       assigneeSeen
-	leadYellow int
-	leadRed    int
-	planRates  json.RawMessage
+	seen        assigneeSeen
+	leadYellow  int
+	leadRed     int
+	modelNames  json.RawMessage
+	planRates   json.RawMessage
+	planPlanner *planner
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -156,7 +162,7 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
+var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -281,6 +287,9 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		return out, err
 	}
 	if out.Releases, out.ReleasesNot, err = negatedList(r, "release", label); err != nil {
+		return out, err
+	}
+	if out.HumanChecks, out.HumanChecksNot, err = negatedList(r, "human_check", func(value string) (string, bool) { return value, value == "pending" || value == "none" }); err != nil {
 		return out, err
 	}
 	if out.Epics, out.EpicsNot, err = negatedList(r, "epic", personOrNone); err != nil {
@@ -455,6 +464,8 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	}
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		ctx = modelprefs.WithChainCache(ctx)
+		ctx = context.WithValue(ctx, planRouteCacheKey{}, map[string]*planRoute{})
 		var anchor any
 		if mark != nil {
 			anchor = mark.ID
@@ -475,6 +486,11 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				return dbErr("lead thresholds", err)
 			}
 			q.leadYellow, q.leadRed = yellow, red
+		}
+		if sortsBy(q, "model") {
+			if err := prepareModelNameSort(ctx, tx, &q); err != nil {
+				return dbErr("model name sort", err)
+			}
 		}
 		if sortsByPlanningValue(q) {
 			if err := preparePlanningSort(ctx, tx, &q); err != nil {
@@ -503,10 +519,25 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var assigneeAvatar bool
 			var leadName, leadKey *string
 			var listSpent, listEst, paidSpent, paidEst *string
-			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
+			var rowNumber int64
+			var anchorValid bool
+			if rows.RawValues()[0] == nil {
+				values, err := rows.Values()
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				rows.Close()
+				if !values[len(values)-1].(bool) {
+					return conflictCoded("cursor anchor no longer matches; restart pagination", "cursor_expired")
+				}
+				break
+			}
+			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.HumanCheck, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
 			if money != nil {
 				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
 			}
+			dest = append(dest, &rowNumber, &anchorValid)
 			err = rows.Scan(dest...)
 			if err != nil {
 				rows.Close()
@@ -592,10 +623,15 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				return err
 			}
+			queued, err := workqueue.Load(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
+				page.Items[i].Queued = queued[page.Items[i].ID]
 			}
-			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money)
+			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money, q.planPlanner)
 			if err != nil {
 				return dbErr("list planning", err)
 			}
@@ -830,7 +866,7 @@ const assigneeWorkerEligible = `s.stopped_at IS NULL
 
 // assigneeHarnessLabel is who()'s last resort: the harness word plus " agent".
 const assigneeHarnessLabel = `CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
-        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
+        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok' WHEN 'gemini' THEN 'Gemini CLI' WHEN 'opencode' THEN 'OpenCode'
         ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent'`
 
 // assigneeShownExpr is the name this caller would see for session s: a
@@ -961,6 +997,11 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	add(q.CostUnitsNot, not(labelMatch("cost_unit")))
 	add(q.Releases, labelMatch("release"))
 	add(q.ReleasesNot, not(labelMatch("release")))
+	checkMatch := func(values []string) string {
+		return `(CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END)=ANY(` + arg(values) + `::text[])`
+	}
+	add(q.HumanChecks, checkMatch)
+	add(q.HumanChecksNot, not(checkMatch))
 	// Epic subtrees: members of the named epics, or of every epic when "none"
 	// is asked for. The walk only runs when an epic filter is set.
 	epicCTE := ""
@@ -1117,8 +1158,8 @@ func listOrder(q listQuery) string {
 			// The number the cell shows: a finished ticket is 100, like its ETA view.
 			parts = append(parts, eta.ProgressSQL("eta", "fin")+" IS NULL ASC", eta.ProgressSQL("eta", "fin")+" "+dir)
 		case "model":
-			// The role's rung on the ladder, then the area; rows without a role last.
-			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
+			// Full model name and version, independent of the person's display choices.
+			parts = append(parts, "route.name IS NULL ASC", "route.name "+dir)
 		case "tokens", "list_cost", "paid":
 			// The same integer the cell prints: spent micro-dollars, else the
 			// estimate. Rounded once in the CTE as numeric, then the id tiebreaker.
@@ -1176,19 +1217,25 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {
-		planningJoin = ` LEFT JOIN LATERAL (
-            SELECT CASE rn.fields->>'route_role' WHEN 'scout' THEN 0 WHEN 'mechanical' THEN 1 WHEN 'build' THEN 2 WHEN 'build-hard' THEN 3 WHEN 'review-gate' THEN 4 END AS rank,
-                nullif(rn.fields->>'area','') AS area
-            FROM nodes rn WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id
-        ) route ON true`
+		names := q.modelNames
+		if len(names) == 0 {
+			names = json.RawMessage(`{}`)
+		}
+		args = append(args, string(names))
+		planningCTE, planningJoin = modelNameSortSQL(fmt.Sprintf("$%d", len(args)))
 	}
+
 	if sortsByPlanningValue(q) {
 		rates := q.planRates
 		if len(rates) == 0 {
 			rates = json.RawMessage(`[]`)
 		}
 		args = append(args, string(rates))
-		planningCTE = planningSortSQL(fmt.Sprintf("$%d", len(args)), harnessAll, projectArg, false)
+		valueCTE := planningSortSQL(fmt.Sprintf("$%d", len(args)), harnessAll, projectArg, false)
+		if sortsBy(q, "model") {
+			valueCTE = strings.Replace(valueCTE, ", "+planningStatesCTE(), "", 1)
+		}
+		planningCTE += valueCTE
 		planningJoin += ` LEFT JOIN planning_values plan ON plan.id=f.id`
 	}
 	moneyJoin, moneyCols := "", ""
@@ -1200,7 +1247,8 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
 	}
 	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
-    selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
+    cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),
+    selected AS (SELECT * FROM ordered WHERE (SELECT valid FROM cursor_guard) AND rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
         SELECT c.parent_id,count(*)::int AS child_count FROM nodes c
@@ -1208,12 +1256,12 @@ func listSQL(q listQuery, anchor any) (string, []any) {
         WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
         GROUP BY c.parent_id
     )
-    SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
+    , page_rows AS (SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
            ` + hasAvatar("assignee.id") + `,
            par.id::text,par.key,par.title,pk.slug,
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
-           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + `
+           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + `,s.rn
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
@@ -1235,7 +1283,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
             WHERE up.depth<32
         ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug='epic' ORDER BY u.depth LIMIT 1
     ) epic ON true` + moneyJoin + `
-    ORDER BY s.rn`
+    ) SELECT page_rows.*,cursor_guard.valid FROM cursor_guard LEFT JOIN page_rows ON true ORDER BY page_rows.rn`
 	return sql, args
 }
 func facetSQL(q listQuery) (string, []any) {
@@ -1253,6 +1301,10 @@ func facetSQL(q listQuery) (string, []any) {
 	// Tag, cost unit and release counts read fields per row; they are only part
 	// of the query when asked for.
 	extra := ""
+	if want("human_check") {
+		extra += `
+    UNION ALL SELECT 'human_check',CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END FROM filtered f JOIN nodes n ON n.id=f.id`
+	}
 	if want("tag") {
 		extra += `
     UNION ALL SELECT 'tag',coalesce(nullif(btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}' ELSE t->>'name' END),''),'none')
@@ -1393,7 +1445,7 @@ func (m *Module) nodeTree(ctx context.Context, tenantID string, q treeQuery) (tr
 			if err := rows.Scan(
 				&item.node.ID, &item.node.Key, &item.node.KindID, &item.node.Title, &item.node.Body,
 				&fields, &item.node.State, &item.node.ParentID, &position,
-				&item.node.CreatedAt, &item.node.UpdatedAt, &item.node.DeletedAt,
+				&item.node.CreatedAt, &item.node.UpdatedAt, &item.node.DeletedAt, &item.node.HumanCheck,
 				&item.depth, &item.posPath, &item.idPath,
 			); err != nil {
 				return err

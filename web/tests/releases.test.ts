@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import { withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, stats, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, visibleReleases, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -235,16 +235,8 @@ test('a server group wins over the commit type, and a version bump stays out', (
   assert.deepEqual(grouped.other.map(c => c.commit), ['3'])
 })
 
-test('stats count today and this week, the gap since the last release and the median gap', () => {
-  const now = new Date(2026, 8, 24, 16, 0).getTime() // a Thursday
-  const at = (d: number, h: number) => new Date(2026, 8, d, h).toISOString()
-  const releases = [rel('1', at(24, 14)), rel('2', at(24, 10)), rel('3', at(23, 12)), rel('4', at(20, 12)), rel('5', at(24, 15), { state: 'reserved' })]
-  const s = stats(releases, now, 7)
-  assert.equal(s.today, 2)
-  assert.equal(s.week, 3) // Monday 21 onwards
-  assert.equal(s.last, Date.parse(at(24, 14)))
-  assert.equal(s.median, 22 * 3_600_000) // gaps 72h, 22h, 4h
-  assert.deepEqual(s.cadence, [0, 0, 1, 0, 0, 1, 2]) // 18 to 24 September
+// The header's stats live in releaseStats (AEON-488, release-stats.unit.test.ts).
+test('spans read in minutes, hours and days', () => {
   assert.equal(span(45 * 60_000), '45 min')
   assert.equal(span(192 * 60_000), '3 h 12 min')
   assert.equal(span(3 * 86_400_000), '3 days')
@@ -314,6 +306,19 @@ test('new since the last visit: newer published releases, nothing on a first vis
   const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
+  assert.deepEqual([...newSince(releases, '1', true)].sort(), ['2', '2.5', '3'])
+  assert.equal(newSince(releases, null, true).size, 0)
+  assert.equal(newSince([releases[2]], '1').size, 0)
+})
+
+test('reserved versions are opt-in without changing the full history or result counts', () => {
+  const releases = [rel('3', ''), rel('2', '', { state: 'reserved', published_at: null }), rel('1', '', { published_at: null })]
+  const before = structuredClone(releases)
+  assert.deepEqual(visibleReleases(releases).map(r => r.version), ['3', '1'])
+  assert.deepEqual(visibleReleases(releases, true), releases)
+  // A tagged published version without a publication timestamp remains visible.
+  assert.deepEqual(releases, before)
+  assert.equal(releases.filter(r => matches(r, { q: '', features: false, fixes: false, tickets: false })).length, 3)
 })
 
 test('regenerated missing snapshots preserve the v1 archive headline, tickets and filters with an honest gap', () => {

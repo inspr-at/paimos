@@ -33,7 +33,7 @@ func TestGrokAssetsStayPinned(t *testing.T) {
 		t.Fatal("Grok isolation assets changed")
 	}
 	if _, err := NewGrokAdapter(map[string]GrokBinding{"account": {Variant: "invalid"}}).Start(context.Background(), StartRequest{
-		Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}, AccountKey: "account"}, func(AdapterEvent) {}); err == nil {
+		Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: "xai"}, AccountKey: "account"}, func(AdapterEvent) {}); err == nil {
 		t.Fatal("unknown native variant accepted")
 	}
 }
@@ -43,7 +43,7 @@ func TestGrokQualifiedVerificationReachesPinnedNativePreflight(t *testing.T) {
 		t.Skip("native Grok verification is qualified only on darwin/arm64")
 	}
 	r := verificationRequest(t)
-	r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}
+	r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: "xai"}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

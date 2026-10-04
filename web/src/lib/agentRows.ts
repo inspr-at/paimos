@@ -16,8 +16,9 @@ import type { SessionChangeRequest, SessionControl } from './agents.ts'
 import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
+import type { ServiceTier, TierChange, TierReport, TierRequest, TierState } from './serviceTier.ts'
 
-export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode' | 'media' | 'terminal'
 export interface MetadataChange {
   field: 'display_label' | 'model' | 'reasoning_effort'
   previous_value: string | null
@@ -30,13 +31,19 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 
 // A session as the API sends it. Nothing outside the ledger may hold one: see
 // HarnessSession in lib/agents.ts for the type the page works with.
+export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
+  service_tier?: ServiceTier | null; service_tier_revision?: number; service_tier_reports?: TierReport[]; service_tier_request?: ServiceTier | null
+  agent_activity_mode?: 'off' | 'tool_activity' | 'agent_summary'
+  current_activity?: CurrentAgentActivity | null
+  current_activity_history?: CurrentAgentActivity[]
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import('./attachWatch').AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   process_ownership?: ProcessOwnership; process_observed_at?: string
+  generator?: string | null; command?: string | null
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
@@ -92,6 +99,17 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
 const sessionResource = (projectId: string, sessionId: string, rest: string) => `/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}/${rest}`
 // The same for the sub-resources that hang off a session by its id alone (its delivery rating).
 const sessionResourceById = (sessionId: string, rest: string) => `/harness-sessions/${enc(sessionId)}/${rest}`
+
+// Tier answers are sub-resource state, never session rows; reads/writes still use
+// the canonical transport so permissions, revocation and write floors apply.
+export const readServiceTier = async (project: string, session: string, signal?: AbortSignal) =>
+  (await call<TierState>(sessionResource(project, session, 'tier'), 'GET', undefined, signal)).body
+export const changeServiceTier = async (project: string, session: string, body: TierChange) =>
+  (await call<TierState>(sessionResource(project, session, 'tier'), 'POST', body)).body
+export const askServiceTier = async (project: string, session: string, body: { request_id: string; tier: ServiceTier; reason: string }) =>
+  (await call<TierRequest>(sessionResource(project, session, 'tier/ask'), 'POST', body)).body
+export const decideServiceTier = async (project: string, session: string, id: string, body: TierChange & { decision: 'approve' | 'decline' }) =>
+  (await call<TierState>(sessionResource(project, session, `tier/requests/${enc(id)}/decision`), 'POST', body)).body
 
 // What one answer knows: the tick its request started at and, for a read, the position
 // of the snapshot it returned. A write's position is the write floor (api() raises it)
@@ -182,6 +200,9 @@ export const cancelRun = async (id: string) => {
 const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 export const readControlResponse = (project: string, session: string, control: string) => api(sessionResource(project, session, `controls/${enc(control)}`))
 export const readManagedSettings = (project: string, session: string) => api(sessionResource(project, session, 'managed-settings'))
+// AEON-436 protected subresource; these answers contain tier state, not raw session rows.
+export const readTierResponse = (project: string, session: string) => api(sessionResource(project, session, 'tier'))
+export const decideTierResponse = (project: string, session: string, request: string, body: unknown) => api(sessionResource(project, session, `tier/requests/${enc(request)}/decision`), post(body))
 export const sendManagedControl = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'managed-controls'), post(body))
 export const sendSessionControl = async (project: string, session: string, kind: 'interrupt' | 'stop'): Promise<SessionControl> =>
   (await call<SessionControl>(sessionResource(project, session, `controls/${kind}`), 'POST', {})).body

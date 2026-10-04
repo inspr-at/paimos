@@ -57,7 +57,7 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 		return nil, err
 	}
 	state, harness := q.Get("state"), q.Get("harness")
-	if state != "" && state != "stopped" && !validPhase(state) {
+	if state != "" && state != "stopped" && state != "paused" && !validPhase(state) {
 		return nil, workorders.Fail(400, "invalid state")
 	}
 	if harness != "" && !validHarness(harness) {
@@ -92,11 +92,11 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 		}
 	}
 	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+` FROM harness_sessions
- WHERE ($1='' OR CASE WHEN stopped_at IS NOT NULL THEN 'stopped' ELSE phase END=$1)
+ WHERE ($1='' OR CASE WHEN stopped_at IS NOT NULL THEN 'stopped' ELSE phase END=$1 OR ($1='paused' AND stopped_at IS NOT NULL AND stop_reason='paused' AND pause_record->>'state' IN ('paused','resume_requested')))
  AND ($2='' OR harness=$2) AND ($3::uuid IS NULL OR agent_principal_id=$3)
  AND ($4::uuid IS NULL OR project_id=$4) AND ($5::uuid IS NULL OR ticket_node_id=$5)
  AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7::uuid))
- AND ($9<>'current' OR coalesce(greatest(stopped_at,archived_at),'infinity')>clock_timestamp()-interval '24 hours')
+ AND ($9<>'current' OR coalesce(greatest(stopped_at,archived_at),'infinity')>clock_timestamp()-interval '24 hours' OR (archived_at IS NULL AND stop_reason='paused' AND pause_record->>'state' IN ('paused','resume_requested')))
  ORDER BY created_at DESC,id DESC LIMIT $8`, state, harness, nullable(agent), nullable(projectID), nullable(ticket), cursorTime(cursor), nullable(cursor.ID), limit+1, view)
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	for i := range out.Items {
 		s := &out.Items[i]
-		if noteID, ok := latestNotes[s.ID]; ok {
+		if noteID, ok := latestNotes[s.ID]; ok && s.ActivityNote != nil {
 			s.ActivityNoteID = &noteID
 		}
 		s.Project = summaries[s.ProjectID]

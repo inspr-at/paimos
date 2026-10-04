@@ -3,10 +3,12 @@ package profile
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"image"
+	"image/color"
 	_ "image/jpeg"
 	"image/png"
 	"io"
@@ -18,8 +20,10 @@ import (
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 
+	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/imagework"
 )
 
 const maxAvatarBytes = 8 << 20
@@ -33,48 +37,124 @@ type Crop struct {
 // ProcessAvatar decodes PNG, JPEG or WebP, applies JPEG EXIF orientation,
 // strips metadata by PNG re-encoding, and produces exact square variants.
 func ProcessAvatar(data []byte, crop Crop) ([]byte, map[int][]byte, error) {
-	if len(data) == 0 || len(data) > maxAvatarBytes {
-		return nil, nil, badInput("file must be 1–8 MiB")
-	}
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil, nil, badInput("invalid image")
-	}
-	if format != "png" && format != "jpeg" && format != "webp" {
-		return nil, nil, badInput("image must be PNG, JPEG or WebP")
-	}
-	if cfg.Width < 1 || cfg.Height < 1 || int64(cfg.Width)*int64(cfg.Height) > 100_000_000 {
-		return nil, nil, badInput("image dimensions exceed limit")
-	}
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, nil, badInput("invalid image")
-	}
-	if format == "jpeg" {
-		img = orient(img, jpegOrientation(data))
-	}
-	b := img.Bounds()
-	if crop.X < 0 || crop.Y < 0 || crop.Size < 1 || crop.X > b.Dx()-crop.Size || crop.Y > b.Dy()-crop.Size {
-		return nil, nil, badInput("crop outside oriented image")
-	}
 	var original bytes.Buffer
-	if err := png.Encode(&original, img); err != nil {
-		return nil, nil, err
-	}
-	selected := image.NewRGBA(image.Rect(0, 0, crop.Size, crop.Size))
-	draw.Draw(selected, selected.Bounds(), img, image.Point{X: b.Min.X + crop.X, Y: b.Min.Y + crop.Y}, draw.Src)
 	variants := map[int][]byte{}
-	for _, size := range []int{32, 64, 128, 256} {
-		dst := image.NewRGBA(image.Rect(0, 0, size, size))
-		draw.CatmullRom.Scale(dst, dst.Bounds(), selected, selected.Bounds(), draw.Over, nil)
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, dst); err != nil {
-			return nil, nil, err
+	err := processAvatar(context.Background(), data, crop, func(img image.Image, scaled map[int]image.Image) error {
+		if err := png.Encode(&original, img); err != nil {
+			return err
 		}
-		variants[size] = buf.Bytes()
+		for _, size := range []int{32, 64, 128, 256} {
+			var buf bytes.Buffer
+			if err := png.Encode(&buf, scaled[size]); err != nil {
+				return err
+			}
+			variants[size] = buf.Bytes()
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	return original.Bytes(), variants, nil
 }
+
+// The consumer runs inside the reservation, including PNG encoding and storage.
+// Production paths use their request context and never decode the canonical PNG.
+func processAvatar(ctx context.Context, data []byte, crop Crop, consume func(image.Image, map[int]image.Image) error) error {
+	if len(data) == 0 || len(data) > maxAvatarBytes {
+		return badInput("file must be 1–8 MiB")
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return badInput("invalid image")
+	}
+	if format != "png" && format != "jpeg" && format != "webp" {
+		return badInput("image must be PNG, JPEG or WebP")
+	}
+	if imagework.Avatar.Check(cfg.Width, cfg.Height) != nil {
+		return badInput("image dimensions exceed limit: use at most 4,194,304 pixels, 4096 pixels per side, and a square crop at most 2048 pixels per side")
+	}
+	orientation := 1
+	w, h := cfg.Width, cfg.Height
+	if format == "jpeg" {
+		orientation = jpegOrientation(data)
+		if orientation >= 5 {
+			w, h = h, w
+		}
+	}
+	if crop.X < 0 || crop.Y < 0 || crop.Size < 1 || crop.Size > 2048 || crop.X > w-crop.Size || crop.Y > h-crop.Size {
+		return badInput("crop outside oriented image: choose a square inside the photo, at most 2048 pixels per side")
+	}
+	release, err := imagework.Avatar.Acquire(ctx, cfg.Width, cfg.Height)
+	if err != nil {
+		return err
+	}
+	defer release()
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return badInput("invalid image")
+	}
+	if img.Bounds().Dx() != cfg.Width || img.Bounds().Dy() != cfg.Height {
+		return badInput("image dimensions differ from header")
+	}
+	img = orient(img, orientation)
+	b := img.Bounds()
+	selected := image.Rect(crop.X, crop.Y, crop.X+crop.Size, crop.Y+crop.Size).Add(b.Min)
+	variants := map[int]image.Image{}
+	for _, size := range []int{32, 64, 128, 256} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		dst := image.NewRGBA(image.Rect(0, 0, size, size))
+		draw.CatmullRom.Scale(dst, dst.Bounds(), avatarCropSource{img}, selected, draw.Over, nil)
+		variants[size] = dst
+	}
+	return consume(img, variants)
+}
+
+// Preserve the old RGBA crop's 8-bit premultiplied samples without allocating
+// a crop bitmap. This matters for transparent and 16-bit source pixels.
+type avatarCropSource struct{ image.Image }
+
+func (src avatarCropSource) At(x, y int) color.Color {
+	return color.RGBAModel.Convert(src.Image.At(x, y))
+}
+
+// Orientation is a coordinate view, avoiding another full-resolution image.
+type orientedImage struct {
+	src    image.Image
+	n      int
+	bounds image.Rectangle
+}
+
+func (img orientedImage) ColorModel() color.Model { return color.RGBAModel }
+func (img orientedImage) Bounds() image.Rectangle { return img.bounds }
+func (img orientedImage) At(x, y int) color.Color {
+	if !(image.Point{X: x, Y: y}).In(img.bounds) {
+		return color.RGBA{}
+	}
+	b := img.src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	sx, sy := x, y
+	switch img.n {
+	case 2:
+		sx = w - 1 - x
+	case 3:
+		sx, sy = w-1-x, h-1-y
+	case 4:
+		sy = h - 1 - y
+	case 5:
+		sx, sy = y, x
+	case 6:
+		sx, sy = y, h-1-x
+	case 7:
+		sx, sy = w-1-y, h-1-x
+	case 8:
+		sx, sy = w-1-y, x
+	}
+	return color.RGBAModel.Convert(img.src.At(b.Min.X+sx, b.Min.Y+sy))
+}
+
 func orient(src image.Image, n int) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -85,30 +165,7 @@ func orient(src image.Image, n int) image.Image {
 	if n >= 5 {
 		ow, oh = h, w
 	}
-	dst := image.NewRGBA(image.Rect(0, 0, ow, oh))
-	for y := 0; y < oh; y++ {
-		for x := 0; x < ow; x++ {
-			sx, sy := x, y
-			switch n {
-			case 2:
-				sx = w - 1 - x
-			case 3:
-				sx, sy = w-1-x, h-1-y
-			case 4:
-				sy = h - 1 - y
-			case 5:
-				sx, sy = y, x
-			case 6:
-				sx, sy = y, h-1-x
-			case 7:
-				sx, sy = w-1-y, h-1-x
-			case 8:
-				sx, sy = w-1-y, x
-			}
-			dst.Set(x, y, src.At(b.Min.X+sx, b.Min.Y+sy))
-		}
-	}
-	return dst
+	return orientedImage{src: src, n: n, bounds: image.Rect(0, 0, ow, oh)}
 }
 func jpegOrientation(data []byte) int {
 	if len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
@@ -169,27 +226,31 @@ func jpegOrientation(data []byte) int {
 	}
 	return 1
 }
-func (m *Module) storeAvatar(ctx *http.Request, tenantID string, data []byte, crop Crop) (string, map[string]string, error) {
-	original, variants, err := ProcessAvatar(data, crop)
-	if err != nil {
-		return "", nil, err
-	}
-	store := m.Store
-	store.MaxSize = 0 // re-encoded PNG can exceed the upload limit
-	first, err := store.Put(ctx.Context(), tenantID, bytes.NewReader(original))
-	if err != nil {
-		return "", nil, err
-	}
-	hashes := map[string]string{}
-	for _, size := range []int{32, 64, 128, 256} {
-		v, err := store.Put(ctx.Context(), tenantID, bytes.NewReader(variants[size]))
-		if err != nil {
-			return "", nil, err
-		}
-		hashes[strconv.Itoa(size)] = v.SHA256
-	}
-	return first.SHA256, hashes, nil
+func (m *Module) stageAvatar(ctx *http.Request, tenantID string, data []byte, crop Crop) ([]*attachments.Staged, error) {
+	return stageAvatarData(ctx.Context(), m.Store, tenantID, data, crop)
 }
+
+func stageAvatarData(ctx context.Context, store attachments.Store, tenantID string, data []byte, crop Crop) (staged []*attachments.Staged, err error) {
+	defer func() {
+		if err != nil {
+			for _, blob := range staged {
+				_ = blob.Close()
+			}
+		}
+	}()
+	err = processAvatar(ctx, data, crop, func(img image.Image, variants map[int]image.Image) error {
+		for _, avatar := range []image.Image{img, variants[32], variants[64], variants[128], variants[256]} {
+			blob, err := store.StageGeneratedPNG(ctx, tenantID, avatar)
+			if err != nil {
+				return err
+			}
+			staged = append(staged, blob)
+		}
+		return nil
+	})
+	return staged, err
+}
+
 func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	p, ok := actor(w, r)
 	if !ok {
@@ -237,7 +298,7 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid crop")
 		return
 	}
-	original, hashes, err := m.storeAvatar(r, p.TenantID, file, crop)
+	staged, err := m.stageAvatar(r, p.TenantID, file, crop)
 	if err != nil {
 		var invalid invalidInput
 		if errors.As(err, &invalid) {
@@ -247,6 +308,11 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	defer func() {
+		for _, blob := range staged {
+			_ = blob.Close()
+		}
+	}()
 	var out Profile
 	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		email, err := identityEmail(r.Context(), tx, p.TenantID, p.ID)
@@ -257,9 +323,15 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err := attachments.Publish(r.Context(), tx, attachments.OwnerAvatar, staged...); err != nil {
+			return err
+		}
 		after := before
-		after.AvatarOriginalHash = original
-		after.AvatarHashes = hashes
+		after.AvatarOriginalHash = staged[0].SHA256
+		after.AvatarHashes = map[string]string{}
+		for i, size := range []int{32, 64, 128, 256} {
+			after.AvatarHashes[strconv.Itoa(size)] = staged[i+1].SHA256
+		}
 		if err := change(r.Context(), tx, p, before, exists, after); err != nil {
 			return err
 		}

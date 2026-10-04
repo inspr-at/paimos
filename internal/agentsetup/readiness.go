@@ -60,7 +60,7 @@ func enrollmentReadiness(v View, local LocalStatus) LocalStatus {
 }
 
 func harnessName(h string) string {
-	return map[string]string{"claude": "Claude", "codex": "Codex", "cursor": "Cursor", "grok": "Grok", "pi": "pi"}[h]
+	return map[string]string{"claude": "Claude", "codex": "Codex", "cursor": "Cursor", "grok": "Grok", "pi": "pi", "gemini": "Gemini CLI", "opencode": "OpenCode"}[h]
 }
 
 func readinessAction(v View, local LocalStatus) (string, string) {
@@ -95,15 +95,22 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 				stage = "blocked"
 				reason := strings.ReplaceAll(d.Reason, "_", " ")
 				switch d.Reason {
+				case "login_required":
+					if detail := SafeProbeDetail(d.Reason, d.ReasonDetail); detail != "" {
+						reason = detail
+					}
 				case "probe_timeout":
 					reason = "its sign-in and availability check did not finish within 60 seconds"
 				case "probe_failed":
 					reason = "its availability check failed or could not be confirmed by Aeon"
+					if detail := SafeProbeDetail(d.Reason, d.ReasonDetail); detail != "" {
+						reason = "its sign-in check failed: " + detail
+					}
 				case "capacity_timeout":
 					reason = "capacity capture exceeded its 10-second limit"
 				}
 				action = account + " is blocked: " + reason + "."
-				if fix := RecoveryFix(a.Harness, d.Reason); fix.Command != "" {
+				if fix := d.WithProbeDetail(a.Harness, d.ReasonDetail).Fix; fix.Command != "" {
 					action += " Run `" + fix.Command + "`."
 				}
 			}

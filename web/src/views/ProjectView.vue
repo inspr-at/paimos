@@ -30,6 +30,14 @@ import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTim
 import { useProjects } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
 import { useSession } from '../stores/session'
+import { useWorkQueue } from '../stores/workQueue'
+import { useReleases } from '../stores/releases'
+import { usePoller } from '../lib/usePolledData'
+import { queueable, queueHours } from '../lib/workQueue'
+import { queueFilteredNodes } from '../lib/queueFilter'
+import type { ListQuery } from '../lib/api'
+import AssigneeMenu from '../components/work/AssigneeMenu.vue'
+import QueueView from '../components/work/QueueView.vue'
 import AppIcon from '../components/AppIcon.vue'
 import PanelSplitter from '../components/PanelSplitter.vue'
 import FilterSheet from '../components/work/FilterSheet.vue'
@@ -78,6 +86,45 @@ const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? ro
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
+const queue = useWorkQueue(), releases = useReleases()
+const queueAnchor = ref<HTMLElement | null>(null)
+const assigneeMenu = ref<{ row: ListItem; anchor: HTMLElement } | null>(null)
+const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
+const queueError = computed(() => projectId.value ? queue.errors[projectId.value] : undefined)
+const mayQueue = computed(() => session.identity?.principal.kind === 'person' && can('run.create', projectId.value ?? undefined))
+const queuePoller = usePoller(() => projectId.value ? queue.load(projectId.value) : undefined, 20_000)
+watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if (id) { void queue.load(id); void releases.load() } }, { immediate: true })
+onMounted(() => queuePoller.start())
+onBeforeUnmount(() => queuePoller.stop())
+function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
+function openAssignee(row: ListItem, anchor: HTMLElement) { assigneeMenu.value = { row, anchor } }
+function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
+async function assignPerson(value: string) {
+  const row = assigneeMenu.value?.row
+  closeAssignee(true)
+  if (!row || !can('nodes.write', projectId.value ?? undefined)) return
+  await list.applyBulk({ ids: [row.id], assignee: value || null }).catch(e => toast(e.message, { tone: 'error' }))
+}
+async function bulkQueue() {
+  const id = projectId.value
+  if (!id || !mayQueue.value || bulkBusy.value || queue.busy) return
+  bulkBusy.value = true
+  let added = 0
+  const skipped: string[] = []
+  try {
+    for (const row of selectedRows.value) {
+      if (queue.entry(id, row.id)) continue
+      if (!queueable(row)) { skipped.push(row.key); continue }
+      try {
+        if (!(await queue.checkReadiness(row)).ready) { skipped.push(row.key); continue }
+        await queue.add(id, row.id); added++
+      }
+      catch (e) { toast(`${row.key}: ${e instanceof Error ? e.message : 'queue failed'}`, { tone: 'error' }); break }
+    }
+    toast(`${added} queued${skipped.length ? `; not ready or not queueable: ${skipped.join(', ')}` : ''}`)
+  } finally { bulkBusy.value = false }
+}
+
 
 // ---------- Columns: the person's order, visibility and widths for this project ----------
 const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list:${projectId.value}`) : null)
@@ -120,7 +167,15 @@ const { density, set: setDensity } = useDensity()
 const { headerGraph, ready: headerGraphReady, set: setHeaderGraph } = useHeaderGraph()
 const glimpseActive = ref(false)
 // A status change that met someone else's newer version opens the ticket to review it.
-const list = useTicketList(projectId, filters, { review: row => openRow(row) })
+async function fetchWorkList(query: ListQuery) {
+  if (!query.state?.some(state => state === 'queued' || state === '!queued') || !projectId.value) return listNodes(query)
+  const id = projectId.value
+  await queue.load(id)
+  const snapshot = queue.snapshots[id]
+  if (!snapshot || queue.errors[id]) throw new Error(queue.errors[id] || 'The work queue could not be loaded.')
+  return queueFilteredNodes(query, snapshot)
+}
+const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
 type ViewMode = TicketView | 'journey' | 'knowledge'
@@ -203,6 +258,7 @@ const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncat
 const ticketGraphView = ref<{ focus: () => void }>()
 const outlineActive = computed(() => viewMode.value === 'outline')
 const outline = useOutline(projectId, filters, outlineActive, list, {
+  fetchList: fetchWorkList,
   me: () => session.identity?.principal.id ?? null,
   quiet: id => !!ticketKey.value && panelItem.value?.id === id,
   holds: id => ticketKey.value && panelItem.value?.id === id
@@ -236,12 +292,13 @@ const liveList = useLiveList({
     dialogOpen: !!document.querySelector('dialog[open]'),
     dragging: false,
   }),
-  around: aroundLiveApply, applied: liveApplied, reload: () => void list.load(),
+  around: aroundLiveApply, applied: liveApplied, reload: () => void list.load(), fetchList: fetchWorkList,
 })
 
 const activeLive = computed(() => outlineActive.value ? outline.live : liveList)
 const liveActive = computed(() => listActive.value || outlineActive.value)
 const liveAgents = useLiveAgents()
+watch(() => liveAgents.updatedAt, () => { if (projectId.value) void queue.load(projectId.value, true) })
 const liveDataStale = computed(() => activeLive.value.dataStale.value || liveAgents.dataStale)
 const liveUpdatedAt = computed(() => {
   const listAt = activeLive.value.updatedAt.value, agentsAt = liveAgents.updatedAt
@@ -255,6 +312,7 @@ watch(bulkBar, bar => {
   bulkHeight.value = 0
   const element = bar?.$el.querySelector('.bulk-bar') as HTMLElement | undefined
   if (!element) return
+  bulkHeight.value = element.offsetHeight
   bulkResize = new ResizeObserver(() => { bulkHeight.value = element.offsetHeight })
   bulkResize.observe(element)
 }, { flush: 'post' })
@@ -288,6 +346,10 @@ const knowledgeDeletable = computed(() => can('knowledge.delete', projectId.valu
 
 // ---------- Rows, groups and keyboard order ----------
 const displayRows = computed(() => {
+  if (filters.value.status.length === 1 && filters.value.status[0] === 'queued' && !filters.value.sort.length) {
+    const positions = new Map(queueSnapshot.value?.items.map((item, i) => [item.ticket_id, i]) ?? [])
+    return [...list.rows.value].sort((a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0))
+  }
   const primary = effectiveSort(filters.value)[0]
   return primary?.field === 'state' ? orderByStatus(list.rows.value, primary.desc, liveList.layout) : list.rows.value
 })
@@ -338,7 +400,8 @@ function options(dimension: Dimension) {
     }
     return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
   }
-  return facetOptions(dimension, list.counts(dimension), filters.value[dimension], list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
   return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value })
@@ -348,14 +411,14 @@ const facetLoading = ref(false)
 function needOptions(dimension: Dimension) {
   if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
   if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
-  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : null
+  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check' : null
   if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
 }
 function sheetOpened() {
   if (graphActive.value) return
   void list.resolveNames(options('assignee').map(o => o.value))
   void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release']) void list.requestFacet(facet)
+  for (const facet of ['tag', 'cost_unit', 'release', 'human_check']) void list.requestFacet(facet)
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -730,7 +793,7 @@ watch(ticketKey, key => { if (!key) openedFromList = false })
 
 // ---------- Actions ----------
 function copyKey(key: string) {
-  navigator.clipboard.writeText(key).then(() => toast(`Copied ${key}`), () => toast(`${key} could not be copied`, { tone: 'error' }))
+  navigator.clipboard.writeText(key).then(() => toast(`${key} copied`), () => toast(`${key} could not be copied`, { tone: 'error' }))
 }
 function newTab(key: string) {
   const project = projects.projects.find(p => key.startsWith(`${p.routeKey}-`))
@@ -1332,6 +1395,7 @@ function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.v
 
 // ---------- Keyboard ----------
 function typing(target: EventTarget | null) {
+  if (target instanceof HTMLInputElement && ['checkbox', 'radio'].includes(target.type)) return false
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 async function move(step: number) {
@@ -1406,6 +1470,13 @@ function keydown(event: KeyboardEvent) {
     }
   }
   if (outlineActive.value && !fullView.value && outlineKey(event, row)) return
+  if (event.key === 'q') {
+    event.preventDefault()
+    if (ticketKey.value) panel.value?.toggleQueue()
+    else if (selected.value.size) void bulkQueue()
+    else if (row) document.querySelector<HTMLButtonElement>(`#row-${CSS.escape(row.id)} .q-btn`)?.click()
+    return
+  }
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); void move(1); break
     case 'k': case 'ArrowUp': event.preventDefault(); void move(-1); break
@@ -1426,7 +1497,7 @@ function keydown(event: KeyboardEvent) {
       else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${row.id} .status-btn`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
       break
     case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
-    case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } break
+    case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .assignee-btn`); if (anchor) { event.preventDefault(); openAssignee(row, anchor) } } break
     case 'r': if (ticketKey.value) { event.preventDefault(); panel.value?.openLink() } break
     case 'g': if (ticketKey.value) { event.preventDefault(); panel.value?.openRelease() } break
     case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
@@ -1526,7 +1597,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('open')!.tip"><StatusIcon state="open" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('doing')!.tip"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('done')!.tip"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
+            <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
           </div>
+          <p v-if="queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
           <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
             <span class="mono pct">{{ counts.percent }}%</span>
@@ -1603,7 +1676,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
-        @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
+        @assignee="openAssignee" @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
         :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
         :live-stale="liveDataStale"
@@ -1612,9 +1685,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </template>
 
       <BulkBar ref="bulkBar"
-        v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
+        v-if="selectable && selected.size" :count="selected.size" :deleted="selectedDeleted.length" :loaded="sequence.length" :total="total" :busy="bulkBusy || queue.busy" :can-queue="mayQueue" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
-        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
+        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
       <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
@@ -1637,9 +1710,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        :density="density" :columns="toolbarColumns" :header-graph="headerGraph"
+        @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
+        @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
@@ -1648,7 +1724,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"
         :busy="saveBusy" :error="saveError" @submit="submitSave" @close="closeSave"
       />
-      <StatusMenu v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
+      <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" :filtered="filters.status.includes('queued')" @close="closeQueue" @open="key => { closeQueue(false); openKey(key) }" @filter="toggleValue('status', 'queued')" />
+      <AssigneeMenu v-if="assigneeMenu" :row="assigneeMenu.row" :project-id="project.id" :anchor="assigneeMenu.anchor" :people="bulkPeople" :can-assign="writable" @choose="assignPerson" @close="closeAssignee" @changed="list.load()" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
       <OptionMenu
         v-else-if="bulkMenu?.kind === 'assignee'" :anchor="bulkMenu.anchor" title="Assignee" :subject="plural(selected.size, 'ticket')" kind="assignee" :options="bulkPeople" current="-" :searchable="bulkPeople.length > 8"
         @choose="bulkAssign" @close="closeBulk"
@@ -1699,6 +1777,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .stat-placeholder { width: 100%; height: 19px; }
 .progress-placeholder { width: 100%; height: 12px; }
 .activity-placeholder { width: 42%; height: 18px; }
+.q-stat { height: 22px; margin: -2px -6px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: inherit; }
+.q-stat:hover { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.q-warn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.q-warn.on { color: var(--queue-wait-ink); }
 .stat-line { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
 .stat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .stat b { font: 600 13px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
@@ -1709,9 +1791,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
-.list-view.selecting { padding-bottom: 76px; }
+.list-view.selecting { padding-bottom: calc(var(--live-obstacle-h, 0px) + 20px + env(safe-area-inset-bottom)); }
 @media (max-width: 720px) {
-  .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); }
   /* The fixed chip never moves rows when it arrives; the last row can scroll
      above both it and the measured selection sheet. Desktop stays in the header. */
   .list-view.has-live-updates { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }

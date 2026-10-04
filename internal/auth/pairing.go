@@ -39,6 +39,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				return nil
 			}
 		case "agent-pairing":
+			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
+				return nil // Handler binds the account and installation proof to this principal.
+			}
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 				return nil
 			}

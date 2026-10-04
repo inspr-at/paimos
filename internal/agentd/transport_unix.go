@@ -103,6 +103,32 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	if s.stepUps != nil {
+		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+	}
+	mux.HandleFunc("POST /v1/account-link", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var req AccountLinkRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid account link", 400)
+			return
+		}
+		out, err := s.AccountLink(r.Context(), req)
+		if err != nil {
+			http.Error(w, "account linking unavailable", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(out)
+	})
 	mux.HandleFunc("POST /v1/statusline", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", 401)

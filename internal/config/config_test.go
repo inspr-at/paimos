@@ -9,6 +9,44 @@ import (
 	"testing"
 )
 
+func TestReviewWebhookSecretFile(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "webhook-fixture")
+	for _, tc := range []struct {
+		name, raw string
+		mode      os.FileMode
+		valid     bool
+	}{
+		{"valid", strings.Repeat("x", 32) + "\n", 0600, true},
+		{"short", "fixture", 0600, false},
+		{"oversized", strings.Repeat("x", 4097), 0600, false},
+		{"readable", strings.Repeat("x", 32), 0644, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(file, []byte(tc.raw), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(file, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			_, err := reviewWebhookSecret(file)
+			if (err == nil) != tc.valid {
+				t.Fatal("unexpected host key validation result")
+			}
+		})
+	}
+	link := filepath.Join(dir, "symlink")
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewWebhookSecret(link); err == nil {
+		t.Fatal("symlink accepted")
+	}
+}
+
 func TestDoctrineBinaryAllowlist(t *testing.T) {
 	hash := strings.Repeat("a", 64)
 	good := `{"assets/logo.png":"` + hash + `"}`
@@ -43,6 +81,7 @@ func TestDoctrineBinaryAllowlist(t *testing.T) {
 }
 
 func TestFromEnvDefaults(t *testing.T) {
+	t.Setenv("AEON_STATUS_AUTOPILOT", "")
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
 	t.Setenv("AEON_ADDR", "")
@@ -60,6 +99,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Addr != ":8080" || cfg.Env != "dev" {
 		t.Fatalf("addr/env = %s %s", cfg.Addr, cfg.Env)
 	}
+	if cfg.StatusAutopilot != "on" {
+		t.Fatal("status autopilot must default on")
+	}
 	if len(cfg.AithemaOperatorLocalServices) != 0 {
 		t.Fatal("operator-local service exceptions must default off")
 	}
@@ -68,6 +110,27 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" || cfg.PublicURL != "" || cfg.WebDir != "" {
 		t.Fatalf("unexpected cfg %+v", cfg)
+	}
+}
+
+func TestStatusAutopilotServerMode(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
+	for _, mode := range []string{"off", "suggest", "on"} {
+		t.Setenv("AEON_STATUS_AUTOPILOT", mode)
+		cfg, err := FromEnv()
+		if err != nil || cfg.StatusAutopilot != mode {
+			t.Fatalf("mode %s: %v", mode, err)
+		}
+	}
+	for _, mode := range []string{"false", "apply", "ON", "unknown"} {
+		t.Setenv("AEON_STATUS_AUTOPILOT", mode)
+		if _, err := FromEnv(); err == nil {
+			t.Fatal("invalid server mode started")
+		}
 	}
 }
 

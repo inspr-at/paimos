@@ -10,11 +10,13 @@ import { mockReleases, presentedHistory } from './releases-fixtures'
 const NOW = Date.parse('2026-09-29T12:00:00Z')
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const detail = (page: Page) => sheet(page).locator('article.detail')
-const rows = (page: Page) => sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const rows = (page: Page) => sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 
 async function open(page: Page, index = 0, locale?: string) {
   const history = presentedHistory(NOW)
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   await mockReleases(page, history)
   if (locale) {
     const profile = { principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale, greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }
@@ -60,12 +62,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(features.getByText('P0.x:')).toHaveCount(0)
       await named.locator('summary').click()
       await expect(d.getByRole('region', { name: 'Fixes, 1' }).locator('.pill-title')).toHaveText('Search stays put')
-      await expect(d.getByRole('region', { name: 'Other changes, 1' })).toContainText('Pin the Go module vendor hash')
+      await expect(d.getByRole('region', { name: 'Other, 1' })).toContainText('Pin the Go module vendor hash')
       // Keys named on a pill need no chip above the list.
       await expect(d.locator('.tickets')).toHaveCount(0)
       await expect(sheet(page).getByText('Historical tag headline')).toHaveCount(0)
       // The tag message stays available as evidence.
-      await d.getByRole('button', { name: /^Evidence/ }).click()
+      await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
       await expect(d.locator('#release-evidence')).toContainText('Tag message: stable104')
       expect(await noHorizontalScroll(page)).toBe(false)
       if (width === 390) await sheet(page).getByRole('button', { name: 'All releases' }).click()
@@ -86,15 +88,15 @@ test('without a presentation: the blocks lead, and a release without them is ver
   await expect(d.getByRole('heading', { level: 2, name: history.releases[1]!.codename })).toBeVisible()
   await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.getByRole('region', { name: 'Features, 1' }).locator('.pill-title')).toHaveText('Wide lists')
-  // PHAROS-11 has no pill, so it keeps its chip.
-  await expect(d.locator('.tickets')).toContainText('PHAROS-11')
+  // PHAROS-11 has no pill, so its key stays in the Other change metadata.
+  await expect(d.locator('.changes')).toContainText('PHAROS-11')
   await expect(rows(page).nth(1).locator('.headline')).toHaveText('Wide lists')
   await expect(rows(page).nth(1).locator('.headline')).not.toHaveClass(/theme/)
   await rows(page).nth(3).click()
   await expect(d.locator('.summary')).toHaveCount(0)
-  await expect(d.locator('.tickets')).toContainText('PAI-1057')
+  await expect(d.locator('.changes .meta')).toContainText('PAI-1057')
   // No ticket tells a benefit, so the fix commit is listed under Other.
-  await expect(d.getByRole('region', { name: 'Other changes, 1' })).toContainText('Retry a busy BEGIN in release acceptance transactions')
+  await expect(d.getByRole('region', { name: 'Other, 1' })).toContainText('Retry a busy BEGIN in release acceptance transactions')
 })
 
 test('a German profile reads the German presentation and pills, with English where German is empty', async ({ page }) => {
