@@ -32,6 +32,7 @@ func TestIntakePreservesPersonEdits(t *testing.T) {
 	ctx := t.Context()
 	database := dbtest.Open(t)
 	fx := newFixture(t, database)
+	foreignEvents := count(t, database, `SELECT count(*) FROM events WHERE tenant_id=$1`, fx.tenantB)
 	mux := http.NewServeMux()
 	New(database.App).Mount(mux)
 
@@ -260,7 +261,7 @@ func TestIntakePreservesPersonEdits(t *testing.T) {
 	if len(otherSnap.Sources) != 0 || len(otherSnap.Drafts) != 0 {
 		t.Fatalf("tenant B saw tenant A intake %+v", otherSnap)
 	}
-	if n := count(t, database, `SELECT count(*) FROM events WHERE tenant_id = $1`, fx.tenantB); n != 0 {
+	if n := count(t, database, `SELECT count(*) FROM events WHERE tenant_id = $1`, fx.tenantB); n != foreignEvents {
 		t.Fatalf("events leaked into tenant B: %d", n)
 	}
 

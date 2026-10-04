@@ -54,6 +54,7 @@
         "internal/tenant/**",
         "internal/tenantbootstrap/**",
         "internal/profile/**",
+        "internal/themes/**",
         "internal/imagework/**",
         "internal/attachwatch/**",
         "internal/linkvault/**",
@@ -109,6 +110,7 @@
       "paths": [
         "internal/cli/**",
         "internal/inbox/**",
+        "internal/chat/**",
         "internal/client/**",
         "internal/plugins/**",
         "internal/events/**"

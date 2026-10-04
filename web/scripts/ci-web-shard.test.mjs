@@ -5,8 +5,8 @@ import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import {
-  balanceShards, checkCoverage, discoverSpecs, loadManifest, main, parseArgs,
-  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, validateManifest, mergeReports, webRoot,
+  balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
+  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
 } from './ci-web-shard.mjs'
 
 const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project: null,
@@ -17,6 +17,43 @@ const fixture = () => ({ version: 1, groups: [group('a', [9, 8, 7]), group('b', 
 const files = manifest => manifest.groups.flatMap(g => g.specs.map(s => s.file))
 // The real manifest plus any specs that landed on main since it was written (what every shard job runs).
 const effective = () => reconcileManifest(loadManifest(), discoverSpecs()).manifest
+
+test('source manifest accounts for every spec, including nested files, before reconciliation', () => {
+  const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
+  assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
+  assert.deepEqual(manifest.exclusions, [])
+  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts']) {
+    assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
+  }
+})
+
+test('new specs require a map entry or a valid ticketed exclusion; stale or conflicting exclusions fail', () => {
+  const manifest = fixture(), added = 'tests/new.spec.ts', discovered = [...files(manifest), added]
+  assert.throws(() => checkSpecInventory(manifest, discovered), /missing from manifest or ticketed exclusions: tests\/new\.spec\.ts/)
+  manifest.exclusions = [{ file: added, ticket: 'AEON-676', reason: 'Known hosted failure' }]
+  assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: 6, excluded: 1 })
+  for (const ticket of [undefined, '', 'pending', 'AEON', 'AEON-0']) {
+    const invalid = structuredClone(manifest)
+    invalid.exclusions[0].ticket = ticket
+    assert.throws(() => checkSpecInventory(invalid, discovered), /Exclusion needs a ticket key/)
+  }
+  const invalidReason = structuredClone(manifest)
+  invalidReason.exclusions[0].reason = ' '
+  assert.throws(() => validateManifest(invalidReason), /Exclusion needs a reason/)
+  assert.throws(() => validateManifest({ ...manifest, exclusions: {} }), /exclusions array/)
+  assert.throws(() => validateManifest({ ...manifest, exclusions: [null] }), /Invalid exclusion path/)
+  assert.throws(() => validateManifest({ ...manifest, exclusions: [...manifest.exclusions, ...manifest.exclusions] }), /Duplicate exclusion/)
+  assert.throws(() => validateManifest({ ...manifest, exclusions: [{ ...manifest.exclusions[0], file: files(manifest)[0] }] }), /both declared and excluded/)
+  assert.throws(() => checkSpecInventory(manifest, files(manifest)), /Stale manifest spec or exclusion: tests\/new\.spec\.ts/)
+  const { manifest: reconciled, unlisted, stale } = reconcileManifest(manifest, discovered)
+  assert.deepEqual({ unlisted, stale }, { unlisted: [], stale: [] })
+  for (const all of [false, true]) {
+    const shards = balanceShards(reconciled, 2, { all })
+    assert.ok(!shards.flatMap(shard => shard.specs).some(spec => spec.file === added))
+    assert.deepEqual(checkCoverage(reconciled, shards, discovered, { all }), { specs: 6, shards: 2, excluded: 1 })
+  }
+  assert.deepEqual(reconcileManifest(manifest, files(manifest)).stale, [added])
+})
 
 test('LPT balancing distributes a known fixture optimally and covers it exactly once', () => {
   const manifest = fixture(), shards = balanceShards(manifest, 3)
@@ -105,13 +142,15 @@ test('commands retain config/project/workers/traces/evidence and honor PW_RETRIE
   for (const value of ['-1', '1.5', 'NaN', '9007199254740992']) assert.throws(() => retryCount({ PW_RETRIES: value }), /PW_RETRIES/)
 })
 
-test('real manifest covers every UI spec once for 1, 12 and 256 shards, including nested specs', () => {
-  // Specs that landed on main after the manifest was written run in the `unlisted` group.
+test('real manifest covers every non-excluded UI spec once for 1, 12 and 256 shards, including nested specs', () => {
   const expected = discoverSpecs(), manifest = reconcileManifest(loadManifest(), expected).manifest
   assert.ok(expected.includes('tests/quotes/print-receipt.spec.ts'))
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
   for (const count of [1, 12, 256]) {
-    assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), { specs: expected.length, shards: count })
+    assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), {
+      specs: expected.length - manifest.exclusions.length, shards: count,
+      ...(manifest.exclusions.length ? { excluded: manifest.exclusions.length } : {}),
+    })
   }
   const access = manifest.groups.find(g => g.id === 'access-dialogs')
   assert.equal(access.hostedOnly, true)
@@ -129,10 +168,11 @@ test('list/check launch no process and checks are wired into the existing CI uni
   const forbiddenRun = async () => { assert.fail('Browser-free mode launched a process') }
   const output = []
   assert.equal(await main(['--check', '--all', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(output.pop()).specs, discoverSpecs().length)
+  const all = JSON.parse(output.pop())
+  assert.equal(all.specs + (all.excluded ?? 0), discoverSpecs().length)
   assert.equal(await main(['--check', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   const gate = JSON.parse(output.pop())
-  assert.equal(gate.specs + gate.ungated, discoverSpecs().length)
+  assert.equal(gate.specs + gate.ungated + (gate.excluded ?? 0), discoverSpecs().length)
   assert.equal(await main(['--list', '1/12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   assert.equal(JSON.parse(output.pop()).length, 1)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts
@@ -160,6 +200,42 @@ test('runner is hosted-only, runs groups sequentially, retains failure and stops
   let interruptedCalls = 0
   assert.equal(await main(['1/1'], { env, out: () => {}, run: async () => { interruptedCalls++; return { code: 143 } } }), 143)
   assert.equal(interruptedCalls, 1)
+})
+
+test('spec-only execution runs exactly changed mapped, ungated and unlisted specs and retains failures', async () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'aeon-changed-specs-'))
+  mkdirSync(resolve(root, 'tests'))
+  const manifest = fixture()
+  manifest.groups[1].gate = false
+  manifest.groups[0].project = 'chromium'
+  manifest.groups[0].flags.push('--trace=retain-on-failure')
+  manifest.groups[0].env = { AEON_DESK_SHOTS: '${RUNNER_TEMP}/desk' }
+  const discovered = [...files(manifest), 'tests/not-in-map.spec.ts']
+  for (const file of discovered) writeFileSync(resolve(root, file), 'fixture')
+  writeFileSync(resolve(root, 'playwright.ui.config.ts'), 'fixture')
+  const selected = ['web/tests/a-0.spec.ts', 'web/tests/b-1.spec.ts', 'web/tests/not-in-map.spec.ts']
+  const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: '/tmp/runner', CI_CHANGED_SPECS: JSON.stringify(selected) }
+  const calls = []
+  const run = async (args, options) => { calls.push({ args, options }); return { code: calls.length === 1 ? 19 : 0 } }
+  assert.equal(await main(['1/1'], { manifest, env, root, run, out: () => {} }), 19)
+  assert.equal(calls.length, 3)
+  const requested = calls.flatMap(call => call.args.filter(arg => arg.startsWith('^')).map(pattern =>
+    discovered.filter(file => new RegExp(pattern).test(resolve(root, file)))))
+  assert.deepEqual(requested.flat().sort(), selected.map(file => file.slice(4)).sort())
+  assert.ok(calls[0].args.includes('chromium'))
+  assert.ok(calls[0].args.includes('--trace=retain-on-failure'))
+  assert.equal(calls[0].options.env.AEON_DESK_SHOTS, '/tmp/runner/desk')
+  assert.ok(calls.every(call => !call.args.includes('--pass-with-no-tests')))
+  await assert.rejects(main(['1/12'], { manifest, env, root, run, out: () => {} }), /require shard 1\/1/)
+  assert.equal(calls.length, 3, 'invalid selection launched work')
+})
+
+test('changed-spec selector refuses malformed, empty, traversing and missing selections', () => {
+  for (const json of ['null', '{}', '[]']) assert.throws(() => selectChangedSpecs(fixture(), json), /nonempty changed spec list/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["web/tests/../a.spec.ts"]'), /Invalid repository path/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["/web/tests/a.spec.ts"]'), /Invalid repository path/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["web/tests/a-0.spec.ts", "web/tests/missing.spec.ts"]'), /missing from checkout/)
+  assert.throws(() => selectChangedSpecs(fixture(), '["web/tests/helper.ts"]'), /top-level UI spec/)
 })
 
 test('native failure-only selectors are passed to every group without repartitioning', async () => {
@@ -199,7 +275,11 @@ test('report merger retains errors, failures, suites and timing from every group
 test('wrapper JSON output aggregates every group and cannot reuse a stale green report', async () => {
   const reportDirectory = resolve(webRoot, 'test-results', 'ci-web-unit-reports')
   const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/ci-web-unit-reports/test-aggregate.json' }
-  const expectedCommands = planCommands(effective(), balanceShards(effective(), 12)[0], env)
+  const manifest = effective()
+  const shard = balanceShards(manifest, 12).find(candidate => planCommands(manifest, candidate, env).length > 1)
+  assert.ok(shard, 'fixture must span several groups')
+  const expectedCommands = planCommands(manifest, shard, env)
+  const selection = `${shard.index}/12`
   assert.ok(expectedCommands.length > 1, 'fixture must span several groups')
   let invocations = 0
   const run = async (args, options) => {
@@ -213,7 +293,7 @@ test('wrapper JSON output aggregates every group and cannot reuse a stale green 
     }))
     return { code: failed ? 1 : 0 }
   }
-  assert.equal(await main(['1/12'], { env, run, reportDirectory, out: () => {} }), 1)
+  assert.equal(await main([selection], { env, run, reportDirectory, out: () => {} }), 1)
   const path = resolve(webRoot, env.PLAYWRIGHT_JSON_OUTPUT_FILE)
   const report = JSON.parse(readFileSync(path, 'utf8'))
   assert.equal(report.suites.length, expectedCommands.length)
@@ -221,13 +301,13 @@ test('wrapper JSON output aggregates every group and cannot reuse a stale green 
   assert.equal(report.stats.unexpected, 1)
   // The same group paths still contain prior green reports: main must clear
   // them before a launch that returns without producing a fresh report.
-  assert.equal(await main(['1/12'], { env, run: async () => ({ code: 0 }), reportDirectory, out: () => {} }), 1)
+  assert.equal(await main([selection], { env, run: async () => ({ code: 0 }), reportDirectory, out: () => {} }), 1)
   const missing = JSON.parse(readFileSync(path, 'utf8'))
   assert.equal(missing.suites.length, 0)
   assert.equal(missing.errors.length, expectedCommands.length)
   assert.match(missing.errors[0].message, /Missing or invalid/)
   writeFileSync(path, JSON.stringify(report))
-  assert.equal(await main(['1/12'], { env, run: async () => ({ code: 143 }), reportDirectory, out: () => {} }), 143)
+  assert.equal(await main([selection], { env, run: async () => ({ code: 143 }), reportDirectory, out: () => {} }), 143)
   assert.equal(readFileSync(path, 'utf8'), '', 'interruption retained an old green aggregate')
 })
 
@@ -294,7 +374,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
 })
 
-test('manifest drift never blocks a PR: new specs stay ungated, removed ones are dropped, --strict reports both', async () => {
+test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
   const manifest = fixture()
   const discovered = [...files(manifest).filter(file => file !== 'tests/a-0.spec.ts'), 'tests/brand-new.spec.ts', 'tests/quotes/also-new.spec.ts']
   const { manifest: reconciled, unlisted, stale } = reconcileManifest(manifest, discovered)
@@ -311,10 +391,10 @@ test('manifest drift never blocks a PR: new specs stay ungated, removed ones are
   assert.equal(reconcileManifest(manifest, files(manifest)).manifest.groups.length, manifest.groups.length)
   assert.throws(() => reconcileManifest({ ...manifest, groups: [...manifest.groups, { ...group, id: 'unlisted' }] }, [...discovered, 'tests/x.spec.ts']), /reserved/)
   assert.equal(parseArgs(['--check', '--strict']).strict, true)
-  // The real tree with the real manifest keeps the full gate even if main moved on.
+  // The real manifest includes all four newly gated specs and main's key-layout gate.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 50)
+  assert.equal(JSON.parse(out.pop()).specs, 54)
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {

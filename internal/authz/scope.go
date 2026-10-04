@@ -26,6 +26,16 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/chat-threads/{id}":           true,
+	"GET /api/themes":                      true,
+	"GET /api/themes/{themeId}":            true,
+	"GET /api/me/theme":                    true,
+	"POST /api/themes":                     true,
+	"PATCH /api/themes/{themeId}":          true,
+	"DELETE /api/themes/{themeId}":         true,
+	"POST /api/themes/{themeId}/duplicate": true,
+	"PUT /api/me/theme":                    true,
+
 	"GET /api/recurrences":                        true,
 	"GET /api/decision-desk":                      true,
 	"GET /api/journey/next-actions":               true,
@@ -86,6 +96,8 @@ var ProjectFilteredRoutes = map[string]bool{
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
+	"POST /api/chat-threads/{id}/binding":                        true,
+	"POST /api/chat-deliveries/binding/resolve":                  true,
 	"PUT /api/model-preferences/levels/{level}":                  true,
 	"DELETE /api/model-preferences/levels/{level}":               true,
 	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    true,
