@@ -40,9 +40,12 @@ var RoutePermissions = map[string]string{
 	"POST /api/phone-approvals/{kind}/{requestId}/options":          "profile.write",
 	"POST /api/phone-approvals/{kind}/{requestId}/decision":         "profile.write",
 
-	"GET /api/features":                "nodes.read",
-	"GET /api/settings/features":       "settings.manage",
-	"PUT /api/settings/features/{key}": "settings.manage",
+	"GET /api/features":                          "nodes.read",
+	"GET /api/settings/features":                 "settings.manage",
+	"PUT /api/settings/features/{key}":           "settings.manage",
+	"GET /api/agentd/step-ups/{challenge_id}":    "harness.worker",
+	"PUT /api/agent-keys/{id}/owner-workstation": "keys.manage",
+	"GET /api/model-preferences":                 "models.read",
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",
@@ -58,7 +61,6 @@ var RoutePermissions = map[string]string{
 	"GET /api/key-trim-proposals":                        "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",
 	"POST /api/key-trim-proposals/{proposalId}/restore":  "keys.manage",
-	"GET /api/model-preferences":                         "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
 	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",

@@ -117,6 +117,9 @@ func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 }
 
 func permitEffective(p tenant.Principal, permission string, effective Effective, scope Scope) error {
+	if p.Kind == tenant.Agent && !KeyGrantable(permission, OwnerWorkstation(p)) {
+		return ErrForbidden
+	}
 	allowed := contains(effective.Workspace.Permissions, permission)
 	if effective.Project != nil {
 		allowed = allowed || contains(effective.Project.Permissions, permission)
@@ -195,6 +198,9 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	}
 	// Derived reads must use the same project in both sets of live grants.
 	applyCoordinatorReads(&result, p, g, creator)
+	if err := workstationEffectiveTx(ctx, tx, p, &result); err != nil {
+		return Effective{}, err
+	}
 	return result, nil
 }
 

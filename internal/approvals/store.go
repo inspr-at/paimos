@@ -192,6 +192,9 @@ func DecideVerified(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
 	var out Approval
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
 		before, expired, err := lockRequest(ctx, tx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(http.StatusNotFound, "approval not found")
@@ -525,10 +528,16 @@ func Review(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Appr
 	return a, nil
 }
 
-// CanDecide applies the same live person and permission policy used by decision writes.
+// CanDecide applies the same live actor and permission policy used by decision writes.
 func CanDecide(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
-	if err := requirePerson(ctx, tx, p, "only a person may decide a live approval"); err != nil {
-		return err
+	if authz.OwnerWorkstation(p) {
+		if a.AgentPrincipalID == p.ID {
+			return fail(http.StatusForbidden, "agents cannot decide their own requests")
+		}
+	} else {
+		if err := requirePerson(ctx, tx, p, "only a person may decide a live approval"); err != nil {
+			return err
+		}
 	}
 	if err := authz.RequireTx(ctx, tx, p, "approvals.decide", authz.Scope{}); err != nil {
 		return fail(http.StatusForbidden, "approval decision requires an authorized person")

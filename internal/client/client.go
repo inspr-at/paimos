@@ -19,9 +19,11 @@ import (
 
 // Me is the GET /api/me response.
 type Me struct {
-	Principal Principal `json:"principal"`
-	Tenant    Tenant    `json:"tenant"`
-	Identity  *Identity `json:"identity"`
+	OwnerWorkstation      bool      `json:"owner_workstation,omitempty"`
+	WorkstationComputerID string    `json:"workstation_computer_id,omitempty"`
+	Principal             Principal `json:"principal"`
+	Tenant                Tenant    `json:"tenant"`
+	Identity              *Identity `json:"identity"`
 }
 
 // Principal is the acting person or agent.
