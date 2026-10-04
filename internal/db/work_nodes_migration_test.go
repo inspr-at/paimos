@@ -286,7 +286,6 @@ func TestWorkNodesMigrationBusyGuardAndAtomicRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY key) FROM nodes n`)
-			before := workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n`)
 			var reported []db.BusyWorkParent
 			preflightErr := db.CheckWorkMigration(t.Context(), d.App, func(p db.BusyWorkParent) error {
 				reported = append(reported, p)
@@ -301,7 +300,7 @@ func TestWorkNodesMigrationBusyGuardAndAtomicRetry(t *testing.T) {
 			} else if preflightErr != nil || len(reported) != 0 {
 				t.Fatalf("non-busy preflight: %v, %+v", preflightErr, reported)
 			}
-			if !reflect.DeepEqual(before, workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n`)) {
+			if !reflect.DeepEqual(before, workSnapshot(t, d, tid, `SELECT jsonb_agg(to_jsonb(n) ORDER BY key) FROM nodes n`)) {
 				t.Fatal("preflight changed node content")
 			}
 			err = db.MigrateWithHook(t.Context(), d.App, nil)
@@ -347,6 +346,70 @@ func TestWorkNodesMigrationBusyGuardAndAtomicRetry(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkMigrationPreflightPagesAllTenantsWithoutWrites(t *testing.T) {
+	d := workOldDatabase(t)
+	tid := workSeed(t, d, "paged-preflight")
+	other := workSeed(t, d, "other-preflight")
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+		statements := []string{
+			`UPDATE node_kinds SET allowed_child_kinds=ARRAY['task'] WHERE slug='ticket'`,
+			`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+ SELECT $1,k.id,'PAGE-'||i,'Parent',p.id FROM generate_series(1,105) i,node_kinds k,nodes p WHERE k.slug='ticket' AND p.key='PRJ-1'`,
+			`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+ SELECT $1,k.id,'CHILD-'||p.key,'Child',p.id FROM node_kinds k,nodes p WHERE k.slug='task' AND p.key LIKE 'PAGE-%'`,
+			`INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase)
+ SELECT $1,n.project_id,a.id,n.id,'codex','fixture','unmanaged','worker','ship',sha256(n.id::text::bytea),sha256(n.key::bytea),'working'
+ FROM nodes n,principals a WHERE n.key LIKE 'PAGE-%' AND a.name='Historical agent'`,
+		}
+		for _, sql := range statements {
+			if _, err := tx.Exec(t.Context(), sql, tid); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, other, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET ticket_node_id=(SELECT id FROM nodes WHERE key='KEEP-1'),stopped_at=NULL,phase='working'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var ledgerBefore int
+	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations`).Scan(&ledgerBefore); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	err := db.CheckWorkMigration(t.Context(), d.App, func(p db.BusyWorkParent) error {
+		if p.Reason != "bound session" || (p.TenantID != tid && p.TenantID != other) {
+			return fmt.Errorf("wrong blocker: %+v", p)
+		}
+		if seen[p.TenantID+":"+p.Key] {
+			return errors.New("duplicate preflight parent")
+		}
+		seen[p.TenantID+":"+p.Key] = true
+		return nil
+	})
+	var blocked *db.BusyWorkParentsError
+	if !errors.As(err, &blocked) || !blocked.Truncated || len(blocked.Parents) != 100 || len(seen) != 106 || !seen[other+":KEEP-1"] {
+		t.Fatalf("incomplete cross-tenant preflight: %v, emitted %d", err, len(seen))
+	}
+	for i := 1; i <= 105; i++ {
+		if !seen[fmt.Sprintf("%s:PAGE-%d", tid, i)] {
+			t.Fatalf("missing parent %d", i)
+		}
+	}
+	var ledgerAfter int
+	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
+		t.Fatalf("preflight changed ledger: %d to %d: %v", ledgerBefore, ledgerAfter, err)
+	}
+	stop := errors.New("output failed")
+	if err := db.CheckWorkMigration(t.Context(), d.App, func(db.BusyWorkParent) error { return stop }); !errors.Is(err, stop) {
+		t.Fatalf("output failure reported clean: %v", err)
 	}
 }
 
