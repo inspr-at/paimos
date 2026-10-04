@@ -325,7 +325,8 @@ func TestWorkAggregatesCalibratedTokenEstimates(t *testing.T) {
 		got := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+sort)
 		a, b := got[parent.Key], got[leaf.Key]
 		if a == nil || b == nil || a.Tokens.Estimated == nil || b.Tokens.Estimated == nil || *a.Tokens.Estimated != 120000 || *a.Tokens.Estimated != *b.Tokens.Estimated || a.Children == nil || a.Children.Total != 1 || a.Children.Estimated != 1 {
-			t.Fatalf("leaf token sum sort %s parent=%+v leaf=%+v", sort, a, b)
+			detail, _ := json.Marshal(map[string]*planningView{"parent": a, "leaf": b})
+			t.Fatalf("leaf token sum sort %s: %s", sort, detail)
 		}
 	}
 	// Only leaves capture a new baseline; a former leaf's old snapshot stays put.

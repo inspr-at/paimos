@@ -4141,7 +4141,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -4249,7 +4249,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
+                          description: benefit_required when a work item or legacy ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -4364,7 +4364,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -4684,13 +4684,13 @@ paths:
     get:
       operationId: getTicketGraph
       description: |
-        Read-only graph of one project's live tickets and epics. Closed work
+        Read-only graph of one project's live work items and legacy tickets and epics. Closed work
         (status category done: accepted, delivered, done, cancelled, archived)
         is left out unless include_closed is true, and a link that would touch
         a left-out node is left out with it. Relation links are blocks, relates,
         implements and duplicates. blocks stays directed; relates keeps the
         stored order, smaller id as source. A parent link points from a child
-        to its parent ticket or epic when that parent is also in the answer.
+        to its parent work item, ticket or epic when that parent is also in the answer.
         At most 1500 nodes, newest updated_at first. Bodies are not read.
         Project visibility applies: a relation into a project the caller cannot
         see does not appear, not even as an id.
@@ -4700,7 +4700,7 @@ paths:
         - {name: include_closed, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Bounded graph, without ticket or epic bodies
+          description: Bounded graph, without work item, ticket or epic bodies
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TicketGraph'}
@@ -9234,7 +9234,7 @@ paths:
     get:
       operationId: readPublicPortalRoadmap
       summary: Read the public roadmap for the portal product
-      description: Anonymous and cacheable. A ticket appears only when it is tagged roadmap, not hidden, has a public target (roadmap-rN, roadmap-later, a release assignment, or a release label that is rN or later) and a person has set roadmap_public. Agents cannot publish. The document carries pill and benefit in English and German, the target, and status planned, in progress, or shipped. Ticket keys, node ids, titles, assignees and internal notes are omitted. A shipped ticket already visible on the public release history is omitted. Release history being off keeps that shipped item here. Ordered by target, then priority. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty items list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. Success responses are public, max-age 60. Errors stay uncached. The public page is /portal/{tenantSlug}/roadmap.
+      description: Anonymous and cacheable. A work item or legacy ticket appears only when it is tagged roadmap, not hidden, has a public target (roadmap-rN, roadmap-later, a release assignment, or a release label that is rN or later) and a person has set roadmap_public. Agents cannot publish. The document carries pill and benefit in English and German, the target, and status planned, in progress, or shipped. Ticket keys, node ids, titles, assignees and internal notes are omitted. A shipped ticket already visible on the public release history is omitted. Release history being off keeps that shipped item here. Ordered by target, then priority. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty items list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. Success responses are public, max-age 60. Errors stay uncached. The public page is /portal/{tenantSlug}/roadmap.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
@@ -16254,7 +16254,7 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+          description: benefit_required when a work item or legacy ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
         children:
           type: array
           description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.
@@ -16488,7 +16488,7 @@ components:
               id: {type: string, format: uuid}
               key: {type: string}
               title: {type: string}
-              type: {type: string, enum: [ticket, epic]}
+              type: {type: string, enum: [ticket, epic, work]}
               status: {type: string, description: Stored workflow state}
               status_category: {type: string, enum: [open, doing, done]}
               priority:
@@ -16496,7 +16496,7 @@ components:
               parent_id:
                 type: [string, 'null']
                 format: uuid
-                description: Parent ticket or epic when that parent is visible. Null when the parent is a project, another kind, or not visible.
+                description: Parent work item, ticket or epic when that parent is visible. Null when the parent is a project, another kind, or not visible.
               release_id:
                 type: [string, 'null']
                 format: uuid
@@ -17002,7 +17002,7 @@ components:
       type: object
       additionalProperties: true
       description: >-
-        Classification of tickets and tasks. Setting estimate_hours fills missing route_role, area and complexity from title/labels, ancestor defaults, then build/backend.
+        Classification of work items, tickets and tasks. Setting estimate_hours fills missing route_role, area and complexity from title/labels, ancestor defaults, then build/backend.
         Server suggestions have source suggested and confirmed false; by is the acting principal and at is UTC. Explicit values are stamped person or agent; only a person confirms classifications.
         To confirm an unchanged suggestion or an unconfirmed agent classification, a person resubmits its value without source/by/at. Other unchanged values retain stored provenance. Clients cannot forge confirmation or attribution.
         Complexity is S for up to 2 hours, M for up to 8, L above 8; build-hard promotes S to M and M to L. Only unconfirmed server-derived complexity follows estimate/role changes.
