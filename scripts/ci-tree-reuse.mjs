@@ -11,15 +11,17 @@ const ensure = (value, message) => { if (!value) throw new Error(message); };
 
 // A green aggregate is insufficient. These execution steps must have run.
 export const executionSteps = {
+  'ci-plan': 'Classify local PR diff',
   'go-static': 'Check prepared rules bootstrap drift',
   'go-timing': 'Timing budgets, alone',
   'web-setup': 'Build web',
-  'release-check': 'Enforce test runner trust boundary',
-  'e2e': 'Start server and run smoke',
+  'release-check-run': 'Enforce test runner trust boundary',
+  'e2e-run': 'Start server and run smoke',
   'migration-compat': 'Previous binary on the candidate schema',
 };
 export const requiredJobs = [
-  'tree-reuse', 'runner-route / route', 'go', 'web', 'release-list-comparison',
+  'tier-plan', 'tier-measurements',
+  'runner-route / route', 'go', 'web', 'release-check', 'e2e',
   ...Object.keys(executionSteps),
   ...Array.from({ length: 7 }, (_, i) => `go-test (${i + 1})`),
   ...Array.from({ length: 12 }, (_, i) => `web-shard (${i + 1})`),
@@ -69,18 +71,22 @@ export async function verifyRun(repository, runID, api, sha) {
   ensure(run.event === 'merge_group' && run.head_sha === sha, 'not the exact merge-group SHA');
   const jobs = await api(`actions/runs/${runID}/attempts/${run.run_attempt}/jobs?per_page=100`);
   ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs?.length === jobs.total_count, 'incomplete job list');
-  ensure(jobs.jobs.every(job => job.run_attempt === run.run_attempt && job.status === 'completed' && (job.conclusion === 'success' || (job.name === 'cache-prime' && job.conclusion === 'skipped'))), 'incomplete suite');
-  // The only optional/skipped job is push-only cache priming. Unknown or
+  ensure(jobs.jobs.every(job => job.run_attempt === run.run_attempt && job.status === 'completed' && (job.conclusion === 'success' || (['cache-prime', 'tree-reuse'].includes(job.name) && job.conclusion === 'skipped'))), 'incomplete suite');
+  // The only optional/skipped jobs are push-only proof and cache priming. Unknown or
   // duplicate jobs cannot silently change the suite this proof recognizes.
-  ensure(jobs.jobs.every(job => requiredJobs.includes(job.name) || job.name === 'cache-prime'), 'unknown suite job');
+  ensure(jobs.jobs.every(job => requiredJobs.includes(job.name) || ['cache-prime', 'tree-reuse'].includes(job.name)), 'unknown suite job');
   ensure(new Set(jobs.jobs.map(job => job.name)).size === jobs.jobs.length, 'duplicate suite job');
   for (const name of requiredJobs) {
     const job = jobs.jobs.find(job => job.name === name);
     ensure(job?.conclusion === 'success', 'missing or failed suite job');
-    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard' : name.startsWith('web-shard (') ? 'Run balanced UI shard with merge-queue flake control' : undefined);
+    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
     if (stepName) {
       const steps = job.steps?.filter(step => step.name === stepName);
       ensure(steps?.length === 1 && steps[0].status === 'completed' && steps[0].conclusion === 'success', 'missing full execution evidence');
+    }
+    if(name==='web-setup'||/^(go-test|web-shard) \(/.test(name)) {
+      const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');
+      ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full tier execution evidence');
     }
     ensure(!job.steps?.some(step => step.name === 'Reuse the verified merge-group run' && step.conclusion !== 'skipped'), 'reused suite is not execution proof');
   }

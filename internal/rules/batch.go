@@ -63,7 +63,7 @@ const (
 // The complete answer is stored with the writes; an exact replay by the same
 // person returns it, after the same authorization, and writes nothing.
 func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return nil, authz.ErrForbidden
 	}
 	var in batchInput

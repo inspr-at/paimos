@@ -5,7 +5,9 @@ import AppIcon from '../components/AppIcon.vue'
 import { setPageTitle } from '../lib/brand'
 import { resilientFetch } from '../lib/api'
 
-const props = defineProps<{ tenantSlug: string }>()
+const props = defineProps<{ tenantSlug: string; productSlug?: string }>()
+const pageBase = computed(() => `/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
+const apiBase = computed(() => `/api/public/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
 
 interface RoadmapItem {
   pill_en: string
@@ -96,16 +98,20 @@ function statusLabel(status: string) {
   }
 }
 
+let loadRevision = 0
 async function load() {
+  const revision = ++loadRevision
+  const address = apiBase.value
   loading.value = true
   error.value = ''
   missing.value = false
   try {
-    const response = await resilientFetch(`/api/public/portal/${encodeURIComponent(props.tenantSlug)}/roadmap`, {
+    const response = await resilientFetch(`${address}/roadmap`, {
       credentials: 'omit',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
     })
+    if (revision !== loadRevision || address !== apiBase.value) return
     if (response.status === 404) {
       missing.value = true
       doc.value = null
@@ -113,18 +119,21 @@ async function load() {
       return
     }
     if (!response.ok) throw new Error('unavailable')
-    doc.value = await response.json() as RoadmapDocument
+    const document = await response.json() as RoadmapDocument
+    if (revision !== loadRevision || address !== apiBase.value) return
+    doc.value = document
     setPageTitle(doc.value.product ? "What's coming" : 'Nothing published yet')
   } catch {
+    if (revision !== loadRevision || address !== apiBase.value) return
     error.value = 'The roadmap could not be loaded.'
     doc.value = null
     setPageTitle("What's coming")
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
-watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
+watch(() => [props.tenantSlug, props.productSlug], () => { void load() }, { immediate: true })
 </script>
 
 <template>
@@ -149,7 +158,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
       </template>
       <template v-else>
         <nav class="jumps" aria-label="Portal">
-          <router-link class="jump" :to="`/portal/${tenantSlug}`"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
+          <router-link class="jump" :to="pageBase"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
         </nav>
         <p class="eyebrow">Product portal</p>
         <h1>What's coming</h1>
@@ -169,7 +178,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
           </section>
         </div>
         <footer class="colophon">
-          <a class="colophon-link" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+          <a class="colophon-link" :href="`${pageBase}/llms.txt`">llms.txt</a>
         </footer>
       </template>
     </div>

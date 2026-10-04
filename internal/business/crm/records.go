@@ -192,7 +192,10 @@ func pathUUID(r *http.Request, key string) (string, error) {
 	return id, nil
 }
 func appendCRM(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID, typ string, before, after any) error {
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &nodeID, Type: typ, Before: before, After: after})
+	event, err := events.Append(ctx, tx, p, events.Change{NodeID: &nodeID, Type: typ, Before: before, After: after})
+	if err == nil {
+		events.RecordMutation(ctx, event.ID)
+	}
 	return err
 }
 func customer(ctx context.Context, tx pgx.Tx, id string, lock bool) (Customer, error) {

@@ -20,10 +20,10 @@ const (
 	StageResult     = "stage-result/1.0"
 	StageLaunch     = "stage-launch/1.0"
 	Journey         = "journey/1.3"
-	Me              = "me/1.2"
+	Me              = "me/1.3"
 	BaselineBatches = "baseline-batches/1.0"
 	Approvals       = "approvals/1.1"
-	HarnessSession  = "harness-session/2.6"
+	HarnessSession  = "harness-session/2.7"
 )
 
 // WithHeader adds the declared contract before a route writes any status or body.

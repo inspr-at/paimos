@@ -153,6 +153,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	written := make(chan Event, 1)
+	firstPID := make(chan int, 1)
 	release := make(chan struct{})
 	defer func() {
 		select {
@@ -164,6 +165,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() {
 		firstDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
+			firstPID <- int(tx.Conn().PgConn().PID())
 			e, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"sensitive_content": "snapshot"}})
 			if err != nil {
 				return err
@@ -188,16 +190,24 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	secondDone := make(chan error, 1)
+	secondPID := make(chan int, 1)
 	go func() {
 		secondDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
+			secondPID <- int(tx.Conn().PgConn().PID())
 			_, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"x": "second"}})
 			return err
 		})
 	}()
+	var waiter int
 	select {
+	case waiter = <-secondPID:
 	case err := <-secondDone:
-		t.Fatalf("second append passed uncommitted first: %v", err)
-	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("second transaction failed before append: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := dbtest.WaitForBlocked(ctx, d.Admin, waiter, <-firstPID, "INSERT INTO events"); err != nil {
+		t.Fatal(err)
 	}
 	waitCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
 	_, err = conn.WaitForNotification(waitCtx)
@@ -373,6 +383,10 @@ func TestSSEHeartbeatAndInvalidResume(t *testing.T) {
 
 func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 	d, a, _ := fixture(t)
+	// This test mounts the adapter directly, so supply the authority that the
+	// real route requires and the mutation transaction now rechecks.
+	dbtest.BindRole(t, d, a.TenantID, a.ID, "member")
+	a.Scopes = []string{"events.undo"}
 	event := appendEvents(t, d, a, 1)[0]
 	for i, opts := range [][]Option{nil, {WithUndo("test.changed", func(ctx context.Context, tx pgx.Tx, p tenant.Principal, e Event) (Change, error) {
 		if _, err := tx.Exec(ctx, `UPDATE principals SET name='Should rollback' WHERE id=$1`, p.ID); err != nil {

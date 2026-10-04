@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
 import { isClipped, vClipTip } from '../directives/clipTip'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
@@ -13,6 +13,10 @@ import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { planningPresent } from '../lib/planning'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
+import { useProjectHeader } from '../lib/useProjectHeader'
+import { selectionHiddenByPolicy, type HideState } from '../lib/hideStates'
+import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../lib/projectStatusCounts'
+import ProjectStatusCounts from '../components/work/ProjectStatusCounts.vue'
 import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
@@ -26,6 +30,9 @@ import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { useLiveList } from '../lib/useLiveList'
 import { rowStore } from '../lib/rowStore'
+import { TICKET_PEEK } from '../lib/ticketPeek'
+import { ticketRef } from '../lib/ticketLinks'
+import { scopeOwner } from '../lib/identityScope'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
@@ -71,6 +78,7 @@ import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
 const JourneyView = defineAsyncComponent(() => import('../components/journey/JourneyView.vue'))
+const RecurringWorkCard = defineAsyncComponent(() => import('../components/recurrences/RecurringWorkCard.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
@@ -84,6 +92,13 @@ const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
+// Links followed from a routed ticket reuse its panel and route guards. Other
+// project views retain the app peek (graphs, Knowledge and the plain list).
+const appPeek = inject(TICKET_PEEK, null)
+provide(TICKET_PEEK, {
+  open: (key, from) => { if (ticketKey.value) void openRelated(key); else appPeek?.open(key, from) },
+  openKey: computed(() => ticketKey.value ? ticketKey.value.toUpperCase() : appPeek?.openKey.value ?? null),
+})
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
 const descriptionExpanded = ref(false)
@@ -179,6 +194,8 @@ const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list
 const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
 const section = computed(() => projectSection(route))
+const { headerDensity } = useProjectHeader()
+const ticketsHeader = computed(() => section.value === 'tickets')
 const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
 const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
 const onKnowledge = () => section.value === 'knowledge'
@@ -226,7 +243,7 @@ async function fetchWorkList(query: ListQuery) {
 const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
-type ViewMode = TicketView | 'journey' | 'knowledge'
+type ViewMode = TicketView | 'journey' | 'knowledge' | 'settings'
 const activeTicketView = computed(() => ticketView(route.query.view))
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
 const knowledgeActive = computed(onKnowledge)
@@ -279,6 +296,7 @@ watch([dockEntry, knowledgeWide], ([entry]) => {
 const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
 const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
 const journeyActive = computed(() => section.value === 'journey')
+const settingsActive = computed(() => section.value === 'settings')
 // The journey's own place: the stage looked at, a chosen release and the walker's ticket.
 const JOURNEY_KEYS = ['stage', 'release', 'walk'] as const
 const queryText = (value: unknown) => typeof value === 'string' && value ? value : null
@@ -477,8 +495,34 @@ function modeQuery() {
     ...(ticketKey.value ? ticketSectionQuery() : {}), ...(route.query.panel === 'full' ? { panel: 'full' } : {}) }
 }
 function update(patch: Partial<ListFilters>) {
+  if (patch.status !== undefined || patch.hideStates !== undefined) {
+    const nextStatus = patch.status ?? filters.value.status
+    if (patch.status !== undefined && !('statusScope' in patch)) patch = { ...patch, statusScope: undefined }
+    const hidden = selectionHiddenByPolicy(nextStatus, patch.statusScope ?? (patch.status === undefined ? filters.value.statusScope : undefined), project.value?.status_counts, patch.hideStates ?? filters.value.hideStates, project.value?.status_counts_truncated)
+    const result = reconcileStatusHide(filters.value.showClosed, filters.value.hideRestore ?? false, hidden)
+    patch = { ...patch, showClosed: result.showClosed, hideRestore: result.automatic || undefined }
+    if (result.note) toast(result.note, { key: 'project-status-hide' })
+  }
   void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...modeQuery() } })
 }
+function setHideStates(hideStates: HideState[]) { update({ hideStates }) }
+function manualShowClosed(showClosed: boolean) { update({ showClosed, hideRestore: undefined }) }
+function selectCountGroup(group: HeaderStatusGroup) {
+  if (!project.value) return
+  const selected = filters.value.statusScope === group.id && filters.value.status.length > 0
+  update({ status: selected ? [] : groupStates(project.value, group), statusScope: selected ? undefined : group.id })
+}
+function selectCountStatus(state: string) {
+  const selected = filters.value.statusScope === 'canonical' && filters.value.status.length === 1 && filters.value.status[0] === state
+  update({ status: selected ? [] : [state], statusScope: selected ? undefined : 'canonical' })
+}
+// The temporary override travels with the URL/view, so reload and navigation
+// preserve restoration. There is no per-person or per-project override cache.
+watch(() => [filters.value.status, filters.value.statusScope, filters.value.hideRestore, filters.value.hideStates, project.value], () => {
+  if (project.value && filters.value.hideRestore && !selectionHiddenByPolicy(filters.value.status, filters.value.statusScope, project.value.status_counts, filters.value.hideStates, project.value.status_counts_truncated)) {
+    if (filters.value.showClosed) { update({ showClosed: false, hideRestore: undefined }); toast('Hide is on again.', { key: 'project-status-hide' }) }
+  }
+})
 // Remember each section's filters and view while moving around this project.
 watch(section, () => { creating.value = false; openedFromList = false })
 const sectionQueries: Partial<Record<ProjectSection, typeof route.query>> = {}
@@ -525,10 +569,7 @@ async function setView(view: string) {
 }
 function toggleValue(dimension: Dimension, value: string) {
   const next = toggleIn(filters.value[dimension], value)
-  const adding = next.includes(value)
   const patch: Partial<ListFilters> = { [dimension]: next }
-  // Choosing a closed status while closed tickets are hidden would show nothing.
-  if (dimension === 'status' && adding && statusMeta(value).closed && !filters.value.showClosed) patch.showClosed = true
   update(patch)
 }
 function excludeValue(dimension: Dimension, value: string) { update({ [dimension]: toggleOut(filters.value[dimension], value) }) }
@@ -553,11 +594,11 @@ function toggleGroup(key: string) {
 const views = computed(() => viewsOf(projectId.value))
 const activeView = computed(() => filters.value.view ? views.value.items.find(view => view.id === filters.value.view) ?? null : null)
 const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
-const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed)
+const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
-const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && (activeView.value ? viewDirty.value : customised.value))
+const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
@@ -601,7 +642,7 @@ watch(projectId, async id => {
 const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value || settingsActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value || mode === 'graph') return
   // Switching views on the same query reuses the rows already loaded.
@@ -636,12 +677,14 @@ const panelPosition = computed(() => {
   return index === -1 ? null : { index, count }
 })
 async function resolvePanel() {
+  // Invalidate an older lookup even when the new route is empty or cached.
+  const request = ++panelGeneration
   const key = ticketKey.value
   const within = projectId.value
   panelError.value = ''
+  panelLoading.value = false
   if (!key || !within) return
   if (list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase()) || fetched.value?.key.toLowerCase() === key.toLowerCase()) return
-  const request = ++panelGeneration
   panelLoading.value = true
   try {
     const sent = rowStore.mark()
@@ -826,15 +869,28 @@ function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(step
 // Related tickets can live in another project: open them where they belong.
 async function openRelated(key: string, newTabRequested = false) {
   if (newTabRequested) { newTab(key); return }
+  // Markdown displays the key that was written, but its resolved link may
+  // name a moved record. Use the same canonical key and owner as its href.
+  const resolved = ticketRef(key)
+  const target = resolved ? projects.byId(resolved.projectId) : undefined
+  if (resolved && target) {
+    follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(resolved.key)}`)
+    return
+  }
+  const from = route.fullPath
+  const ownerScope = scopeOwner(session.identity)
+  const stale = () => route.fullPath !== from || scopeOwner(session.identity) !== ownerScope
   const here = key.split('-')[0] === routeKey.value || list.rows.value.some(row => row.key === key)
   if (!here) {
     try {
       const page = await listNodes({ q: key, limit: 25 })
+      if (stale()) return
       const owner = page.items.find(item => item.key === key)?.project
       const target = owner ? projects.byId(owner.id) : undefined
       if (target && target.id !== projectId.value) { follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(key)}`); return }
     } catch { /* fall back to this project, where the panel explains */ }
   }
+  if (stale()) return
   if (ticketKey.value) follow(ticketPath(key)); else openKey(key)
 }
 watch(ticketKey, key => { if (!key) openedFromList = false })
@@ -1126,7 +1182,7 @@ async function remove(view: SavedView) {
 }
 
 // ---------- Selection and bulk changes ----------
-const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && !fullView.value)
+const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
 // Phone selection can be armed before the first card is chosen.
 const phoneQuery = window.matchMedia('(max-width: 720px)')
@@ -1418,7 +1474,10 @@ async function chooseRelease(target: ReleaseTarget) {
 function dirty() { return !!panel.value?.isDirty() || !!knowledgeEntry.value?.isDirty() }
 async function confirmDiscard() {
   if (skipGuard || !dirty()) return true
-  return confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+  const outgoing = panel.value, outgoingKnowledge = knowledgeEntry.value
+  const ok = await confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+  if (ok) { outgoing?.discard(); outgoingKnowledge?.discard() }
+  return ok
 }
 // Which knowledge entry an address shows (its page or the docked pane), so leaving
 // an entry asks about unsaved edits, while Expand (same entry, now its page) does not.
@@ -1487,7 +1546,7 @@ function extendSelection(step: number) {
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
-  if (knowledgeActive.value && !ticketKey.value) return
+  if ((knowledgeActive.value || settingsActive.value) && !ticketKey.value) return
   // Command or Control A in the list selects every loaded row.
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && selectable.value && !event.defaultPrevented
     && !typing(event.target) && !document.querySelector('dialog[open], .floating') && !panel.value?.el?.contains(document.activeElement)) {
@@ -1627,15 +1686,16 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
-      <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
-        <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
+      <div id="project-header-fold" v-show="!ticketsHeader || headerDensity !== 'collapsed'" class="project-fold">
+      <header class="project-head" :class="{ 'glimpse-room': !ticketsHeader && glimpseActive && !showViewBar }">
+        <div class="head-flex" :class="{ 'with-glimpse': !ticketsHeader && glimpseActive }">
         <div class="head-main">
           <div class="title-line">
             <span class="key-badge big">{{ project.routeKey }}</span>
-            <h1 id="project-title">{{ project.title }}</h1>
+            <h1 id="project-title" v-clip-tip>{{ project.title }}</h1>
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
@@ -1646,46 +1706,57 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <div v-if="descriptionExpanded" id="project-description-full" ref="descriptionFull" class="description-full" :style="{ maxHeight: `min(40dvh, ${descriptionRoom}px)` }" role="region" aria-label="Full project description" tabindex="0" @keydown.stop @keydown.esc.prevent="closeDescription">{{ project.description }}</div>
           </div>
         </div>
+        <div v-if="ticketsHeader" class="activity header-activity"><span>Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></span>
+          <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" :data-tip="queueSnapshot ? queueHours(queueSnapshot) : 'Open the work queue to retry'" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
+        </div>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
-          <div class="stat-line">
+          <ProjectStatusCounts v-if="ticketsHeader" :summary="project" :filters="filters" :density="headerDensity" @group="selectCountGroup" @status="selectCountStatus" />
+          <div v-if="!ticketsHeader" class="stat-line">
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('open')!.tip"><StatusIcon state="open" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('doing')!.tip"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('done')!.tip"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
             <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
           </div>
-          <p v-if="queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
+          <p v-if="!ticketsHeader && queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
           <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
+            <span v-if="ticketsHeader && headerDensity === 'comfortable'" class="progress-label">Progress</span>
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
             <span class="mono pct">{{ counts.percent }}%</span>
           </div>
-          <p class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
+          <p v-if="!ticketsHeader" class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
         </div>
         <div v-else class="head-stats head-stats-skeleton" aria-hidden="true">
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
         </div>
-        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections @select="setSection" />
       </header>
-
+      <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
+        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
+        <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
-        v-if="showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="(ticketsHeader && !graphActive) || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
+        <div v-if="ticketsHeader" id="project-view-settings" class="project-view-settings" />
+      </div>
+      </div>
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
-      <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
+      <div v-if="!journeyActive && !settingsActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
-          :facet-loading="facetLoading"
+          ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
+          :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
-          @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
+          @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
-          :view="viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+          :view="viewMode === 'settings' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
-        />
+        >
+          <template #freshness><ListFreshness v-if="liveActive" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" inline /></template>
+        </ListToolbar>
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
             <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
@@ -1707,6 +1778,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <p>They are off by default and have not yet been tested end to end. In the Developer section of Settings, turn on “Show the flow controls (not yet tested end to end)” to open this journey.</p>
         <RouterLink class="btn" to="/settings/developer#flow-controls">Developer settings</RouterLink>
       </section>
+      <RecurringWorkCard v-else-if="settingsActive" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
@@ -1714,7 +1786,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
-      <ListFreshness v-if="liveActive" class="ticket-freshness" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" />
       <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
       <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
@@ -1732,7 +1803,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
         @assignee="openAssignee" @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
-        @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
+        @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="manualShowClosed(true)"
         :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
         :live-stale="liveDataStale"
         :live-pill="liveActive && activeLive.pill.value ? { text: activeLive.pill.value, overflow: activeLive.pending.overflow } : null" @show-updates="showUpdates"
@@ -1744,21 +1815,21 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
-      <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
+      <p v-if="!journeyActive && !knowledgeActive && !settingsActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
       </div>
 
       <KnowledgeEntryPage
-        v-if="shownEntry" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
+        v-if="shownEntry" :key="`${project.id}/${me?.id ?? ''}`" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
         :type="shownEntry.type" :slug="shownEntry.slug" :state="knowledge" :can-write="knowledgeWritable" :can-delete="knowledgeDeletable" :now="now" :list-query="knowledgeListQuery"
         @close="shownEntry.mode === 'dock' ? closeKnowledgeDock() : closeKnowledgeEntry()"
       />
       <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
-      <PanelSplitter v-if="ticketKey && !fullView" />
+      <PanelSplitter v-if="ticketKey && !fullView" class="early" :reserve="500" />
       <TicketWorkspace
-        v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
+        v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
         :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
@@ -1767,12 +1838,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
-        :density="density" :columns="toolbarColumns" :header-graph="headerGraph"
+        ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="ticketsHeader"
         @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
-        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
+        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
       />
       <SaveViewPanel
@@ -1830,7 +1901,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .description-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .description-probe { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
-.description-block { position: relative; display: flex; flex-direction: column; }
+.description-block { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.description-block:has(.description-full) { z-index: 6; }
 .description-more { display: block; align-self: flex-start; min-width: 5ch; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .description-full { position: absolute; z-index: 6; top: 100%; inset-inline: 0; max-height: 40dvh; overflow: auto; overscroll-behavior: contain; padding: 12px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13.5px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 @media (pointer: coarse) { .description { min-height: 44px; line-height: 22px; } }
@@ -1841,6 +1913,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity-placeholder { width: 42%; height: 18px; }
 .q-stat { height: 22px; margin: -2px -6px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: inherit; }
 .q-stat:hover { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+@media (max-width: 600px) {
+  /* The configurable header folds its timestamp, not the queue action.
+     Keep these selectors more specific than its general phone folding rules. */
+  .project-page[class*="header-"] .header-activity > span { display: none; }
+  .project-page[class*="header-"] .header-activity { display: flex; grid-area: activity; justify-self: start; }
+  .project-page[class*="header-"] .header-activity .q-stat { margin: 0; min-width: 44px; min-height: 44px; }
+  .project-page[class*="header-"] .project-head .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "activity activity" "stats stats" "description description"; }
+}
 .q-warn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
 .q-warn.on { color: var(--queue-wait-ink); }
 .stat-line { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
@@ -1894,6 +1974,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   --panel-w: min(var(--knowledge-panel-user-w, var(--panel-default)), calc(100vw - 620px));
 }
 /* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
+.project-page.ticket-dock { --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw, calc(100vw - 500px)); }
+@media (min-width: 900px) {
+  .project-page.ticket-dock { padding-right: calc(var(--panel-w) + 22px); }
+  .project-page.ticket-dock :deep(.ticket-ws.panel) { width: var(--panel-w); }
+  .project-page.ticket-dock .toolbar-wrap { margin-right: 0; padding-right: 0; }
+}
 @media (min-width: 1100px) {
   .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
   .project-page.panel-open .toolbar-wrap { margin-right: 0; padding-right: 0; }
@@ -1928,4 +2014,79 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .activity { display: none; }
   .hint { display: none; }
 }
+
+/* AEON-639: header and view settings fold together; the independent toolbar
+   retains the same width and horizontal layout in every density. */
+.project-page[class*="header-"] { padding-top: 12px; }
+.project-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.project-navigation :deep(.sections) { margin-top: 0; }
+.project-navigation .view-bar { flex: 1; min-width: 0; padding: 0; }
+.nav-divider { width: 1px; height: 20px; background: var(--line-2); flex: none; }
+.project-view-settings { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
+.project-page[class*="header-"] .project-head { padding: 0 0 4px; }
+.project-page[class*="header-"] .head-flex { position: relative; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
+.project-page[class*="header-"] .head-main { display: contents; }
+.project-page[class*="header-"] .title-line { max-width: 34vw; }
+.project-page[class*="header-"] .title-line h1 { font-size: 22px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.project-page[class*="header-"] .description-block { min-width: 0; position: static; }
+.project-page[class*="header-"] .description { margin: 0; max-width: none; min-width: 0; }
+.project-page[class*="header-"] .description-block { min-width: 0; }
+.project-page[class*="header-"] .activity { white-space: nowrap; }
+.project-page[class*="header-"] .head-stats { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] .stat-line { gap: 10px; }
+.project-page[class*="header-"] .progress-line { width: 130px; }
+.project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto minmax(0, max-content); grid-template-areas: "title title activity stats" "description description description stats"; grid-template-rows: min-content 1fr; align-items: start; row-gap: 6px; }
+.project-page.header-comfortable .title-line { grid-area: title; max-width: none; }
+.project-page.header-comfortable .title-line h1 { font-size: 34px; }
+.project-page.header-comfortable .description-block { grid-area: description; }
+.project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
+.project-page.header-comfortable .activity { grid-area: activity; justify-self: end; align-self: center; }
+.project-page.header-comfortable .head-stats { grid-area: stats; display: grid; align-self: stretch; align-content: start; gap: 6px; }
+.header-activity { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: auto; }
+.project-page.header-comfortable .progress-line { width: 100%; }
+.progress-label { font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.project-page.header-comfortable .project-navigation { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
+@media (min-width: 601px) and (max-width: 1100px) {
+  .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+  .project-page[class*="header-"] .progress-line { width: 88px; }
+  .project-page.header-comfortable .progress-line { width: 100%; }
+  .project-page[class*="header-"] .head-flex { column-gap: 8px; }
+  .project-page[class*="header-"] .stat-line { gap: 8px; }
+}
+@media (max-width: 900px) { .project-view-settings { display: none; } }
+@container projecthead (max-width: 760px) {
+  .project-page.header-compact .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; }
+  .project-page.header-compact .title-line { grid-area: title; max-width: none; }
+  .project-page.header-compact .head-stats { display: contents; }
+  .project-page.header-compact .head-stats > .project-status-counts { grid-area: stats; }
+  .project-page.header-compact .progress-line { grid-area: progress; }
+  .project-page.header-compact .description-block { grid-area: description; }
+  .project-page.header-compact .activity { grid-area: activity; }
+}
+@media (max-width: 600px) {
+  .header-activity { display: none; }
+  .header-activity:has(.q-stat) { display: flex; grid-area: activity; justify-self: start; }
+  .header-activity:has(.q-stat) > span { display: none; }
+  .header-activity .q-stat { min-height: 44px; margin: 0; }
+  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; gap: 4px 10px; }
+  .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
+  .project-page[class*="header-"] .title-line h1 { font-size: 24px; }
+  .project-page.header-comfortable .title-line h1 { font-size: 28px; }
+  .project-page[class*="header-"] .description-block { grid-area: description; }
+  .project-page[class*="header-"] .description { white-space: nowrap; display: block; }
+  .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .project-page[class*="header-"] .head-stats { display: contents; }
+  .project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: stats; }
+  .project-page[class*="header-"] .progress-line { grid-area: progress; width: 96px; }
+  .progress-label { display: none; }
+  .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; }
+  .project-navigation :deep(.sections button:not([aria-selected="true"])) { flex: none; width: 44px; padding: 0; }
+  .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+  .project-navigation :deep(.view-bar) { padding: 0; }
+}
+
+.project-navigation.legacy-navigation { display: block; border: 0; padding: 0; }
+.project-navigation.legacy-navigation :deep(.sections) { margin-top: 18px; }
+.project-navigation.legacy-navigation .view-bar { padding: 2px 0 6px; }
 </style>

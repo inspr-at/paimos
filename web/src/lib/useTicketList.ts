@@ -85,11 +85,13 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const current = filters.value
     loading.value = true; loadingMore.value = false; error.value = ''; moreError.value = ''
     extraFacets.value = {}
-    const extras = activeDimensions(current).filter(dimension => facetOf(dimension)).map(async dimension => {
+    // Own optional rejections immediately, including when the primary read is
+    // still pending or this generation returns early after being superseded.
+    const extras = Promise.allSettled(activeDimensions(current).filter(dimension => facetOf(dimension)).map(async dimension => {
       const facet = facetOf(dimension)!
       const page = await fetchList(apiParams(within, current, { omit: dimension, facets: [facet], limit: 1 }))
       return [dimension, page.facets?.[facet] ?? {}] as const
-    })
+    }))
     try {
       const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
       if (!page) return
@@ -106,7 +108,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     } finally {
       if (request === generation) loading.value = false
     }
-    const settled = await Promise.allSettled(extras)
+    const settled = await extras
     if (request !== generation) return
     dimensionFacets.value = Object.fromEntries(settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
   }

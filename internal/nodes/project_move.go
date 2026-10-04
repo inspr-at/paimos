@@ -78,7 +78,15 @@ func (m *Module) handleGetNodeByKey(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		node, err = loadNode(ctx, tx, id, false)
-		return err
+		if err != nil {
+			return err
+		}
+		recurrences, err := loadNodeRecurrences(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Recurrence = recurrences[id]
+		return nil
 	})
 	if err != nil {
 		writeErr(w, err)

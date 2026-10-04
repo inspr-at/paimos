@@ -800,3 +800,29 @@ func buryValue(rng *rand.Rand, key string, value any, depth int) any {
 		return map[string]any{"wrap": buryValue(rng, key, value, depth-1), "note": "plain"}
 	}
 }
+
+// A revocation can commit between initial visibility setup and the request's
+// authorization fence. The final handler must see the post-fence project set.
+func TestTenantGuardRefreshesVisibilityAfterRevocation(t *testing.T) {
+	d := dbtest.Open(t)
+	f := newVisibilityFixture(t, d, "guard-visibility")
+	if _, err := d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, f.tenant, f.actor, f.projectA); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: f.actor, TenantID: f.tenant, Kind: tenant.Person})
+	if countVisible(t, ctx, f).nodes != 2 {
+		t.Fatal("project grant fixture is not visible")
+	}
+	ctx = db.WithTenantGuard(ctx, func(ctx context.Context, tx pgx.Tx, tid string) error {
+		// This is the deterministic interleaving point, after enterTenant and before
+		// the fence is acquired. Commit the revocation on a separate connection.
+		if _, err := d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, tid, f.actor); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tid)
+		return err
+	})
+	if got := countVisible(t, ctx, f); got.nodes != 0 || got.attachments != 0 || got.nodeEvents != 0 {
+		t.Fatalf("stale project access after guard: %+v", got)
+	}
+}

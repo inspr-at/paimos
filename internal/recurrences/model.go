@@ -18,6 +18,7 @@ const Permission = "recurrences.manage"
 const Job = "recurring-work"
 
 type Template struct {
+	Name          string   `json:"name,omitempty"`
 	Title         string   `json:"title"`
 	Description   string   `json:"description"`
 	Criteria      []string `json:"acceptance_criteria"`
@@ -47,6 +48,14 @@ type Recurrence struct {
 	CreatedBy       string     `json:"created_by_principal_id"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+	LastResult      *Result    `json:"last_result,omitempty"`
+	OpenPrevious    *Result    `json:"open_previous,omitempty"`
+}
+type Result struct {
+	Occurrence
+	NodeKey string `json:"key,omitempty"`
+	Title   string `json:"title,omitempty"`
+	State   string `json:"state,omitempty"`
 }
 type Occurrence struct {
 	RecurrenceID  string    `json:"recurrence_id"`
@@ -83,6 +92,10 @@ func (in *Input) normalize(now time.Time) error {
 	in.ProjectID = strings.ToLower(in.ProjectID)
 	in.ParentID = strings.ToLower(in.ParentID)
 	t := &in.Template
+	t.Name = strings.TrimSpace(t.Name)
+	if len(t.Name) > 80 {
+		return fmt.Errorf("name must be at most 80 bytes")
+	}
 	if t.Type == "" {
 		t.Type = "ticket"
 	}
@@ -153,14 +166,29 @@ func (in *Input) normalize(now time.Time) error {
 		if in.Trigger.Event != "release.published" || in.Trigger.RRULE != "" || in.Trigger.TimeOfDay != "" || in.Trigger.Timezone != "" || in.Trigger.StartDate != "" {
 			return fmt.Errorf("event trigger supports only release.published and no time fields")
 		}
+		if in.Trigger.EventStart != "" && in.Trigger.EventStart != "now" && in.Trigger.EventStart != "hour" && in.Trigger.EventStart != "morning" {
+			return fmt.Errorf("event_start must be now, hour or morning")
+		}
+		if len(in.Trigger.EventTimezone) > 128 || in.Trigger.EventTimezone == "Local" {
+			return fmt.Errorf("invalid event timezone")
+		}
+		if in.Trigger.EventTimezone != "" {
+			if _, err := time.LoadLocation(in.Trigger.EventTimezone); err != nil {
+				return fmt.Errorf("invalid event timezone")
+			}
+		}
 	default:
 		return fmt.Errorf("trigger kind must be time or event")
 	}
 	return nil
 }
 func render(value string, number int64, at time.Time, trigger Trigger, name, version string) string {
-	if trigger.Kind == "time" {
-		if loc, err := time.LoadLocation(trigger.Timezone); err == nil {
+	zone := trigger.Timezone
+	if trigger.Kind == "event" {
+		zone = trigger.EventTimezone
+	}
+	if zone != "" {
+		if loc, err := time.LoadLocation(zone); err == nil {
 			at = at.In(loc)
 		}
 	}
@@ -189,7 +217,7 @@ func scanRecurrence(row pgx.Row) (Recurrence, error) {
 	return r, err
 }
 func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Recurrence, error) {
-	query := `SELECT ` + recurrenceColumns + ` FROM recurrences WHERE id=$1`
+	query := `SELECT ` + recurrenceColumns + ` FROM recurrences WHERE id=$1 AND retired_at IS NULL`
 	if lock {
 		query += ` FOR UPDATE`
 	}

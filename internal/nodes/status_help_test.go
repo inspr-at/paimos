@@ -16,6 +16,9 @@ import (
 )
 
 func TestStatusDefinitions(t *testing.T) {
+	if help := defaultStatusHelp(); help.Recurring.Label != "Recurring" || help.Recurring.IsStatus || !strings.Contains(help.Recurring.Meaning, "occurrence number") {
+		t.Fatalf("missing shared recurring marker definition: %+v", help.Recurring)
+	}
 	help := defaultStatusHelp()
 	want := []string{"new", "backlog", "open", "blocked", "in_progress", "qa", "done", "delivered", "accepted", "cancelled", "archived"}
 	states := []string{}

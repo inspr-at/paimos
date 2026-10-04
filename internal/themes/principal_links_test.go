@@ -4,8 +4,8 @@ package themes
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -274,7 +274,9 @@ func TestThemeWriteRechecksLinkAfterAuthorityFence(t *testing.T) {
 	f := setup(t)
 	old := mustTheme(t, f.s, f.member, "Original", "personal")
 	linkPeople(t, f, f.member, f.other)
-	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "pg_advisory_xact_lock") })
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	pool := f.d.App
 	tx, err := f.d.Admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -290,8 +292,6 @@ func TestThemeWriteRechecksLinkAfterAuthorityFence(t *testing.T) {
 		result <- err
 		close(done)
 	}()
-	barrier.Wait(t, ctx)
-	barrier.Release()
 	if dbtest.BlockedOrDone(t, ctx, f.d.Admin, tx.Conn().PgConn().PID(), done) == "" {
 		t.Fatal("write did not wait for link authority fence")
 	}
@@ -314,7 +314,9 @@ func TestAliasThemeWriteDropsCachedCanonicalAfterUnlink(t *testing.T) {
 	f := setup(t)
 	private := mustTheme(t, f.s, f.other, "Former canonical person's private theme", "personal")
 	linkPeople(t, f, f.member, f.other)
-	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "pg_advisory_xact_lock") })
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	pool := f.d.App
 	tx, err := f.d.Admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -332,8 +334,6 @@ func TestAliasThemeWriteDropsCachedCanonicalAfterUnlink(t *testing.T) {
 		result <- err
 		close(done)
 	}()
-	barrier.Wait(t, ctx)
-	barrier.Release()
 	if dbtest.BlockedOrDone(t, ctx, f.d.Admin, tx.Conn().PgConn().PID(), done) == "" {
 		t.Fatal("alias write did not overlap the unlink")
 	}

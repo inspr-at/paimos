@@ -165,7 +165,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
   const spent = [row.primary, row.five].filter((w): w is CapacityWindow => !!w && w.remaining_percent < 1)
     .sort((a, b) => Date.parse(b.reading.resets_at) - Date.parse(a.reading.resets_at))[0]
   if (spent) return { kind: 'limit', text: `At limit until ${at(spent.reading.resets_at)}`, tone: 'warn', tip: `${HARNESS_NAME[row.harness] ?? row.harness} reported its limit used up; it resets ${at(spent.reading.resets_at)}.` }
-  return { kind: 'ready', text: 'Ready', tone: 'ok' }
+  return { kind: 'ready', text: 'Ready', tone: 'ok', ...(enrollment?.verification_state === 'expired' ? { tip: 'Verification expired; the live account probe is ready.' } : {}) }
 }
 
 const WINDOW_WORD: Record<string, string> = { weekly: 'this week', monthly: 'this month', '5h': 'this window', other: 'this period' }

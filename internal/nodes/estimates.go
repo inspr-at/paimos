@@ -45,26 +45,12 @@ func canonicalEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, id st
 			return nil, err
 		}
 	}
-	keys := []string{"estimate_hours", "estimate_source", "estimate_by", "estimate_at", "estimate_confirmed"}
-	unchanged := true
-	for _, key := range keys {
-		if key == "estimate_hours" {
-			a, aok := estimateNumber(next[key])
-			b, bok := estimateNumber(old[key])
-			if aok && bok && a == b {
-				continue
-			}
-		}
-		if !reflect.DeepEqual(next[key], old[key]) {
-			unchanged = false
-		}
-	}
-	if unchanged {
+	if sameEstimateFields(next, old) {
 		return raw, nil
 	}
 	value, present := next["estimate_hours"]
 	if !present || value == nil {
-		for _, key := range keys {
+		for _, key := range []string{"estimate_hours", "estimate_source", "estimate_by", "estimate_at", "estimate_confirmed"} {
 			delete(next, key)
 		}
 		return json.Marshal(next)
@@ -83,6 +69,22 @@ func canonicalEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, id st
 	}
 	next["estimate_source"], next["estimate_by"], next["estimate_at"], next["estimate_confirmed"] = string(p.Kind), p.ID, time.Now().UTC().Format(time.RFC3339Nano), confirmed
 	return json.Marshal(next)
+}
+
+func sameEstimateFields(next, old map[string]any) bool {
+	for _, key := range []string{"estimate_hours", "estimate_source", "estimate_by", "estimate_at", "estimate_confirmed"} {
+		if key == "estimate_hours" {
+			a, aok := estimateNumber(next[key])
+			b, bok := estimateNumber(old[key])
+			if aok && bok && a == b {
+				continue
+			}
+		}
+		if !reflect.DeepEqual(next[key], old[key]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Callers are told which field to set. The CLI adds its own flag hint.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
-import { effectiveLimit, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingRows, type PlanSnapshot } from '../src/lib/agentsWorking'
+import { effectiveLimit, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepHarnessLimit, stepLimit, stepTotal, typedLimit, typedTotal, waitingCopy, workingRows, type HarnessLimit, type PlanSnapshot } from '../src/lib/agentsWorking'
 const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4, claude: 2, cursor: 'off' }, principal_id: 'owner', running: { codex: 12, claude: 1, cursor: 3 }, running_total: 16, source: 'plan', updated_at: null }
 describe('the one dial', () => {
   it('changes only the ceiling, preserving running agents and independent harness limits', () => {
@@ -16,12 +16,13 @@ describe('the one dial', () => {
     const input = { total: 5, limits: { codex: 0, claude: 'no_limit' as const, cursor: 'off' as const } }
     const rows = workingRows(input, snapshot, { codex: 3, claude: 2, cursor: 2 }, null)
     expect(rows.map(r => [r.key, r.mode, r.shown, r.words])).toEqual([
-      ['codex', 'max', 0, 'at most 0'], ['claude', 'none', 3, 'up to 3 · no own limit'], ['cursor', 'off', 0, 'no new starts'],
+      ['codex', 'max', 0, 'at most 0'], ['claude', 'none', 3, 'no own limit · up to 3 now'], ['cursor', 'off', 0, 'no new starts'],
     ])
-    expect(stepLimit(input, 'claude', 3, 1).limits.claude).toBe(4)
+    expect(stepLimit(input, 'claude', 3, 1).limits.claude).toBe('no_limit')
+    expect(stepLimit(input, 'claude', 3, -1).limits.claude).toBe(2)
     expect(stepLimit(input, 'cursor', 0, 1).limits.cursor).toBe(1)
     expect(stepLimit({ total: 5, limits: { codex: 1 } }, 'codex', 5, -1).limits.codex).toBe('off')
-    expect(stepLimit({ total: 5, limits: { codex: 30 } }, 'codex', 5, 1).limits.codex).toBe(30)
+    expect(stepLimit({ total: 5, limits: { codex: 30 } }, 'codex', 5, 1).limits.codex).toBe('no_limit')
   })
   it('caps a harness without its own limit by the total and measured account room', () => {
     expect(effectiveLimit(5, 1, 2)).toBe(3)
@@ -30,12 +31,51 @@ describe('the one dial', () => {
     expect(effectiveLimit(5, 0, null)).toBe(5)
     expect(noOwnTip('claude', 0)).toBe('Claude has no limit of its own; with 0 at once, nothing new starts.')
   })
-  it('expanded limits stop at one, while a stored API zero stays visible until increased', () => {
-    const input = { total: 5, limits: { codex: 1 } }
-    expect(stepExpandedLimit(input, 'codex', 1, -1).limits.codex).toBe(1)
-    expect(stepExpandedLimit({ ...input, limits: { codex: 0 } }, 'codex', 0, 1).limits.codex).toBe(1)
-    expect(workingRows({ ...input, limits: { codex: 0 } }, snapshot, {}, null)[0]!.shown).toBe(0)
-    expect(stepLimit(input, 'codex', 5, -1).limits.codex).toBe('off')
+  it('walks the entire ladder with the same ends in both views', () => {
+    let value: HarnessLimit = 'off'
+    expect(stepHarnessLimit(value, 5, -1)).toBe('off')
+    for (let n = 1; n <= 30; n++) {
+      value = stepHarnessLimit(value, 5, 1)
+      expect(value).toBe(n)
+    }
+    expect(stepHarnessLimit(value, 5, 1)).toBe('no_limit')
+    expect(stepHarnessLimit('no_limit', 5, 1)).toBe('no_limit')
+    expect(stepHarnessLimit('no_limit', 5, -1)).toBe(4)
+    expect(stepHarnessLimit(undefined, 30, -1)).toBe(29)
+    expect(stepHarnessLimit('no_limit', 1, -1)).toBe('off')
+    expect(stepHarnessLimit('no_limit', 0, -1)).toBe('off')
+    for (let n = 30; n > 1; n--) expect(stepHarnessLimit(n, 5, -1)).toBe(n - 1)
+    expect(stepHarnessLimit(1, 5, -1)).toBe('off')
+    expect(stepHarnessLimit(0, 5, -1)).toBe(0)
+    expect(stepHarnessLimit(0, 5, 1)).toBe(1)
+    expect(workingRows({ total: 5, limits: { codex: 0 } }, snapshot, {}, null)[0]!.shown).toBe(0)
+  })
+  it('accepts typed limits and totals, clamps large values, and rejects invalid drafts', () => {
+    expect(typedLimit('')).toBe('no_limit')
+    expect(typedLimit('  ')).toBe('no_limit')
+    expect(typedLimit('0')).toBe('off')
+    expect(typedLimit('001')).toBe(1)
+    expect(typedLimit(' 29 ')).toBe(29)
+    expect(typedLimit('31')).toBe(30)
+    expect(typedLimit('9'.repeat(64))).toBe(30)
+    expect(typedTotal('0')).toBe(0)
+    expect(typedTotal('30')).toBe(30)
+    expect(typedTotal('100')).toBe(30)
+    for (const invalid of ['-1', '+2', '1.5', '3e2', 'Infinity', '∞', 'off', '1 2', '9'.repeat(65), ' '.repeat(65)]) {
+      expect(typedLimit(invalid)).toBeUndefined()
+      expect(typedTotal(invalid)).toBeUndefined()
+    }
+    expect(typedTotal('')).toBeUndefined()
+  })
+  it('cycles no own limit, at most, and off, restoring a bounded remembered ceiling', () => {
+    let value: HarnessLimit = 'no_limit'
+    value = modeLimit(value, nextLimitMode(value), 7); expect(value).toBe(7)
+    value = modeLimit(value, nextLimitMode(value), 7); expect(value).toBe('off')
+    value = modeLimit(value, nextLimitMode(value), 7); expect(value).toBe('no_limit')
+    expect(modeLimit(undefined, 'max')).toBe(2)
+    expect(modeLimit('off', 'max', 50)).toBe(30)
+    expect(modeLimit('off', 'max', 0)).toBe(1)
+    expect(modeLimit(0, 'max', 7)).toBe(1)
   })
   it('uses the approved wind-down, zero, full and room wording', () => {
     expect(liveCopy(5, 16, 7)).toBe('16 running · winding down to 5')

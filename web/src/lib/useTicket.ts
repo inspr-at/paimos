@@ -43,8 +43,8 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
   const fromParentId = item.parent_id
   const since = rows.shown(item.id)?.updated_at ?? item.updated_at
   const sent = rows.mark()
-  const conflict = (latest: WorkNode) => {
-    rows.adoptNode(latest, sent)
+  const conflict = (latest: WorkNode, authoritative: boolean) => {
+    rows.adoptNode(latest, sent, { authoritative })
     rows.reshow(item.id)
     toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
     return 'conflict' as const
@@ -55,7 +55,8 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
     catch (e) {
       if (!(e instanceof APIError) || e.status !== 412) throw e
       const current = e.body.node as WorkNode | undefined
-      return conflict(current && typeof current.updated_at === 'string' ? current : await getNode(item.id))
+      const partial = current && typeof current.updated_at === 'string'
+      return conflict(partial ? current : await getNode(item.id), !partial)
     }
     // The answer is in the row store (this tab's write); the parent chip and
     // the epic a list groups by are known here, for this answer's revision
@@ -286,9 +287,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     void refresh(); void loadChildren(); void loadRelations()
   }, { immediate: true })
 
-  async function patch(change: TicketChange, onOk?: (node: WorkNode) => void): Promise<SaveResult> {
+  async function patch(change: TicketChange, onOk?: (node: WorkNode) => void, expectedId: string | null = item.value?.id ?? null): Promise<SaveResult> {
     const target = item.value
-    if (!target) return 'error'
+    if (!target || target.id !== expectedId) return 'error'
     const copy = base() ?? target
     const body: NodePatch = {}
     if (change.title !== undefined) body.title = change.title
@@ -326,7 +327,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         return 'conflict'
       }
       if (e instanceof APIError && e.status === 403 && e.message !== 'only a person can mark a human check checked' && e.message !== 'only a person can undo a human check') {
-        readOnly.value = true
+        if (item.value?.id === target.id) readOnly.value = true
         toast(`You can read ${target.key} but not change it.`, { tone: 'error' })
         return 'error'
       }
@@ -376,8 +377,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }, context.onMoved, rows) === 'error') sync(target, null)
   }
 
-  async function remove(): Promise<boolean> {
-    const target = item.value
+  async function remove(target: ListItem | null = item.value): Promise<boolean> {
     if (!target) return false
     const sent = rows.mark()
     try {
@@ -561,5 +561,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (item.value?.id === target.id) await loadChildren()
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, hold, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, hold, release, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
 }

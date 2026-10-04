@@ -26,6 +26,8 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
+	Recurrence *nodeRecurrence   `json:"recurrence,omitempty"`
+	QueueStale bool              `json:"queue_stale"`
 	Queued     *workqueue.Queued `json:"queued,omitempty"`
 	HumanCheck *string           `json:"human_check"`
 	Estimate   *estimateView     `json:"estimate,omitempty"`
@@ -199,14 +201,31 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Estimate = views[id]
-		queued, err := workqueue.Load(ctx, tx, []string{id})
+		recurrences, err := loadNodeRecurrences(ctx, tx, []string{id})
 		if err != nil {
 			return err
 		}
-		node.Queued = queued[id]
-		return nil
+		node.Recurrence = recurrences[id]
+		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, err
+}
+
+// loadQueueProjection keeps mutation responses as authoritative as GET/list:
+// the row store adopts them directly without another readiness read. These are
+// bounded reads only; they do not acquire locks after the event counter.
+func loadQueueProjection(ctx context.Context, tx pgx.Tx, node *nodeJSON) error {
+	queued, err := workqueue.Load(ctx, tx, []string{node.ID})
+	if err != nil {
+		return err
+	}
+	stale, err := workqueue.Stale(ctx, tx, []string{node.ID})
+	if err != nil {
+		return err
+	}
+	node.Queued = queued[node.ID]
+	node.QueueStale = stale[node.ID]
+	return nil
 }
 
 func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
@@ -349,7 +368,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node.Estimate = views[loaded.ID]
-		return nil
+		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, err
 }
@@ -421,7 +440,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return err
 			}
 			node.Estimate = views[id]
-			return nil
+			return loadQueueProjection(ctx, tx, &node)
 		}
 		if hours, ok := raw["estimate_hours"]; ok {
 			if _, replaces := raw["fields"]; replaces {
@@ -559,7 +578,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		node.Estimate = views[id]
-		return nil
+		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, dbErr("update node", err)
 }
@@ -690,7 +709,7 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 			return err
 		}
 		node = loaded
-		return nil
+		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, err
 }

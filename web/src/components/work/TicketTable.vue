@@ -12,6 +12,7 @@ import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import TicketTypeIcon from './TicketTypeIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
@@ -20,6 +21,7 @@ import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
 import PlanningCell from './PlanningCell.vue'
 import QueueAction from './QueueAction.vue'
+import QueueStaleHint from './QueueStaleHint.vue'
 import QueueIndicator from './QueueIndicator.vue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useWorkQueue } from '../../stores/workQueue'
@@ -695,7 +697,7 @@ defineExpose({
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
                 </span>
-                <AppIcon :name="entry.row.kind_slug === 'epic' ? 'epic' : entry.row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="kindLabel(entry.row.kind_slug)" />
+                <TicketTypeIcon :kind="entry.row.kind_slug" :recurrence="entry.row.recurrence" />
                 <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
@@ -722,7 +724,7 @@ defineExpose({
                 <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
                   <StatusIcon :state="entry.row.state" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
-                </button></div>
+                </button><QueueStaleHint :row="entry.row" /></div>
               </td>
               <td v-else-if="column.id === 'priority'" class="c-prio" :data-column-label="column.label" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
                 <div class="cell" :data-tip="entry.row.priority && entry.row.priority !== 'none' ? priorityLabel(entry.row.priority) : 'No priority'">
@@ -872,6 +874,9 @@ thead th:hover .col-resize::after { opacity: 1; }
 
 /* Every cell centres one flex line in the row, so text, icons and chips share a baseline. */
 .ticket-row { height: var(--row-h); cursor: default; scroll-margin-top: calc(var(--toolbar-h, 0px) + 40px); scroll-margin-bottom: 24px; }
+.ticket-row { --recurrence-row-tint: transparent; }
+@media (hover: hover) { .ticket-row:hover { --recurrence-row-tint: var(--row-hover); } }
+.ticket-row.selected, .ticket-row.cursor, .ticket-row.open, .ticket-row.drop-target { --recurrence-row-tint: var(--row-selected); }
 .ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ticket-row td:first-child { padding-left: 18px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
@@ -983,7 +988,8 @@ td.c-title { position: relative; overflow: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
-/* Hover actions float at the end of the title. Reserve their width (two 24px
+/* Hover actions float at the end of the title. Reserve their width on opening,
+   so hovering or focusing the recurring marker never shrinks the title link (two 24px
    buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
    leaves the cue 12px clear of Copy. Phones hide the actions. */
 @media (min-width: 721px) {
@@ -1001,10 +1007,13 @@ td.c-title { position: relative; overflow: hidden; }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
 @media (min-width: 721px) and (pointer: coarse) {
   /* Keep the compact visuals, but reserve each full 44px reach plus the
-     existing 2px separation before interaction. Touch can set :hover during
+     existing 2px separation before interaction, as on fine pointers above.
+     Padding contains the outer edges as well. Touch can set :hover during
      a hold; reserving space only then shrinks the name under the pointer. */
   .row-actions { gap: 22px; padding: 0 10px; }
   .compact .row-actions { gap: 24px; padding: 0 11px; }
+  /* Reserve the touch action reach before hover/focus so the recurring
+     marker never changes the title width when those actions appear. */
   .title-cell { padding-right: 98px; }
 }
 
@@ -1182,7 +1191,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-title { grid-area: title; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
-  .title-cell .kind-glyph { margin-top: 2px; }
+  .title-cell .kind-glyph, .title-cell .ticket-type-icon { margin-top: 2px; }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */

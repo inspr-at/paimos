@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -36,14 +37,14 @@ func TestFromEnvAndHTTPProvider(t *testing.T) {
 		if body.Model == "test-model" && len(body.Input) == 2 {
 			sawModel = true
 		}
-		vec := make([]float32, Dimensions)
-		vec[0] = 1
+		first, second := make([]float32, Dimensions), make([]float32, Dimensions)
+		first[0], second[0] = 1, 2
 		_ = json.NewEncoder(w).Encode(embedResponse{Data: []struct {
 			Index     int       `json:"index"`
 			Embedding []float32 `json:"embedding"`
 		}{
-			{Index: 1, Embedding: vec},
-			{Index: 0, Embedding: vec},
+			{Index: 1, Embedding: second},
+			{Index: 0, Embedding: first},
 		}})
 	}))
 	t.Cleanup(srv.Close)
@@ -59,7 +60,9 @@ func TestFromEnvAndHTTPProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sawAuth || !sawModel || len(got) != 2 || got[0][0] != 1 || got[1][0] != 1 {
+	first, second := make([]float32, Dimensions), make([]float32, Dimensions)
+	first[0], second[0] = 1, 2
+	if !sawAuth || !sawModel || !reflect.DeepEqual(got, [][]float32{first, second}) {
 		t.Fatalf("auth %v model %v len %d", sawAuth, sawModel, len(got))
 	}
 

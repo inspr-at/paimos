@@ -141,7 +141,7 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 				return err
 			}
 			node.Estimate = views[id]
-			return nil
+			return loadQueueProjection(ctx, tx, &node)
 		}
 		if !issueFamilyKind(currentKind) || !issueFamilyKind(target) {
 			return conflictCoded("kind is immutable", codeKindChangeNotAllowed)
@@ -235,7 +235,7 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 			return err
 		}
 		node.Estimate = views[id]
-		return nil
+		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, err
 }

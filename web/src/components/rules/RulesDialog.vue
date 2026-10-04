@@ -19,7 +19,7 @@ onMounted(async () => {
   const first = dialog.value?.querySelector<HTMLElement>('[data-autofocus]')
   first?.focus()
 })
-onBeforeUnmount(() => { opener?.focus?.({ preventScroll: true }) })
+onBeforeUnmount(() => { dialog.value?.close(); opener?.focus?.({ preventScroll: true }) })
 function close() { if (!props.busy) emit('close') }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 </script>

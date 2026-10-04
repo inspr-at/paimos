@@ -28,7 +28,9 @@ const document = {
   getElementById: id => id === 'data' ? { textContent: data } : element(id),
   querySelector: selector => element(selector),
 }
-vm.runInNewContext(renderer, { document, location: { hash: '' } }, { timeout: 1000 })
+// This is a hang guard, not a renderer speed assertion. Cold locale setup and
+// scheduling on shared CI runners can consume a second even for two findings.
+vm.runInNewContext(renderer, { document, location: { hash: '' } }, { timeout: 10000 })
 assert.equal(elements['#count'].textContent, `${audit.findings.length} of ${audit.findings.length} shown`)
 assert.equal((elements['#groups'].innerHTML.match(/<article class="finding"/g) ?? []).length, audit.findings.length)
 let absentQuery = 'no matching finding'
