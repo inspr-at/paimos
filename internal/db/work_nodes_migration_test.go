@@ -4,6 +4,7 @@ package db_test
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -138,7 +139,7 @@ func TestWorkNodesMigrationPreservesRowsHistoryAndIdentities(t *testing.T) {
 	deskProjectionSQL := `SELECT jsonb_build_object('questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q),'askers',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM desk_askers a))`
 	deskProjections := workSnapshot(t, d, tid, deskProjectionSQL)
 	var oldEvents int
-	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&oldEvents); err != nil {
+	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='import.node_created'`).Scan(&oldEvents); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
@@ -535,4 +536,110 @@ func TestWorkNodesVerifiedBackupRestoreDrill(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("verified local backup %s SHA256 %s; %d table/function digests restored", archivePath, backupHash, len(before))
+}
+
+//go:embed testdata/work_release_122.json
+var workRelease122 []byte
+
+// Mask files absent from the pinned release while constructing its exact SQL
+// schema, then remove those temporary ledger entries before the real upgrade.
+// This uses the runner's staged/concurrent paths and ordinary FORCE-RLS role.
+func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
+	var release struct {
+		Sequence   int               `json:"release_sequence"`
+		Version    string            `json:"version"`
+		Commit     string            `json:"source_commit"`
+		Migrations map[string]string `json:"migrations"`
+	}
+	if err := json.Unmarshal(workRelease122, &release); err != nil {
+		t.Fatal(err)
+	}
+	if release.Sequence != 122 || release.Version != "261003095616.0.0" || release.Commit != "068611ab87b80319ed1f0843bbad79ca897b7dcb" || len(release.Migrations) != 231 {
+		t.Fatal("release 122 fixture pin changed")
+	}
+	for name, digest := range release.Migrations {
+		body, err := migrationFiles.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprintf("%x", sha256.Sum256(body)) != digest {
+			t.Fatalf("release 122 SQL changed: %s", name)
+		}
+	}
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := d.App.Exec(t.Context(), `CREATE TABLE schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		t.Fatal(err)
+	}
+	var masked []string
+	for _, name := range migrationNames(t) {
+		if _, published := release.Migrations[name]; !published {
+			masked = append(masked, name)
+			if _, err := d.App.Exec(t.Context(), `INSERT INTO schema_migrations(version) VALUES($1)`, name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if _, published := release.Migrations[name]; !published {
+			return fmt.Errorf("unexpected release 122 file: %s", name)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.App.Exec(t.Context(), `DELETE FROM schema_migrations WHERE version=ANY($1::text[])`, masked); err != nil {
+		t.Fatal(err)
+	}
+	var applied []string
+	if err := d.App.QueryRow(t.Context(), `SELECT array_agg(version ORDER BY version) FROM schema_migrations`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != len(release.Migrations) {
+		t.Fatalf("release 122 schema has %d migrations", len(applied))
+	}
+	for _, name := range applied {
+		if _, published := release.Migrations[name]; !published {
+			t.Fatalf("non-release migration: %s", name)
+		}
+	}
+	var absent bool
+	if err := d.App.QueryRow(t.Context(), `SELECT to_regclass('themes') IS NULL AND to_regprocedure('aeon_work_status_begin()') IS NULL AND to_regprocedure('aeon_work_aggregates(uuid[])') IS NULL`).Scan(&absent); err != nil {
+		t.Fatal(err)
+	}
+	if !absent {
+		t.Fatal("fixture already includes later schema")
+	}
+	tid := workSeed(t, d, "release-122-upgrade")
+	preserved := `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n)-'kind_id' ORDER BY key) FROM nodes n),'sessions',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM harness_sessions s),'questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q))`
+	before := workSnapshot(t, d, tid, preserved)
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, workSnapshot(t, d, tid, preserved)) {
+		t.Fatal("release 122 upgrade changed nodes, sessions or Decision Desk identities")
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+		var legacy, work, migrated int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM node_kinds WHERE slug IN ('epic','ticket','task')),(SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='work'),(SELECT count(*) FROM events WHERE type='node.work_kind_migrated')`).Scan(&legacy, &work, &migrated); err != nil {
+			return err
+		}
+		if legacy != 0 || work != 5 || migrated != 5 {
+			return fmt.Errorf("legacy=%d work=%d migration events=%d", legacy, work, migrated)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MigrateWithHook(t.Context(), d.App, func(name string) error { return fmt.Errorf("unexpected reapplication: %s", name) }); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("release 122 (%s): %d exact SQL files, upgrade and reapply under FORCE RLS", release.Commit, len(applied))
 }
