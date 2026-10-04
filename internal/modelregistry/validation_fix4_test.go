@@ -78,7 +78,7 @@ func TestPlacementSecurityReviewRejectsInvalidStructureBeforePreparation(t *test
 		{"missing author", "&area=backend", "review-gate requires author_family"},
 		{"invalid author", "&area=backend&author_family=invalid", `unknown author family "invalid": use openai, anthropic, xai, cursor, google or local (aliases: codex, claude, grok, gemini)`},
 		{"invalid harness", "&area=backend&author_family=openai&harness=invalid", "unsupported model harness"},
-		{"legacy role", "&author_family=openai", "unknown model role"},
+		{"invalid mode", "&author_family=openai&mode=invalid", "invalid resolution mode"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reset(t)
@@ -122,10 +122,15 @@ func TestPlacementSecurityReviewRetainsOwnerRequiredExplanation(t *testing.T) {
 				WorkResolution
 				Preference PreferenceDecision `json:"preference"`
 			}](t, &p, http.MethodGet, path, "", http.StatusOK)
-			if got.Role != "review-gate-security" || got.AuthorFamily != "openai" || !got.OwnerRequired || got.Profile != nil || got.CommandTemplate != "" || len(got.Ladder) != 0 {
+			if got.Role != "review-gate-security" || got.AuthorFamily != "openai" || !got.OwnerRequired || got.Profile != nil || got.CommandTemplate != "" || len(got.Ladder) == 0 {
 				t.Fatalf("security review selected an ordinary route: %+v", got)
 			}
-			const reason = "security review ladder not available (AEON-485)"
+			for _, candidate := range got.Ladder {
+				if candidate.Selected || len(candidate.SkipReasons) == 0 {
+					t.Fatalf("security refusal lost candidate reason: %+v", candidate)
+				}
+			}
+			const reason = "no qualified security review profile/account"
 			if got.Trace.Blocked != reason || got.Preference.Blocked == nil || got.Preference.Blocked.Reason != reason || got.Preference.Role != "review-gate-security" {
 				t.Fatalf("security explanation lost: trace=%+v preference=%+v", got.Trace, got.Preference)
 			}

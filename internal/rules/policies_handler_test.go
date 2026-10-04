@@ -33,9 +33,9 @@ func TestPoliciesRulesPublishHandlerPersonRequired(t *testing.T) {
 	}
 }
 
-// Internal transaction-helper pin. A custom role and injected scope deliberately
-// provide rules.publish, so RequireTx passes and cannot mask the person check.
-func TestPoliciesRulesPublishTransactionHelperPersonRequired(t *testing.T) {
+// A custom role cannot make the person/workstation publish permission
+// grantable to an ordinary agent, even with an injected key scope.
+func TestPoliciesRulesPublishTransactionHelperRejectsOrdinaryAgentScope(t *testing.T) {
 	d := dbtest.Open(t)
 	p := tenant.Principal{Kind: tenant.Agent, Scopes: []string{"rules.publish"}}
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('policies-rule-pin','Policies') RETURNING id::text`).Scan(&p.TenantID); err != nil {
@@ -59,8 +59,15 @@ func TestPoliciesRulesPublishTransactionHelperPersonRequired(t *testing.T) {
 	}
 	ctx := tenant.WithPrincipal(t.Context(), p)
 	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.RequireTx(ctx, tx, p, "rules.publish", authz.Scope{}); err != nil {
-			t.Fatalf("fixture masks person check: %v", err)
+		var granted bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM role_bindings b JOIN role_permissions r ON r.tenant_id=b.tenant_id AND r.role_id=b.role_id WHERE b.principal_id=$1 AND r.permission='rules.publish')`, p.ID).Scan(&granted); err != nil {
+			return err
+		}
+		if !granted {
+			t.Fatal("fixture lost its explicit role grant")
+		}
+		if err := authz.RequireTx(ctx, tx, p, "rules.publish", authz.Scope{}); !errors.Is(err, authz.ErrForbidden) {
+			t.Fatalf("ordinary agent gained publish authority: %v", err)
 		}
 		err := permission(ctx, tx, p, Scope{Layer: "company"}, "rules.publish")
 		if !errors.Is(err, authz.ErrForbidden) {

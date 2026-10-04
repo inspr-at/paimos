@@ -178,6 +178,9 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	}
 	if out.Profile == nil {
 		out.OwnerRequired = true
+		if out.Role == "review-gate-security" {
+			out.Trace.Blocked = "no qualified security review profile/account"
+		}
 		if requirement != "any" {
 			out.Trace.Blocked = "no " + requirement + " model route"
 		}
