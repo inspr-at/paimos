@@ -368,7 +368,17 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
+		ownsActor := e.ActorPrincipalID == p.ID
+		// Theme identity survives principal linking. Its resource undo handler
+		// rechecks the current owner under the authority fence before writing.
+		// This exception is limited to registered theme events, never agents or
+		// unrelated workspace activity.
+		if !ownsActor && p.Kind == tenant.Person && m.undo[e.Type] != nil && strings.HasPrefix(e.Type, "theme.") {
+			if err := tx.QueryRow(r.Context(), `SELECT aeon_theme_owns($1::uuid)`, e.ActorPrincipalID).Scan(&ownsActor); err != nil {
+				return err
+			}
+		}
+		if !ownsActor && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]
