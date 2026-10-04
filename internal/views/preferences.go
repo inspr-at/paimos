@@ -27,6 +27,7 @@ import (
 const maxPreferenceBytes = 16 << 10
 
 var preferenceKey = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,127}$`)
+var errAgentsPlanChanged = errors.New("agents plan changed")
 
 type preference struct {
 	Key       string          `json:"key"`
@@ -95,13 +96,21 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid preference key")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxPreferenceBytes+64)
+	r.Body = http.MaxBytesReader(w, r.Body, maxPreferenceBytes+192)
 	var in struct {
-		Value json.RawMessage `json:"value"`
+		Value             json.RawMessage `json:"value"`
+		ExpectedUpdatedAt json.RawMessage `json:"expected_updated_at"`
 	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	var expectedAt *time.Time
+	if len(in.ExpectedUpdatedAt) > 0 {
+		if key != agentplan.PreferenceKey || json.Unmarshal(in.ExpectedUpdatedAt, &expectedAt) != nil {
+			httpapi.WriteError(w, http.StatusBadRequest, "expected_updated_at requires an agents plan timestamp or null")
+			return
+		}
 	}
 	trimmed := bytes.TrimSpace(in.Value)
 	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(trimmed) {
@@ -126,10 +135,28 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 	err := m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		owner := p.ID
 		if key == agentplan.PreferenceKey {
+			// Tenant first: serialize with access/identity changes and all plan
+			// writers, including aliases and unconditional legacy clients.
+			var locked string
+			if err := tx.QueryRow(r.Context(), `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&locked); err != nil {
+				return err
+			}
 			var err error
 			owner, err = agentsPlanOwner(r.Context(), tx, p.TenantID, p.ID)
 			if err != nil {
 				return err
+			}
+			if err := authz.RequireTx(r.Context(), tx, p, "views.write", authz.Scope{}); err != nil {
+				return err
+			}
+			if len(in.ExpectedUpdatedAt) > 0 {
+				_, currentAt, err := readAgentsPlanPreference(r.Context(), tx, p.TenantID, owner)
+				if err != nil {
+					return err
+				}
+				if (expectedAt == nil) != (currentAt == nil) || expectedAt != nil && !expectedAt.Equal(*currentAt) {
+					return errAgentsPlanChanged
+				}
 			}
 		}
 		var value []byte
@@ -137,7 +164,9 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 		err := tx.QueryRow(r.Context(), `
 			INSERT INTO user_preferences (tenant_id, principal_id, key, value)
 			VALUES ($1::uuid, $2::uuid, $3, $4::jsonb)
-			ON CONFLICT (tenant_id, principal_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+			ON CONFLICT (tenant_id, principal_id, key) DO UPDATE SET value = EXCLUDED.value,
+			updated_at = CASE WHEN EXCLUDED.key='agents.working'
+				THEN greatest(clock_timestamp(), user_preferences.updated_at + interval '1 microsecond') ELSE now() END
 			RETURNING value, updated_at`, p.TenantID, owner, key, string(trimmed)).Scan(&value, &at)
 		if err != nil {
 			return err
@@ -153,6 +182,10 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 		out.Value, out.UpdatedAt = value, &at
 		return err
 	})
+	if errors.Is(err, errAgentsPlanChanged) {
+		httpapi.WriteError(w, http.StatusConflict, "agents plan changed; re-read before saving")
+		return
+	}
 	if errors.Is(err, authz.ErrForbidden) {
 		httpapi.WriteError(w, http.StatusForbidden, "active person required for plan")
 		return

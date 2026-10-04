@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
+import { expectStableControls } from './helpers/stable'
 import type { AutopilotSettings, AutopilotProposal, AutomaticChange, ProjectOverride } from '../src/lib/statusAutopilot'
 
 async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
@@ -47,8 +48,70 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
     return route.fulfill({ json: {} })
   })
   await page.route('**/api/events/41/undo', route => { undo++; changes[0]!.undone = true; changes[0]!.undoable = false; return route.fulfill({ status: 201, json: { id: 42 } }) })
-  return { settings, proposals, resolutions, writes, conflict: () => { conflict = true }, undos: () => undo }
+  return { settings, suggestions, proposals, resolutions, writes, conflict: () => { conflict = true }, undos: () => undo }
 }
+
+test('250 attention ticket pills stay steady for 3 seconds with bounded lookups', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const world = await setup(page)
+  const base = world.suggestions[0]!
+  world.suggestions.splice(0, world.suggestions.length, ...Array.from({ length: 250 }, (_, i) => ({
+    ...base, event_id: 1000 + i, node_id: `pill-${i}`, key: `AEON-${1001 + i}`,
+    title: `Langfristige Überprüfung der Zugriffsberechtigungen und nachvollziehbare Freigabe ${i + 1}`,
+  })))
+  const lookups: string[][] = []
+  await page.route('**/api/nodes/lookup**', route => {
+    const keys = (new URL(route.request().url()).searchParams.get('keys') ?? '').split(',').filter(Boolean)
+    if (!keys.length) return route.fallback()
+    lookups.push(keys)
+    return route.fulfill({ json: { items: keys.map(key => ({ requested_key: key, key, id: `pill-${key}`, title: key, state: 'new', project_id: 'p-aeon' })) } })
+  })
+  await page.goto('/settings/workspace')
+  const attention = page.getByRole('region', { name: 'Tickets needing attention', exact: true })
+  await expect(attention.locator('a.ticket-link')).toHaveCount(250)
+  await expect(attention.locator('.ticket-plain')).toHaveCount(0)
+  const before = lookups.length
+  // Observe replacements as well as class mutations: a flickering link may be
+  // removed and recreated rather than have its class changed in place.
+  const observation = await attention.evaluate(async region => {
+    const snapshot = () => [...region.querySelectorAll('.key-badge')].map(el => `${el.tagName}:${el.textContent}:${el.className}`)
+    const baseline = snapshot()
+    let mutations = 0
+    const observer = new MutationObserver(records => {
+      mutations += records.filter(record => record.type === 'attributes' || [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element && (node.matches('.key-badge') || node.querySelector('.key-badge')))).length
+    })
+    observer.observe(region, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] })
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    observer.disconnect()
+    return { baseline, after: snapshot(), mutations }
+  })
+  expect(observation.baseline).toHaveLength(250)
+  expect(observation.after).toEqual(observation.baseline)
+  expect(observation.mutations).toBe(0)
+  expect(lookups.length).toBe(before)
+  expect(lookups.length).toBeLessThanOrEqual(4) // 250 suggestions plus the recent-change key.
+  expect(lookups.every(keys => keys.length <= 100)).toBe(true)
+  expect(world.suggestions.every(item => lookups.flat().filter(key => key === item.key).length === 1)).toBe(true)
+
+  const first = attention.locator('a.ticket-link').first()
+  await first.scrollIntoViewIfNeeded()
+  await expectStableControls({
+    controls: { ticket: first, row: attention.locator('.change').first() }, scrollAreas: { attention },
+    interactions: [{ name: 'hover ticket', run: () => first.hover() }, { name: 'focus ticket', run: () => first.focus() }],
+  })
+  const folder = testInfo.outputPath('aeon-668-pills')
+  await mkdir(folder, { recursive: true })
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await first.scrollIntoViewIfNeeded()
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      const path = `${folder}/attention-${width}-${theme}.png`
+      await page.screenshot({ path })
+      await testInfo.attach(`attention-${width}-${theme}`, { path, contentType: 'image/png' })
+    }
+  }
+})
 
 test('upgrade proposals offer Apply and Dismiss while stale proposals stay guarded', async ({ page }) => {
   const world = await setup(page)

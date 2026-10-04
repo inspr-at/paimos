@@ -59,6 +59,12 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 				*dest = &end
 			}
 		}
+		if synthetic(w) {
+			if len(w.recoveryPermits) > 0 {
+				p.slots = min(p.slots, 1)
+			}
+			continue
+		}
 		available := float64(allowedUnits(w.Allowance, paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)) - w.Used - w.Reserved)
 		if w.capacityBudget != nil {
 			available = math.Min(available, *w.capacityBudget-float64(w.Reserved))
@@ -308,10 +314,32 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 // bounded backoff. This value is frozen on the stopped run, so polling cannot
 // slide a long-reset handoff into the short-wait branch.
 func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID, runID string, now time.Time) (time.Time, bool, error) {
-	// A stop without a reading from this run retains its bounded backoff;
-	// another run's older reading is not evidence for this stop's reset.
+	// Retry advice follows the same persisted resource waits as reservation;
+	// another daemon poll cannot restart a one-hour timer or shorten backoff.
+	a, err := getAccount(ctx, tx, accountID)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	facts, err := loadReadinessFacts(ctx, tx, a, now)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	var next *time.Time
+	for _, f := range facts {
+		if recoverableFact(f) && f.NextAttemptAt != nil && (next == nil || f.NextAttemptAt.After(*next)) {
+			next = f.NextAttemptAt
+		}
+	}
+	if next != nil {
+		return *next, false, nil
+	}
+	// Only this stopped run can identify its named reset. A prior run's
+	// sibling reading still blocks admission, but never names this stop.
 	var until *time.Time
-	err := tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2`, accountID, now, runID).Scan(&until)
+	err = tx.QueryRow(ctx, `SELECT max(reset) FROM (
+      SELECT max(resets_at) AS reset FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2
+      UNION ALL SELECT max(limit_resets_at) FROM run_telemetry WHERE run_id=$3 AND error_code='vendor_limit' AND limit_resets_at>$2
+    ) named`, accountID, now, runID).Scan(&until)
 	if err != nil {
 		return time.Time{}, false, err
 	}

@@ -31,6 +31,8 @@ export interface CapacityOptions {
   unavailable?: boolean
   /** Studio (Codex) has no reading yet: the Codex pool is measured by 2 of 3 accounts. */
   unmeasured?: boolean
+  /** Online Codex Spare has not received its first quota reading. */
+  unreadCodex?: boolean
   /** mbp2607's setup reports login_required (computer-wide, not per account). */
   computerLogin?: boolean
   /**
@@ -69,6 +71,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
     { id: ACCOUNTS.grok, label: 'markus', harness: 'grok', host: 'mbp2607', plan: 'SuperGrok Heavy', ...(options.unavailable ? { probe: false, failure: 'unavailable' } : {}), windows: [{ kind: 'weekly', used: 0, usedToday: 0, budget: 13, reset: '2026-10-06T11:10:00Z', start: '2026-09-29T11:10:00Z', source: 'agentd', readMin: options.stale ? 400 : 12, finish: '2026-10-06T11:10:00Z' }] },
   ]
   if (options.unmeasured) accts.find(a => a.id === ACCOUNTS.studio)!.windows = []
+  if (options.unreadCodex) accts.find(a => a.id === ACCOUNTS.spare)!.windows = []
   if (options.clash) accts.find(a => a.id === ACCOUNTS.studio)!.label = 'Main'
   if (options.apiKey) accts.push({ id: ACCOUNTS.pi, label: 'OpenRouter key', harness: 'pi', host: 'mbp2607', plan: '', windows: [] })
   if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })

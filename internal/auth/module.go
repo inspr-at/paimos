@@ -28,6 +28,7 @@ import (
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
@@ -112,6 +113,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("POST /api/agent-keys/{id}/trim-proposals", m.handleProposeKeyTrim)
+	mux.HandleFunc("GET /api/key-trim-proposals", m.handleListKeyTrims)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/decision", m.handleDecideKeyTrim)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/restore", m.handleDecideKeyTrim)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -291,6 +296,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "agent-keys":
+		if len(parts) == 3 && parts[2] == "trim-proposals" && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
 	case "agents":
 		if len(parts) == 2 && parts[1] == "plan" && read {
 			return "agents.plan.read", true
@@ -475,6 +484,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 2 {
+			if parts[1] == "refresh" {
+				return "models.refresh", true
+			}
+			if parts[1] == "reports" {
+				return "models.report", true
+			}
+		}
 		if read {
 			return "models.read", true
 		}
@@ -591,7 +608,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}

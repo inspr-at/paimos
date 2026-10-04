@@ -105,3 +105,38 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	}
 	return ids, nil
 }
+
+// ResidencyProfileRouteCounts shares the same account read and harness fences
+// across picker choices. It is advisory evidence, never a reservation decision.
+func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (map[string]int, error) {
+	accounts, err := listAccounts(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(profiles))
+	byHarness := map[string][]Account{}
+	for profileID, harness := range profiles {
+		candidates, loaded := byHarness[harness]
+		if !loaded {
+			fs, err := loadFences(ctx, tx, harness)
+			if err != nil {
+				return nil, err
+			}
+			candidates = applyFence(accounts, fs, projectID)
+			byHarness[harness] = candidates
+		}
+		for _, a := range candidates {
+			if a.Harness != harness || a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, profileID) {
+				continue
+			}
+			class, err := ResidencyClass(ctx, tx, a, profileID, now)
+			if err != nil {
+				return nil, err
+			}
+			if modelprefs.Strictness(class) >= modelprefs.Strictness(requirement) {
+				counts[profileID]++
+			}
+		}
+	}
+	return counts, nil
+}

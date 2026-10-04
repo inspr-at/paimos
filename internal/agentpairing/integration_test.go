@@ -1039,6 +1039,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/windows", map[string]any{"starts_at": time.Now(), "ends_at": time.Now().Add(time.Hour), "unit": "requests", "allowance": 2, "pace_model": "unrestricted"}, true, "", 201)
+	fixtureWorkHours(t, f, e.AccountID)
 	var old, ongoing agentruns.Run
 	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &old)
 	decodeResult(t, f.call("POST", "/api/work-orders/"+old.OrderID+"/runs", map[string]string{"agent_principal_id": *v.PrincipalID, "model_profile_id": e.ProfileID, "requested_account_id": e.AccountID}, true, "", 201), &ongoing)
@@ -1555,8 +1556,8 @@ func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
 	proof["progress"] = progress
 	report = agentpairing.View{}
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
-	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
-		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
+	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 1 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("blocked account attention was lost: %+v", report.HarnessDetails["claude"])
 	}
 }
 

@@ -98,6 +98,7 @@
 // # HTTP
 //
 //	GET /api/releases            the whole history plus the running version
+//	GET /api/releases/pending    bounded main changes since the running release
 //	GET /api/releases/{version}  one release (with or without the leading v)
 //	PUT /api/releases/{version}/presentation     set theme, headline, intro
 //	DELETE /api/releases/{version}/presentation  remove them
@@ -110,8 +111,15 @@
 // adds immutable database snapshots for the caller's tenant and visible product
 // project. Native journey snapshots win, followed by explicit manifest backfills,
 // then embedded tag/public notes; empty and hidden-only captures also win.
-// Note text is never taken from live ticket fields, and reads never contact
-// the network. When a capture has no group, or the release has none, Aeon
+// Note text is never taken from live ticket fields. History and single-release
+// reads never contact the network. The pending endpoint compares the running
+// published release's source commit with the public GitHub main head, cached
+// for two minutes and bounded to 250 commits, 4 MiB and six seconds. It excludes
+// merge and version-bump commits, pages by commit key within that pinned
+// snapshot, and reports unavailable or partial evidence explicitly. A partial
+// lookup gives a confirmed lower bound and no exact total. Ticket classification
+// uses only the caller tenant; live benefit text is never attached or cached.
+// When a capture has no group, or the release has none, Aeon
 // reads the live classification of every commit ticket (bug tag, type or kind,
 // or a visible benefit) and ignores the live pill and benefit. A capture that
 // already records a group keeps that group, and Aeon reads the same two facts

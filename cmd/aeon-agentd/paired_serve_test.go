@@ -93,6 +93,11 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					case polled <- struct{}{}:
 					default:
 					}
+				case "/api/agent-accounts":
+					if r.Method != http.MethodGet || r.URL.RawQuery != "include_checks=true" {
+						t.Error("capacity check poll did not use the scoped contract")
+					}
+					_ = json.NewEncoder(w).Encode([]any{})
 				case "/api/agent-accounts/" + account + "/probe":
 					w.WriteHeader(204)
 				default:

@@ -36,7 +36,7 @@ func TestCanonicalRouteFields(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339Nano, fields["route_role_at"].(string)); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`{"route_role":"gruntwork"}`, `{"route_role":""}`, `{"area":"mobile"}`, `{"route_role":1}`} {
+	for _, raw := range []string{`{"route_role":"gruntwork"}`, `{"route_role":""}`, `{"area":"bad area"}`, `{"route_role":1}`} {
 		if _, err := canonicalRouteFields(person, "ticket", []byte(raw), nil); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}

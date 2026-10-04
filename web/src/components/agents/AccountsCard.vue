@@ -51,6 +51,10 @@ const agentsAllowed = (a: AgentAccount) => a.state === 'available' && a.ongoing_
 // Only what needs a word: a normal, usable account shows none.
 const STATE_TEXT: Partial<Record<AccountState, string>> = { signin: 'Sign in again', offline: 'Offline', unavailable: "Couldn't check", paused: 'Paused' }
 const stateOf = (a: AgentAccount): AccountState => rowOf.value.get(a.id)?.state ?? (a.state === 'draining' ? 'paused' : 'live')
+const readinessText = (a: AgentAccount) => {
+  const readiness = capacity.accountLines.get(a.id)?.readiness
+  return readiness ? readiness.kind === 'ready' ? '' : readiness.text : STATE_TEXT[stateOf(a)]
+}
 function limitChip(a: AgentAccount): string {
   const rule = capacity.byAccount.get(a.id)?.limit
   if (rule) return `Limit · ${limitSummary(rule)}`
@@ -176,7 +180,7 @@ async function backInPool(account: AgentAccount) {
                 <button v-else-if="mayManage" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="openSeparate(a)">Keep separate…</button>
                 <span v-if="limitChip(a)" class="chip mine">{{ limitChip(a) }}</span>
                 <span class="meta">
-                  <template v-if="STATE_TEXT[stateOf(a)]"><span class="state">{{ STATE_TEXT[stateOf(a)] }}</span><span class="sep"> · </span></template>
+                  <template v-if="readinessText(a)"><span class="state">{{ readinessText(a) }}</span><span class="sep"> · </span></template>
                   <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
                   <span class="reads">{{ readingSupport(a.harness) }}</span>
                 </span>
@@ -188,6 +192,10 @@ async function backInPool(account: AgentAccount) {
               <button type="button" class="icon-btn flat more" :aria-expanded="open === a.id" :aria-controls="`account-detail-${a.id}`" :aria-label="`Details for ${accountName(a)}`" @click="toggleOpen(a.id)"><AppIcon name="chevron" :size="16" /></button>
             </div>
             <p v-if="useLine(a)" class="use-line">{{ useLine(a) }}</p>
+            <div v-if="capacity.accountLines.get(a.id)?.readiness.hint || capacity.accountLines.get(a.id)?.readiness.command" class="account-diagnostic">
+              <p>{{ capacity.accountLines.get(a.id)?.readiness.hint || capacity.accountLines.get(a.id)?.readiness.text }}</p>
+              <p v-if="capacity.accountLines.get(a.id)?.readiness.command">On {{ host(a) || 'its computer' }}, run <code>{{ capacity.accountLines.get(a.id)?.readiness.command }}</code></p>
+            </div>
             <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" />
             <AccountDetail
               v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
@@ -282,6 +290,9 @@ async function backInPool(account: AgentAccount) {
 }
 .quiet-act { height: 24px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--ink-2); font-size: 12px; }
 .use-line { margin: 6px 0 0; color: var(--ink-3); font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+.account-diagnostic { margin-top: 6px; color: var(--warn-ink); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-diagnostic p { margin: 3px 0 0; }
+.account-diagnostic code { color: var(--ink); user-select: all; }
 dialog.separate { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
 dialog.separate::backdrop { background: var(--scrim); }
 dialog.separate form { display: grid; gap: 10px; padding: 16px 18px 14px; }
