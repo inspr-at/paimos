@@ -113,3 +113,84 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 		t.Fatal("future dispatch modified prior bound work")
 	}
 }
+
+func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testing.T) {
+	f := newFixture(t)
+	strong := testID()
+	f.tx(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','opus','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',99,$2)`, f.person.TenantID, strong); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET max_parallel_runs=4 WHERE id=$1`, f.account)
+		return err
+	})
+	source, report := f.completion(t)
+	handler := f.boundaryHandler(t, f.d.App)
+	cookie := f.boundaryCookie(t)
+	read := httptest.NewRequest("GET", "/api/models/routes?role=review-gate", nil)
+	read.AddCookie(cookie)
+	response := serveBoundary(handler, read)
+	var snapshot struct {
+		Rows  []modelregistry.Route `json:"routes"`
+		Token string                `json:"edit_token"`
+	}
+	if response.Code != 200 {
+		t.Fatal("snapshot middleware refusal", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	desired := []modelregistry.Route{}
+	for _, row := range snapshot.Rows {
+		if row.ProfileID == strong {
+			desired = append(desired, row)
+		}
+	}
+	for _, row := range snapshot.Rows {
+		if row.ProfileID != strong {
+			desired = append(desired, row)
+		}
+	}
+	for i := range desired {
+		desired[i].Priority = i + 1
+	}
+	save := func(mode, token string) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(desired)
+		req := httptest.NewRequest("PUT", "/api/models/routes?role=review-gate&order_mode="+mode, strings.NewReader(string(raw)))
+		req.AddCookie(cookie)
+		req.Header.Set("If-Match", token)
+		return serveBoundary(handler, req)
+	}
+	activation := save("saved", snapshot.Token)
+	if activation.Code != 200 || activation.Header().Get("Model-Order-Mode") != "saved" {
+		t.Fatal("activation middleware refusal", activation.Code, activation.Body.String())
+	}
+	finished := serveBoundary(handler, boundaryRequest(t.Context(), "/api/runs/"+source+"/telemetry", report, f.token, nil))
+	if finished.Code != 200 {
+		t.Fatal("production completion failed", finished.Code, finished.Body.String())
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var reviewProfile, runProfile, account string
+		var trace, runTrace modelregistry.PreferenceTrace
+		if err := tx.QueryRow(t.Context(), `SELECT v.reviewer_profile_id::text,r.model_profile_id::text,COALESCE(r.account_id,r.requested_account_id)::text,v.trace,r.trace FROM work_order_reviews v JOIN agent_runs r ON r.tenant_id=v.tenant_id AND r.work_order_id=v.work_order_id WHERE v.author_run_id=$1`, source).Scan(&reviewProfile, &runProfile, &account, &trace, &runTrace); err != nil {
+			return err
+		}
+		if reviewProfile != strong || runProfile != strong || account != f.account || trace.OrderMode != "saved" || runTrace.OrderMode != "saved" {
+			t.Fatal("finished telemetry ignored saved dispatch or trace", trace, runTrace)
+		}
+		return nil
+	})
+	// Changing fallback after completion does not rebind an accepted replay.
+	restored := save("legacy", activation.Header().Get("ETag"))
+	if restored.Code != 200 {
+		t.Fatal("mode compensation failed", restored.Code, restored.Body.String())
+	}
+	before := f.completionState(t)
+	replay := serveBoundary(handler, boundaryRequest(t.Context(), "/api/runs/"+source+"/telemetry", report, f.token, nil))
+	if replay.Code != 200 || f.completionState(t) != before {
+		t.Fatal("mode change caused completion replay to settle/rebind", replay.Code, replay.Body.String())
+	}
+}

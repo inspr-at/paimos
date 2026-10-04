@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPolicyEditor, PolicyFailure, policyError, policyJSON } from '../src/lib/policyEditor.ts'
-import { preferenceRequest, compensatePreferences, preferenceScalars, writePreferences, writeLadder, validateLadder, type PreferenceSnapshot, type PreferenceMutation, type EditableLadder } from '../src/lib/policyModels.ts'
+import { preferenceRequest, compensatePreferences, preferenceScalars, writePreferences, writeLadder, validateLadder, ladderDraft, compensateLadder, type PreferenceSnapshot, type PreferenceMutation, type EditableLadder } from '../src/lib/policyModels.ts'
 function barrier<T>() { let resolve!: (value:T)=>void; const promise=new Promise<T>(yes=>{resolve=yes}); return {promise,resolve} }
 type Snapshot={person:string;revision:number;value:string}
 function fixture() {
@@ -120,4 +120,22 @@ for(const status of [401,403])test(`confirmed save followed by denied preview ${
  await editor.load();editor.edit('desired');await editor.submit()
  assert.equal(editor.snapshot.value,null);assert.equal(editor.undo.value,null);assert.equal(editor.draft.value,null);assert.equal(editor.needsReload.value,true);assert.equal(editor.phase.value,'saved');assert.match(editor.message.value,/Saved\. Current preview could not be refreshed/)
  await editor.submit(true);assert.equal(writes,1)
+})
+
+test('managed order drafts preserve holds and Undo restores rows plus captured mode',async()=>{
+ const routes=[{role:'review-gate' as const,priority:10,profile_id:'strong',state:'available',reason:'',valid_until:null},{role:'review-gate' as const,priority:20,profile_id:'frontier',state:'conserved',reason:'old hold',valid_until:'2020-01-01T00:00:00Z'}]
+ const token='"'+'a'.repeat(64)+'"',next='"'+'b'.repeat(64)+'"'
+ const before={role:'review-gate',setup:true,truncated:false,can_edit:true,edit_token:token,routes,steps:routes.map(row=>({...row,profile:{id:row.profile_id,family:'anthropic',tier:row.profile_id}})),order_mode:'legacy',managed_fallback_order:['frontier','strong'],dispatch_family_order:['anthropic'],review_floors:[]} as EditableLadder
+ const draft=ladderDraft(before),prior=compensateLadder(before)
+ assert.equal(draft.order_mode,'saved');assert.deepEqual(draft.routes,routes.toReversed().map((row,index)=>({...row,priority:index+1})));assert.deepEqual(prior,{routes,order_mode:'legacy'})
+ const original=globalThis.fetch,requests:{path:string;init:RequestInit}[]=[]
+ try{globalThis.fetch=async(path,init)=>{requests.push({path:String(path),init:init!});const body=JSON.parse(String(init!.body));return new Response(JSON.stringify(body),{headers:{ETag:next,'Model-Order-Mode':String(path).includes('order_mode=legacy')?'legacy':'saved'}})}
+ const saved=await writeLadder(before,draft,false,new AbortController().signal)
+ assert.equal(saved.order_mode,'saved');assert.match(requests[0]!.path,/order_mode=saved/)
+ const restored=await writeLadder(saved,prior,true,new AbortController().signal)
+ assert.equal(restored.order_mode,'legacy');assert.match(requests[1]!.path,/expiry_policy=clear&order_mode=legacy/);assert.deepEqual(restored.routes,routes);assert.equal((requests[1]!.init.headers as Record<string,string>)['If-Match'],next)
+ globalThis.fetch=async()=>new Response(JSON.stringify(draft.routes),{headers:{ETag:next,'Model-Order-Mode':'legacy'}})
+ await assert.rejects(writeLadder(before,draft,false,new AbortController().signal),/ordering mode confirmation/)
+ assert.throws(()=>ladderDraft({...before,managed_fallback_order:['strong','strong']}),/managed order snapshot/)
+ }finally{globalThis.fetch=original}
 })

@@ -2,24 +2,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { createPolicyEditor, policyJSON, policyRequest } from '../../lib/policyEditor'
-import { readLadder, writeLadder, type ModelRoute, type EditableLadder } from '../../lib/policyModels'
+import { readLadder, writeLadder, ladderDraft, compensateLadder, type LadderMutation, type ModelRoute, type EditableLadder } from '../../lib/policyModels'
 import { stepName, stepState, truncatedLadder, type PolicyRole, type PolicyStep } from '../../lib/policies'
 import { createScope } from '../../lib/identityScope'
 import PolicyEditorFrame from './PolicyEditorFrame.vue'
 import PolicyEditorActions from './PolicyEditorActions.vue'
 const props = defineProps<{ owner: string; role: PolicyRole; person: boolean }>()
-const editor = createPolicyEditor<EditableLadder, ModelRoute[]>(() => props.owner ? `${props.owner}/${props.role}` : '', {
+const editor = createPolicyEditor<EditableLadder, LadderMutation>(() => props.owner ? `${props.owner}/${props.role}` : '', {
   read: signal => readLadder(props.role, signal), write: writeLadder, identity: value => value.role,
   writeKey: before => `${props.owner}/ladder/${before.role}`,
-  compensate: before => structuredClone(before.routes),
-  saved: (result, undo, wanted) => undo ? wanted.some(row => row.state !== 'available' && result.routes.find(now => now.profile_id === row.profile_id)?.state === 'available') ? 'Order restored; expired holds remain available.' : 'Order restored.' : 'Saved.',
+  compensate: compensateLadder,
+  saved: (result, undo, wanted) => undo ? wanted.routes.some(row => row.state !== 'available' && result.routes.find(now => now.profile_id === row.profile_id)?.state === 'available') ? 'Order restored; expired holds remain available.' : 'Order restored.' : 'Saved.',
 })
 const { snapshot, draft, busy, loading, needsReload, message, undo, phase } = editor
 const selected = ref(0), profiles = ref<PolicyStep['profile'][]>([]), profileError = ref(''), catalogTruncated = ref(false)
 const scope = createScope(() => `${props.owner}/${props.role}`)
-const rows = computed(() => phase.value === 'saving' && draft.value ? draft.value : snapshot.value?.routes ?? [])
+const rows = computed(() => phase.value === 'saving' && draft.value ? draft.value.routes : snapshot.value?.routes ?? [])
 const editable = computed(() => props.person && !!snapshot.value?.can_edit && !!snapshot.value?.edit_token && !snapshot.value.truncated && snapshot.value.setup)
-const displayed = computed(() => draft.value ?? snapshot.value?.routes ?? [])
+const displayed = computed(() => draft.value?.routes ?? snapshot.value?.routes ?? [])
 const route = computed(() => displayed.value[selected.value])
 const opened = ref(false)
 function cancel() { if (!busy.value) { editor.cancel(); opened.value = false } }
@@ -32,7 +32,7 @@ onBeforeUnmount(() => { editor.dispose(); scope.dispose() })
 function edit() {
   if (!editable.value || !snapshot.value || busy.value) return
   opened.value = true
-  editor.edit(draft.value ?? snapshot.value.routes)
+  editor.edit(draft.value ?? ladderDraft(snapshot.value))
   if (!profiles.value.length) void scope.run(({ after, signal }) => after(policyRequest('/models', { signal }).then(r => policyJSON<PolicyStep['profile'][]>(r)), value => {
     if (!Array.isArray(value)) throw new Error('Invalid model catalog')
     catalogTruncated.value = value.length > 256; profiles.value = value.slice(0, 256)
@@ -40,39 +40,39 @@ function edit() {
 }
 function move(position: number) {
   if (!draft.value || busy.value || !route.value || !Number.isInteger(position)) return
-  const target = Math.max(0, Math.min(draft.value.length - 1, position - 1))
-  const next = [...draft.value], [item] = next.splice(selected.value, 1)
+  const target = Math.max(0, Math.min(draft.value.routes.length - 1, position - 1))
+  const next = [...draft.value.routes], [item] = next.splice(selected.value, 1)
   next.splice(target, 0, item!); selected.value = target
-  draft.value = next.map((row, index) => ({ ...row, priority: index + 1 }))
+  draft.value = { ...draft.value, routes: next.map((row, index) => ({ ...row, priority: index + 1 })) }
 }
 function update(field: 'state' | 'reason' | 'valid_until', value: string) {
   if (!draft.value || !route.value || busy.value) return
   const changed = { ...route.value, [field]: value || null }
   if (field === 'state' && value === 'available') { changed.reason = ''; changed.valid_until = null }
-  draft.value = draft.value.map((row, index) => index === selected.value ? changed as ModelRoute : row)
+  draft.value = { ...draft.value, routes: draft.value.routes.map((row, index) => index === selected.value ? changed as ModelRoute : row) }
 }
 function add(event: Event) {
   const select = event.target as HTMLSelectElement, id = select.value; select.value = ''
-  if (!id || !draft.value || busy.value || draft.value.length >= 50 || draft.value.some(row => row.profile_id === id)) return
-  draft.value = [...draft.value, { role: props.role, profile_id: id, priority: draft.value.length + 1, state: 'available' as const, reason: '', valid_until: null }].map((row, index) => ({ ...row, priority: index + 1 })); selected.value = draft.value.length - 1
+  if (!id || !draft.value || busy.value || draft.value.routes.length >= 50 || draft.value.routes.some(row => row.profile_id === id)) return
+  draft.value = { ...draft.value, routes: [...draft.value.routes, { role: props.role, profile_id: id, priority: draft.value.routes.length + 1, state: 'available' as const, reason: '', valid_until: null }].map((row, index) => ({ ...row, priority: index + 1 })) }; selected.value = draft.value.routes.length - 1
 }
 function remove() {
   if (!draft.value || busy.value) return
-  draft.value = draft.value.filter((_, index) => index !== selected.value).map((row,index) => ({ ...row, priority: index + 1 }))
-  selected.value = Math.max(0, Math.min(selected.value, draft.value.length - 1))
+  draft.value = { ...draft.value, routes: draft.value.routes.filter((_, index) => index !== selected.value).map((row,index) => ({ ...row, priority: index + 1 })) }
+  selected.value = Math.max(0, Math.min(selected.value, draft.value.routes.length - 1))
 }
 function name(id: string) {
   const profile = profiles.value.find(row => row.id === id) ?? snapshot.value?.steps.find(row => row.profile_id === id)?.profile
   return profile ? stepName({ profile } as PolicyStep) : id
 }
-const preview = computed(() => (draft.value ?? rows.value).map(row => ({ ...row, profile: profiles.value.find(item => item.id === row.profile_id) ?? snapshot.value?.steps.find(item => item.profile_id === row.profile_id)?.profile })).filter((row): row is PolicyStep => !!row.profile))
+const preview = computed(() => (draft.value?.routes ?? rows.value).map(row => ({ ...row, profile: profiles.value.find(item => item.id === row.profile_id) ?? snapshot.value?.steps.find(item => item.profile_id === row.profile_id)?.profile })).filter((row): row is PolicyStep => !!row.profile))
 function submit() { if (editable.value) void editor.submit() }
 </script>
 <template>
   <div class="ladder-editor">
     <PolicyEditorFrame :active="opened" title="Saved job order" @save="submit" @cancel="cancel" @undo="editor.submit(true)" @edit="edit">
       <template #actions="{ submitKey }"><PolicyEditorActions :editable="editable" :editing="!!draft" :closable="opened" :busy="busy || loading" :reload-required="needsReload" :undoable="!!undo" :submit-key="submitKey" @edit="edit" @save="submit" @cancel="cancel" @undo="editor.submit(true)" @reload="editor.load" /></template>
-      <template #status>{{ message || (loading ? 'Loading the saved order…' : snapshot?.truncated ? 'The complete order is needed before it can be changed.' : !editable ? 'A person with See models and Manage models may change a complete order.' : 'Model registry owns this order. Save changes only the selected job role.') }}<span v-if="draft && !draft.length"> The empty order leaves no configured fallback for this role.</span></template>
+      <template #status>{{ message || (loading ? 'Loading the saved order…' : snapshot?.truncated ? 'The complete order is needed before it can be changed.' : !editable ? 'A person with See models and Manage models may change a complete order.' : 'Model registry owns this order. Save changes only the selected job role.') }}<span v-if="draft && !draft.routes.length"> The empty order leaves no configured fallback for this role.</span></template>
       <div class="ladder-fields">
         <label>Step<select :value="selected" aria-label="Selected ladder step" :disabled="busy || !draft" @change="selected = Number(($event.target as HTMLSelectElement).value)"><option v-for="(item,index) in displayed" :key="index" :value="index">{{ index + 1 }} · {{ name(item.profile_id) }}</option></select></label>
         <label>Position<input aria-label="Ladder position" type="number" min="1" :max="displayed.length || 1" :value="selected + 1" :disabled="busy || !draft || !route" @change="move(Number(($event.target as HTMLInputElement).value))" /></label>
@@ -84,7 +84,7 @@ function submit() { if (editable.value) void editor.submit() }
         <p class="wide">New or renewed holds need a reason and a future expiry. An unchanged expired hold can stay in a reorder; Undo keeps expired holds available.</p>
         <p v-if="profileError || catalogTruncated" class="wide">{{ profileError || 'Only the first 256 model choices are shown; existing steps remain intact.' }}</p>
       </div>
-      <div class="read-help"><p>CLI follows this priority and harness health. Dispatch qualifies accounts, platform and preferences separately.</p><p v-if="role === 'review-gate'">Command-line order. Managed review currently retains its built-in family fallback; minimum review checks still apply.</p><p>Use a numbered position to move a step. Holds record a reason and expiry; no drag gesture is required.</p></div>
+      <div class="read-help"><p>CLI follows this priority and harness health. Dispatch qualifies accounts, platform and preferences separately.</p><p v-if="role === 'review-gate'">Managed fallback: {{ snapshot?.order_mode === 'saved' ? 'saved order' : 'built-in family and tier order' }}. Saving activates this order for future reviews. An available preferred reviewer can outrank it; minimum checks still apply.</p><p>Use a numbered position to move a step. Holds record a reason and expiry; no drag gesture is required.</p></div>
     </PolicyEditorFrame>
     <p v-if="snapshot && !snapshot.setup">The model registry is not set up yet.</p>
     <p v-if="snapshot?.truncated">{{ truncatedLadder() }}</p>
@@ -92,7 +92,7 @@ function submit() { if (editable.value) void editor.submit() }
     <ol class="order ladder" aria-label="Configured ladder">
       <li v-for="(step,index) in preview" :key="index" class="order-row" data-testid="ladder-slot"><span>{{ String(index + 1).padStart(2,'0') }}</span><div><h4>{{ stepName(step) }}</h4><p>{{ step.profile.family }} · {{ step.profile.harness }} · {{ step.profile.effort }}</p><p>{{ stepState(step, Date.now()) }}</p></div></li>
     </ol>
-    <div v-if="role === 'review-gate' && snapshot" class="floors routing-notes"><p>Built-in review family order: {{ snapshot.dispatch_family_order.join(', then ') }}.</p><p v-for="floor in snapshot.review_floors" :key="floor">{{ floor }}</p></div>
+    <div v-if="role === 'review-gate' && snapshot" class="floors routing-notes"><p>{{ snapshot.order_mode === 'saved' ? 'Saved managed fallback order is active.' : `Built-in review family order: ${snapshot.dispatch_family_order.join(', then ')}.` }}</p><p v-for="floor in snapshot.review_floors" :key="floor">{{ floor }}</p></div>
   </div>
 </template>
 <style scoped>

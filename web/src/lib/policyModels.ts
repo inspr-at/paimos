@@ -2,6 +2,7 @@
 import { policyJSON, policyRequest } from './policyEditor.ts'
 import type { PolicyLadder, PolicyRole, PolicyStep } from './policies.ts'
 export type ModelRoute = Omit<PolicyStep, 'profile'>
+export interface LadderMutation { routes: ModelRoute[]; order_mode?: 'legacy' | 'saved' }
 export interface EditableLadder extends PolicyLadder { routes: ModelRoute[]; edit_token: string | null; can_edit: boolean }
 export type Selector = { mode: 'auto' } | { mode: 'pinned'; profile_id: string } | { mode: 'latest'; family: string; line: string; effort: string; harness?: string }
 export type PreferenceLevelName = 'default' | 'person' | 'project'
@@ -39,6 +40,7 @@ function validLevel(level: PreferenceLevel) {
 }
 export function validateLadder(data: EditableLadder, role: PolicyRole) {
   if (data.role !== role || !Array.isArray(data.routes) || data.routes.length > 50 || !Array.isArray(data.steps) || data.steps.length !== data.routes.length || typeof data.can_edit !== 'boolean' || typeof data.truncated !== 'boolean' || typeof data.setup !== 'boolean' || (!data.truncated && !strongToken(data.edit_token))) throw new Error('Invalid ladder snapshot')
+  if (role === 'review-gate' && (!['legacy','saved'].includes(data.order_mode ?? '') || !Array.isArray(data.managed_fallback_order) || data.managed_fallback_order.length !== data.routes.length || new Set(data.managed_fallback_order).size !== data.routes.length || data.managed_fallback_order.some(id => !data.routes.some(row => row.profile_id === id)))) throw new Error('Invalid managed order snapshot')
   for (const route of data.routes) if (!validRoute(route, role)) throw new Error('Invalid ladder route')
   return data
 }
@@ -46,16 +48,33 @@ export async function readLadder(role: PolicyRole, signal: AbortSignal): Promise
   const response = await policyRequest(`/models/routes?role=${encode(role)}`, { signal })
   return validateLadder(await policyJSON<EditableLadder>(response), role)
 }
-export async function writeLadder(before: EditableLadder, routes: ModelRoute[], undo: boolean, signal: AbortSignal): Promise<EditableLadder> {
+export async function writeLadder(before: EditableLadder, desired: ModelRoute[] | LadderMutation, undo: boolean, signal: AbortSignal): Promise<EditableLadder> {
+  const routes = Array.isArray(desired) ? desired : desired.routes
+  const orderMode = before.role === 'review-gate' ? (Array.isArray(desired) ? undo ? before.order_mode : 'saved' : desired.order_mode) : undefined
+  if (before.role === 'review-gate' && (!['legacy','saved'].includes(orderMode ?? '') || !['legacy','saved'].includes(before.order_mode ?? ''))) throw new Error('A complete managed order mode is required')
   if (!before.setup || before.truncated || !before.can_edit || !strongToken(before.edit_token) || routes.length > 50 || routes.some(row => row.role !== before.role)) throw new Error('A complete editable order is required')
-  const response = await policyRequest(`/models/routes?role=${encode(before.role)}${undo ? '&expiry_policy=clear' : ''}`, {
+  const response = await policyRequest(`/models/routes?role=${encode(before.role)}${undo ? '&expiry_policy=clear' : ''}${orderMode ? `&order_mode=${orderMode}` : ''}`, {
     method: 'PUT', signal, headers: { 'Content-Type': 'application/json', 'If-Match': before.edit_token }, body: JSON.stringify(routes),
   })
   const actual = await policyJSON<ModelRoute[]>(response), token = response.headers.get('ETag')
   if (!strongToken(token) || !Array.isArray(actual) || actual.length !== routes.length || actual.some((row,index) => !validRoute(row, before.role) || row.profile_id !== routes[index]?.profile_id || row.priority !== routes[index]?.priority)) throw new Error('Invalid save confirmation')
+  const actualMode = response.headers.get('Model-Order-Mode')
+  if (orderMode && actualMode !== orderMode) throw new Error('Invalid ordering mode confirmation')
   // Profile display metadata is refreshed afterwards; stored routes/token are
   // adopted immediately from the confirmed response, including expiry clearing.
-  return { ...before, routes: actual, edit_token: token, steps: actual.map(route => ({ ...route, profile: before.steps.find(row => row.profile_id === route.profile_id)?.profile ?? { id: route.profile_id, slug: route.profile_id, model: route.profile_id, family: '', harness: '', effort: '', tier: '', enabled: true } })) }
+  // Legacy fallback is refreshed from its source GET rather than inferred from
+  // possibly missing display metadata (for example a step re-added by Undo).
+  return { ...before, ...(orderMode ? { order_mode: orderMode, managed_fallback_order: orderMode === 'saved' ? actual.map(row => row.profile_id) : undefined } : {}), routes: actual, edit_token: token, steps: actual.map(route => ({ ...route, profile: before.steps.find(row => row.profile_id === route.profile_id)?.profile ?? { id: route.profile_id, slug: route.profile_id, model: route.profile_id, family: '', harness: '', effort: '', tier: '', enabled: true } })) }
+}
+/** Legacy draft starts from the displayed dispatch order, retaining every hold. */
+export function ladderDraft(before: EditableLadder): LadderMutation {
+  if (before.role !== 'review-gate') return { routes: structuredClone(before.routes) }
+  validateLadder(before, before.role)
+  const ids = before.managed_fallback_order!
+  return { routes: ids.map((id, index) => ({ ...before.routes.find(row => row.profile_id === id)!, priority: index + 1 })), order_mode: 'saved' }
+}
+export function compensateLadder(before: EditableLadder): LadderMutation {
+  return { routes: structuredClone(before.routes), ...(before.role === 'review-gate' ? { order_mode: before.order_mode } : {}) }
 }
 export function validatePreferences(data: PreferenceDocument) {
   if (typeof data.person_id !== 'string' || !Array.isArray(data.kinds) || data.kinds.length > 256 || data.residency_lock_mode !== 'warn' || !data.can || !data.views || !data.levels) throw new Error('Invalid preference snapshot')

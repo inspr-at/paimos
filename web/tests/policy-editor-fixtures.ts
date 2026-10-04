@@ -5,7 +5,7 @@ import { mockPolicies, policyLadder } from './policies-fixtures'
 import type { EditableLadder, ModelRoute, PreferenceDocument, PreferenceLevelName } from '../src/lib/policyModels'
 import type { PolicyRole } from '../src/lib/policies'
 function barrier() { let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve});return {promise,release} }
-const token=(routes:ModelRoute[])=>'"'+createHash('sha256').update(JSON.stringify(routes)).digest('hex')+'"'
+const token=(routes:ModelRoute[],mode?:string)=>'"'+createHash('sha256').update(JSON.stringify({routes,mode})).digest('hex')+'"'
 export function preferenceDocument():PreferenceDocument {
  const auto={mode:'auto'} as const,profiles=policyLadder('build').steps.map(row=>row.profile)
  profiles[0]!.display_name='Sehr lange Modellbezeichnung für nachvollziehbare normale und komplexe Entwicklungsaufgaben'
@@ -30,6 +30,7 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
  const base=await mockPolicies(page,theme)
  base.data.grants.push('models.manage','model_prefs.manage','nodes.read')
  const catalog=policyLadder('build',3).steps.map(s=>s.profile)
+ catalog[0]!.display_name='Sehr lange Modellbezeichnung für nachvollziehbare normale und komplexe Reviewaufgaben'
  const state={document:preferenceDocument(),ladders:new Map<PolicyRole,EditableLadder>(),writes:[] as {path:string;method:string;body:Record<string,unknown>|ModelRoute[]|null;headers:Record<string,string>}[],refusal:null as null|{status:number;code:string},failReads:false,malformed:false,unknown:false}
  let next:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>}|null=null
  await page.route('**/api/models',route=>route.fulfill({json:catalog}))
@@ -44,8 +45,8 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
   if(req.headers()['if-match']!==ladder.edit_token)return route.fulfill({status:409,json:{code:'stale_revision',error:'stale_revision'}})
   if(new Set(desired.map(row=>row.priority)).size!==desired.length)return route.fulfill({status:400,json:{error:'duplicate priority for role'}})
   const actual=desired.map(row=>url.searchParams.get('expiry_policy')==='clear'&&row.valid_until&&Date.parse(row.valid_until)<=Date.now()?{...row,state:'available',reason:'',valid_until:null}:row).sort((a,b)=>a.priority-b.priority||a.profile_id.localeCompare(b.profile_id))
-  ladder.routes=actual;ladder.edit_token=token(actual);ladder.steps=actual.map(row=>({...row,profile:catalog.find(item=>item.id===row.profile_id)!}))
-  return route.fulfill({json:actual,headers:{ETag:ladder.edit_token!}})
+  ladder.routes=actual;if(role==='review-gate'){ladder.order_mode=(url.searchParams.get('order_mode')??ladder.order_mode) as 'legacy'|'saved';ladder.managed_fallback_order=actual.map(row=>row.profile_id)}ladder.edit_token=token(actual,ladder.order_mode);ladder.steps=actual.map(row=>({...row,profile:catalog.find(item=>item.id===row.profile_id)!}))
+  return route.fulfill({json:actual,headers:{ETag:ladder.edit_token!,...(role==='review-gate'?{'Model-Order-Mode':ladder.order_mode!}:{})}})
  })
  await page.route(/\/api\/model-preferences(\/|\?|$)/,async route=>{
   const req=route.request(),url=new URL(req.url())

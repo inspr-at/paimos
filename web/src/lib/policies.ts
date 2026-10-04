@@ -26,6 +26,7 @@ export interface PolicyStep {
 export interface PolicyLadder {
   role: PolicyRole; steps: PolicyStep[]; setup: boolean; truncated: boolean
   routes?: Omit<PolicyStep, 'profile'>[]; edit_token?: string | null; can_edit?: boolean
+  order_mode?: 'legacy' | 'saved'; managed_fallback_order?: string[]
   dispatch_family_order: string[]; review_floors: string[]
 }
 export const truncatedLadder = () => `Showing the first 50 steps; the rest are applied by ${brand.value.short_name} but not listed here.`
