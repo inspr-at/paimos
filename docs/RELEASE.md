@@ -261,6 +261,28 @@ without browsers using `npm --prefix web run ci:web:shard -- --check --strict`.
 A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
 reruns exactly one test in its original config group.
 
+Coverage-addition validation (AEON-677, fix round 2): at source commit
+`dc61efd76ad7263749c3b70a515aad5e40df60ba`, local macOS arm64 runs with
+Playwright 1.63.0's bundled Chromium headless shell passed `aeon-632b-clip`
+(39 tests), `key-trim` (7) and `model-prefs` (42). Each spec ran separately
+with `playwright.ui.config.ts`, one worker and zero retries: 88 passed, no
+failures, skips or flakes, and zero owned processes remaining after each run.
+All 19 shard unit checks, 11 queue-measurement unit checks and strict default
+and `--all` inventory checks passed. Local logs, JSON reports, process metrics,
+source hashes and the ticket snapshot are retained in the ignored
+`web/test-results/aeon-ci-sharding-fix2/` directory. The `summary.json` SHA256 is
+`934eb94695da47b8a636d0f3a11d88415acd7f63095ac6c92f8a5e1b1bfe06b9`.
+This is evidence-only work;
+no application behavior, test assertions, workflows, weights or gates changed.
+
+**Hosted validation remains pending.** The GitHub run lookup returned no runs
+for that source commit. Local execution proves the recorded macOS results;
+neither those results nor collection counts establish hosted Linux stability
+or the five-minute shard target. The coordinator must record successful hosted
+execution of all three specs at the reviewed candidate SHA and repeat the
+consolidated gate before accepting the coverage change. No push, deployment
+or review approval was performed by this worker.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
