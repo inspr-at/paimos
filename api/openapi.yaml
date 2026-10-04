@@ -10958,9 +10958,9 @@ paths:
   /nodes/{nodeId}/agent-work:
     get:
       operationId: getTicketAgentWork
-      summary: Agent sessions, tokens, estimated cost and time for a ticket or epic
+      summary: Agent sessions, tokens, estimated cost and time for a work item
       description: >
-        Sessions whose ticket is this live ticket, epic or task, or a visible descendant.
+        Sessions whose ticket is this live work item (or legacy ticket, epic or task), or a visible descendant.
         Filtered by the caller's tenant and visible projects. Each session is listed once.
         Token counts and list-price estimates are summed from the current
         harness_session_usage rows for that session, one row per model. Cost is an exact
@@ -10979,9 +10979,10 @@ paths:
   /nodes/{nodeId}/delivery-ratings:
     get:
       operationId: listDeliveryRatings
-      summary: Rework marks and objective signals for sessions on a ticket, epic or task
+      summary: Rework marks and objective signals for sessions on a work item
       description: >
-        Person session only. One row per visible session whose ticket is this node
+        Person session only. Supports work and legacy ticket, epic and task nodes.
+        One row per visible session whose ticket is this node
         or a visible descendant, newest first, at most 80. A vote row is an exception:
         silence is not stored. mine is the caller's mark, or null. votes counts
         exception rows. average is the mean of optional scores, null when none were
@@ -15561,7 +15562,7 @@ components:
       required: [node_id, kind, currency, usage_available, includes_descendants, scope_truncated, list_truncated, sessions, totals]
       properties:
         node_id: {type: string, format: uuid}
-        kind: {type: string, enum: [ticket, epic, task]}
+        kind: {type: string, enum: [work, ticket, epic, task]}
         currency: {type: string, enum: [USD]}
         usage_available: {type: boolean, description: 'True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.'}
         includes_descendants: {type: boolean}

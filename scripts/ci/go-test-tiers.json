@@ -3712,6 +3712,9 @@
     {"kind":"go","package":"internal/agentruns","name":"TestWorkParentQueueRefusedWithLiveWorkChild","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentruns","name":"TestCanonicalWorkResidencyAdmissionAndLiveRecheck","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentruns","name":"TestCanonicalWorkLiveResidencyRecheck","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/db","name":"TestWorkRoutingUpgradePreservesResidencyAndPins","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/db","name":"TestWorkRoutingUpgradePreservesResidencyAndPins","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/deliveryvote","name":"TestMigratedWorkRetainsDeliveryRatingsAndVisibility","tier":"GATED-FULL"}
   ]
 }

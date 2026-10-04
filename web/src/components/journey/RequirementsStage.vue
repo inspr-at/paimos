@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { isWorkItem, isWorkLeaf, isWorkParent } from '../../lib/workVocabulary'
+import { parentLeafGroups, workParentId } from '../../lib/journeyWork'
 import { ACTION_LONG, addRequirement, gateApprovals, isDropped, isFinished, isImported, offeredApproval, STAGE_LABEL, type Requirement } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { can } from '../../lib/authz'
@@ -35,16 +37,16 @@ const tickets = computed(() => all.value.reduce((sum, r) => sum + r.generated_ti
 const imported = computed(() => isImported(journey.value) && !all.value.length)
 const work = computed(() => ctx.data.work.value.value)
 const keyOrder = (a: ListItem, b: ListItem) => a.key.localeCompare(b.key, undefined, { numeric: true })
-const epicOf = (item: ListItem) => item.epic?.id ?? (item.parent?.kind_slug === 'epic' ? item.parent.id : null)
+const epicOf = workParentId
 const importedEpics = computed(() => {
-  const tickets = work.value.filter(i => i.kind_slug === 'ticket' && !isDropped(i.state))
-  return work.value.filter(i => i.kind_slug === 'epic').sort(keyOrder).map(epic => {
-    const mine = tickets.filter(t => epicOf(t) === epic.id)
+  const groups = parentLeafGroups(work.value)
+  return work.value.filter(i => isWorkItem(i) && isWorkParent(i)).sort(keyOrder).map(epic => {
+    const mine = (groups.get(epic.id) ?? []).filter(i => !isDropped(i.state))
     const done = mine.filter(t => isFinished(t.state)).length
     return { epic, total: mine.length, done, segments: Array.from({ length: Math.min(12, Math.max(1, mine.length)) }, (_, i) => i < Math.round(done / Math.max(1, mine.length) * Math.min(12, Math.max(1, mine.length)))) }
   })
 })
-const loose = computed(() => work.value.filter(i => i.kind_slug === 'ticket' && !isDropped(i.state) && !epicOf(i)).length)
+const loose = computed(() => work.value.filter(i => isWorkLeaf(i) && !isDropped(i.state) && !epicOf(i)).length)
 const epicHref = (key: string) => `/p/${encodeURIComponent(ctx.project.value.routeKey)}/${encodeURIComponent(key)}`
 
 // Adding a requirement (a draft until the next agreement).
@@ -71,7 +73,7 @@ async function add() {
   <div class="j-grid">
     <div class="j-col">
       <section v-if="imported" class="j-card" aria-labelledby="req-imported">
-        <header class="j-card-head"><p id="req-imported" class="eyebrow">Features · {{ importedEpics.length }} · imported epics</p><span class="j-count">{{ plural(work.filter(i => i.kind_slug === 'ticket' && !isDropped(i.state)).length, 'ticket') }}</span></header>
+        <header class="j-card-head"><p id="req-imported" class="eyebrow">Features · {{ importedEpics.length }} · imported epics</p><span class="j-count">{{ plural(work.filter(i => isWorkLeaf(i) && !isDropped(i.state)).length, 'ticket') }}</span></header>
         <p v-if="!importedEpics.length" class="j-note">The project came without epics{{ loose ? `; its ${plural(loose, 'ticket')} stand on their own` : '' }}. Requirements agreed here become its first features.</p>
         <ol v-else class="reqs">
           <li v-for="(row, i) in importedEpics" :key="row.epic.id" class="req">

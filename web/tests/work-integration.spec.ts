@@ -27,6 +27,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme })
     const calls = await mockWork(page, migrated())
     await page.goto('/p/PHAROS/PHAROS-12')
+    await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
     await page.keyboard.press('Control+k')
     const palette = page.getByRole('dialog', { name: 'Search and commands' })
     const search = palette.getByRole('combobox')
@@ -49,17 +50,19 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await shot(page, 'relations', width, theme)
     await picker.getByRole('option').first().click()
     await expect(picker).toBeHidden()
-    expect(calls.filter(c => c.path === '/api/nodes' && c.query.get('q')).every(c => c.query.get('kind')?.split(',').includes('work'))).toBe(true)
+    const searchCalls = calls.filter(c => c.path === '/api/nodes' && c.query.get('q') && c.query.get('limit') === '8')
+    expect(searchCalls).toHaveLength(4)
+    expect(searchCalls.every(c => c.query.get('kind')?.split(',').includes('work'))).toBe(true)
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/relations')).toHaveLength(1)
   })
 
   test(`canonical leaf classification renders, confirms and saves at ${width}px ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
-    const data = migrated(), row = data.nodes.find(n => n.id === 'n-2')!
+    const data = migrated(), row = data.nodes.find(n => n.id === 'n-1')!
     Object.assign(row.fields, { area: 'backend', area_source: 'suggested', complexity: 'M', complexity_source: 'suggested' })
     const revision = row.updated_at, calls = await mockWork(page, data)
     await page.route('**/api/work-kinds?**', route => route.fulfill({ json: { items: ['backend', 'security'].map(slug => ({ id: slug, slug, label: slug, position: 0 })), next_cursor: null } }))
-    await page.goto('/p/PHAROS/PHAROS-12')
+    await page.goto('/p/PHAROS/PHAROS-11')
     const panel = page.getByRole('complementary', { name: 'Ticket details' })
     const area = panel.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity = panel.getByRole('combobox', { name: 'Complexity', exact: true })
     await expect(area).toBeEnabled()
@@ -68,7 +71,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       { name: 'choose security', run: async () => { await area.selectOption('security'); await expect(area).toBeEnabled(); await expect(area).toHaveValue('security') } },
       { name: 'choose complexity', run: async () => { await complexity.selectOption('L'); await expect(complexity).toBeEnabled(); await expect(complexity).toHaveValue('L') } },
     ] })
-    const writes = calls.filter(c => c.method === 'PATCH' && c.path === '/api/nodes/n-2')
+    const writes = calls.filter(c => c.method === 'PATCH' && c.path === '/api/nodes/n-1')
     expect(writes).toHaveLength(3); expect(writes[0]!.headers['if-unmodified-since']).toBe(revision)
     expect((writes[0]!.body as { fields: object }).fields).not.toHaveProperty('area_source')
     expect((writes[1]!.body as { fields: { area: string } }).fields.area).toBe('security')
@@ -88,9 +91,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await expect(page.locator('.journey-view .skeleton')).toHaveCount(0)
       if (stage === 'inspire') {
         const brought = page.getByRole('list', { name: 'What the project brought' })
-        await expect(brought).toContainText('1epic'); await expect(brought).toContainText('4tickets · 1 done')
+        await expect(brought).toContainText('2epics'); await expect(brought).toContainText('4tickets · 1 done')
       } else if (stage === 'requirements') {
-        const features = page.getByRole('region', { name: /Features · 1 · imported epics/ })
+        const features = page.getByRole('region', { name: /Features · 2 · imported epics/ })
         await expect(features).toContainText('0 of 2 tickets done'); await expect(features).toContainText('2 tickets are not tied to an epic.')
       } else if (stage === 'plan') {
         const backlog = page.getByRole('region', { name: 'Backlog · what release 1 is chosen from' })

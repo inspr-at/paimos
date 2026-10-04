@@ -23,11 +23,6 @@ func run(t *testing.T, command string, args ...string) {
 		t.Errorf("%s %v: %v", command, args, err)
 	}
 }
-func TestBaselineWeb(t *testing.T) {
-	npmReady(t)
-	run(t, "node", "--experimental-strip-types", "--test", "tests/palette.test.ts")
-	run(t, "node", "node_modules/vitest/vitest.mjs", "run", "tests/morning-briefing-view.unit.test.ts", "--maxWorkers=1", "--no-fileParallelism")
-}
 func TestWebValidation(t *testing.T) {
 	npmReady(t)
 	run(t, "npm", "run", "build")

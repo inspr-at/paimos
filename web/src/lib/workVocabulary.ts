@@ -16,3 +16,6 @@ export function workIcon(row: Pick<ListItem, 'kind_slug'> & { level_icon?: strin
   return row.is_leaf === false || row.kind_slug === 'epic' ? 'epic' : row.kind_slug === 'task' ? 'task' : 'ticket'
 }
 export function isWorkParent(row: { is_leaf?: boolean; kind_slug: string }): boolean { return row.is_leaf === false || (row.is_leaf === undefined && row.kind_slug === 'epic') }
+export const WORK_KINDS = ['work', 'ticket', 'task', 'epic']
+export function isWorkItem(row: { kind_slug: string }): boolean { return WORK_KINDS.includes(row.kind_slug) }
+export function isWorkLeaf(row: { is_leaf?: boolean; kind_slug: string }): boolean { return isWorkItem(row) && !isWorkParent(row) }

@@ -6,7 +6,7 @@ import { listNodes, type ListItem, type WorkNode } from '../../lib/api'
 import { keyPrefixOf, keyQuery, ticketResults, type TicketResult } from '../../lib/palette'
 import { recents } from '../../lib/recents'
 import { choiceById, RELATION_CHOICES, type RelationChoice } from '../../lib/relations'
-import { searchWork, workKindMap } from '../../lib/ticketSearch'
+import { searchWork, workKindMap, WORK_KINDS } from '../../lib/ticketSearch'
 import type { RelatedNode, RelatedTicket } from '../../lib/useTicket'
 import { highlight } from '../../lib/work'
 import { useProjects } from '../../stores/projects'
@@ -90,7 +90,7 @@ onBeforeUnmount(() => { clearTimeout(timer); controller?.abort() })
 // A recent ticket carries no id: its key finds it.
 async function resolve(result: TicketResult): Promise<RelatedTicket | null> {
   if (!result.id.startsWith('recent-')) return { id: result.id, key: result.key, title: result.title, state: result.state }
-  const page = await listNodes({ q: result.key, kind: ['ticket', 'task', 'epic'], sort: 'key', limit: 5 })
+  const page = await listNodes({ q: result.key, kind: WORK_KINDS, sort: 'key', limit: 5 })
   const item = page.items.find(candidate => candidate.key === result.key)
   return item ? { id: item.id, key: item.key, title: item.title, state: item.state } : null
 }

@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { isWorkItem, isWorkLeaf, isWorkParent } from '../../lib/workVocabulary'
+import { workParentId } from '../../lib/journeyWork'
 import type { ListItem } from '../../lib/api'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { plural, statusMeta } from '../../lib/work'
@@ -13,11 +15,11 @@ const ctx = useJourneyContext()
 const PER_GROUP = 5
 const expanded = ref(new Set<string>())
 const keyOrder = (a: ListItem, b: ListItem) => a.key.localeCompare(b.key, undefined, { numeric: true })
-const epicOf = (item: ListItem) => item.epic?.id ?? (item.parent?.kind_slug === 'epic' ? item.parent.id : null)
+const epicOf = workParentId
 const work = computed(() => ctx.data.work.value.value)
-const open = computed(() => work.value.filter(i => i.kind_slug === 'ticket' && !statusMeta(i.state).closed))
+const open = computed(() => work.value.filter(i => isWorkLeaf(i) && !statusMeta(i.state).closed))
 const groups = computed(() => {
-  const epics = work.value.filter(i => i.kind_slug === 'epic').sort(keyOrder)
+  const epics = work.value.filter(i => isWorkItem(i) && isWorkParent(i)).sort(keyOrder)
   const out = epics.map(epic => ({ id: epic.id, epic: epic as ListItem | null, tickets: open.value.filter(t => epicOf(t) === epic.id).sort(keyOrder) }))
     .filter(g => g.tickets.length)
   const known = new Set(epics.map(e => e.id))
