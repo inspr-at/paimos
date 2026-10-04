@@ -27,6 +27,58 @@ func retryBody(v agentpairing.View, e agentpairing.Enrollment) map[string]any {
 	return map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": e.VerificationRunID}
 }
 
+func TestVerifyAgainRequiresExplicitReviewedRun(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	if e.VerificationRunID != nil {
+		t.Fatal("connect-only fixture already has a verification run")
+	}
+	snapshot := func() string {
+		t.Helper()
+		var state string
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT jsonb_build_array(to_jsonb(e),
+		 (SELECT count(*) FROM agent_runs WHERE requested_account_id=e.account_id),
+		 (SELECT count(*) FROM account_allowance_windows WHERE account_id=e.account_id),
+		 (SELECT count(*) FROM events WHERE type='agent_pairing.verification_created' AND after->>'account_id'=e.account_id::text))::text
+		 FROM agent_pairing_enrollments e WHERE account_id=$1`, e.AccountID).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	before := snapshot()
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"omitted run", map[string]any{"expected_revision": v.Revision}},
+		{"empty run", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": ""}},
+		{"invalid UUID", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": "not-a-uuid"}},
+		{"numeric run", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": 1}},
+		{"boolean run", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": false}},
+		{"object run", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": map[string]any{}}},
+		{"array run", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": []any{}}},
+		{"unknown field", map[string]any{"expected_revision": v.Revision, "expected_verification_run_id": nil, "unexpected": true}},
+	} {
+		t.Log(tc.name)
+		retryErrorCode(t, f.call("POST", retryPath(v, e.AccountID), tc.body, true, "", 400), "invalid_request")
+		if snapshot() != before {
+			t.Fatal("invalid retry changed enrollment, runs, allowances or audit events")
+		}
+	}
+	// Explicit null acknowledges that the reviewed enrollment has no prior run.
+	var out struct {
+		AccountID string `json:"account_id"`
+		RunID     string `json:"run_id"`
+	}
+	decodeResult(t, f.call("POST", retryPath(v, e.AccountID), retryBody(v, e), true, "", 200), &out)
+	if out.AccountID != e.AccountID || out.RunID == "" {
+		t.Fatal("explicit-null retry did not create a verification for the reviewed account")
+	}
+}
+
 func TestVerifyAgainKeepsEnrollmentAndSiblingAndCreatesOneBoundRun(t *testing.T) {
 	f := newFixture(t)
 	p, v := f.twoQualifiedEnrollments()

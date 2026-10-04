@@ -3,6 +3,7 @@ package agentpairing
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -27,16 +28,22 @@ func (m *Module) verifyAgain(w http.ResponseWriter, r *http.Request, p tenant.Pr
 	defer cancel()
 	r = r.WithContext(ctx)
 	var in struct {
-		Revision *int64  `json:"expected_revision"`
-		RunID    *string `json:"expected_verification_run_id"`
+		Revision *int64          `json:"expected_revision"`
+		RunID    json.RawMessage `json:"expected_verification_run_id"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if err := decode(w, r, &in); err != nil {
 		WriteError(w, err)
 		return
 	}
+	// Null explicitly reviews a connect-only enrollment; omission does not.
+	var expectedRunID *string
+	if len(in.RunID) == 0 || json.Unmarshal(in.RunID, &expectedRunID) != nil {
+		WriteError(w, fail(400, "invalid_request", "reviewed verification run required; use null when no prior run exists"))
+		return
+	}
 	computer, account := r.PathValue("computerId"), r.PathValue("accountId")
-	if !uuidRE.MatchString(computer) || !uuidRE.MatchString(account) || in.Revision == nil || *in.Revision < 1 || in.RunID != nil && !uuidRE.MatchString(*in.RunID) {
+	if !uuidRE.MatchString(computer) || !uuidRE.MatchString(account) || in.Revision == nil || *in.Revision < 1 || expectedRunID != nil && !uuidRE.MatchString(*expectedRunID) {
 		WriteError(w, fail(400, "invalid_request", "reviewed computer revision and verification run required"))
 		return
 	}
@@ -66,7 +73,7 @@ func (m *Module) verifyAgain(w http.ResponseWriter, r *http.Request, p tenant.Pr
 		if owner != p.ID {
 			return fail(403, "forbidden", "account owner required")
 		}
-		if revision != *in.Revision || (run == nil) != (in.RunID == nil) || run != nil && *run != *in.RunID {
+		if revision != *in.Revision || (run == nil) != (expectedRunID == nil) || run != nil && *run != *expectedRunID {
 			return fail(409, "conflict", "account verification changed; refresh before verifying")
 		}
 		if !verificationCapabilities(platform, arch)[a.Harness].Supported {
