@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
+import { useVisualViewport } from '../../lib/visualViewport'
 import { isSettingsField } from '../../lib/settingsOverlays'
 
 // Owns the Settings layout, so a section list keeps its column when a pane
@@ -32,23 +33,31 @@ const overlay = ref<Record<string, string>>({})
 const dockHeight = ref('calc(100dvh - 32px)')
 let observer: ResizeObserver | undefined
 let returnTo: HTMLElement | null = null
-let savedScroll: { element: HTMLElement; overflow: string }[] = []
+let savedScroll: { element: HTMLElement; overflow: string; gutter: string; top: number; left: number }[] = []
 let preservedInert: { element: HTMLElement; inert: boolean }[] = []
 let openGeneration = 0
+
+useVisualViewport(frame, 720, fit)
 
 function fit() {
   if (!frame.value) return
   const rect = frame.value.getBoundingClientRect()
   width.value = rect.width
-  const top = Math.max(0, rect.top)
-  const bottom = Math.min(innerHeight, rect.bottom)
+  const viewportTop = parseFloat(frame.value.style.getPropertyValue('--vv-top')) || 0
+  const viewportBottom = viewportTop + (parseFloat(frame.value.style.getPropertyValue('--vv-h')) || innerHeight)
+  const top = Math.max(viewportTop, rect.top)
+  const bottom = Math.min(viewportBottom, rect.bottom)
   overlay.value = { left: `${Math.max(0, rect.left)}px`, top: `${top}px`, width: `${Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left))}px`, height: `${Math.max(0, bottom - top)}px` }
   dockHeight.value = `${Math.max(0, innerHeight - Math.max(16, rect.top) - 16)}px`
 }
 function releaseBackground() {
   for (const { element, inert } of preservedInert) element.inert = inert
   preservedInert = []
-  for (const { element, overflow } of savedScroll) element.style.overflow = overflow
+  for (const { element, overflow, gutter, top, left } of savedScroll) {
+    element.style.overflow = overflow
+    element.style.scrollbarGutter = gutter
+    element.scrollTop = top; element.scrollLeft = left
+  }
   savedScroll = []
 }
 function holdBackground() {
@@ -57,15 +66,19 @@ function holdBackground() {
   for (const element of [navigation.value, content.value]) {
     if (element) { preservedInert.push({ element, inert: element.inert }); element.inert = true }
   }
-  // Preserve scroll positions without making room for a disappearing scrollbar.
-  // overflow:clip leaves the page geometry unchanged and rejects user scrolling.
+  // Keep these elements as scroll containers: clip would reset their offsets.
+  // A stable gutter preserves the space occupied by a classic scrollbar.
   const elements = new Set<HTMLElement>([document.documentElement, document.body])
   for (let parent = frame.value?.parentElement; parent; parent = parent.parentElement) {
     if (parent.scrollHeight > parent.clientHeight) elements.add(parent)
   }
   for (const element of elements) {
-    savedScroll.push({ element, overflow: element.style.overflow })
-    element.style.overflow = 'clip'
+    savedScroll.push({ element, overflow: element.style.overflow, gutter: element.style.scrollbarGutter, top: element.scrollTop, left: element.scrollLeft })
+    const style = getComputedStyle(element)
+    const scrollbar = element === document.documentElement ? innerWidth - element.clientWidth
+      : element.offsetWidth - element.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
+    if (scrollbar > 0 && style.scrollbarGutter === 'auto') element.style.scrollbarGutter = 'stable'
+    element.style.overflow = 'hidden'
   }
 }
 function restoreFocus() {

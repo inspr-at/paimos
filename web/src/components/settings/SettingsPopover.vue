@@ -15,6 +15,7 @@ export interface SettingsMenuItem {
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
+import { useVisualViewport } from '../../lib/visualViewport'
 import { claimSettingsPopover, isSettingsField, settingsSubmitKey } from '../../lib/settingsOverlays'
 
 const props = withDefaults(defineProps<{
@@ -44,7 +45,9 @@ const confirmation = computed(() => selected.value?.confirmation ?? props.confir
 const confirming = computed(() => !!selected.value || props.mode === 'confirmation')
 const role = computed(() => props.mode === 'menu' && !confirming.value ? 'menu' : 'dialog')
 const hintId = useId()
+const errorId = useId()
 const placed = ref(false)
+const opensUp = ref(false)
 const position = ref<Record<string, string>>({})
 let release: (() => void) | undefined
 let triggerRect: DOMRect | undefined
@@ -52,6 +55,8 @@ let opening = 0
 let scrollCheck = 0
 let previousExpanded: string | null = null
 let ownedAnchor: HTMLElement | null = null
+
+useVisualViewport(panel, 720, () => { if (props.open) place() })
 
 function close(restoreFocus = true) {
   if (!props.open) return
@@ -66,12 +71,15 @@ function place() {
   const frame = props.frame?.getBoundingClientRect()
   const left = Math.max(0, frame?.left ?? 0) + 12
   const right = Math.min(innerWidth, frame?.right ?? innerWidth) - 12
-  const top = Math.max(0, frame?.top ?? 0) + 12
-  const bottom = Math.min(innerHeight, frame?.bottom ?? innerHeight) - 12
+  const viewportTop = parseFloat(panel.value.style.getPropertyValue('--vv-top')) || 0
+  const viewportBottom = viewportTop + (parseFloat(panel.value.style.getPropertyValue('--vv-h')) || innerHeight)
+  const top = Math.max(viewportTop, frame?.top ?? viewportTop) + 12
+  const bottom = Math.min(viewportBottom, frame?.bottom ?? viewportBottom) - 12
   const width = Math.max(0, Math.min(320, right - left))
   panel.value.style.width = `${width}px`
   const height = Math.min(panel.value.scrollHeight + 2, Math.max(0, bottom - top))
   const up = !!props.anchor.closest('.pane-foot') || (trigger.bottom + 4 + height > bottom && trigger.top - top > bottom - trigger.bottom)
+  opensUp.value = up
   const available = Math.max(0, up ? trigger.top - 4 - top : bottom - trigger.bottom - 4)
   const maxHeight = Math.min(bottom - top, available || bottom - top)
   const x = Math.max(left, Math.min(trigger.right - width, right - width))
@@ -126,7 +134,20 @@ function keys(event: KeyboardEvent) {
     return
   }
   if (!panel.value?.contains(event.target as Node)) return
+  if (event.key === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    // This teleported overlay is the inner focus scope, including when its
+    // trigger belongs to a modal sheet. The sheet yields to this handler.
+    const controls = [...panel.value.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')]
+      .filter(element => element.tabIndex >= 0 && element.getClientRects().length && !element.closest('[inert], [hidden]'))
+    const first = controls[0], last = controls.at(-1)
+    if (!first || !last) { event.preventDefault(); event.stopImmediatePropagation(); panel.value.focus({ preventScroll: true }); return }
+    if (document.activeElement === panel.value || (event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+      event.preventDefault(); event.stopImmediatePropagation(); (event.shiftKey ? last : first).focus({ preventScroll: true })
+    }
+    return
+  }
   if (props.mode === 'form' && settingsSubmitKey(event)) { event.preventDefault(); event.stopImmediatePropagation(); submit(); return }
+  if (props.mode === 'form' && event.key === 'Enter' && event.target instanceof HTMLInputElement) { event.preventDefault(); return }
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || role.value !== 'menu') return
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
   const items = [...panel.value.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
@@ -175,18 +196,19 @@ onBeforeUnmount(cleanup)
 </script>
 <template>
   <Teleport to="body">
-    <div v-if="open" ref="panel" class="popover" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
+    <div v-if="open" ref="panel" class="popover" :class="{ 'opens-up': opensUp, staged: mode === 'form' || confirming }" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
       <template v-if="mode === 'menu' && !confirming">
         <button v-for="item in items" :key="item.id" type="button" class="mi" :class="{ danger: item.confirmation }" role="menuitem" :disabled="item.disabled" @click="choose(item)"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span></button>
       </template>
       <div v-else-if="confirming && confirmation" class="confirm">
         <h3>{{ confirmation.title }}</h3><p>{{ confirmation.effect }}</p><p class="keeps">{{ confirmation.keeps }}</p>
         <div class="confirm-acts"><button type="button" class="btn sm" @click="close()">Cancel</button><button type="button" class="btn sm danger" :disabled="busy" @click="confirm">{{ confirmation.action }}</button></div>
-        <p v-if="error" class="err" role="alert">{{ error }}</p>
+        <p v-if="error" class="feedback err" role="alert">{{ error }}</p>
       </div>
       <form v-else-if="mode === 'form'" class="qform" @submit.prevent="submit">
-        <h3>{{ label }}</h3><slot :hint-id="hintId" />
-        <p :id="hintId" class="qhint" :class="{ err: error }" aria-live="polite">{{ error || hint }}</p>
+        <h3>{{ label }}</h3><div class="form-fields"><slot :hint-id="error ? `${hintId} ${errorId}` : hintId" /></div>
+        <p :id="hintId" class="qhint">{{ hint }}</p>
+        <p v-if="error" :id="errorId" class="feedback err" role="alert">{{ error }}</p>
         <div class="confirm-acts"><button type="button" class="btn sm" @click="close()">Cancel</button><button type="submit" class="btn sm primary" :disabled="busy" aria-keyshortcuts="Meta+Enter Control+Enter">{{ saveLabel }} <span class="save-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button></div>
       </form>
     </div>
@@ -198,7 +220,14 @@ onBeforeUnmount(cleanup)
 .mi:hover:not(:disabled), .mi:focus-visible { background: var(--row-hover); outline: none; }.mi svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
 .t { font-size: 13.5px; font-weight: 600; }.d { font-size: 12px; line-height: 1.4; color: var(--ink-3); }.danger .t, .danger svg { color: var(--danger); }
 .mi:disabled .t, .mi:disabled svg { color: var(--ink-3); }
-.confirm, .qform { padding: 10px 10px 6px; }.confirm h3, .qform h3 { font-size: 14px; overflow-wrap: anywhere; }
+.staged { display: flex; flex-direction: column; overflow: hidden; }
+.confirm, .qform { display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 6px; }
+.confirm > :not(.feedback), .qform > :not(.feedback) { flex: none; }
+/* Feedback grows below a top anchor or above a bottom anchor. Once the
+   viewport is full, only feedback scrolls; fields and actions stay put. */
+.feedback { order: 1; flex: 0 1 auto; min-height: 0; overflow: auto; overflow-wrap: anywhere; overscroll-behavior: contain; }
+.opens-up .feedback { order: -1; }
+.confirm h3, .qform h3 { font-size: 14px; overflow-wrap: anywhere; }
 .confirm p { margin-top: 6px; font-size: 12.5px; }.keeps { color: var(--ink-3); }
 .confirm-acts { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }.save-keys { display: inline-flex; gap: 2px; }
 .qhint { min-height: 2lh; margin-top: 8px; font-size: 12px; color: var(--ink-3); }.err { color: var(--danger); }

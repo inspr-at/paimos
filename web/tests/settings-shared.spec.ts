@@ -151,3 +151,123 @@ test('approved shared shapes fit long German copy at phone, tablet and desktop i
     await page.screenshot({ path: `test-results/aeon-695/confirm-${width}-${theme}.png` })
   }
 })
+
+
+test('modal scroll lock preserves the already-scrolled shell and scrollbar geometry', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await page.goto('/tests/settings-shared-harness.html?scroll-shell')
+  const shell = page.locator('main')
+  const row = page.locator('[data-row="1"]')
+  await expect(row).toBeVisible()
+  await shell.evaluate(el => { el.scrollTop = 140 })
+  const before = await shell.evaluate(el => ({ top: el.scrollTop, width: el.clientWidth }))
+  expect(before.top).toBe(140)
+  const rowBefore = (await row.boundingBox())!
+  await row.click()
+  await expect(pane(page)).toBeVisible()
+  expect(await shell.evaluate(el => el.scrollTop)).toBe(before.top)
+  expect(await shell.evaluate(el => el.clientWidth)).toBe(before.width)
+  expect((await row.boundingBox())!.y).toBeCloseTo(rowBefore.y, 1)
+  await page.getByRole('button', { name: 'Close details' }).click()
+  await expect(pane(page)).toHaveCount(0)
+  await expect(row).toBeFocused()
+  expect(await shell.evaluate(el => el.scrollTop)).toBe(before.top)
+  expect(await shell.evaluate(el => el.clientWidth)).toBe(before.width)
+  expect((await row.boundingBox())!.y).toBeCloseTo(rowBefore.y, 1)
+})
+
+test('nested popovers contain forward and reverse Tab in menus, confirmations and forms', async ({ page }) => {
+  await open(page, 390)
+  await page.locator('[data-row="1"]').click()
+  await page.getByRole('button', { name: 'More actions' }).click()
+  const menu = page.getByRole('menu', { name: 'Computer actions' })
+  const first = menu.getByRole('menuitem', { name: 'Read quota now' })
+  const last = menu.getByRole('menuitem', { name: 'Remove computer…' })
+  await first.focus(); await page.keyboard.press('Shift+Tab'); await expect(last).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(first).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(last).toBeFocused()
+  await last.click()
+  const confirm = page.getByRole('dialog', { name: 'Remove this computer?' })
+  const cancel = confirm.getByRole('button', { name: 'Cancel' })
+  const remove = confirm.getByRole('button', { name: 'Remove computer', exact: true })
+  await cancel.focus(); await page.keyboard.press('Shift+Tab'); await expect(remove).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(cancel).toBeFocused()
+  await cancel.click()
+  await page.getByRole('button', { name: 'Apply capacity' }).click()
+  const form = page.getByRole('dialog', { name: 'Quota warnings' })
+  const input = form.getByRole('textbox'), save = form.getByRole('button', { name: /^Save/ })
+  await input.focus(); await page.keyboard.press('Shift+Tab'); await expect(save).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(input).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(form.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(save).toBeFocused()
+})
+
+for (const platform of ['MacIntel', 'Linux x86_64']) test(`plain Enter never submits staged fields on ${platform}`, async ({ page }) => {
+  await page.addInitScript(platform => { Object.defineProperty(navigator, 'platform', { value: platform }) }, platform)
+  await open(page)
+  await page.getByRole('button', { name: 'Change quota' }).click()
+  const form = page.getByRole('dialog', { name: 'Quota warnings' })
+  await form.getByRole('textbox').fill('20')
+  await page.keyboard.press('Enter')
+  await expect(form).toBeVisible(); await expect(writes(page)).toHaveText('0')
+  await page.keyboard.press(platform === 'MacIntel' ? 'Meta+Enter' : 'Control+Enter')
+  await expect(writes(page)).toHaveText('1')
+  await page.getByRole('button', { name: 'Change quota' }).click()
+  await form.getByRole('button', { name: /^Save/ }).focus(); await page.keyboard.press('Enter')
+  await expect(writes(page)).toHaveText('2')
+})
+
+for (const orientation of ['down', 'up']) for (const kind of ['form', 'confirmation']) test(`multiline ${kind} errors keep ${orientation}-opening actions stationary`, async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/tests/settings-shared-harness.html?fail-confirm')
+  if (orientation === 'up') await page.locator('[data-row="1"]').click()
+  if (kind === 'form') {
+    await page.getByRole('button', { name: orientation === 'up' ? 'Apply capacity' : 'Change quota' }).click()
+    await page.getByRole('dialog', { name: 'Quota warnings' }).getByRole('textbox').fill('fail-long')
+  } else {
+    await page.getByRole('button', { name: orientation === 'up' ? 'Footer menu' : 'Page menu', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Remove computer…' }).click()
+  }
+  const dialog = page.getByRole('dialog', { name: kind === 'form' ? 'Quota warnings' : 'Remove this computer?' })
+  const action = dialog.getByRole('button', { name: kind === 'form' ? /^Save/ : 'Remove computer', exact: kind !== 'form' })
+  expect(await dialog.evaluate(el => el.style.top === 'auto')).toBe(orientation === 'up')
+  await expectStableControls({ controls: { action, cancel: dialog.getByRole('button', { name: 'Cancel' }), ...(kind === 'form' ? { input: dialog.getByRole('textbox') } : {}) }, scrollAreas: { feedback: dialog }, interactions: [
+    { name: 'multiline failure', run: async () => { await action.click(); await expect(dialog).toContainText('The computer could not be reached'); await expect(writes(page)).toHaveText('0') } },
+  ] })
+  const feedback = dialog.locator('.qhint.err, [role="alert"]')
+  await expect(feedback).toBeVisible()
+  expect(await feedback.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(60)
+  await action.click(); await expect(writes(page)).toHaveText('0'); await expect(dialog).toBeVisible()
+})
+
+test('phone sheet and popover actions follow a keyboard-shrunken visual viewport', async ({ page }) => {
+  await page.addInitScript(() => {
+    const viewport = new EventTarget()
+    Object.assign(viewport, { width: 390, height: 900, offsetTop: 0, offsetLeft: 0, scale: 1 })
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+  })
+  await open(page, 390)
+  await page.locator('[data-row="1"]').click()
+  await page.getByRole('button', { name: 'Apply capacity' }).click()
+  const form = page.getByRole('dialog', { name: 'Quota warnings' })
+  await form.getByRole('textbox').focus()
+  for (const viewport of [{ height: 480, offsetTop: 0 }, { height: 430, offsetTop: 50 }]) {
+    await page.evaluate(viewport => {
+      Object.assign(window.visualViewport!, viewport)
+      window.visualViewport!.dispatchEvent(new Event('resize'))
+      window.visualViewport!.dispatchEvent(new Event('scroll'))
+    }, viewport)
+    await expect(form).toBeVisible()
+    await expect.poll(async () => (await pane(page).boundingBox())!.y + (await pane(page).boundingBox())!.height).toBeLessThanOrEqual(viewport.offsetTop + viewport.height + .5)
+    const sheet = (await pane(page).boundingBox())!, popover = (await form.boundingBox())!
+    expect(sheet.y).toBeGreaterThanOrEqual(viewport.offsetTop - .5)
+    expect(popover.y).toBeGreaterThanOrEqual(viewport.offsetTop + 12 - .5)
+    expect(popover.y + popover.height).toBeLessThanOrEqual(viewport.offsetTop + viewport.height - 12 + .5)
+    const save = (await form.getByRole('button', { name: /^Save/ }).boundingBox())!
+    expect(save.y + save.height).toBeLessThanOrEqual(viewport.offsetTop + viewport.height + .5)
+    await expect(form.getByRole('textbox')).toBeFocused()
+  }
+  await form.getByRole('textbox').fill('20')
+  await form.getByRole('button', { name: /^Save/ }).click()
+  await expect(writes(page)).toHaveText('1')
+})
