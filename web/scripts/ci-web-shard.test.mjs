@@ -290,6 +290,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const real = loadManifest()
   assert.equal(real.groups.find(g => g.id === 'remaining-ui').gate, false)
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
+  assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
 })
@@ -314,7 +315,8 @@ test('manifest drift never blocks a PR: new specs stay ungated, removed ones are
   // The real tree with the real manifest keeps the full gate even if main moved on.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 49)
+  const declaredGate = loadManifest().groups.filter(group => group.gate !== false).flatMap(group => group.specs)
+  assert.equal(JSON.parse(out.pop()).specs, declaredGate.length)
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {
