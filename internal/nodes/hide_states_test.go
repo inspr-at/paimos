@@ -61,7 +61,7 @@ func TestHideStatesAPIBucketsFacetsAndPaging(t *testing.T) {
 	status, body = call(t, &p, "PATCH", "/api/kinds/"+ticket.ID, string(raw))
 	decode[kindJSON](t, status, body, 200)
 	other := addPrincipal(t, "hide-other")
-	foreign := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Foreign accepted","state":"accepted"}`)
+	foreign := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Foreign accepted","state":"accepted","fields":`+benefitFields+`}`)
 	base := "/api/nodes?within=" + root.ID + "&kind=ticket,task,epic&sort=key&facets=state,kind"
 	for _, check := range []struct {
 		query  string

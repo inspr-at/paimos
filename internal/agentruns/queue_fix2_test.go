@@ -76,13 +76,28 @@ func TestTicketQueueDeleteWithOtherLiveChildRollsBack(t *testing.T) {
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	id := f.apiQueueTicket(t, nil)
 	child := f.apiQueueTicket(t, &id)
-	e := f.addQueue(t, id, nil)
+	// Work with a live work child is a parent, so queueing is refused before
+	// creating an order/run. Failed deletion must retain both original nodes.
+	var rejected struct {
+		Code      string `json:"code"`
+		Readiness struct {
+			Queueable bool     `json:"queueable"`
+			Missing   []string `json:"missing"`
+		} `json:"readiness"`
+	}
+	f.call(t, f.person, "POST", "/api/queue", map[string]any{"node_id": id}, 422, &rejected)
+	if rejected.Code != "queue_not_ready" || rejected.Readiness.Queueable || len(rejected.Readiness.Missing) != 1 || rejected.Readiness.Missing[0] != "status" {
+		t.Fatalf("parent refused for the wrong reason: %+v", rejected)
+	}
 	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 409, nil)
-	for _, live := range []string{id, child, e.Run.OrderID} {
+	for _, live := range []string{id, child} {
 		f.call(t, f.person, "GET", "/api/nodes/"+live, nil, 200, nil)
 	}
-	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued'`, e.Run.ID); n != 1 {
-		t.Fatal("failed deletion cancelled queued work")
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE queue_node_id=$1`, id); n != 0 {
+		t.Fatal("parent queue refusal created a run")
+	}
+	if f.queuePage(t).Count != 0 {
+		t.Fatal("parent queue refusal created a projection")
 	}
 	if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.removed'`, id); n != 0 {
 		t.Fatal("failed deletion retained removal audit")

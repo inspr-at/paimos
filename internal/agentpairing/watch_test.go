@@ -311,7 +311,10 @@ func TestAttachCannotRenewChangedSession(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			f, key, in := watchFixture(t)
 			v := activateWatch(t, f, key, &in)
-			if _, err := f.db.Admin.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID); err != nil {
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			in.Sequence++

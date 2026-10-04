@@ -117,10 +117,10 @@ func TestWorkMCPCancelAndListBounds(t *testing.T) {
 		t.Fatalf("cancelled create: %v", err)
 	}
 	for _, n := range []int{-1, 10001} {
-		if err := rt.listIssues("", "", "", "", "", n, 0); err == nil || !strings.Contains(err.Error(), "between 0 and 10000") {
+		if err := rt.listIssues("", "", "", "", "", n, 0); !isWorkBoundsUsage(err) {
 			t.Fatalf("limit %d: %v", n, err)
 		}
-		if err := rt.listIssues("", "", "", "", "", 1, n); err == nil || !strings.Contains(err.Error(), "between 0 and 10000") {
+		if err := rt.listIssues("", "", "", "", "", 1, n); !isWorkBoundsUsage(err) {
 			t.Fatalf("offset %d: %v", n, err)
 		}
 	}
@@ -141,4 +141,9 @@ func workAliasMCPSession(t *testing.T, rt *runtime) *mcp.ClientSession {
 	}
 	t.Cleanup(func() { session.Close() })
 	return session
+}
+
+func isWorkBoundsUsage(err error) bool {
+	var usage *exitError
+	return errors.As(err, &usage) && usage.code == 2 && strings.Contains(usage.Error(), "offset") && strings.Contains(usage.Error(), "limit") && strings.Contains(usage.Error(), "10000")
 }

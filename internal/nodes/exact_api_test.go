@@ -18,7 +18,7 @@ func TestExactAPISameKindHumanCheck(t *testing.T) {
 	for _, alias := range []string{"kind_id", "type", "kind"} {
 		t.Run(alias, func(t *testing.T) {
 			n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Check"}`, kind.ID))
-			value := "ticket"
+			value := kind.Slug
 			if alias == "kind_id" {
 				value = kind.ID
 			}

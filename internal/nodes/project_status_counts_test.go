@@ -44,7 +44,7 @@ func TestProjectStatusCountsAndSelectors(t *testing.T) {
 	// A foreign tenant's identical statuses must not contribute.
 	other := addPrincipal(t, "header-foreign")
 	foreign := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "project").ID+`","title":"Foreign","state":"active"}`)
-	mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Foreign work","state":"done","parent_id":"`+foreign.ID+`"}`)
+	mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Foreign work","state":"done","parent_id":"`+foreign.ID+`","fields":`+benefitFields+`}`)
 	ticket := kindBySlug(t, p, "work")
 	var schema map[string]any
 	if err := json.Unmarshal(ticket.FieldSchema, &schema); err != nil {
