@@ -62,3 +62,62 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     expect(errors).toEqual([])
   })
 }
+
+for (const type of ['status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed']) {
+  test(`live leaf aggregates refresh from ${type} with unchanged parent status`, async ({ page }) => {
+    // An isolated stream delivers exactly one ready envelope and the named
+    // change. No heartbeat, polling replay or parent derivation can mask it.
+    await page.addInitScript(() => {
+      const sources: EventTarget[] = []
+      class QuietSource extends EventTarget {
+        readyState = 1
+        onerror = null
+        constructor(readonly url: string) {
+          super()
+          if (url.includes('/api/events/stream')) {
+            sources.push(this)
+            queueMicrotask(() => this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 700, resumed: false }) })))
+          }
+        }
+        close() { this.readyState = 2 }
+      }
+      Object.assign(window, { EventSource: QuietSource, aggregateEvent: (event: { id: number; type: string }) => {
+        for (const source of sources) source.dispatchEvent(new MessageEvent(event.type, { data: JSON.stringify(event), lastEventId: String(event.id) }))
+      } })
+    })
+    const errors = watchErrors(page)
+    const data = fixtures()
+    for (const node of data.nodes) node.kind_slug = 'work'
+    data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'estimate', 'progress', 'eta'] }
+    const parent = data.nodes.find(node => node.id === 'n-1')!
+    const leaf = data.nodes.find(node => node.id === 'n-4')!
+    leaf.parent_id = parent.id
+    parent.estimate = { hours: 10, planned_hours: 40, is_parent: true, leaf_count: 2, estimated_leaves: 2, estimated_children: 2, open_children: 2 }
+    parent.eta = { finished: false, progress_pct: 20, leaf_count: 2, estimated_leaves: 2, progress_basis: 'estimate', open_leaves: 1 }
+    const revision = parent.updated_at, state = parent.state
+    const calls = await mockWork(page, data)
+    await page.goto('/p/PHAROS')
+    const row = page.locator('#row-n-1')
+    await expect(row.locator('.progress-read')).toHaveAccessibleName(/20% done/)
+    await row.locator('.title-text').click()
+    const panel = page.getByRole('complementary', { name: 'Ticket details' })
+    const plan = panel.getByRole('button', { name: /^Parent estimate:/ })
+    await expect(plan).toHaveAccessibleName(/~10h from leaves/)
+    const listReads = calls.filter(call => call.path === '/api/nodes' && call.method === 'GET').length
+    await expectStableControls({ controls: { 'parent plan': plan }, scrollAreas: { panel }, interactions: [{ name: `receive ${type}`, run: async () => {
+      parent.estimate!.hours = 18
+      parent.eta!.progress_pct = 60
+      await page.evaluate(({ type, leaf, revision }) => {
+        const send = (window as unknown as { aggregateEvent: (event: unknown) => void }).aggregateEvent
+        send({ id: 701, type, actor_principal_id: 'agent', node_changes: [{ id: leaf.id, project_id: leaf.project,
+          change: type === 'import.node_created' ? 'created' : 'updated', fields: type === 'import.parent_changed' ? ['parent_id'] : ['state', 'fields.estimate_hours'], revision }] })
+      }, { type, leaf, revision })
+      await expect(plan).toHaveAccessibleName(/~18h from leaves/)
+      await expect(row.locator('.progress-read')).toHaveAccessibleName(/60% done/)
+    } }] })
+    expect(parent.updated_at).toBe(revision)
+    expect(parent.state).toBe(state)
+    expect(calls.filter(call => call.path === '/api/nodes' && call.method === 'GET').length).toBeGreaterThan(listReads)
+    expect(errors).toEqual([])
+  })
+}

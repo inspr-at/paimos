@@ -4,6 +4,8 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -90,6 +92,11 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if err != nil {
 		return events.Change{}, events.ErrConflict
 	}
+	// Both preview and confirmed Undo call this handler under the access fence
+	// and current row lock. A historical event does not grant person authority.
+	if err := authorizeWorkRestore(p, current, before); err != nil {
+		return events.Change{}, err
+	}
 	restored, err := scanNode(tx.QueryRow(ctx, `UPDATE nodes SET title=$2,body=$3,fields=$4::jsonb,state=$5,human_check=$6,deleted_at=$7,
  updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1::uuid RETURNING `+nodeReturning,
 		current.ID, before.Title, before.Body, fields, before.State, before.HumanCheck, before.DeletedAt))
@@ -101,4 +108,43 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 
 func sameTime(a, b *time.Time) bool {
 	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
+}
+
+// Authorize the reverse transition using the normal person-only guards. Unlike
+// a new PATCH, Undo restores a trusted server snapshot, retaining its original
+// attribution rather than minting a new publication or completion timestamp.
+func authorizeWorkRestore(p tenant.Principal, current, before nodeJSON) error {
+	guardError := func(err error) error {
+		var denied *httpError
+		if errors.As(err, &denied) && denied.status == http.StatusForbidden {
+			return events.ErrForbidden
+		}
+		return events.ErrConflict
+	}
+	if _, err := canonicalRoadmapPublication(p, "work", before.Fields, current.Fields); err != nil {
+		return guardError(err)
+	}
+	// Supply the current server metadata to test only the reverse check
+	// transition; the historical completion is separately protected below.
+	if _, err := humanCheckFields(p, current.Fields, current.Fields, current.HumanCheck, before.HumanCheck, !sameString(current.HumanCheck, before.HumanCheck)); err != nil {
+		return guardError(err)
+	}
+	if p.Kind != tenant.Person {
+		previous, err := decodeRouteFields(current.Fields)
+		if err != nil {
+			return events.ErrConflict
+		}
+		target, err := decodeRouteFields(before.Fields)
+		if err != nil {
+			return events.ErrConflict
+		}
+		// An ordinary agent edit must not replace or erase a person's saved
+		// provenance, even when the flag or pending-check text stays the same.
+		for _, key := range []string{"human_check_completed", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at"} {
+			if !reflectJSONEqual(previous[key], target[key]) {
+				return events.ErrForbidden
+			}
+		}
+	}
+	return nil
 }
