@@ -3,18 +3,13 @@
 package nodes
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
+	"github.com/inspr-at/paimos/internal/fieldschema"
 )
-
-// workStateSep matches the spaces and hyphens collapsed by workStateNormSQL.
-var workStateSep = regexp.MustCompile(`[[:space:]-]+`)
 
 // normaliseWorkState matches workStateNormSQL: trim, lowercase, and collapse
 // each run of spaces or hyphens to one underscore.
 func normaliseWorkState(state string) string {
-	return workStateSep.ReplaceAllString(strings.ToLower(strings.TrimSpace(state)), "_")
+	return fieldschema.NormaliseWorkState(state)
 }
 
 // workStateNormSQL is the SQL form of normaliseWorkState for a column or expression.
@@ -98,39 +93,4 @@ func workStateKnownSQL(stateExpr string) string {
 // a rank with the canonical word.
 func workStateOrderSQL(stateExpr string) string {
 	return `CASE ` + workStateNormSQL(stateExpr) + ` WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'open' THEN 2 WHEN 'blocked' THEN 3 WHEN 'in_progress' THEN 4 WHEN 'active' THEN 4 WHEN 'qa' THEN 5 WHEN 'done' THEN 6 WHEN 'delivered' THEN 7 WHEN 'accepted' THEN 8 WHEN 'cancelled' THEN 9 WHEN 'canceled' THEN 9 WHEN 'archived' THEN 10 ELSE 11 END`
-}
-
-// compileStateCatalog checks field_schema.states: objects with a distinct state
-// and a category project counts understand.
-func compileStateCatalog(val any) error {
-	items, ok := val.([]any)
-	if !ok {
-		return fmt.Errorf("states must be an array")
-	}
-	seen := map[string]bool{}
-	for _, item := range items {
-		obj, ok := item.(map[string]any)
-		if !ok {
-			return fmt.Errorf("states entries must be objects")
-		}
-		rawState, ok := obj["state"].(string)
-		if !ok || strings.TrimSpace(rawState) == "" || len(rawState) > 64 {
-			return fmt.Errorf("states entries need a state")
-		}
-		rawCategory, ok := obj["category"].(string)
-		if !ok || strings.TrimSpace(rawCategory) == "" {
-			return fmt.Errorf("states entries need a category")
-		}
-		norm := normaliseWorkState(rawState)
-		if norm == "" || seen[norm] {
-			return fmt.Errorf("states entries must name a distinct state")
-		}
-		seen[norm] = true
-		switch normaliseWorkState(rawCategory) {
-		case "open", "doing", "progress", "in_progress", "done", "cancelled", "canceled", "archived":
-		default:
-			return fmt.Errorf("states category must be open, doing, in_progress, done, cancelled or archived")
-		}
-	}
-	return nil
 }

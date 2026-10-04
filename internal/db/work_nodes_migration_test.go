@@ -331,6 +331,85 @@ func TestWorkNodesMigrationBusyGuardAndAtomicRetry(t *testing.T) {
 	}
 }
 
+func TestWorkNodesMigrationExactNumbers(t *testing.T) {
+	for _, tc := range []struct {
+		name, constraint, value string
+		valid                   bool
+	}{
+		{"large_integer_above_exclusive_min", `{"type":"integer","exclusiveMinimum":9007199254740992}`, `9007199254740993`, true},
+		{"large_integer_below_exclusive_max", `{"type":"integer","exclusiveMaximum":9007199254740993}`, `9007199254740992`, true},
+		{"decimal_above_exclusive_min", `{"type":"number","exclusiveMinimum":0.10000000000000000001}`, `0.10000000000000000002`, true},
+		{"decimal_below_exclusive_max", `{"type":"number","exclusiveMaximum":0.10000000000000000002}`, `0.10000000000000000001`, true},
+		{"large_integer_below_min", `{"type":"integer","minimum":9007199254740993}`, `9007199254740992`, false},
+		{"large_integer_above_max", `{"type":"integer","maximum":9007199254740992}`, `9007199254740993`, false},
+		{"decimal_below_min", `{"type":"number","minimum":0.10000000000000000002}`, `0.10000000000000000001`, false},
+		{"decimal_above_max", `{"type":"number","maximum":0.10000000000000000001}`, `0.10000000000000000002`, false},
+		{"fraction_is_not_integer", `{"type":"integer"}`, `1.00000000000000000001`, false},
+		{"distinct_large_integer_const", `{"const":9007199254740992}`, `9007199254740993`, false},
+		{"distinct_decimal_enum", `{"enum":[0.10000000000000000001]}`, `0.10000000000000000002`, false},
+		{"exclusive_min_equality", `{"exclusiveMinimum":9007199254740993}`, `9007199254740993`, false},
+		{"exclusive_max_equality", `{"exclusiveMaximum":0.10000000000000000002}`, `0.10000000000000000002`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := workOldDatabase(t)
+			tid := workSeed(t, d, "numeric-work")
+			if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties,precise}',$1::jsonb) WHERE slug IN ('epic','ticket','task')`, tc.constraint); err != nil {
+					return err
+				}
+				// Exercise nested items as well as an ordinary numeric property.
+				if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties,nested}',jsonb_build_object('type','array','items',jsonb_build_object('type','object','properties',jsonb_build_object('precise',$1::jsonb)))) WHERE slug IN ('epic','ticket','task')`, tc.constraint); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('precise',$1::jsonb,'nested',jsonb_build_array(jsonb_build_object('precise',$1::jsonb))) WHERE key='KEEP-2'`, tc.value)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			nodesSQL := `SELECT jsonb_agg(to_jsonb(n)-'kind_id' ORDER BY key) FROM nodes n`
+			before := workSnapshot(t, d, tid, nodesSQL)
+			kindsSQL := `SELECT jsonb_agg(to_jsonb(k) ORDER BY slug) FROM node_kinds k`
+			kinds := workSnapshot(t, d, tid, kindsSQL)
+			eventsSQL := `SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e`
+			events := workSnapshot(t, d, tid, eventsSQL)
+			err := db.MigrateWithHook(t.Context(), d.App, nil)
+			if tc.valid {
+				if err != nil {
+					t.Fatalf("valid exact number blocked migration: %v", err)
+				}
+				var kind string
+				if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.key='KEEP-2'`).Scan(&kind)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if kind != "work" {
+					t.Fatalf("numeric node kind = %s, want work", kind)
+				}
+				var retained bool
+				if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT field_schema->'properties'->'precise'=$1::jsonb AND field_schema->'properties'->'nested'->'items'->'properties'->'precise'=$1::jsonb FROM node_kinds WHERE slug='work'`, tc.constraint).Scan(&retained)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if !retained {
+					t.Fatal("migration changed exact schema constraints")
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), "KEEP-2 fields do not satisfy the merged work schema") {
+					t.Fatalf("invalid exact number: got %v, want KEEP-2 schema validation failure", err)
+				}
+				if !reflect.DeepEqual(kinds, workSnapshot(t, d, tid, kindsSQL)) || !reflect.DeepEqual(events, workSnapshot(t, d, tid, eventsSQL)) {
+					t.Fatal("rejected numeric migration changed kinds or events")
+				}
+			}
+			if !reflect.DeepEqual(before, workSnapshot(t, d, tid, nodesSQL)) {
+				t.Fatal("numeric migration changed historical fields or node identities")
+			}
+		})
+	}
+}
+
 func TestWorkNodesVerifiedBackupRestoreDrill(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Fatal("local restore drill requires Docker and aeon-dev-db")

@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/inspr-at/paimos/internal/fieldschema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -368,12 +368,10 @@ func mergeWorkSchemas(schemas map[string]json.RawMessage) ([]byte, error) {
 // anything. This catches a strict schema on one kind that would reject fields
 // from another kind. Read bounded pages and reject oversized payloads in SQL,
 // before materializing them. Values are validated, never converted or stored.
+// Use the application's compiler and json.Number/big.Rat comparisons so valid
+// large integers and precise decimals cannot be rounded into a schema violation.
 func validateWorkMigrationFields(ctx context.Context, tx pgx.Tx, tenantID string, raw []byte) error {
-	var schema jsonschema.Schema
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		return err
-	}
-	resolved, err := schema.Resolve(nil)
+	resolved, err := fieldschema.Compile(raw)
 	if err != nil {
 		return fmt.Errorf("tenant %s: invalid merged work schema", tenantID)
 	}
@@ -399,8 +397,8 @@ func validateWorkMigrationFields(ctx context.Context, tx pgx.Tx, tenantID string
 				rows.Close()
 				return fmt.Errorf("tenant %s: %s fields exceed migration validation bound (1 MiB); reconcile before migration", tenantID, key)
 			}
-			var value any
-			if err := json.Unmarshal(fields, &value); err != nil {
+			value, err := fieldschema.Decode(fields)
+			if err != nil {
 				rows.Close()
 				return err
 			}
