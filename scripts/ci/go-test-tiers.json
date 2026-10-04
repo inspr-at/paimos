@@ -4,6 +4,20 @@
   "defaultNewTier": "NIGHTLY",
   "policy": "ESSENTIAL runs on PRs and merge groups plus changed-area cases. GATED-FULL preserves the prior Go/unit/browser gate. NIGHTLY includes never-gated browser cases. Runtime reconciliation warns, defaults new cases to NIGHTLY and drops stale entries. Known-flaky cases and deletion candidates cannot be ESSENTIAL; AEON-678 rule B removes reviewed low-value categories; protected candidates stay available.",
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)",
+  "postGateCases": [
+      "internal/agentruns:TestWaitingClockTerminalWithoutStatusAndLifetimeBounds",
+      "internal/agentruns:TestTerminalTelemetrySurvivesTimingHistoryLimit",
+      "internal/agentruns:TestTerminalWithoutStatusClosesWaitingSpan",
+      "internal/cli:TestCommitDiffEvidenceFromOwnedGitCommit",
+      "internal/cli:TestCommitNumstatNeverTurnsMissingOrBinaryEvidenceIntoZero",
+      "internal/db:TestRunMeasurementUpgradeFromRelease122PreservesEvidence",
+      "internal/harness:TestHeartbeatCommitDiffValidationAndStorage",
+      "internal/nodes:TestPlanningWorkStartIncludesInitiatingMeasuredRun",
+      "internal/nodes:TestReleaseTextEditPreservesMissingRouteHints",
+      "internal/outcomes:TestTicketMeasurementCanonicalCommitIdentity",
+      "internal/outcomes:TestTicketMeasurementEvidenceKinds",
+      "internal/outcomes:TestTicketMeasurementProjectScopeThroughMiddleware"
+  ],
   "tests": [
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachFallbackRefreshCannotWidenApprovedRoot","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupDropsOnlyUnverifiableFallbacks","tier":"GATED-FULL"},

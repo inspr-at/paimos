@@ -408,7 +408,17 @@ test('three-tier manifests preserve the old Go and unit gates and never promote 
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  // Cases first classified after the old gate retain the NIGHTLY default.
+  // An explicit inventory keeps the assertion strict for every legacy case.
+  const postGateCases=new Set(go.postGateCases??[])
+  assert.equal(postGateCases.size,(go.postGateCases??[]).length)
+  for(const id of postGateCases) {
+    const row=go.tests.find(row=>key(row)===id)
+    assert.ok(row,`Unknown post-gate case: ${id}`)
+    assert.equal(row.tier,'NIGHTLY',id)
+  }
   for(const row of [...go.tests,...web.tests]) {
+    if(row.kind==='go'&&postGateCases.has(key(row)))continue
     if(row.tier==='ESSENTIAL')continue
     assert.equal(row.tier,row.kind!=='browser'||gated.has(row.file)?'GATED-FULL':'NIGHTLY',key(row))
   }
