@@ -75,14 +75,12 @@ function assertSchema(value, schema, root = schema) {
 test('quarantine JSON validates against its schema and seeds only documented short-lived Go entries', () => {
   assertSchema(quarantine, quarantineSchema);
   assert.equal(validateQuarantine(quarantine), quarantine);
-  assert.equal(quarantine.entries.length, 2);
+  assert.equal(quarantine.entries.length, 1);
   assert.equal(quarantine.entries[0].id, goID);
   assert.equal(quarantine.entries[0].kind, 'go');
   assert.equal(quarantine.entries[0].owner, 'AEON-623');
   assert.match(quarantine.entries[0].note, /Fixed by AEON-623/);
-  assert.equal(quarantine.entries[1].id, 'internal/importer TestSourceRequestCapAndDelay');
-  assert.equal(quarantine.entries[1].kind, 'go');
-  assert.equal(quarantine.entries[1].owner, 'AEON-675');
+  assert.ok(quarantine.entries.every(entry => entry.owner !== 'AEON-675' && entry.id !== 'internal/importer TestSourceRequestCapAndDelay'));
   for (const entry of quarantine.entries) assert.ok(Date.parse(entry.expires) - Date.parse(entry.added) <= 7 * 86400000);
 });
 test('invalid quarantine configuration fails closed (schema, identities, dates, owner)', () => {
