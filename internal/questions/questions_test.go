@@ -711,7 +711,9 @@ func TestQuestionPermissionFilteredPageAndRollback(t *testing.T) {
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", input()); w.Code != 500 {
+	fresh := input()
+	fresh.AnywayReason = "Exercise fresh question creation rollback"
+	if w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", fresh); w.Code != 500 {
 		t.Fatal("event failure not propagated")
 	}
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&after); err != nil {
@@ -742,6 +744,11 @@ func TestQuestionSourceCorrelation(t *testing.T) {
 	q := f.ask(t, in)
 	if q.Askers[0].Input.SourceRequestID != source || q.Askers[0].SessionID != f.session {
 		t.Fatal("lost original source route")
+	}
+	duplicate := in
+	duplicate.RequestID = uid()
+	if separate := f.ask(t, duplicate); separate.ID == q.ID {
+		t.Fatal("source-linked protected request participated in automatic merging")
 	}
 	in.RequestID = uid()
 	in.SessionID = ""

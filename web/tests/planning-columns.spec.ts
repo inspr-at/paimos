@@ -111,14 +111,14 @@ test('approved cells show estimates, running figures, measured checks and sessio
   await expect(row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Measured so far 1.1M · estimated ~2.4M \(46%\) · Codex sol/)
   await expect(row(page, 'PHAROS-12').locator('.c-list-cost .plan-figure')).toHaveText('$1.93/~$4.20')
   await expect(row(page, 'PHAROS-12').locator('.c-list-cost .plan-figure')).toHaveAccessibleDescription(/Measured so far \$1.93 · estimated ~\$4.20 \(46%\)\s+API-billed · at list prices/)
-  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Codex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Codex Sol 6.1 · xhigh, as used')
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Codex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Codex Sol 6.1 · xhigh, as used · Why this model?')
   const measured = row(page, 'PHAROS-13')
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveText('1.9M')
   await expect(measured.locator('.c-tokens .measured')).toHaveCount(1)
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleName(/measured/)
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Estimated ~2.4M · measured 1.9M \(−21%\)/)
   await expect(measured.locator('.plan-model')).toHaveText('Opus 5.5+1')
-  await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', 'Used, per session:\nClaude Opus 5.5 · high · Effort high · 3 of 5 · 1 session · 1.9M\nCodex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session · 0\nPlanned: Codex Sol 6.1 · xhigh')
+  await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', 'Used, per session:\nClaude Opus 5.5 · high · Effort high · 3 of 5 · 1 session · 1.9M\nCodex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session · 0\nPlanned: Codex Sol 6.1 · xhigh · Why this model?')
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).not.toHaveClass(/over/)
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).toHaveAttribute('data-tip', /\(\+35%\)/)
   await expect(row(page, 'PHAROS-15').locator('.c-list-cost .plan-figure')).toHaveText('plan$3.10')
@@ -126,7 +126,15 @@ test('approved cells show estimates, running figures, measured checks and sessio
   for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) expect(await row(page, key).locator('.c-tokens .slot').evaluate(el => el.getBoundingClientRect().width)).toBe(12)
   await measured.locator('.c-tokens .plan-figure').hover()
   await expect(page.locator('.tooltip')).toHaveText(/Estimate taken when work started/)
-  await expect(page.locator('.plan-model[tabindex], .plan-figure[tabindex]')).toHaveCount(0)
+  // Model explanations are native actions without adding sequential tab stops.
+  const modelActions = page.locator('button.plan-model')
+  await expect(modelActions).toHaveCount(7)
+  await expect(page.locator('.plan-model:not(button), .plan-figure[tabindex]')).toHaveCount(0)
+  for (const action of await modelActions.all()) {
+    await expect(action).toHaveAttribute('type', 'button')
+    await expect(action).toHaveAttribute('tabindex', '-1')
+    await expect(action).toHaveAccessibleName(/\. Why this model\?$/)
+  }
 })
 
 test('Cursor Grok hovers match profile keys and explain runs without a planned role', async ({ page }) => {
@@ -142,11 +150,11 @@ test('Cursor Grok hovers match profile keys and explain runs without a planned r
   await mockWork(page, data)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto('/p/PHAROS?sort=key')
-  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh, as used')
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh, as used · Why this model?')
   const noPlan = row(page, 'PHAROS-11').locator('.plan-model')
-  await expect(noPlan).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set')
+  await expect(noPlan).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set · Why this model?')
   await noPlan.hover()
-  await expect(page.locator('.tooltip')).toHaveText('Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set')
+  await expect(page.locator('.tooltip')).toHaveText('Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set · Why this model?')
 })
 
 test('unknown planned and used effort stays undrawn and is explained to hover and screen readers', async ({ page }) => {
@@ -201,7 +209,7 @@ test('omitted model versions do not match explicit versions even when version di
     const model = row(page, key).locator('.plan-model')
     await expect(model).toHaveText('Opus')
     const plannedName = ['Claude Opus', plannedVersion].filter(Boolean).join(' ')
-    await expect(model).toHaveAttribute('data-tip', new RegExp(`Planned: ${plannedName.replaceAll('.', '\\.')} · high${same ? ', as used' : ' \\(a different model ran\\)'}$`))
+    await expect(model).toHaveAttribute('data-tip', new RegExp(`Planned: ${plannedName.replaceAll('.', '\\.')} · high${same ? ', as used' : ' \\(a different model ran\\)'} · Why this model\\?$`))
     await expect(model).toHaveAccessibleDescription(same ? /as used/ : /a different model ran/)
   }
 })
@@ -234,7 +242,7 @@ test('planning hovers match effort, running usage and pre-session calibration', 
   await estimated.hover()
   await expect(page.locator('.tooltip')).toHaveText(estimateTip)
   const model = row(page, 'PHAROS-12').locator('.plan-model')
-  const modelTip = 'Used: Cursor Grok 4.7 · high · Effort high · 3 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh'
+  const modelTip = 'Used: Cursor Grok 4.7 · high · Effort high · 3 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh · Why this model?'
   await expect(model).toHaveAttribute('data-tip', modelTip)
   await model.hover()
   await expect(page.locator('.tooltip')).toHaveText(modelTip)
@@ -249,7 +257,7 @@ test('planning hovers match effort, running usage and pre-session calibration', 
   await missingUsage.hover()
   await expect(page.locator('.tooltip')).toHaveText(usageTip)
   const noModel = row(page, 'PHAROS-15').locator('.plan-model')
-  const emptyTip = 'No agent session yet\nNo model planned: set a role and area'
+  const emptyTip = 'No agent session yet\nNo model planned: set a role and area · Why this model?'
   await expect(noModel).toHaveAttribute('data-tip', emptyTip)
   await noModel.hover()
   await expect(page.locator('.tooltip')).toHaveText(emptyTip)

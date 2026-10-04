@@ -10,6 +10,7 @@ import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import TargetSummary from '../deploy/TargetSummary.vue'
+import ExpandableText from '../ExpandableText.vue'
 import HarnessMark from './HarnessMark.vue'
 import AgentStateMark from '../indicators/AgentStateMark.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
@@ -232,7 +233,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </div>
         </li>
         <li
-          v-else class="item agent-state-surface" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
+          v-else class="item permission agent-state-surface" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
           :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${named(approval).name}`"
           @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
         >
@@ -262,7 +263,11 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               </span>
             </p>
             <TargetSummary :approval="approval" compact />
-            <p v-if="approval.rationale" class="why">{{ approval.rationale }}</p>
+            <div v-if="open?.id !== approval.id && canDecideApproval(approval)" class="row-actions">
+              <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
+              <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
+            </div>
+            <ExpandableText v-if="approval.rationale" class="why" :text="approval.rationale" :expanded="open?.id === approval.id" />
             <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)" @click.stop>
               <label :for="`reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
               <textarea
@@ -278,10 +283,6 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
                 </button>
               </div>
             </form>
-          </div>
-          <div v-if="open?.id !== approval.id && canDecideApproval(approval)" class="row-actions">
-            <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
-            <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
           </div>
         </li>
         </template>
@@ -302,7 +303,14 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
             </button>
             <span class="asks">to</span><span class="to" :title="request.to">{{ request.to.split(':').pop() }}</span>
           </p>
-          <p class="why body-text">{{ request.body }}</p>
+          <div v-if="open?.id !== request.id" class="row-actions">
+            <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
+            <template v-if="canResolve">
+              <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
+              <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
+            </template>
+          </div>
+          <ExpandableText class="why body-text" :text="request.body" :lines="3" :expanded="open?.id === request.id" />
           <form v-if="open?.id === request.id" class="decision" @submit.prevent="settle(request)" @click.stop>
             <label :for="`note-${request.id}`">Note (optional)</label>
             <textarea
@@ -319,13 +327,6 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               </button>
             </div>
           </form>
-        </div>
-        <div v-if="open?.id !== request.id" class="row-actions">
-          <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
-          <template v-if="canResolve">
-            <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
-            <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
-          </template>
         </div>
       </li>
       <li v-for="row in signins ?? []" :key="row.id" class="item signin" :data-row="`g:${row.id}`" tabindex="-1" :aria-label="`${vendor(row)} needs a new sign-in on ${row.host}`">
@@ -391,6 +392,9 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 @media (hover: hover) { .item:hover { background: var(--row-hover); } }
 .item.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .item.open { background: var(--row-selected); }
+/* Decision controls precede the preview, so revealing context grows below them. */
+.item.permission, .item.held { grid-template-columns: 30px minmax(0, 1fr); }
+.body > .row-actions { grid-column: auto; justify-self: start; align-self: start; }
 .mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .item.medium .mark { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
 .item.high .mark { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
@@ -430,8 +434,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-key.plain:hover { text-decoration: none; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }
-.why { margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.body-text { -webkit-line-clamp: 3; line-clamp: 3; color: var(--ink); }
+.why { margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+.body-text { color: var(--ink); }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; align-self: center; min-width: 0; max-width: 100%; }
 .decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
 .decision label { font-size: 12px; font-weight: 600; color: var(--ink-2); }

@@ -19,19 +19,22 @@ import (
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
-const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}`
+const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
 // These exact mappings are the sole authority for workflow concurrency. Jobs
 // never own concurrency, and reusable workflows cannot enter a caller's group.
 var workflowConcurrency = map[string]map[string]any{
 	"ci.yml": {
-		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' }}`,
+		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}`,
 	},
 	"release.yml": {
 		"group": `release-${{ github.ref }}`, "cancel-in-progress": false,
 	},
 	"homebrew-tap.yml": {
-		"group": `homebrew-tap-${{ github.event.release.tag_name }}`, "cancel-in-progress": false,
+		"group": `homebrew-tap-${{ inputs.version }}`, "cancel-in-progress": false,
+	},
+	"verify-live.yml": {
+		"group": "aeon-live-verification", "cancel-in-progress": false,
 	},
 	"release-image-check.yml": {
 		"group": `release-image-check-${{ github.ref }}`, "cancel-in-progress": true,
@@ -391,6 +394,14 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			}
 			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
+			}
+		} else if context == "web" {
+			// OPS-257: web is the aggregate over setup and the sharded UI jobs, like go.
+			if job["if"] != "always()" {
+				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
+			}
+			if !reflect.DeepEqual(job["needs"], []any{"web-setup", "web-shard"}) {
+				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
 			}
 		} else if _, exists := job["if"]; exists {
 			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])

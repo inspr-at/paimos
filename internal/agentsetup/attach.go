@@ -11,7 +11,7 @@ var (
 	ErrAttachConfigMismatch   = errors.New("paired attach origin or workspace configuration changed")
 )
 
-// ReadAttachProof is for daemon-start registration only: it binds the lifecycle
+// ReadAttachProof is for daemon startup and recovery registration only: it binds the lifecycle
 // proof and public hostname to the already approved runtime. Signed Mac builds
 // load it from the daemon-restricted Keychain; legacy/Linux storage is readable
 // by same-user code. It never authorizes watch exchanges. Never return it to a CLI
