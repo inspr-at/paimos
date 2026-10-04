@@ -13409,7 +13409,7 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/AccessAuditEvent'}}
         next_after: {type: [integer, 'null'], description: Cursor for the next asc page; null in desc order}
-        next_before: {type: [integer, 'null'], description: Cursor for the next desc page; present in desc order, null when complete}
+        next_before: {type: [integer, 'null'], description: "Cursor for the next desc page; present in desc order, null when complete"}
     AccessAuditEvent:
       type: object
       required: [id, type, at, actor, subject, project, data]
