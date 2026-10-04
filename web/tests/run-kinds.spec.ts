@@ -23,19 +23,19 @@ function expectHostBadgeFits(width: number, available: number, message: string) 
   expect(width, message).toBeLessThanOrEqual(available + 0.5)
 }
 
-async function modelGlyphSize(model: Locator) {
-  return model.evaluate(el => {
+async function modelGlyphSize(model: Locator, characters = 1) {
+  return model.evaluate((el, characters) => {
     const text = el.firstChild!
     const range = document.createRange()
     range.setStart(text, 0)
-    range.setEnd(text, 1)
+    range.setEnd(text, Math.min(characters, text.textContent!.length))
     const glyph = range.getBoundingClientRect(), box = el.getBoundingClientRect()
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')!
     context.font = getComputedStyle(el).font
     const ellipsis = el.scrollWidth > el.clientWidth ? context.measureText('…').width : 0
     return { width: glyph.width, required: glyph.width + ellipsis, available: box.right - glyph.left, slot: el.clientWidth }
-  })
+  }, characters)
 }
 
 function expectModelGlyphFits(glyph: Awaited<ReturnType<typeof modelGlyphSize>>, message: string, soft = false) {
@@ -83,6 +83,102 @@ test('model glyph guard rejects a separator-only slot that the old positive-widt
   expect(clipped.available, 'no part of the real first character fits').toBeLessThanOrEqual(0)
   expect(() => expectModelGlyphFits(clipped, 'model character cannot fit after the separator'))
     .toThrow(/model character cannot fit after the separator/)
+})
+
+for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact phone actions stay clear of Host in ${theme}`, async ({ page }) => {
+  await page.clock.install({ time: now })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ colorScheme: theme })
+  const work = fixtures()
+  work.preferences.theme = { choice: 'system' }
+  await mockWork(page, work, { admin: true })
+  const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
+  const ended = { ...data.sessions[6]!, display_label: 'Ended', brief: 'Ship', host: 'mbp2606', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null }
+  const silent = { ...data.sessions[4]!, display_label: 'Silent', brief: 'Ship', host: 'mbp2606', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null, heartbeat_at: new Date(now - 20 * 60_000).toISOString() }
+  data.sessions.splice(0, data.sessions.length, ended, silent)
+  data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0); data.targets.splice(0)
+  await mockAgents(page, data)
+  await page.route('**/api/me/host-labels', route => route.fulfill({ json: [] }))
+  // Keep both records present while proving the Remove button receives clicks.
+  // The real error response lets the row's disabled/busy state settle naturally.
+  const removed: string[] = []
+  await page.route('**/harness-sessions/*/remove', async route => {
+    removed.push(new URL(route.request().url()).pathname.split('/').at(-2)!)
+    await route.fulfill({ status: 503, json: { error: 'Removal unavailable in layout fixture' } })
+  })
+  await page.goto('/agents')
+  const accounts = page.getByRole('button', { name: /^Accounts and computers/ })
+  if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
+  await expect(page.locator(`[data-row="s:${ended.id}"]`)).toHaveAttribute('data-state', 'stopped')
+  await expect(page.locator(`[data-row="s:${silent.id}"]`)).toHaveAttribute('data-state', 'unresponsive')
+  const dialog = page.getByRole('dialog', { name: 'Your name for this computer' })
+  for (const width of [390, 320, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width <= 390 ? 844 : 1000 })
+    for (const session of [ended, silent]) {
+      const row = page.locator(`[data-row="s:${session.id}"]`)
+      const host = row.locator('.host-badge'), pencil = row.locator('.host-pencil')
+      const remove = row.getByRole('button', { name: `Remove ${session.display_label}`, exact: true })
+      const menu = row.getByRole('button', { name: `Actions for ${session.display_label}`, exact: true })
+      await row.scrollIntoViewIfNeeded()
+      await expect(row.locator('.result')).toHaveText('Ship')
+      await expect(remove).toBeVisible()
+      await expect(menu).toBeVisible()
+      for (const action of [remove, menu]) {
+        const actionBox = (await action.boundingBox())!
+        expect(actionBox.width).toBeGreaterThanOrEqual(width <= 390 ? 44 : 1)
+        expect(actionBox.height).toBeGreaterThanOrEqual(width <= 390 ? 44 : 1)
+        for (const control of [host, pencil]) {
+          const controlBox = (await control.boundingBox())!
+          const overlapWidth = Math.min(actionBox.x + actionBox.width, controlBox.x + controlBox.width) - Math.max(actionBox.x, controlBox.x)
+          const overlapHeight = Math.min(actionBox.y + actionBox.height, controlBox.y + controlBox.height) - Math.max(actionBox.y, controlBox.y)
+          expect(Math.min(overlapWidth, overlapHeight), `${width}px ${session.display_label}: ${await action.getAttribute('aria-label')} stays clear of Host and rename`).toBeLessThanOrEqual(0)
+        }
+      }
+      expectModelGlyphFits(await modelGlyphSize(row.locator('.exec-model'), 6), `${width}px ${session.display_label}: complete ffmpeg remains visible`)
+      if (width <= 390) await expectStableControls({ controls: { row, host, pencil, remove, menu }, scrollAreas: { row }, interactions: [
+        { name: 'open Host from badge', run: async () => {
+          await host.click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+        } },
+        { name: 'cancel Host draft', run: async () => {
+          await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+        } },
+        { name: 'open Host from rename control', run: async () => {
+          await pencil.click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+        } },
+        { name: 'cancel rename', run: async () => {
+          await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+        } },
+        { name: 'open row Actions', run: async () => {
+          await menu.click()
+          await expect(menu).toHaveAttribute('aria-expanded', 'true')
+          await expect(page.getByRole('menu', { name: `Actions for ${session.display_label}` })).toBeVisible()
+        } },
+        { name: 'close row Actions', run: async () => {
+          await page.keyboard.press('Escape')
+          await expect(menu).toHaveAttribute('aria-expanded', 'false')
+        } },
+        { name: 'click Remove and report its failure', run: async () => {
+          const count = removed.length
+          await remove.click()
+          await expect.poll(() => removed.length).toBe(count + 1)
+          expect(removed.at(-1)).toBe(session.id)
+          await expect(remove).toBeEnabled()
+          await expect(page.getByText('Removal unavailable in layout fixture', { exact: true }).last()).toBeVisible()
+        } },
+      ] })
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+    const shots = process.env.AEON_670_FIX2_SHOTS
+    if (shots) {
+      mkdirSync(shots, { recursive: true })
+      await page.locator('.sessions').screenshot({ path: join(shots, `paired-actions-${width}-${theme}.png`), animations: 'disabled' })
+    }
+  }
 })
 
 test('execution kinds and person-specific host names on the real agents table', async ({ page }, info) => {
@@ -223,17 +319,48 @@ test('execution kinds and person-specific host names on the real agents table', 
             expect.soft(harnessBox!.x + harnessBox!.width, `${child.display_label}: execution stays before host`).toBeLessThanOrEqual(badgeBox!.x + 0.5)
           }
         }
-        // The existing 132px phone reservation can hide model text at 390px.
-        // At tablet/desktop sizes, require room for a real glyph: the generated
-        // separator alone must never satisfy this guard.
-        for (const child of [ai, xai]) {
+        // Real execution text must fit beside Host even on phones: the
+        // generated separator alone must never satisfy this guard.
+        for (const child of [ai, xai, media, terminal]) {
           const model = page.locator(`[data-row="s:${child.id}"] .exec-model`)
-          await expect(model).toContainText(child.model)
-          await expect(model).toHaveAttribute('title', /fixture/)
-          if (width > 390) {
-            const glyph = await modelGlyphSize(model)
-            expectModelGlyphFits(glyph, `${width}px ${child.display_label}: a whole model character fits after the separator and before any ellipsis`, true)
-          }
+          await expect(model).toContainText(child.model || ('generator' in child ? child.generator : 'command' in child ? child.command : ''))
+          const characters = child === terminal ? terminal.command.length : width === 390 ? 3 : 1
+          const glyph = await modelGlyphSize(model, characters)
+          expectModelGlyphFits(glyph, `${width}px ${child.display_label}: ${characters} execution characters fit after the separator and before any ellipsis`, true)
+        }
+        if (width === 390) {
+          await expectStableControls({ controls: { host: workerHost, pencil, row, menu: row.locator('.more') }, scrollAreas: { row }, interactions: [
+            { name: 'hover compact host', run: async () => {
+              await workerHost.hover()
+              await expect(pencil).toHaveCSS('opacity', '1')
+            } },
+            { name: 'edit compact host draft', run: async () => {
+              await pencil.click()
+              await expect(dialog.getByRole('textbox')).toBeEnabled()
+              await dialog.getByRole('textbox').fill('Draft only')
+              await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
+            } },
+            { name: 'cancel compact host draft', run: async () => {
+              await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+              await expect(dialog).toHaveCount(0)
+              await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
+            } },
+          ] })
+          await workerHost.click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+          await dialog.getByRole('textbox').fill('mba')
+          await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+          await expect(workerHost.locator('.host-name')).toHaveText('mba')
+          expect((await workerHost.boundingBox())!.width).toBeLessThan(responsiveBadge!.width)
+          const shortHostModel = await modelGlyphSize(row.locator('.exec-model'), 3)
+          expectModelGlyphFits(shortHostModel, 'short host leaves real model text visible')
+          await workerHost.click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+          await dialog.getByRole('textbox').fill(longLabel)
+          await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+          await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
         }
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
         if (shots) await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })

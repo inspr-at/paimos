@@ -12,11 +12,12 @@ const listPath = `actions/workflows/ci.yml/runs?event=merge_group&status=success
 function fixture(attempt = 1) {
   const run = { id: 123, name: 'CI', repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: attempt, event: 'merge_group', head_sha: sha };
   const workflow = { id: 20, name: 'CI', path: workflowPath };
-  const jobs = { total_count: requiredJobs.length + 1, jobs: requiredJobs.map(name => {
+  const jobs = { total_count: requiredJobs.length + 2, jobs: requiredJobs.map(name => {
     const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard' : name.startsWith('web-shard (') ? 'Run balanced UI shard with merge-queue flake control' : undefined);
     return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : [] };
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
+  jobs.jobs.push({ name: 'tree-reuse', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   const listed = { total_count: 1, workflow_runs: [{ id: 123, head_sha: sha, event: 'merge_group' }] };
   const calls = [];
   const api = async path => {

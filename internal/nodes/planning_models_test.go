@@ -149,6 +149,17 @@ func TestPlanningRawAndUnknownSessionModels(t *testing.T) {
 	if got == nil || len(got.Models) != 1 || got.Models[0].Model != "unregistered-model" || got.Models[0].Sessions[0].Tokens != nil || got.Tokens.Running != 1 {
 		t.Fatalf("raw fallback: %+v", got)
 	}
+	// Preserve a real model-bearing owner fixture during the foreign read.
+	foreign := addPrincipal(t, "foreign-models")
+	got = planningOf(t, w.admin, path)[n.Key]
+	if got == nil || len(got.Models) != 1 || got.Models[0].Model != "unregistered-model" {
+		t.Fatalf("owner model fixture lost before isolation check: %+v", got)
+	}
+	for key, p := range planningOf(t, foreign, "/api/nodes") {
+		if key == n.Key || p != nil && len(p.Models) > 0 {
+			t.Fatalf("foreign tenant leaked owner model projection: %s %+v", key, p)
+		}
+	}
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET model_raw=NULL WHERE ticket_node_id=$1`, n.ID)
 		return err
@@ -159,11 +170,5 @@ func TestPlanningRawAndUnknownSessionModels(t *testing.T) {
 	got = planningOf(t, w.admin, path)[n.Key]
 	if got == nil || len(got.Models) != 0 || got.Tokens.Running != 1 {
 		t.Fatalf("unknown model must retain running count: %+v", got)
-	}
-	foreign := newPrincipal(t, "foreign-models")
-	for key, p := range planningOf(t, foreign, "/api/nodes") {
-		if p != nil && len(p.Models) > 0 {
-			t.Fatalf("foreign tenant %s leaked models: %s", key, strings.TrimSpace(p.Models[0].Model))
-		}
 	}
 }
