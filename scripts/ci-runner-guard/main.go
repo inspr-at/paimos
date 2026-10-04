@@ -45,6 +45,8 @@ var reservedCIJobs = map[string]bool{
 	"go": true, "web": true, "release-check": true, "e2e": true,
 	"cross-family": true, "gate/cross-family": true,
 	"go-test": true, "go-static": true, "go-timing": true, "runner-route": true,
+	"ci-plan": true, "web-setup": true, "web-shard": true,
+	"release-check-run": true, "e2e-run": true,
 }
 
 var matrixRunner = regexp.MustCompile(`^\$\{\{\s*matrix\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}$`)
@@ -369,43 +371,60 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
-	// A proof outage must remain an unset reuse output, never a failed need
-	// that skips the full suite. This includes checkout failures/timeouts.
+	// A push-only proof must fail open to full validation, with read-only authority.
 	proof := mapping(jobs["tree-reuse"])
 	if proof == nil || proof["continue-on-error"] != true {
 		return fmt.Errorf("tree-reuse must continue on error so proof failure cannot skip required CI jobs")
 	}
 	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
-		return fmt.Errorf("tree-reuse needs a bounded 5–10 minute timeout for checkout plus the 10 second proof")
+		return fmt.Errorf("tree-reuse needs a bounded 5–10 minute timeout")
 	}
-	if proof["if"] != nil || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
-		return fmt.Errorf("tree-reuse must always run and expose only its proof step output")
+	if proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
+		return fmt.Errorf("tree-reuse must run only on main pushes and expose only its proof step output")
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
+	if !reflect.DeepEqual(mapping(proof["permissions"]), map[string]any{"contents": "read", "actions": "read"}) {
+		return fmt.Errorf("tree-reuse needs read-only proof permissions")
+	}
+	for _, id := range []string{"runner-route", "ci-plan", "migration-compat"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
-		if id != "runner-route" {
-			if _, exists := job["if"]; exists {
-				return fmt.Errorf("required CI job %q must run without an if condition", id)
-			}
-			if !hasNeed(job["needs"], "tree-reuse") {
-				return fmt.Errorf("required CI job %q must use the non-failing tree-reuse dependency", id)
+		if _, exists := job["if"]; exists {
+			return fmt.Errorf("required CI job %q must run without an if condition", id)
+		}
+		if id == "migration-compat" {
+			if _, exists := job["needs"]; exists {
+				return fmt.Errorf("migration-compat must run independently of classification")
 			}
 		}
 	}
-	migration := mapping(jobs["migration-compat"])
-	if migration["needs"] != nil {
-		return fmt.Errorf("migration-compat must remain independent of reuse proof")
-	}
-	steps, _ := migration["steps"].([]any)
-	for _, value := range steps {
-		if mapping(value)["if"] != nil {
-			return fmt.Errorf("migration-compat steps must remain unconditional")
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run", "release-list-comparison"} {
+		job := mapping(jobs[id])
+		if job == nil {
+			return fmt.Errorf("required CI job %q is missing", id)
+		}
+		condition := "needs.ci-plan.outputs.lane == 'full'"
+		switch id {
+		case "web-setup", "web-shard":
+			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
+		}
+		condition = "always() && needs.ci-plan.result == 'success' && (" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
+		switch id {
+		case "go-test":
+			condition += " && needs.runner-route.result == 'success'"
+		case "web-shard", "release-list-comparison":
+			condition += " && needs.web-setup.result == 'success'"
+		}
+		if job["if"] != condition || !hasNeed(job["needs"], "ci-plan") || !hasNeed(job["needs"], "tree-reuse") {
+			return fmt.Errorf("required CI job %q must use the reviewed PR classification gate", id)
 		}
 	}
-	for _, context := range []string{"go", "web", "release-check", "e2e", "migration-compat"} {
+	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
+	if webMatrix != `${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
+		return fmt.Errorf("web shard matrix must retain 12 full rows and one changed-spec row")
+	}
+	for _, context := range []string{"go", "web", "release-check", "e2e"} {
 		job := mapping(jobs[context])
 		if job == nil {
 			return fmt.Errorf("required check %q is missing", context)
@@ -417,7 +436,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if context == "web" {
@@ -425,13 +444,11 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"web-setup", "web-shard", "tree-reuse", "cache-prime"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("web must gate setup and every UI shard: %v", job["needs"])
 			}
-		} else if _, exists := job["if"]; exists {
-			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
-		} else if context != "migration-compat" && !hasNeed(job["needs"], "tree-reuse") {
-			return fmt.Errorf("required check %q must use the non-failing tree-reuse dependency", context)
+		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}) {
+			return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
 		}
 	}
 	return nil
