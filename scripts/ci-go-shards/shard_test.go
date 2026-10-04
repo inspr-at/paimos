@@ -916,7 +916,7 @@ func TestClassifyTimedTests(t *testing.T) {
 	}
 }
 
-func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
+func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -941,8 +941,8 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	timing := workflow.Jobs["go-timing"]
-	if timing.RunsOn != "ubuntu-latest" || timing.If != "" {
-		t.Fatal("timing job must always run hosted")
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "needs.ci-plan.outputs.lane == 'full'" || timing.Needs != "ci-plan" {
+		t.Fatal("timing job must run hosted for full validation")
 	}
 	count := 0
 	for _, step := range timing.Steps {
@@ -960,7 +960,7 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatalf("timing command runs %d times", count)
 	}
 	foundGuard := false
-	for _, step := range workflow.Jobs["release-check"].Steps {
+	for _, step := range workflow.Jobs["release-check-run"].Steps {
 		if strings.Contains(step.Run, "go test ./scripts/ci-runner-guard -count=1") {
 			foundGuard = true
 		}
@@ -976,7 +976,9 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			hasTiming = true
 		}
 	}
-	if gate.If != "always()" || !ok || !hasTiming || !strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = success`) {
+	if gate.If != "always()" || !ok || !hasTiming ||
+		!strings.Contains(gate.Steps[0].Run, `full) expected=success`) ||
+		!strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = "$expected"`) {
 		t.Fatal("required go gate does not require successful timing budgets")
 	}
 }
