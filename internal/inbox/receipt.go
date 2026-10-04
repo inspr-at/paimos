@@ -73,7 +73,7 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 			FROM inbox_messages m
 			JOIN tenants t ON t.id = m.tenant_id
 			JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
-			WHERE m.id = $1::uuid AND m.sender_principal_id = $2::uuid`, id, p.ID).Scan(
+			WHERE m.chat_thread_id IS NULL AND m.id = $1::uuid AND m.sender_principal_id = $2::uuid`, id, p.ID).Scan(
 			&out.MessageID, &out.IdempotencyKey, &out.Tenant,
 			&out.SenderPrincipalID, &out.RecipientPrincipalID,
 			&out.TargetID, &out.TargetVersion, &out.Adapter, &out.Address, &out.EffectiveLevel,

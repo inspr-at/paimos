@@ -78,7 +78,7 @@ func sameSession(a, b *string) bool {
 // handed_off (AEON-280); a receipt that already failed stays failed.
 func ConfirmSessionMessage(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string) error {
 	var acked bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&acked); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE chat_thread_id IS NULL AND id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&acked); err != nil {
 		return err
 	}
 	if !acked {
@@ -105,12 +105,12 @@ func FailSessionMessage(ctx context.Context, tx pgx.Tx, p tenant.Principal, mess
 	if err != nil || failed {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2::uuid WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`, messageID, p.ID)
+	tag, err := tx.Exec(ctx, `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2::uuid WHERE chat_thread_id IS NULL AND id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`, messageID, p.ID)
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
 	}
 	var bound bool
-	if err := tx.QueryRow(ctx, `SELECT recipient_session_id IS NOT NULL FROM inbox_messages WHERE id=$1::uuid`, messageID).Scan(&bound); err != nil || !bound {
+	if err := tx.QueryRow(ctx, `SELECT recipient_session_id IS NOT NULL FROM inbox_messages WHERE chat_thread_id IS NULL AND id=$1::uuid`, messageID).Scan(&bound); err != nil || !bound {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason='transport_error' FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid AND c.recipient_session_id IS NOT NULL`, messageID); err != nil {
