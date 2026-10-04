@@ -4141,7 +4141,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A work item or legacy ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -4249,7 +4249,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a work item or legacy ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
+                          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -4364,7 +4364,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A work item or legacy ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -16298,7 +16298,7 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a work item or legacy ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
         children:
           type: array
           description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.

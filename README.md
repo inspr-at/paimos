@@ -472,6 +472,9 @@ provenance metadata on existing nodes. `GET /api/nodes/{id}/benefit-generation`
 reports status; the person-only retry POST requires the displayed generation and
 node revision. A generated write emits `node.benefits_generated` for live refresh;
 it has no generic node Undo, which could overwrite unrelated fields.
+Leaf completion checks use the same tenant state categories as parent derivation,
+including custom Done states. Cancellation and archival do not require benefits,
+and edits to already-completed historical records remain available.
 
 API keys are optional and encrypted through the existing tenant-bound AES-GCM
 vault, separate from JSON settings and event data. Reads reveal only whether a

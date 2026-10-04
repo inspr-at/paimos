@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -311,8 +312,10 @@ func TestPublishedSnapshotAndUnrelatedFieldsSurvive(t *testing.T) {
         SELECT $1::uuid,$2::uuid,'frozen-fixture',jsonb_build_object(
           'schema','aeon.release-note-snapshot.v1','membership_source','release-manifest-tickets',
           'label','backfilled','backfilled',true,'frozen',true,
+          'version_scheme','inspr-calendar-v2','release_revision',1,
+          'captured_at','2026-10-04T09:00:00Z','field_source','nodes.fields',
           'tenant_id',$1::uuid::text,'project_node_id',$2::uuid::text,'version','frozen-fixture',
-          'items',(SELECT jsonb_agg(jsonb_build_object('id',id,'key',key,'fields',aeon_benefit_texts(fields)) ORDER BY key)
+          'tickets',(SELECT jsonb_agg(jsonb_build_object('id',id,'key',key,'fields',aeon_benefit_texts(fields)) ORDER BY key)
                    FROM nodes WHERE id=ANY($3::uuid[]) AND project_id=$2))
         RETURNING snapshot::text`, f.p.TenantID, project, []string{f.parent, f.leaf}).Scan(&original)
 	})
@@ -321,16 +324,21 @@ func TestPublishedSnapshotAndUnrelatedFieldsSurvive(t *testing.T) {
 	}
 
 	// Assert exact source identities and frozen text before exercising writes.
-	var snapshot struct {
-		Items []struct {
-			ID     string `json:"id"`
-			Fields Texts  `json:"fields"`
-		} `json:"items"`
-	}
+	var snapshot releasehistory.NoteSnapshot
 	if err := json.Unmarshal([]byte(original), &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Items) != 2 || snapshot.Items[0].ID != f.parent || snapshot.Items[1].ID != f.leaf || snapshot.Items[0].Fields != parentTexts || snapshot.Items[1].Fields != sample {
+	var capturedParent, capturedLeaf Texts
+	if len(snapshot.Tickets) != 2 {
+		t.Fatal("snapshot does not contain both edited records", original)
+	}
+	if err := json.Unmarshal(snapshot.Tickets[0].Fields, &capturedParent); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(snapshot.Tickets[1].Fields, &capturedLeaf); err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Frozen || snapshot.ProjectID != project || snapshot.Tickets[0].ID != f.parent || snapshot.Tickets[1].ID != f.leaf || capturedParent != parentTexts || capturedLeaf != sample {
 		t.Fatal("snapshot does not contain the edited records", original)
 	}
 	assertFrozen := func(stage string) {
