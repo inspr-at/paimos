@@ -153,7 +153,7 @@ export interface Call { path: string; method: string; query: URLSearchParams; bo
 // hideLead: the caller cannot read harness sessions, so the server sends no
 // lead_worker (AEON-316 gates it on the same visibility as the live read).
 function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
-  const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
+  const kindIds: Record<string, string> = { work: 'k-work', epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
   // has_avatar as the server sends it (U27), when the spec gives it; absent,
@@ -425,7 +425,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     }
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.principalKind ?? 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
-    if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
+    if (path === '/api/kinds') return route.fulfill({ json: { items: ['work', 'epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     // Relations (U27): the server's refusals, in its words, for the picker to show.
     if (path === '/api/relations' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { code: 'forbidden', message: 'forbidden' } })
@@ -532,7 +532,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
-        const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
+        const work = data.nodes.filter(n => n.project === p.id && ['work', 'ticket', 'task', 'epic'].includes(n.kind_slug))
         const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
         for (const node of work) {
           const bucket = workBucket(node.state)

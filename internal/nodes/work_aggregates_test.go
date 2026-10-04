@@ -4,8 +4,10 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func aggregateNode(t *testing.T, w planningWorld, key, parent, state string, hours any) nodeJSON {
@@ -339,5 +342,104 @@ func TestWorkAggregatesCalibratedTokenEstimates(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWorkAggregatesClosedLeafEstimateOrder(t *testing.T) {
+	w := planningSetup(t)
+	top := aggregateNode(t, w, "ORDER-1", w.root.ID, "open", 99)
+	aggregateNode(t, w, "ORDER-2", top.ID, "open", 3)
+	cancelled := aggregateNode(t, w, "ORDER-3", top.ID, "cancelled", 1)
+	archived := aggregateNode(t, w, "ORDER-4", top.ID, "archived", 5)
+	estimates, _ := aggregateRead(t, w.admin, top.ID, cancelled.ID, archived.ID)
+	if *estimates[top.ID].Hours != 3 {
+		t.Fatal("closed leaves contributed to parent")
+	}
+	for _, tc := range []struct {
+		sort string
+		want []string
+	}{
+		{"estimate", []string{cancelled.ID, top.ID, archived.ID}},
+		{"-estimate", []string{archived.ID, top.ID, cancelled.ID}},
+	} {
+		page := listPage(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+tc.sort+"&limit=50")
+		var got []string
+		for _, n := range page.Items {
+			if n.ID == top.ID || n.ID == cancelled.ID || n.ID == archived.ID {
+				got = append(got, n.ID)
+			}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Fatalf("%s actual order %v, want %v", tc.sort, got, tc.want)
+		}
+	}
+}
+
+func TestWorkScopeRootAndExpansionBudgets(t *testing.T) {
+	w := planningSetup(t)
+	root := seedAggregateTree(t, w, 316, 0)
+	t.Run("roots", func(t *testing.T) {
+		for _, count := range []int{4096, 4097} {
+			ids := make([]string, count)
+			for i := range ids {
+				ids[i] = root
+			}
+			var n int
+			err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM aeon_work_scope($1::uuid[])`, ids).Scan(&n)
+			})
+			if count == 4096 {
+				if err != nil || n != 316 {
+					t.Fatalf("valid roots lost scope: count=%d err=%v", n, err)
+				}
+				continue
+			}
+			var pgerr *pgconn.PgError
+			if !errors.As(err, &pgerr) || pgerr.Code != "54000" || pgerr.Message != "work scope root budget exceeded" {
+				t.Fatalf("root budget: %v", err)
+			}
+		}
+	})
+	t.Run("expansion", func(t *testing.T) {
+		for _, count := range []int{303, 304} {
+			var n int
+			err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+				// First N chain nodes yield N*317-N*(N+1)/2 scope pairs.
+				return tx.QueryRow(t.Context(), `WITH RECURSIVE chain(id,depth) AS (
+     SELECT $1::uuid,1 UNION ALL SELECT n.id,c.depth+1 FROM chain c JOIN nodes n ON n.parent_id=c.id WHERE c.depth<$2
+    ) SELECT count(*) FROM aeon_work_scope(ARRAY(SELECT id FROM chain))`, root, count).Scan(&n)
+			})
+			if count == 303 {
+				if err != nil || n != 49995 {
+					t.Fatalf("valid expansion truncated: count=%d err=%v", n, err)
+				}
+				continue
+			}
+			var pgerr *pgconn.PgError
+			if !errors.As(err, &pgerr) || pgerr.Code != "54000" || pgerr.Message != "work scope expansion budget exceeded" {
+				t.Fatalf("expansion budget: %v", err)
+			}
+		}
+	})
+}
+
+func TestWorkAggregateLimitsAreExplicitHTTPFailures(t *testing.T) {
+	for _, err := range []error{
+		&pgconn.PgError{Code: "54000", Message: "work scope root budget exceeded"},
+		&pgconn.PgError{Code: "54000", Message: "work scope expansion budget exceeded"},
+		fmt.Errorf("read aggregate: %w", context.DeadlineExceeded),
+	} {
+		r := httptest.NewRecorder()
+		writeErr(r, err)
+		if r.Code != 503 {
+			t.Errorf("%v: status %d, want 503", err, r.Code)
+		}
+		var body map[string]any
+		if e := json.Unmarshal(r.Body.Bytes(), &body); e != nil {
+			t.Fatal(e)
+		}
+		if body["error"] != "Work aggregates exceeded a resource limit; narrow the scope or retry." {
+			t.Errorf("opaque failure: %s", r.Body.String())
+		}
 	}
 }

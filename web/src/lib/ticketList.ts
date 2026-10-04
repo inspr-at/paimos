@@ -58,7 +58,7 @@ export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
 export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)
 // The counts every page carries; the others are asked for when a menu opens.
 export const LIST_FACETS = ['state', 'priority', 'assignee', 'kind']
-export const WORK_KINDS = ['ticket', 'task', 'epic']
+export const WORK_KINDS = ['work', 'ticket', 'task', 'epic']
 export const PAGE_SIZE = 200
 export const GROUPS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'assignee', label: 'Assignee' }, { value: 'priority', label: 'Priority' },
@@ -555,7 +555,7 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     if (entry.key === 'none') return [9, '']
     if (group === 'assignee') return [entry.key === options.me ? 0 : 1, entry.label.toLowerCase()]
     if (group === 'priority') return [1, PRIORITY_RANK[entry.key] ?? 3]
-    if (group === 'type') return [1, WORK_KINDS.indexOf(entry.key) === -1 ? 9 : ['epic', 'ticket', 'task'].indexOf(entry.key)]
+    if (group === 'type') return [1, WORK_KINDS.indexOf(entry.key) === -1 ? 9 : ['work', 'epic', 'ticket', 'task'].indexOf(entry.key)]
     return [1, entry.label.toLowerCase()]
   }
   return out.sort((a, b) => {

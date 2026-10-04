@@ -76,7 +76,12 @@ type Aggregate struct {
 	EstimateByName *string
 }
 
+// AggregateReadTimeout also covers detail reads, which have no list middleware.
+const AggregateReadTimeout = 5 * time.Second
+
 func LoadAggregates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]Aggregate, error) {
+	ctx, cancel := context.WithTimeout(ctx, AggregateReadTimeout)
+	defer cancel()
 	out := map[string]Aggregate{}
 	if len(ids) == 0 {
 		return out, nil
@@ -120,6 +125,8 @@ func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error)
 
 // One reads a single node's estimate. A blank view means nothing is known.
 func One(ctx context.Context, tx pgx.Tx, id string) (View, error) {
+	ctx, cancel := context.WithTimeout(ctx, AggregateReadTimeout)
+	defer cancel()
 	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+` FROM aeon_work_aggregates(ARRAY[$1::uuid]) e`, id)
 	if err != nil {
 		return View{}, err

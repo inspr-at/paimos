@@ -9,6 +9,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))
     const data = fixtures()
+    for (const node of data.nodes) node.kind_slug = 'work'
     data.preferences.theme = { choice: theme }
     data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'estimate', 'progress', 'eta'] }
     const parent = data.nodes.find(n => n.id === 'n-1')!

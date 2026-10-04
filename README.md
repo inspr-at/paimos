@@ -3164,3 +3164,22 @@ No version, release pin, session/Decision Desk identity or historical event is
 rewritten by this package. AEON-649's backup-only kind migration rollback still
 applies. No permanent tables or columns are added; only transaction-local queues,
 SQL functions/triggers, and existing append-only event metadata are used.
+
+## Work leaf aggregates (AEON-651)
+
+Default and live work lists include migrated `work` nodes. Parents show the sum
+of eligible leaf estimates separately from their editable planned estimate;
+cancelled and archived leaves retain their own displayed estimate and sort by it,
+but contribute nothing to ancestor totals. Descendant node and session events
+invalidate loaded parent projections in the affected project even when parent
+status and revision stay unchanged. Membership changes also refresh former leaves;
+reads still respect pinned editors and reject responses overtaken by newer hints.
+
+The unreleased 1230 migration bounds every shared scope traversal to 4096 input
+roots and 50000 distinct root/node pairs, counting overlapping roots against the
+expansion budget before leaf facts or sessions are read. Cycles are deduplicated
+and depth is not silently truncated. Aggregate readers and node detail reads use
+five-second context deadlines, preserving shorter caller deadlines. Exceeding a
+budget or deadline returns an explicit failure (node APIs: 503), never a partial
+aggregate. Larger lists should narrow their scope. RLS, exact-money permissions,
+historical spend and session identities are unchanged.

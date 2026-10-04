@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { estimateDisplay, estimateHours } from '../src/lib/estimates.ts'
-import { totalFrom } from '../src/lib/ticketList.ts'
+import { apiParams, filtersFromQuery, totalFrom } from '../src/lib/ticketList.ts'
 import { etaFromTicket, formatEta } from '../src/lib/eta.ts'
 
 const parent = { kind_slug: 'work', fields: { estimate_hours: 40 }, estimate: { hours: 32, planned_hours: 40, is_parent: true, estimated_children: 6, open_children: 9, estimated_leaves: 6, leaf_count: 9 } }
@@ -32,4 +32,12 @@ test('partial ETA and progress coverage are explicit in every ETA mode', () => {
 test('headline totals use leaf state facets instead of grouping row counts', () => {
  assert.equal(totalFrom({ kind: { work: 6 }, state: { open: 2, done: 1 } }), 3)
  assert.equal(totalFrom({ kind: { work: 6 }, state: {} }), 0)
+})
+
+test('migrated work is included by the default list and live filter', () => {
+  const filters = filtersFromQuery({})
+  assert.ok(apiParams('project', filters).kind?.includes('work'))
+  const typed = filtersFromQuery({ type: 'work' })
+  assert.deepEqual(typed.type, ['work'])
+  assert.deepEqual(apiParams('project', typed).kind, ['work'])
 })

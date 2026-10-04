@@ -79,7 +79,7 @@ test('list state round-trips through the URL and maps onto the list API', () => 
   const plain = filtersFromQuery({})
   assert.equal(apiParams('p1', plain).sort, '-updated_at')
   assert.equal(apiParams('p1', plain).hide_closed, true)
-  assert.deepEqual(apiParams('p1', plain).kind, ['ticket', 'task', 'epic'])
+  assert.deepEqual(apiParams('p1', plain).kind, ['work', 'ticket', 'task', 'epic'])
 })
 
 test('facet options merge spellings and count once', () => {

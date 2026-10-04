@@ -945,3 +945,20 @@ describe('revisions only move forward in the list (review 326d #4)', () => {
     expect(row.updated_at).toBe(saved.updated_at)
   })
 })
+
+describe('leaf changes invalidate parent projections without a status transition', () => {
+  it.each(['node.updated', 'harness.heartbeat', 'harness.stopped', 'node.deleted', 'node.moved'])('refreshes shown ancestors after %s on an unseen deep child', async type => {
+    const h = setup([item('n1', { kind_slug: 'work', estimate: { hours: 2, is_parent: true }, eta: { finished: false, progress_pct: 25 } })])
+    const row = h.rows.value[0], revision = row.updated_at
+    h.srv.nodes[0].estimate = { hours: 8, is_parent: true, leaf_count: 3, estimated_leaves: 2 }
+    h.srv.nodes[0].eta = { finished: false, progress_pct: 63 }
+    h.send({ id: 'deep-unseen', type, fields: type.startsWith('harness.') ? ['eta', 'lead_worker'] : ['fields'], change: type === 'node.deleted' ? 'deleted' : 'updated' })
+    await h.settle()
+    expect(h.srv.calls.some(call => call.ids?.includes('n1'))).toBe(true)
+    expect(row.estimate).toEqual(h.srv.nodes[0].estimate)
+    expect(row.eta).toEqual(h.srv.nodes[0].eta)
+    expect(row.updated_at).toBe(revision)
+    expect(row.state).toBe('new')
+    expect(h.rows.value[0]).toBe(row)
+  })
+})

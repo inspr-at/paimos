@@ -438,6 +438,19 @@ export class RowStore {
     entry.shown = copy
   }
 
+  // Aggregates depend on descendants that may not be loaded. Conservatively
+  // invalidate visible parents in the affected project, including former leaves
+  // and both sides of a move; never guess an incomplete ancestry chain.
+  aggregateParents(projectIds: Set<string>, includeLeaves = false): ListItem[] {
+    const kept = new Set<string>()
+    for (const ids of this.holders) for (const id of ids()) kept.add(id)
+    return [...kept].flatMap(id => {
+      const entry = this.entries.get(id), row = entry?.row
+      return row && !entry?.tomb && row.project && projectIds.has(row.project.id)
+        && (row.estimate?.is_parent || row.children_count > 0 || includeLeaves && ['work', 'ticket', 'task', 'epic'].includes(row.kind_slug)) ? [row] : []
+    })
+  }
+
   // ---------- State ----------
   revision(id: string): string | null { return this.entries.get(id)?.revision ?? null }
   // The store knows a newer revision than this one.

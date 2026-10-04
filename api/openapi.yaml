@@ -4087,6 +4087,7 @@ paths:
   /nodes:
     get:
       operationId: listNodes
+      description: 'Work aggregate reads reject more than 4096 roots or 50000 expanded root/node pairs before computing facts. Over-budget scopes fail explicitly; results are never silently truncated.'
       security: *auth
       parameters:
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
@@ -4118,6 +4119,7 @@ paths:
           $ref: '#/components/responses/Nodes'
         '400':
           $ref: '#/components/responses/Error'
+        '503': {description: 'Read deadline or work aggregate budget exceeded; narrow the scope or retry. No partial aggregate is returned.'}
     post:
       operationId: createNode
       description: |
@@ -4318,6 +4320,7 @@ paths:
           $ref: '#/components/responses/Node'
         '404':
           $ref: '#/components/responses/Error'
+        '503': {description: 'Work aggregate read exceeded its five-second deadline or scope budget. No partial aggregate is returned.'}
     patch:
       operationId: updateNode
       description: |

@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -184,6 +185,8 @@ func (m *Module) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, error) {
+	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
+	defer cancel()
 	var node nodeJSON
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		loaded, err := loadNode(ctx, tx, id, false)

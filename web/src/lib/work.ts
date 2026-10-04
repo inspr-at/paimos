@@ -58,6 +58,7 @@ export function priorityLabel(priority: string | null | undefined): string {
 }
 
 export const KINDS = [
+  { value: 'work', label: 'Work' },
   { value: 'epic', label: 'Epic' },
   { value: 'ticket', label: 'Ticket' },
   { value: 'task', label: 'Task' },

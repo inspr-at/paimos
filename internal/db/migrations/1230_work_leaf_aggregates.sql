@@ -8,16 +8,33 @@ SET LOCAL lock_timeout = '5s';
 -- leaf session reads are shared across overlapping requested roots.
 CREATE FUNCTION aeon_work_scope(roots uuid[])
 RETURNS TABLE(root uuid, id uuid, kind_slug text, fields jsonb, bucket text, is_leaf boolean, project_id uuid)
-LANGUAGE sql STABLE AS $$
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+ scope_roots uuid[];
+ scope_nodes uuid[];
+BEGIN
+ -- Bound the caller's root array before traversal, including duplicate roots.
+ IF cardinality(roots)>4096 THEN
+  RAISE EXCEPTION 'work scope root budget exceeded' USING ERRCODE='54000';
+ END IF;
+ -- LIMIT consumes at most budget+1 recursive pairs, before facts/session reads
+ -- or the overlapping-root cross product can materialize unbounded work.
+ -- UNION still detects cycles; there is no arbitrary depth cutoff.
  WITH RECURSIVE walk(root,id) AS (
   SELECT n.id,n.id FROM nodes n
   WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
    AND n.id=ANY(roots) AND n.deleted_at IS NULL
   UNION
-  SELECT w.root,c.id FROM walk w CROSS JOIN LATERAL (
-   SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
-    AND parent_id=w.id AND deleted_at IS NULL ORDER BY updated_at DESC OFFSET 0
-  ) c
+  SELECT w.root,c.id FROM walk w JOIN nodes c ON c.parent_id=w.id
+   AND c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
+ ), bounded AS MATERIALIZED (SELECT w.root,w.id FROM walk w LIMIT 50001)
+ SELECT array_agg(b.root),array_agg(b.id) INTO scope_roots,scope_nodes FROM bounded b;
+ IF cardinality(scope_nodes)>50000 THEN
+  RAISE EXCEPTION 'work scope expansion budget exceeded' USING ERRCODE='54000';
+ END IF;
+ RETURN QUERY
+ WITH walk AS MATERIALIZED (
+  SELECT p.root,p.id FROM unnest(scope_roots,scope_nodes) AS p(root,id)
  ), facts AS MATERIALIZED (
   SELECT n.id,k.slug,n.fields,n.project_id,
    CASE aeon_work_status_category(n.state,k.field_schema)
@@ -27,13 +44,14 @@ LANGUAGE sql STABLE AS $$
     SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
     WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL
      AND ck.slug IN ('work','epic','ticket','task')) AS is_leaf
-  FROM (SELECT DISTINCT id FROM walk) u CROSS JOIN LATERAL (
-   SELECT id,tenant_id,kind_id,fields,state,project_id FROM nodes WHERE id=u.id
-    AND tenant_id=current_setting('aeon.tenant_id')::uuid OFFSET 0
+  FROM (SELECT DISTINCT w.id FROM walk w) u CROSS JOIN LATERAL (
+   SELECT n.id,n.tenant_id,n.kind_id,n.fields,n.state,n.project_id FROM nodes n WHERE n.id=u.id
+    AND n.tenant_id=current_setting('aeon.tenant_id')::uuid OFFSET 0
   ) n CROSS JOIN LATERAL (
-   SELECT slug,field_schema FROM node_kinds WHERE tenant_id=n.tenant_id AND id=n.kind_id OFFSET 0
+   SELECT k.slug,k.field_schema FROM node_kinds k WHERE k.tenant_id=n.tenant_id AND k.id=n.kind_id OFFSET 0
   ) k
  ) SELECT w.root,f.id,f.slug,f.fields,f.bucket,f.is_leaf,f.project_id FROM walk w JOIN facts f ON f.id=w.id;
+END;
 $$;
 
 -- Direct session evidence only: no kind-dependent recursion, and no report
@@ -103,7 +121,10 @@ LANGUAGE sql STABLE AS $$
    row_number() OVER (PARTITION BY s.root ORDER BY l.eta_ready_at DESC NULLS LAST,l.ready_reported_at DESC NULLS LAST,l.id) AS rr,
    row_number() OVER (PARTITION BY s.root ORDER BY l.eta_live_at DESC NULLS LAST,l.live_reported_at DESC NULLS LAST,l.id) AS lr
   FROM scope s JOIN leaf l ON l.id=s.id WHERE l.bucket<>'done'
- ) SELECT t.root,t.hours,
+ ) SELECT t.root,
+  CASE WHEN own.is_leaf AND jsonb_typeof(own.fields->'estimate_hours')='number' THEN
+   CASE WHEN (own.fields->>'estimate_hours')::numeric>0 AND (own.fields->>'estimate_hours')::numeric<=200
+    THEN (own.fields->>'estimate_hours')::numeric END ELSE t.hours END,
   CASE WHEN NOT own.is_leaf AND jsonb_typeof(own.fields->'estimate_hours')='number' THEN
    CASE WHEN (own.fields->>'estimate_hours')::numeric>0 AND (own.fields->>'estimate_hours')::numeric<=200
     THEN (own.fields->>'estimate_hours')::numeric END END,
