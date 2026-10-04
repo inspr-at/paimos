@@ -3489,6 +3489,14 @@
     {"kind":"go","package":"scripts/rules-bootstrap","name":"TestSyntheticChild","tier":"NIGHTLY"},
     {"kind":"go","package":"scripts/rules-bootstrap","name":"TestUnsafeFiles","tier":"NIGHTLY"},
     {"package":"scripts/test-tier-go","name":"TestSourceInventoryUsesTestingSignatureAndBuildActivity","kind":"go","tier":"NIGHTLY"},
-    {"package":"scripts/ci-runner-guard","name":"TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority","kind":"go","tier":"NIGHTLY"}
+    {"package":"scripts/ci-runner-guard","name":"TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/ci-runner-guard","name":"TestTreeProofFailureCannotSkipRequiredChecks","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestDirectPushCannotSkipWithoutQueueProof","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestFullFallbackPreservesPinnedMainJobs","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestQueueProofFailureCannotSkipRequiredJobs","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestQueuePushReuseRetainsMainStructureAndFallback","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestQueueReuseAggregatesRejectPartialResults","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestQueueReuseFixturesCoverCurrentWorkflowJobs","kind":"go","tier":"NIGHTLY"},
+    {"package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","kind":"go","tier":"NIGHTLY"}
   ]
 }

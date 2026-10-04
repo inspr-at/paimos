@@ -124,6 +124,16 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
 })
 
+test('exact-SHA reuse records provenance and current costs without fabricating fresh case passes',()=>{
+  const jobs=[{name:'go-test (1)',status:'completed',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:00:30Z'}]
+  const reused=aggregate([],jobs,{reusedFrom:'123'})
+  assert.equal(reused.coverage,'reused');assert.equal(reused.reusedFrom,'123')
+  assert.deepEqual(reused.classes,{});assert.deepEqual(reused.missingEvidence,[])
+  assert.equal(reused.measured.goRunnerMinutes,0.5)
+  assert.throws(()=>aggregate([],jobs,{reusedFrom:'invalid'}),/Invalid reused source/)
+  assert.throws(()=>aggregate([{}],jobs,{reusedFrom:'123'}),/must not report fresh test passes/)
+})
+
 test('committed allowlists preserve 332/60/155, helpers, and AEON-541 behavioral guards',()=>{
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
@@ -144,8 +154,8 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   assert.doesNotMatch(nightly,/pull_request:|merge_group:|runner-route:/)
   for(const command of ['run go --full --shard','run web --full --unit','run web --full --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
-  assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[go-test, go-static, go-timing\]/)
-  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[web-setup, web-shard\]/)
+  assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[go-test, go-static, go-timing, tree-reuse, cache-prime\]/)
+  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[web-setup, web-shard, tree-reuse, cache-prime\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
 })

@@ -8,14 +8,6 @@
       "added": "2026-10-03",
       "expires": "2026-10-10",
       "note": "Known tier-change confirmation/undo/safe-point flake. Fixed by AEON-623; short quarantine while the fix is verified in the merge queue. Remove after clean runs, by expiry."
-    },
-    {
-      "id": "internal/importer TestSourceRequestCapAndDelay",
-      "kind": "go",
-      "owner": "AEON-675",
-      "added": "2026-10-03",
-      "expires": "2026-10-10",
-      "note": "Wall-clock spacing (>=10 ms between request starts) and exact peak of 2 concurrent requests flake on loaded hosted runners. AEON-675 replaces the timing with an injected clock. Remove this entry in that change, by expiry."
     }
   ],
   "template": {

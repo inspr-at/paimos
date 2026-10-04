@@ -644,22 +644,26 @@ with `node scripts/test-tiers/cli.mjs classify go` (or `web`) and run `check`.
 New browser files also need their launch policy in `web/ci-web-shards.json`.
 Unclassified and stale entries fail CI. No tests are deleted: `delete-candidate`
 is only a tag, and every retained test runs in `nightly-full.yml` (scheduled or
-manual), including previously ungated UI specs. Main/manual CI also runs full.
+manual), including previously ungated UI specs. Main/manual CI also runs full,
+except API-verified reuse of a full queue run (see below). A reduced queue run
+never qualifies as full-suite reuse evidence.
 The AEON-415 migration check, static checks, isolated timing budgets and smoke
-gate remain unconditional; selected cases never retry automatically. Run
+gate remain outside tier selection; migration compatibility always runs fresh.
+Selected cases never retry automatically. Run
 measurements are uploaded as `test-tier-run-measurement`, with pass/skip/failure
 counts per class and complete Actions job runner minutes against the 22.50 Go /
 42.17 web baselines. The target is at most eight runner-minutes per gate for an
 unrelated PR; collection counts alone do not establish runtime savings.
 Mixed browser deletion recommendations are tagged as candidate groups until
 their exact NIGHTLY members have been reviewed; classification and execution
-remain unchanged by those tags.
+remain unchanged by those tags. A reused main report records its source run and
+current job overhead without claiming fresh test passes.
 
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for
 the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
-does not satisfy that gate. Main validation is retained, including when a merge
-group tested the same tree. Workflow policy tests live in
+does not satisfy that gate. Main validates the full suite unless the exact-SHA
+proof below establishes full merge-group execution. Workflow policy tests live in
 `scripts/ci-runner-guard` and `scripts/releaseworkflow`.
 
 The ordinary activity tests check exact pagination through 240 same-ticket
@@ -680,6 +684,29 @@ It measures the handler and JSON decoding; the nearest-rank p95 must be below
 100 ms. Median and maximum are logged for diagnosis. It does not measure full
 history traversal or guarantee production latency. Shared or loaded runners
 are unsuitable for interpreting this budget.
+
+### CI push reuse (AEON-423)
+
+On a push to main, `scripts/ci-tree-reuse.mjs` searches for a successful `CI`
+merge-group run at that exact commit SHA and verifies its repository, workflow
+name/path/ID, latest run attempt, complete required jobs, all seven Go and twelve
+web shards, and successful execution steps. A verified match skips the heavy
+suite steps and database startup; the existing required checks and aggregates
+report `reused merge_group run <id>`. One hosted `cache-prime` job still runs
+`npm ci`, installs Playwright Chromium and warms Go modules/builds, saving the
+same main-scoped dependency, browser and hosted Go shard cache keys restored
+by PR/queue jobs; its failure fails both aggregates. `migration-compat` always
+runs against the latest release, including every step (AEON-415). Direct pushes
+without verified queue evidence, PRs, queue runs, manual runs, failed/cancelled
+or partial reruns, API errors and timeouts run the full suite. Lookup uses only
+read permissions, a ten-second network deadline, bounded responses and at most
+20 candidates; a failed proof job leaves outputs unset and runs full CI. Set
+`CI_TREE_REUSE=off` to disable lookup. PR-to-queue tree reuse and its registry
+publisher were removed to keep this path small; no tree comparisons or record
+writes remain. Offline fixtures run with `node --test scripts/ci-tree-reuse.test.mjs`
+and `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard ./scripts/ci-go-shards`;
+hosted savings and the cache-priming duration require coordinator measurement
+once the change reaches main.
 
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.

@@ -13,13 +13,22 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
     assert.ok(match, `Missing CI job ${id}`)
     return match[1]
   }
+  // Other dependencies may grow; these gates must remain required.
+  const requireDependencies = (id, required) => {
+    const needs = /^    needs: (?:\[([^\]\n]*)\]|([a-z][a-z-]*))$/m.exec(job(id))
+    assert.ok(needs, `${id} must declare its dependencies`)
+    const dependencies = (needs[1] ?? needs[2]).split(',').map(name => name.trim())
+    for (const name of required) {
+      assert.ok(dependencies.includes(name), `${id} must require ${name}`)
+    }
+  }
   assert.match(job('web'), /if: always\(\)/)
-  assert.match(job('web'), /needs: \[web-setup, web-shard\]/)
+  requireDependencies('web', ['web-setup', 'web-shard'])
   assert.match(job('web'), /test "\$\{WEB_SETUP\}" = success/)
   assert.match(job('web'), /test "\$\{WEB_SHARD\}" = success/)
   assert.match(job('web-setup'), /cli\.mjs run web --unit/)
   const shard = job('web-shard')
-  assert.match(shard, /needs: \[web-setup, tier-plan\]/)
+  assert.match(shard, /needs: \[web-setup, tier-plan, tree-reuse\]/)
   assert.match(shard, /runs-on: ubuntu-latest/)
   assert.match(shard, /cli\.mjs run web --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   assert.doesNotMatch(shard, /ci-flake-guard\.mjs/)

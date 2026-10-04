@@ -86,15 +86,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 8
           overwrite: true
-      - name: Preserve flake-guard summaries
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: go-test-${{ matrix.shard }}-flake-evidence
-          path: ${{ runner.temp }}/ci-flake-evidence/
-          if-no-files-found: ignore
-          retention-days: 7
-          overwrite: true
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in
@@ -345,8 +336,6 @@ jobs:
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-          # The guard needs the wrapper's merged JSON report to see every group, including one that never started.
-          CI_FLAKE_REQUIRE_JSON: '1'
         run: node scripts/test-tiers/cli.mjs run web --full --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
       - name: Preserve browser tier measurements
         if: always()
@@ -372,7 +361,6 @@ jobs:
             ${{ runner.temp }}/aeon-attach-shots/
             ${{ runner.temp }}/aeon-521a-shots/
             ${{ runner.temp }}/status-autopilot-shots/
-            ${{ runner.temp }}/ci-flake-evidence/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
@@ -481,6 +469,10 @@ jobs:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
+      - name: Exact-SHA reuse provenance and workflow regressions
+        run: |
+          node --test scripts/ci-tree-reuse.test.mjs
+          go test ./scripts/releaseworkflow -count=1
       - name: Enforce test runner trust boundary
         run: |
           node --test scripts/ci-runner-route.test.mjs

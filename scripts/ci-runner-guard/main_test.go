@@ -21,6 +21,47 @@ func TestRepositoryWorkflows(t *testing.T) {
 	}
 }
 
+func TestTreeProofFailureCannotSkipRequiredChecks(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(map[string]any){
+		func(jobs map[string]any) { delete(mapping(jobs["tree-reuse"]), "continue-on-error") },
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["continue-on-error"] = false },
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["timeout-minutes"] = 1 },
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["if"] = "success()" },
+	} {
+		var changed map[string]any
+		if err := yaml.Unmarshal(body, &changed); err != nil {
+			t.Fatal(err)
+		}
+		mutate(mapping(changed["jobs"]))
+		if err := checkCITriggersAndRequiredChecks(changed); err == nil {
+			t.Fatal("proof failure could skip required checks but the guard accepted it")
+		}
+	}
+	for _, id := range []string{"go", "web", "release-check", "e2e", "migration-compat", "go-test", "go-static", "go-timing"} {
+		t.Run(id, func(t *testing.T) {
+			var changed map[string]any
+			if err := yaml.Unmarshal(body, &changed); err != nil {
+				t.Fatal(err)
+			}
+			mapping(mapping(changed["jobs"])[id])["if"] = "success()"
+			if err := checkCITriggersAndRequiredChecks(changed); err == nil {
+				t.Fatalf("%s may skip after proof failure", id)
+			}
+		})
+	}
+}
+
 func TestFullUIQALabelOptInBoundary(t *testing.T) {
 	body, err := os.ReadFile("../../.github/workflows/full-ui-qa.yml")
 	if err != nil {
