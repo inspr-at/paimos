@@ -13,7 +13,7 @@ const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' }
 const liveCount = (page: Page) => page.locator('.sessions .group-row.live .mono')
 const shots = process.env.AEON691_SHOTS
 
-async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = false) {
+async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = false, endedCount = 696) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
   work.preferences.theme = { choice: theme }
@@ -35,7 +35,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = 
     stopped_at: stopped ? new Date(NOW - 60_000).toISOString() : null,
     eta_ready_at: new Date(NOW + 5 * 60_000).toISOString(), eta_reported_at: new Date(NOW).toISOString(), progress_pct: 80,
   }) as unknown as typeof data.sessions[number]
-  data.sessions = [...Array.from({ length: 4 }, (_, i) => session(i + 1)), ...Array.from({ length: 696 }, (_, i) => session(i + 10, true))]
+  data.sessions = [...Array.from({ length: 4 }, (_, i) => session(i + 1)), ...Array.from({ length: endedCount }, (_, i) => session(i + 10, true))]
   data.approvals = []; data.messages = []; data.runs = []; data.targets = []
   const capacity = capacityWorld()
   data.accounts = capacity.accounts.filter(a => a.id === ACCOUNTS.main).map(a => ({ ...a, registered_by_principal_id: me.id, owner_person_id: unrelated ? 'another-person' : me.id })) as unknown as typeof data.accounts
@@ -51,6 +51,10 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = 
   await page.route('**/api/agent-accounts/capacity', route => {
     const answer = capacity.handle('/api/agent-accounts/capacity', 'GET', null)!.json as { account_id: string }[]
     return route.fulfill({ json: answer.filter(a => a.account_id === ACCOUNTS.main).map(a => ({ ...a, routing: { rank: 1, available_slots: 17 } })) })
+  })
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => {
+    const sessionId = new URL(route.request().url()).pathname.split('/').at(-2)
+    return route.fulfill({ json: { session_id: sessionId, revision: 0, active_tier: null, pending: null, read_only: true, reports: [], requests: [] } })
   })
   return { data, calls }
 }
@@ -97,6 +101,28 @@ test('another person’s visible account never becomes your full account or your
   await expect(dial(page).locator('.f-live')).not.toContainText('accounts full')
 })
 
+test('ended workers remain recoverable through an opt-in fold without cleanup writes', async ({ page }) => {
+  const { data, calls } = await setup(page, 'light', false, 3)
+  await page.goto('/agents')
+  const history = row(page, 1).locator('.history-toggle')
+  await expect(history).toHaveAttribute('aria-expanded', 'false')
+  await expectStableControls({
+    controls: { lead: row(page, 1), history, workers: row(page, 1).locator('.worker-toggle').first() },
+    scrollAreas: { sessions: page.locator('.sessions') },
+    interactions: [
+      { name: 'show ended workers', run: async () => { await history.click(); await expect(page.locator('.sessions .row')).toHaveCount(7); await expect(history).toHaveAttribute('aria-expanded', 'true'); await expect(row(page, 10)).toHaveClass(/stopped/) } },
+      { name: 'hide ended workers', run: async () => { await history.click(); await expect(page.locator('.sessions .row')).toHaveCount(4); await expect(liveCount(page)).toHaveText('4') } },
+    ],
+  })
+  await history.click()
+  await expect(row(page, 10)).toBeVisible()
+  await page.reload()
+  await expect(history).toHaveAttribute('aria-expanded', 'false')
+  await expect(row(page, 10)).toHaveCount(0)
+  expect(data.sessions.filter(session => session.stopped_at)).toHaveLength(3)
+  expect(calls.filter(call => call.path.includes('harness-sessions') && call.method !== 'GET')).toEqual([])
+})
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: existing Agents layout shows the report source and stable capacity controls`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
@@ -117,9 +143,18 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await page.screenshot({ path: join(shots, `agents-${width}-${theme}.png`) })
       await page.locator('.sessions').scrollIntoViewIfNeeded()
       await page.screenshot({ path: join(shots, `agents-sessions-${width}-${theme}.png`) })
-      await row(page, 2).locator('.agent-link').click()
-      await expect(page.locator('.now-eta .report-source')).toBeVisible()
-      await page.screenshot({ path: join(shots, `agents-session-details-${width}-${theme}.png`) })
     }
+    await row(page, 2).locator('.agent-link').click()
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await expect(panel.locator('.now-eta .report-source')).toBeVisible()
+    await expectStableControls({
+      controls: { overview: panel.getByRole('tab', { name: 'Overview' }), messages: panel.getByRole('tab', { name: 'Messages' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
+      scrollAreas: { panel },
+      interactions: [
+        { name: 'show messages', run: async () => { await panel.getByRole('tab', { name: 'Messages' }).click(); await expect(panel.getByRole('tab', { name: 'Messages' })).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'return to reported progress', run: async () => { await panel.getByRole('tab', { name: 'Overview' }).click(); await expect(panel.locator('.now-eta .report-source')).toBeVisible() } },
+      ],
+    })
+    if (shots) await page.screenshot({ path: join(shots, `agents-session-details-${width}-${theme}.png`) })
   })
 }
