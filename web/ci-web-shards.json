@@ -2276,6 +2276,37 @@
           "listedTests": 8
         }
       ]
+    },
+    {
+      "id": "aeon-624-dialogs",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/dialog-widths.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/dialog-full-text.spec.ts",
+          "weightSeconds": 115.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 52
+        },
+        {
+          "file": "tests/role-picker-layout.spec.ts",
+          "weightSeconds": 184.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 83
+        }
+      ]
     }
   ],
   "sourceRevision": "068611ab87b80319ed1f0843bbad79ca897b7dcb",

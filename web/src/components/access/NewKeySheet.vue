@@ -112,7 +112,7 @@ async function copyCommand() {
 </script>
 
 <template>
-  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" actions-first :submit-shortcut="!created" @submit="create" @close="busy || emit('close')">
+  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" wide actions-first :submit-shortcut="!created" @submit="create" @close="busy || emit('close')">
     <div v-if="!created" class="body">
       <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement and revoke the old key immediately when you confirm. The same scopes are kept unless you change the selection. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
       <p v-else class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
@@ -190,11 +190,11 @@ async function copyCommand() {
 .note svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
 .label { padding: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .token { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.scopes { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; border-radius: 10px; }
+.scopes { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; border-radius: 10px; min-width: 0; }
 .scopes:focus-visible { box-shadow: var(--focus-ring); }
 .count { margin-left: 6px; letter-spacing: .04em; color: var(--ink-3); }
 .clear { justify-self: start; }
-.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; row-gap: 4px; }
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 4px 0 2px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
@@ -205,5 +205,7 @@ async function copyCommand() {
 .empty { font-size: 13px; color: var(--ink-3); }
 .field-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .token .field { font-size: 12.5px; }
+@container access-body (min-width: 600px) { .scope-group { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container access-body (min-width: 900px) { .scope-group { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .cli-login .btn { min-height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } }
 </style>

@@ -173,8 +173,8 @@ test('execution kinds and person-specific host names on the real agents table', 
     expectHostBadgeFits(renamed!.width, availableBadgeWidth, 'renamed badge fits the cell beside the pencil')
     expect(await workerHost.evaluate(el => getComputedStyle(el).width)).not.toBe('104px')
     await workerHost.click()
-    await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
-    await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
+    await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
+    await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
     await expect(workerHost).toContainText('mbp2606')
     expect((await workerHost.boundingBox())?.width).toBe(original?.width)
     // Long labels use the available width up to the cap, visibly ellipsised.
@@ -244,8 +244,8 @@ test('execution kinds and person-specific host names on the real agents table', 
     await page.emulateMedia({ colorScheme: 'light' })
 
     await workerHost.click()
-    await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
-    await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
+    await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
+    await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(workerHost.locator('.host-name')).toHaveText('mbp2606')
   }

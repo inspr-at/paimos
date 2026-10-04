@@ -344,8 +344,8 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 </template>
 
 <style scoped>
-.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); max-height: min(720px, calc(100dvh - 96px)); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
-.ed.night { width: 580px; }
+.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: clamp(620px, 50vw, 1040px); max-width: calc(100vw - 24px); max-height: min(720px, calc(100dvh - 96px)); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
+.ed.night { width: clamp(580px, 44vw, 960px); }
 .grab { width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line-2); }
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
 .ed-head h3 { margin: 0 auto 0 0; font: 600 16px/1.3 var(--font); color: var(--ink); }

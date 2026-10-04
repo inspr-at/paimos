@@ -5,8 +5,10 @@ export interface PickOption { value: string; label: string; hint?: string; badge
 </script>
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import AppIcon from './BizIcon.vue'
 import FloatingPanel from './BusinessPopover.vue'
+import ReadName from '../ReadName.vue'
 
 // A searchable choice popover: type to filter (or search the server), arrows to
 // move, Enter to choose. An optional last row creates what was typed.
@@ -69,19 +71,23 @@ function keys(event: KeyboardEvent) {
       :aria-activedescendant="count ? `${listId}-${active}` : undefined" :placeholder="placeholder" :aria-label="title" data-autofocus autocomplete="off" spellcheck="false" @keydown="keys"
     />
     <ul :id="listId" class="picker-list" role="listbox" :aria-label="title">
-      <li
-        v-for="(option, index) in shown" :id="`${listId}-${index}`" :key="option.value" role="option" class="picker-option"
-        :class="{ active: index === active, disabled: option.disabled }" :aria-selected="index === active" :aria-disabled="option.disabled || undefined"
-        @pointerenter="active = index" @click="pick(index)"
-      >
-        <AppIcon v-if="option.icon" :name="option.icon" :size="14" class="opt-icon" />
-        <span v-if="option.badge" class="opt-badge">{{ option.badge }}</span>
-        <span class="opt-text"><span class="opt-label">{{ option.label }}</span><span v-if="option.note" class="opt-note">{{ option.note }}</span></span>
-        <span v-if="option.hint" class="opt-hint">{{ option.hint }}</span>
-        <AppIcon v-if="option.value === current" name="check" :size="14" class="tick" />
+      <li v-for="(option, index) in shown" :key="option.value" class="option-row" role="presentation">
+        <button
+          :id="`${listId}-${index}`" type="button" role="option" class="picker-option"
+          :class="{ active: index === active, disabled: option.disabled }" :aria-selected="index === active" :aria-disabled="option.disabled || undefined"
+          :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="pick(index)"
+          @pointerenter="active = index" @click="pick(index)"
+        >
+          <AppIcon v-if="option.icon" :name="option.icon" :size="14" class="opt-icon" />
+          <span v-if="option.badge" class="opt-badge">{{ option.badge }}</span>
+          <span class="opt-text"><span v-clip-tip class="opt-label">{{ option.label }}</span><span v-if="option.note" v-clip-tip class="opt-note">{{ option.note }}</span></span>
+          <span v-if="option.hint" class="opt-hint">{{ option.hint }}</span>
+          <AppIcon v-if="option.value === current" name="check" :size="14" class="tick" />
+        </button>
+        <ReadName :text="[option.label, option.note, option.hint].filter(Boolean).join('\n')" />
       </li>
       <li v-if="canCreate" :id="`${listId}-${shown.length}`" role="option" class="picker-option create" :class="{ active: active === shown.length }" :aria-selected="active === shown.length" @pointerenter="active = shown.length" @click="pick(shown.length)">
-        <AppIcon name="plus" :size="14" class="opt-icon" /><span class="opt-label">{{ createLabel!(term.trim()) }}</span>
+        <AppIcon name="plus" :size="14" class="opt-icon" /><span v-clip-tip class="opt-label">{{ createLabel!(term.trim()) }}</span>
       </li>
     </ul>
     <p v-if="searching && !shown.length" class="none" role="status">Searching…</p>
@@ -92,8 +98,9 @@ function keys(event: KeyboardEvent) {
 <style scoped>
 .menu-title { padding: 6px 10px 4px; }
 .picker-search { height: 32px; margin: 0 0 6px; font-size: 13px; }
-.picker-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; margin: 0; padding: 0; overflow: auto; list-style: none; }
-.picker-option { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 4px 10px; border-radius: 8px; color: var(--ink); font-size: 13.5px; cursor: pointer; }
+.picker-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; }
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.picker-option { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 34px; padding: 4px 10px; border: 0; background: transparent; text-align: left; border-radius: 8px; color: var(--ink); font-size: 13.5px; cursor: pointer; }
 .picker-option.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .picker-option.disabled { cursor: not-allowed; color: var(--ink-3); }
 .picker-option.create { color: var(--teal-ink); font-weight: 600; }
@@ -107,4 +114,5 @@ function keys(event: KeyboardEvent) {
 .picker-option.active .opt-hint, .picker-option.active .opt-note { color: var(--ink-2); }
 .tick { color: var(--teal); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
+@media (pointer: coarse), (max-width: 720px) { .picker-option { min-height: 44px; } }
 </style>
