@@ -17,7 +17,7 @@ const busyWorkParentsSQL = `SELECT n.id::text,n.key,
  CASE WHEN EXISTS(SELECT 1 FROM harness_sessions s WHERE s.ticket_node_id=n.id AND s.stopped_at IS NULL)
  THEN 'bound session' ELSE 'claim or running work order' END
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.tenant_id=$1 AND n.id>$2::uuid AND n.deleted_at IS NULL AND k.slug IN ('epic','ticket','task')
+ WHERE n.tenant_id=$1 AND ($2::uuid IS NULL OR n.id>$2::uuid) AND n.deleted_at IS NULL AND k.slug IN ('epic','ticket','task')
  AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
  WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug IN ('epic','ticket','task','work'))
  AND (EXISTS(SELECT 1 FROM harness_sessions s WHERE s.ticket_node_id=n.id AND s.stopped_at IS NULL)
@@ -54,7 +54,11 @@ func (e *BusyWorkParentsError) Error() string {
 }
 
 func busyWorkParents(ctx context.Context, tx pgx.Tx, tenantID, after string, limit int) ([]BusyWorkParent, error) {
-	rows, err := tx.Query(ctx, busyWorkParentsSQL, tenantID, after, limit)
+	var cursor any
+	if after != "" {
+		cursor = after
+	}
+	rows, err := tx.Query(ctx, busyWorkParentsSQL, tenantID, cursor, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +111,7 @@ func CheckWorkMigration(ctx context.Context, pool *pgxpool.Pool, emit func(BusyW
 		if err := enterTenant(ctx, tx, tid); err != nil {
 			return err
 		}
-		after := "00000000-0000-0000-0000-000000000000"
+		after := ""
 		for {
 			parents, err := busyWorkParents(ctx, tx, tid, after, 100)
 			if err != nil {

@@ -3703,6 +3703,9 @@
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueEligibility","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueRecoveryAndUndo","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueSessionEligibility","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueUndoFences","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueUndoFences","tier":"GATED-FULL"},
+    {"kind":"go","package":"cmd/aeon","name":"TestMigrationBlockedExitCode","tier":"GATED-FULL"},
+    {"kind":"go","package":"cmd/aeon","name":"TestMigrationCommandRequiresCheckBeforeConnecting","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/db","name":"TestWorkMigrationPreflightPagesAllTenantsWithoutWrites","tier":"GATED-FULL"}
   ]
 }

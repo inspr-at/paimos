@@ -80,9 +80,9 @@ func migrateWorkNodes(ctx context.Context, tx pgx.Tx) error {
 }
 
 func workTenantPages(ctx context.Context, tx pgx.Tx, visit func(string) error) error {
-	after := "00000000-0000-0000-0000-000000000000"
+	var after *string
 	for {
-		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants WHERE id>$1::uuid ORDER BY id LIMIT 100`, after)
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants WHERE ($1::uuid IS NULL OR id>$1::uuid) ORDER BY id LIMIT 100`, after)
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,8 @@ func workTenantPages(ctx context.Context, tx pgx.Tx, visit func(string) error) e
 				return err
 			}
 		}
-		after = ids[len(ids)-1]
+		last := ids[len(ids)-1]
+		after = &last
 	}
 }
 
@@ -198,7 +199,7 @@ func migrateTenantWorkNodes(ctx context.Context, tx pgx.Tx, tenantID string) err
 	}
 	// Only direct, live work children make a parent. A work order, knowledge
 	// entry or Decision Desk child alone does not trigger the busy-leaf guard.
-	parents, err := busyWorkParents(ctx, tx, tenantID, "00000000-0000-0000-0000-000000000000", 101)
+	parents, err := busyWorkParents(ctx, tx, tenantID, "", 101)
 	if err != nil {
 		return err
 	}
@@ -349,12 +350,12 @@ func validateWorkMigrationFields(ctx context.Context, tx pgx.Tx, tenantID string
 	if err != nil {
 		return fmt.Errorf("tenant %s: invalid merged work schema", tenantID)
 	}
-	after := "00000000-0000-0000-0000-000000000000"
+	var after *string
 	for {
 		rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,
  CASE WHEN octet_length(n.fields::text)<=1048576 THEN n.fields ELSE NULL END
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.tenant_id=$1 AND k.slug IN ('epic','ticket','task') AND n.id>$2::uuid
+ WHERE n.tenant_id=$1 AND k.slug IN ('epic','ticket','task') AND ($2::uuid IS NULL OR n.id>$2::uuid)
  ORDER BY n.id LIMIT 50`, tenantID, after)
 		if err != nil {
 			return err
@@ -381,7 +382,7 @@ func validateWorkMigrationFields(ctx context.Context, tx pgx.Tx, tenantID string
 				// The validator can include values; report the key, never content.
 				return fmt.Errorf("tenant %s: %s fields do not satisfy the merged work schema; reconcile before migration", tenantID, key)
 			}
-			after = id
+			after = &id
 			count++
 		}
 		err = rows.Err()

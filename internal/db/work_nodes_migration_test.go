@@ -351,15 +351,16 @@ func TestWorkNodesMigrationBusyGuardAndAtomicRetry(t *testing.T) {
 
 func TestWorkMigrationPreflightPagesAllTenantsWithoutWrites(t *testing.T) {
 	d := workOldDatabase(t)
+	// A valid all-zero UUID must not be lost to an artificial lower bound.
 	tid := workSeed(t, d, "paged-preflight")
 	other := workSeed(t, d, "other-preflight")
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
 		statements := []string{
 			`UPDATE node_kinds SET allowed_child_kinds=ARRAY['task'] WHERE tenant_id=$1 AND slug='ticket'`,
+			`INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id)
+ SELECT $1,CASE WHEN i=1 THEN '00000000-0000-0000-0000-000000000000'::uuid ELSE gen_random_uuid() END,k.id,'PAGE-'||i,'Parent',p.id FROM generate_series(1,105) i,node_kinds k,nodes p WHERE k.slug='ticket' AND p.key='PRJ-1'`,
 			`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
- SELECT $1,k.id,'PAGE-'||i,'Parent',p.id FROM generate_series(1,105) i,node_kinds k,nodes p WHERE k.slug='ticket' AND p.key='PRJ-1'`,
-			`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
- SELECT $1,k.id,'CHILD-'||p.key,'Child',p.id FROM node_kinds k,nodes p WHERE k.slug='task' AND p.key LIKE 'PAGE-%'`,
+ SELECT $1,k.id,'CHILD-'||split_part(p.key,'-',2),'Child',p.id FROM node_kinds k,nodes p WHERE k.slug='task' AND p.key LIKE 'PAGE-%'`,
 			`INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase)
  SELECT $1,n.project_id,a.id,n.id,'codex','fixture','unmanaged','worker','ship',sha256(n.id::text::bytea),sha256(n.key::bytea),'working'
  FROM nodes n,principals a WHERE n.key LIKE 'PAGE-%' AND a.name='Historical agent'`,
