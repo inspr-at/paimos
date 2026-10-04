@@ -111,26 +111,26 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
       </SettingsCard>
       <SettingsCard title="Changes" icon="list" anchor="autopilot-changes">
         <template #lead>Proposed changes leave tickets untouched until applied. Dismiss keeps the same proposal from returning.</template>
-        <ul class="auto-changes"><li v-for="proposal in proposals" :key="proposal.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="proposal.key" /><span class="change-title">{{ proposal.title }}</span></p><p class="proposal-move">{{ statusMeta(proposal.from).label }} <AppIcon name="arrow" :size="12" /> {{ automaticTarget(proposal.to) || statusMeta(proposal.to).label }}</p><p class="proposal-reason">{{ proposal.reason }}</p><p v-if="proposal.changed_since" class="proposal-reason">Ticket changed since this proposal. Dismiss it and review the current ticket.</p><div class="proposal-actions"><button type="button" class="btn sm" :disabled="pending || !proposal.applicable" :aria-label="`Apply proposal for ${proposal.key}`" @click="resolve(proposal, 'apply')">Apply</button><button type="button" class="btn sm" :disabled="pending" :aria-label="`Dismiss proposal for ${proposal.key}`" @click="resolve(proposal, 'dismiss')">Dismiss</button></div></div></li></ul>
+        <ul class="auto-changes"><li v-for="proposal in proposals" :key="proposal.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="proposal.key" /><span v-clip-tip="proposal.title" class="change-title">{{ proposal.title }}</span></p><p class="proposal-move">{{ statusMeta(proposal.from).label }} <AppIcon name="arrow" :size="12" /> {{ automaticTarget(proposal.to) || statusMeta(proposal.to).label }}</p><p class="proposal-reason">{{ proposal.reason }}</p><p v-if="proposal.changed_since" class="proposal-reason">Ticket changed since this proposal. Dismiss it and review the current ticket.</p><div class="proposal-actions"><button type="button" class="btn sm" :disabled="pending || !proposal.applicable" :aria-label="`Apply proposal for ${proposal.key}`" @click="resolve(proposal, 'apply')">Apply</button><button type="button" class="btn sm" :disabled="pending" :aria-label="`Dismiss proposal for ${proposal.key}`" @click="resolve(proposal, 'dismiss')">Dismiss</button></div></div></li></ul>
         <p v-if="!proposals.length" class="empty">No proposed changes.</p>
       </SettingsCard>
       <SettingsCard title="Autopilot per project" icon="folders" anchor="autopilot-projects">
         <template #lead>A project follows the workspace unless it sets its own. The upgrade review period and server mode apply to every project.</template>
         <div class="projects"><div class="proj head" aria-hidden="true"><span>Project</span><span>Status autopilot</span></div>
-          <div v-for="project in projects" :key="project.id" class="proj"><span class="proj-name"><span class="key-badge">{{ project.key }}</span><span>{{ project.title }}</span></span><div class="proj-ctl"><span class="ctl-cap">Status autopilot</span><div class="seg" role="radiogroup" :aria-label="`Status autopilot in ${project.title}`" @keydown="modeKey($event, project)"><button v-for="value in modes" :key="value" type="button" role="radio" :aria-checked="project.override.mode === value" :tabindex="project.override.mode === value ? 0 : -1" :disabled="pending" @click="mode(project, value)">{{ value === 'inherit' ? 'Inherit' : value === 'on' ? 'On' : 'Off' }}</button></div><span v-if="project.override.mode === 'inherit'" class="eff">Workspace: {{ settings.enabled ? 'On' : 'Off' }}</span></div></div>
+          <div v-for="project in projects" :key="project.id" class="proj"><span class="proj-name"><span class="key-badge">{{ project.key }}</span><span v-clip-tip="project.title">{{ project.title }}</span></span><div class="proj-ctl"><span class="ctl-cap">Status autopilot</span><div class="seg" role="radiogroup" :aria-label="`Status autopilot in ${project.title}`" @keydown="modeKey($event, project)"><button v-for="value in modes" :key="value" type="button" role="radio" :aria-checked="project.override.mode === value" :tabindex="project.override.mode === value ? 0 : -1" :disabled="pending" @click="mode(project, value)">{{ value === 'inherit' ? 'Inherit' : value === 'on' ? 'On' : 'Off' }}</button></div><span v-if="project.override.mode === 'inherit'" class="eff">Workspace: {{ settings.enabled ? 'On' : 'Off' }}</span></div></div>
         </div>
       </SettingsCard>
       <SettingsCard title="Tickets needing attention" icon="list" anchor="autopilot-suggestions">
         <template #lead>Current triage suggestions, blocked reminders and missed releases stay listed until resolved.</template>
         <section v-for="list in lists" :key="list.flag" class="attention-list" :aria-label="list.label">
           <h3>{{ list.label }}</h3>
-          <ul class="auto-changes"><li v-for="change in suggestions.filter(item => item.to === list.flag)" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
+          <ul class="auto-changes"><li v-for="change in suggestions.filter(item => item.to === list.flag)" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span v-clip-tip="change.title" class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
           <p v-if="!suggestions.some(item => item.to === list.flag)" class="empty">No tickets listed.</p>
         </section>
       </SettingsCard>
       <SettingsCard title="Recent automatic changes" icon="history" anchor="autopilot-recent">
         <template #lead>The latest moves by Status autopilot, with their reasons. The full record stays in each ticket’s Activity.</template>
-        <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
+        <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span v-clip-tip="change.title" class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
         <p v-if="!changes.length" class="empty">No automatic changes yet.</p>
       </SettingsCard>
     </template>
@@ -187,5 +187,9 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
  .proj { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 0; }
  .proj.head { display: none; }.ctl-cap { display: block; }
  .rule { grid-template-columns: minmax(0, 1fr) auto; }.rule-cond { grid-column: 1 / -1; grid-row: 2; }.rule-value { grid-column: 1 / -1; grid-row: 3; justify-items: start; }
+}
+@media (max-width: 720px) {
+  .proj-name span:last-child, .change-title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .proj-name, .change-head { align-items: flex-start; }
 }
 </style>
