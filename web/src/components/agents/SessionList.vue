@@ -718,8 +718,12 @@ function rowClick(event: MouseEvent, id: string) {
   .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
-  /* The menu occupies the title line only. Execution and Host share the whole
-     line below it; a short host returns its spare width to the model/command. */
+  /* Keep paired Remove/Actions beside each other on the title line, so neither
+     extends into the full-width execution/Host line below. */
+  .row:has(> .c-actions > .bin):has(> .c-actions > .more) { grid-template-columns: 30px auto minmax(0, 1fr) 88px; }
+  .row > .c-actions:has(> .bin):has(> .more) { flex-direction: row; }
+  /* Execution and Host share the whole line below the actions; a short host
+     returns its spare width to the model/command. */
   .execution-host { display: grid; grid-column: 2 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-top: 6px; }
   .c-exec { min-width: 0; gap: 6px; }
   .exec-icon { width: 18px; height: 18px; place-items: center; }
@@ -756,5 +760,11 @@ function rowClick(event: MouseEvent, id: string) {
   .sort-bar { padding: 8px 18px; }
   .sort-select { height: 44px; font-size: 16px; }
   .sort-dir { width: 44px; height: 44px; }
+}
+/* A very narrow list cannot fit both Terminal and its command beside Host.
+   Grow the execution copy downward to leave room for command text. */
+@container sessions (max-width: 320px) {
+  .c-exec:has([data-run-kind="terminal"]) .exec-copy { display: grid; }
+  .c-exec:has([data-run-kind="terminal"]) .exec-model::before { content: none; }
 }
 </style>
