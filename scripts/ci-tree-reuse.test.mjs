@@ -68,7 +68,6 @@ for (const [name, mutate] of [
   ['manual run', f => { f.run.event = 'workflow_dispatch'; }],
   ['unsafe run attempt', f => { f.run.run_attempt = Number.MAX_SAFE_INTEGER + 1; }],
   ['invalid run attempt', f => { f.run.run_attempt = 0; }],
-  ['found on partial rerun with retained old attempt', f => { f.run.run_attempt = 2; }],
   ['job from a different attempt', f => { job(f, 'go').run_attempt = 2; }],
   ['green aggregate but failed shard', f => { job(f, 'go-test (4)').conclusion = 'failure'; }],
   ['green aggregate but cancelled web shard', f => { job(f, 'web-shard (4)').conclusion = 'cancelled'; }],
@@ -107,6 +106,7 @@ test('found on full rerun: latest fully executed attempt is eligible', async () 
 test('partial rerun cannot use retained green job results', async () => {
   const f = fixture(2);
   f.jobs.jobs = [job(f, 'go')]; f.jobs.total_count = 1;
+  await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing or failed suite job/);
   assert.equal((await check(f)).reuse, 'none');
 });
 
@@ -123,6 +123,7 @@ test('skipped push-only cache job is allowed but no required job may skip', asyn
 test('every heavy execution step must succeed, even with green job conclusions', async () => {
   for (const name of requiredJobs.filter(n => executionSteps[n] || /^(go-test|web-shard) \(/.test(n))) {
     const f = fixture(); job(f, name).steps[0].conclusion = 'skipped';
+    await assert.rejects(verifyRun(repository, 123, f.api, sha), /missing full execution evidence/);
     assert.equal((await check(f)).reuse, 'none', name);
   }
 });
@@ -144,6 +145,19 @@ test('invalid candidate does not hide a subsequent verified run', async () => {
   const f = fixture(); f.listed.workflow_runs.unshift({ id: 999, head_sha: sha, event: 'merge_group' }); f.listed.total_count++;
   assert.equal((await check(f)).run, 123);
   assert(f.calls.includes('actions/runs/999'));
+});
+
+test('verified main entry point emits reuse and source-run outputs plus success note', async () => {
+  const f = fixture(); const dir = mkdtempSync(join(tmpdir(), 'aeon-423-'));
+  const output = join(dir, 'output'); const summary = join(dir, 'summary');
+  const result = await main({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha, GITHUB_REPOSITORY: repository, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary }, async url => {
+    const prefix = `https://api.github.com/repos/${repository}/`;
+    assert(url.startsWith(prefix));
+    return new Response(JSON.stringify(await f.api(url.slice(prefix.length))));
+  });
+  assert.equal(result.reuse, 'merge_group');
+  assert.equal(readFileSync(output, 'utf8'), 'reuse=merge_group\nrun=123\n');
+  assert.match(readFileSync(summary, 'utf8'), /reused merge_group run 123/);
 });
 
 test('direct main entry point cannot reuse absent merge-group evidence', async () => {

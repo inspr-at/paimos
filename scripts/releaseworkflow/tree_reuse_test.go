@@ -2,6 +2,8 @@
 package releaseworkflow
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -281,5 +283,77 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	cmd.Dir = root(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("queue reuse fixtures: %v\n%s", err, out)
+	}
+}
+
+func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
+	// An immutable small digest fixture keeps this regression active in shallow
+	// CI checkouts. Only proof dependencies/guards and the new fixture step are
+	// normalized away; test commands, services, caches and original conditions
+	// must still equal main's reviewed OPS-257/AEON-585 configuration.
+	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-main-before-reuse.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var baseline struct {
+		Source string            `json:"source_main_sha"`
+		Hashes map[string]string `json:"sha256"`
+	}
+	if err := json.Unmarshal(body, &baseline); err != nil {
+		t.Fatal(err)
+	}
+	if len(baseline.Source) != 40 || len(baseline.Hashes) != 11 {
+		t.Fatal("incomplete main fixture")
+	}
+	w := treeWorkflow(t, "ci.yml")
+	jobs := treeMap(w["jobs"])
+	for id, expected := range baseline.Hashes {
+		value := w["concurrency"]
+		if id != "concurrency" {
+			j := treeMap(jobs[id])
+			value = j
+			switch id {
+			case "go-test":
+				j["needs"] = "runner-route"
+			case "web-shard", "release-list-comparison":
+				j["needs"] = "web-setup"
+			default:
+				delete(j, "needs")
+			}
+			for _, service := range treeMap(j["services"]) {
+				treeMap(service)["image"] = "pgvector/pgvector:pg18"
+			}
+			var steps []any
+			for _, v := range reuseSteps(j) {
+				s := treeMap(v)
+				if s["name"] == "Reuse the verified merge-group run" || s["name"] == "Exact-SHA reuse provenance and workflow regressions" {
+					continue
+				}
+				if condition, ok := s["if"].(string); ok {
+					if condition == fullQueueFallback {
+						delete(s, "if")
+					} else {
+						suffix := ") && " + fullQueueFallback
+						if !strings.HasPrefix(condition, "(") || !strings.HasSuffix(condition, suffix) {
+							t.Fatalf("unexpected fallback condition in %s: %s", id, condition)
+						}
+						s["if"] = strings.TrimSuffix(strings.TrimPrefix(condition, "("), suffix)
+					}
+				}
+				steps = append(steps, s)
+			}
+			if _, exists := j["steps"]; exists {
+				j["steps"] = steps
+			}
+		}
+		var encoded bytes.Buffer
+		encoder := json.NewEncoder(&encoded)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(value); err != nil {
+			t.Fatal(err)
+		}
+		if actual := fmt.Sprintf("%x", sha256.Sum256(encoded.Bytes())); actual != expected {
+			t.Fatalf("%s full fallback differs from main %s: %s", id, baseline.Source, actual)
+		}
 	}
 }
