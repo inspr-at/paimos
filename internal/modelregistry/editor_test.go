@@ -418,11 +418,13 @@ func linkEditorPerson(t *testing.T, p tenant.Principal, from, to string) {
 	}
 }
 
+const preferenceStorageSQL = `SELECT jsonb_build_object('counter',(SELECT to_jsonb(c) FROM event_counters c),'scopes',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM model_pref_scopes s),'rows',(SELECT jsonb_agg(to_jsonb(r) ORDER BY scope_id,kind_id) FROM model_pref_rows r),'cells',(SELECT jsonb_agg(to_jsonb(c) ORDER BY scope_id,kind_id,bucket) FROM model_pref_cells c),'runs',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM agent_runs r),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e WHERE type IN ('model.preferences_changed','run.residency_restamped')))::text`
+
 func preferenceStorage(t *testing.T, p tenant.Principal) string {
 	t.Helper()
 	var state string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object('counter',(SELECT to_jsonb(c) FROM event_counters c),'scopes',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM model_pref_scopes s),'rows',(SELECT jsonb_agg(to_jsonb(r) ORDER BY scope_id,kind_id) FROM model_pref_rows r),'cells',(SELECT jsonb_agg(to_jsonb(c) ORDER BY scope_id,kind_id,bucket) FROM model_pref_cells c),'runs',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM agent_runs r),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e WHERE type IN ('model.preferences_changed','run.residency_restamped')))::text`).Scan(&state)
+		return tx.QueryRow(t.Context(), preferenceStorageSQL).Scan(&state)
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -36,6 +36,12 @@
 // and managed-dispatch activation. This slice rejects order_mode until that
 // integration lands; it does not claim to activate saved managed order.
 //
+// Preference writes validate selectors with targeted existence queries (one
+// bounded result row, no catalog/ladder decoding). Per-request checks reuse
+// selector results, with a separate review-floor key, and validated replacement
+// kinds are reused inside the same tenant fence. SQL latest-line matching is
+// tested against ProfileLine across the catalog and concrete harness forms.
+//
 // Every preference person-level PUT/DELETE now requires If-Prefs-Person from
 // the coherent GET. This is a client compatibility change: all You writers,
 // including Reset/Undo, must supply it before enablement. The header only
