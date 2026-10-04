@@ -50,6 +50,21 @@ func TestKnowledgeTenantTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 				first <- w
 			}()
 			pid := barrier.Wait(t, ctx)
+			// Tenant serialization alone would hide a missing tree lock.
+			// Probe it independently at the row-lock boundary.
+			if err := db.InTenant(ctx, f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+				var free bool
+				if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, 0))`, f.a.TenantID).Scan(&free); err != nil {
+					return err
+				}
+				if free {
+					t.Error("knowledge writer reached row lock without the tree fence")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
 			second := make(chan *httptest.ResponseRecorder, 1)
 			done := make(chan struct{})
 			go func() {

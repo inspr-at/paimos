@@ -1,88 +1,107 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-499: the Agents working control. Running counts come from sessions,
-// targets from the person's preference; row targets never exceed the total and
-// the words never claim that anything starts agents automatically.
 import { describe, expect, it } from 'vitest'
-import { freeLine, stepCap, stepRow, workingPlan, type RunningSession } from '../src/lib/agentsWorking'
-
-const sessions: RunningSession[] = [
-  ...Array.from({ length: 5 }, () => ({ harness: 'codex', model: 'gpt-6.1-sol', area: 'backend' })),
-  { harness: 'codex', model: 'gpt-6.1-sol', area: 'frontend' },
-  { harness: 'claude', model: 'opus', area: 'design' },
-  { harness: 'codex', model: 'gpt-6.1-sol', area: '' },
-]
-
-describe('agents working', () => {
-  it('counts running sessions against the total, with honest words', () => {
-    const plan = workingPlan({ pref: { cap: 10 }, sessions, harnesses: ['codex', 'claude', 'grok'], capacityKnown: false, roomNow: null })
-    expect(plan.running).toBe(8)
-    expect(plan.runningLine).toBe('2 slots free')
-    expect(plan.capDots).toEqual([true, true, true, true, true, true, true, true, false, false])
-    expect(plan.footLine).toBe('0 of 10 assigned · 10 flexible: any area takes them · no capacity readings yet, so the limits are yours, not the accounts’')
-    expect(plan.footLine).not.toMatch(/autopilot|starts/i)
-    expect(freeLine(8, 8)).toBe('every slot busy')
-    expect(freeLine(6, 8)).toBe('2 over your target')
+import { effectiveLimit, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepHarnessLimit, stepLimit, stepTotal, typedLimit, typedTotal, waitingCopy, workingRows, type HarnessLimit, type PlanSnapshot } from '../src/lib/agentsWorking'
+const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4, claude: 2, cursor: 'off' }, principal_id: 'owner', running: { codex: 12, claude: 1, cursor: 3 }, running_total: 16, source: 'plan', updated_at: null }
+describe('the one dial', () => {
+  it('changes only the ceiling, preserving running agents and independent harness limits', () => {
+    const lower = stepTotal(snapshot, -1)
+    expect(lower).toEqual({ total: 4, limits: snapshot.limits })
+    expect(snapshot.running_total).toBe(16)
+    expect(snapshot.running).toEqual({ codex: 12, claude: 1, cursor: 3 })
+    expect(stepTotal({ total: 0, limits: {} }, -1).total).toBe(0)
+    expect(stepTotal({ total: 30, limits: {} }, 1).total).toBe(30)
+    expect(setLimit(lower, 'claude', 30)).toEqual({ total: 4, limits: { codex: 4, claude: 30, cursor: 'off' } })
   })
-  it('without a chosen total nothing stands in for it: no number, no free slots, no assigned share', () => {
-    const plan = workingPlan({ pref: null, sessions, harnesses: [], capacityKnown: true, roomNow: null })
-    expect(plan).toMatchObject({ unset: true, cap: null, from: 8, runningLine: 'no target set yet', flexible: 0, footLine: '' })
-    expect(plan.capDots).toEqual(Array(8).fill(true))
-    // A first step starts from what runs now; a row target fixes that total.
-    expect(stepCap(null, 1, plan.from).cap).toBe(9)
-    expect(stepCap(null, -1, plan.from).cap).toBe(7)
-    expect(stepRow(null, 'area', 'docs', 1, plan.from)).toEqual({ cap: 8, area: { docs: 1 } })
+  it('keeps no own limit, numeric zero and off distinct', () => {
+    const input = { total: 5, limits: { codex: 0, claude: 'no_limit' as const, cursor: 'off' as const } }
+    const rows = workingRows(input, snapshot, { codex: 3, claude: 2, cursor: 2 }, null)
+    expect(rows.map(r => [r.key, r.mode, r.shown, r.words])).toEqual([
+      ['codex', 'max', 0, 'at most 0'], ['claude', 'none', 3, 'no own limit · up to 3 now'], ['cursor', 'off', 0, 'no new starts'],
+    ])
+    expect(stepLimit(input, 'claude', 3, 1).limits.claude).toBe('no_limit')
+    expect(stepLimit(input, 'claude', 3, -1).limits.claude).toBe(2)
+    expect(stepLimit(input, 'cursor', 0, 1).limits.cursor).toBe(1)
+    expect(stepLimit({ total: 5, limits: { codex: 1 } }, 'codex', 5, -1).limits.codex).toBe('off')
+    expect(stepLimit({ total: 5, limits: { codex: 30 } }, 'codex', 5, 1).limits.codex).toBe('no_limit')
   })
-  // AEON-499 review: zero to three running once showed "Target: 4" and four slots nobody chose.
-  for (const n of [0, 1, 2, 3]) {
-    it(`with ${n} running and no total, no target is invented`, () => {
-      const running = sessions.slice(0, n)
-      const plan = workingPlan({ pref: null, sessions: running, harnesses: ['codex'], capacityKnown: false, roomNow: null })
-      expect(plan.cap).toBeNull()
-      expect(plan.running).toBe(n)
-      expect(plan.capDots).toEqual(Array(n).fill(true))
-      expect(plan.capDots.filter(on => !on)).toHaveLength(0)
-      expect(plan.flexible).toBe(0)
-      expect(plan.footLine).not.toMatch(/assigned|flexible|\b4\b/)
-      expect(plan.footLine).toBe('No capacity readings yet, so the limits are yours, not the accounts’')
-      expect(plan.runningLine).toBe('no target set yet')
-      // − lowers below what runs now only when that leaves at least one; + always starts one above it.
-      expect(plan.canFewer).toBe(n > 1)
-      expect(plan.canMore).toBe(true)
-      expect(stepCap(null, 1, plan.from).cap).toBe(n + 1)
-      expect(plan.rows.every(r => r.target === 0 && r.canInc)).toBe(true)
-      expect(plan.full).toBe(false)
-    })
-  }
-  it('a stored total, once loaded, is the number', () => {
-    const plan = workingPlan({ pref: { cap: 6 }, sessions: sessions.slice(0, 2), harnesses: [], capacityKnown: true, roomNow: null })
-    expect(plan).toMatchObject({ unset: false, cap: 6, runningLine: '4 slots free', footLine: '0 of 6 assigned · 6 flexible: any area takes them' })
-    expect(plan.capDots).toEqual([true, true, false, false, false, false])
+  it('caps a harness without its own limit by the total and measured account room', () => {
+    expect(effectiveLimit(5, 1, 2)).toBe(3)
+    expect(effectiveLimit(5, 12, 3)).toBe(5)
+    expect(effectiveLimit(0, 12, 3)).toBe(0)
+    expect(effectiveLimit(5, 0, null)).toBe(5)
+    expect(noOwnTip('claude', 0)).toBe('Claude has no limit of its own; with 0 at once, nothing new starts.')
   })
-  it('by area: only areas with work or a target, the rest as quiet choices', () => {
-    const plan = workingPlan({ pref: { cap: 10, area: { backend: 6, design: 1 } }, sessions, harnesses: [], capacityKnown: true, roomNow: 3 })
-    expect(plan.rows.map(r => r.label)).toEqual(['Backend', 'Frontend', 'Design', 'No area set'])
-    expect(plan.spare.map(a => a.label)).toEqual(['Full stack', 'Infrastructure', 'Docs'])
-    const backend = plan.rows[0]
-    expect(backend).toMatchObject({ running: 5, target: 6, canDec: true, canInc: true })
-    expect(backend.dots).toEqual([true, true, true, true, true, false])
-    expect(plan.footLine).toBe('7 of 10 assigned · 3 flexible: any area takes them · the accounts have room for 3 more agents now')
+  it('walks the entire ladder with the same ends in both views', () => {
+    let value: HarnessLimit = 'off'
+    expect(stepHarnessLimit(value, 5, -1)).toBe('off')
+    for (let n = 1; n <= 30; n++) {
+      value = stepHarnessLimit(value, 5, 1)
+      expect(value).toBe(n)
+    }
+    expect(stepHarnessLimit(value, 5, 1)).toBe('no_limit')
+    expect(stepHarnessLimit('no_limit', 5, 1)).toBe('no_limit')
+    expect(stepHarnessLimit('no_limit', 5, -1)).toBe(4)
+    expect(stepHarnessLimit(undefined, 30, -1)).toBe(29)
+    expect(stepHarnessLimit('no_limit', 1, -1)).toBe('off')
+    expect(stepHarnessLimit('no_limit', 0, -1)).toBe('off')
+    for (let n = 30; n > 1; n--) expect(stepHarnessLimit(n, 5, -1)).toBe(n - 1)
+    expect(stepHarnessLimit(1, 5, -1)).toBe('off')
+    expect(stepHarnessLimit(0, 5, -1)).toBe(0)
+    expect(stepHarnessLimit(0, 5, 1)).toBe(1)
+    expect(workingRows({ total: 5, limits: { codex: 0 } }, snapshot, {}, null)[0]!.shown).toBe(0)
   })
-  it('by model: harnesses with accounts or work, in pool order, with their models', () => {
-    const plan = workingPlan({ pref: { cap: 10, view: 'model', model: { codex: 8 } }, sessions, harnesses: ['grok', 'codex'], capacityKnown: true, roomNow: null })
-    expect(plan.rows.map(r => [r.label, r.running, r.target])).toEqual([['Codex', 7, 8], ['Claude', 1, 0], ['Grok', 0, 0]])
-    expect(plan.rows[0].sub).toBe('7 running · gpt-6.1-sol')
-    expect(plan.rows[1].canDec).toBe(false)
+  it('accepts typed limits and totals, clamps large values, and rejects invalid drafts', () => {
+    expect(typedLimit('')).toBe('no_limit')
+    expect(typedLimit('  ')).toBe('no_limit')
+    expect(typedLimit('0')).toBe('off')
+    expect(typedLimit('001')).toBe(1)
+    expect(typedLimit(' 29 ')).toBe(29)
+    expect(typedLimit('31')).toBe(30)
+    expect(typedLimit('9'.repeat(64))).toBe(30)
+    expect(typedTotal('0')).toBe(0)
+    expect(typedTotal('30')).toBe(30)
+    expect(typedTotal('100')).toBe(30)
+    for (const invalid of ['-1', '+2', '1.5', '3e2', 'Infinity', '∞', 'off', '1 2', '9'.repeat(65), ' '.repeat(65)]) {
+      expect(typedLimit(invalid)).toBeUndefined()
+      expect(typedTotal(invalid)).toBeUndefined()
+    }
+    expect(typedTotal('')).toBeUndefined()
   })
-  it('row targets stay within the total; lowering the total trims the last targets', () => {
-    let pref = stepRow({ cap: 2 }, 'area', 'backend', 1, 0)
-    pref = stepRow(pref, 'area', 'design', 1, 0)
-    expect(stepRow(pref, 'area', 'docs', 1, 0)).toBe(pref)
-    const full = workingPlan({ pref, sessions: [], harnesses: [], capacityKnown: true, roomNow: null })
-    expect(full.rows.every(r => !r.canInc)).toBe(true)
-    expect(full.full).toBe(true)
-    const lower = stepCap(pref, -1, 0)
-    expect(lower).toMatchObject({ cap: 1, area: { backend: 1, design: 0 } })
-    expect(stepCap({ cap: 12 }, 1, 0).cap).toBe(12)
-    expect(stepCap({ cap: 1 }, -1, 0).cap).toBe(1)
+  it('cycles no own limit, at most, and off, restoring a bounded remembered ceiling', () => {
+    let value: HarnessLimit = 'no_limit'
+    value = modeLimit(value, nextLimitMode(value), 7); expect(value).toBe(7)
+    value = modeLimit(value, nextLimitMode(value), 7); expect(value).toBe('off')
+    value = modeLimit(value, nextLimitMode(value), 7); expect(value).toBe('no_limit')
+    expect(modeLimit(undefined, 'max')).toBe(2)
+    expect(modeLimit('off', 'max', 50)).toBe(30)
+    expect(modeLimit('off', 'max', 0)).toBe(1)
+    expect(modeLimit(0, 'max', 7)).toBe(1)
+  })
+  it('uses the approved wind-down, zero, full and room wording', () => {
+    expect(liveCopy(5, 16, 7)).toBe('16 running · winding down to 5')
+    expect(nowCopy(5, 16, 7)).toBe('16 are running, 11 more than 5 at once; they finish before anything new starts.')
+    expect(liveCopy(0, 2, 6)).toBe('2 running · nothing new starts')
+    expect(nowCopy(0, 0, 6)).toBe('Nothing new starts, and nothing is running.')
+    expect(liveCopy(8, 8, 2)).toBe('8 running · all 8 in use')
+    expect(liveCopy(8, 3, 0)).toBe('3 running · accounts full')
+    expect(statusCopy(8, 3, 0)).toBe('Room for 5 more, but the accounts are full: new starts wait for room.')
+    expect(nowCopy(8, 3, 2)).toBe('3 are running; 5 more would fit the 8 at once, but the accounts have room for 2.')
+    expect(nowCopy(8, 3, null)).toContain('Account room is not available yet.')
+  })
+  it('reports actual waiting work without simulating starts or inventing an empty queue', () => {
+    const room = { codex: 3, claude: 2, cursor: 2 }
+    expect(waitingCopy(snapshot, snapshot, room, null)).toBe('Waiting work is not available yet.')
+    expect(waitingCopy(snapshot, snapshot, room, [])).toBe('No work waiting.')
+    expect(waitingCopy(snapshot, snapshot, room, [{}, {}])).toBe('2 waiting: winding down first')
+    const under = { ...snapshot, running: { cursor: 0 }, running_total: 0 }
+    expect(waitingCopy(snapshot, under, room, [{ harness: 'cursor' }])).toBe('1 waiting: Cursor is off')
+    expect(waitingCopy(snapshot, under, room, [{}])).toBe('1 waiting: ready for a start')
+    expect(waitingCopy(snapshot, under, { codex: 0, claude: 0, cursor: 0 }, [{}])).toBe('1 waiting for room on an account')
+  })
+  it('includes all configured harnesses and counts beyond a lowered ceiling', () => {
+    const rows = workingRows({ total: 1, limits: { grok: 30, pi: 'off', gemini: 'no_limit', opencode: 0 } }, snapshot, {}, null)
+    expect(rows.map(r => r.key)).toEqual(['codex', 'claude', 'grok', 'cursor', 'pi', 'gemini', 'opencode'])
+    expect(rows[0]!.sub).toBe('12 running')
+    expect(workingRows(snapshot, snapshot, {}, null)[0]!.sub).toBe('12 running, 8 above, finishing')
   })
 })

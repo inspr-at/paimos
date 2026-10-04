@@ -19,7 +19,6 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fixture struct {
@@ -402,7 +401,9 @@ func TestPermissionsExplicitAgentGrantTenantIsolationAndRLS(t *testing.T) {
 	dbtest.BindRole(t, f.d, f.p.TenantID, viewerID, "viewer")
 	agent := tenant.Principal{ID: agentID, TenantID: f.p.TenantID, Kind: tenant.Agent, Scopes: []string{Permission, "nodes.write", "run.create", "work_orders.write"}, KeyCreatorID: f.p.ID}
 	f.call(agent, "GET", "/api/recurrences/"+r.ID, nil, 403)
-	f.call(tenant.Principal{ID: viewerID, TenantID: f.p.TenantID, Kind: tenant.Person}, "GET", "/api/recurrences/"+r.ID, nil, 403)
+	viewer := tenant.Principal{ID: viewerID, TenantID: f.p.TenantID, Kind: tenant.Person}
+	f.call(viewer, "GET", "/api/recurrences/"+r.ID, nil, 200)
+	f.call(viewer, "POST", "/api/recurrences/"+r.ID+"/pause", map[string]int{"expected_revision": 1}, 403)
 	var roleID string
 	f.tx(func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'recurring_agent','Explicit recurring agent') RETURNING id::text`, f.p.TenantID).Scan(&roleID); err != nil {
@@ -688,12 +689,10 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 			if _, err = other.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, f.p.TenantID); err != nil {
 				t.Fatal(err)
 			}
-			attempted := make(chan struct{})
 			done := make(chan error, 1)
 			go func() {
 				done <- db.InTenant(ctx, f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
-					barrier := &treeBarrierTx{Tx: tx, attempted: attempted}
-					if _, err := lock(ctx, barrier, f.p.TenantID, false); err != nil {
+					if _, err := lock(ctx, tx, f.p.TenantID, false); err != nil {
 						return err
 					}
 					if err := manage(ctx, tx, caller, f.project); err != nil {
@@ -703,13 +702,11 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 					return err
 				})
 			}()
-			select {
-			case <-attempted:
-			case err := <-done:
-				t.Fatalf("recurrence failed before tree barrier: %v", err)
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
+			waitKind := "advisory"
+			if writer == "membership change" {
+				waitKind = "transactionid"
 			}
+			dbtest.WaitForLock(t, ctx, f.d, other.Conn().PgConn().PID(), waitKind)
 			if writer == "node write" {
 				// The normal node INSERT takes a tenant FK key-share lock.
 				_, err = other.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position)
@@ -850,4 +847,14 @@ func TestRecurrenceFenceAllowsTenantKeyShare(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("recurrence fence blocks tenant FK key-share: %v", err)
 	}
+}
+
+func TestRecurrenceTenantBeforeTree(t *testing.T) {
+	f := setup(t)
+	dbtest.TenantBeforeTree(t, f.d, f.p.TenantID, func(ctx context.Context) error {
+		return db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			_, err := lock(ctx, tx, f.p.TenantID, false)
+			return err
+		})
+	})
 }

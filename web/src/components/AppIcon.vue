@@ -2,7 +2,7 @@
 <script lang="ts">
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
-  | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top'
+  | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top' | 'repeat'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
@@ -12,7 +12,7 @@ export type IconName =
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
-  | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
+  | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
   | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
 </script>
 <script setup lang="ts">
@@ -47,6 +47,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'tree'"><rect x="5.8" y="1.6" width="4.4" height="3.8" rx="1.1" /><rect x="1.6" y="10.8" width="4.2" height="3.6" rx="1.1" /><rect x="10.2" y="10.8" width="4.2" height="3.6" rx="1.1" /><path d="M8 5.4v2.4M3.7 10.8V8.6h8.6v2.2" /></template>
     <template v-else-if="name === 'search'"><circle cx="7" cy="7" r="4.4" /><path d="m10.3 10.3 3.5 3.5" /></template>
     <path v-else-if="name === 'list'" d="M5.6 4h8M5.6 8h8M5.6 12h8M2.4 4h.01M2.4 8h.01M2.4 12h.01" />
+    <path v-else-if="name === 'pin'" d="M5 2.5h6M6 2.5v4L4 9h8l-2-2.5v-4M8 9v4.5" />
+    <template v-else-if="name === 'lock'"><rect x="3" y="7" width="10" height="7" rx="1.6" /><path d="M5 7V5a3 3 0 0 1 6 0v2M8 10v1.5" /></template>
     <path v-else-if="name === 'plus'" d="M8 3v10M3 8h10" />
     <path v-else-if="name === 'close'" d="m4.2 4.2 7.6 7.6M11.8 4.2l-7.6 7.6" />
     <path v-else-if="name === 'edit'" d="m10.4 2.6 3 3L6 13l-3.6.6L3 10Z" />
@@ -84,7 +86,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'play'" d="M5.4 3.6v8.8l7-4.4z" stroke-linejoin="round" />
     <rect v-else-if="name === 'stop'" x="3.8" y="3.8" width="8.4" height="8.4" rx="1.6" />
     <template v-else-if="name === 'shield'"><path d="M8 1.9 13 3.8v3.9c0 3-2.1 5.4-5 6.4-2.9-1-5-3.4-5-6.4V3.8Z" /><path d="m5.9 8 1.5 1.5 2.8-2.9" /></template>
-    <template v-else-if="name === 'interrupt'"><circle cx="8" cy="8" r="6.2" /><path d="M6.5 5.7v4.6M9.5 5.7v4.6" /></template>
+    <template v-else-if="name === 'interrupt'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2.6" /><path d="M10.2 10.4 5.8 6M5.8 9V6h3" /></template>
     <template v-else-if="name === 'halt'"><path d="M5.5 1.9h5l3.6 3.6v5l-3.6 3.6h-5l-3.6-3.6v-5Z" /><rect x="6" y="6" width="4" height="4" rx=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'send'" d="M14 2 7.2 8.8M14 2 9.6 14 7.2 8.8 2 6.4Z" />
     <path v-else-if="name === 'bolt'" d="M9 1.8 3.6 9h4l-.8 5.2L12.4 7h-4Z" />
@@ -131,6 +133,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'sort'" d="M4.8 2.6v10.8M2.4 11l2.4 2.4 2.4-2.4M11.2 13.4V2.6M8.8 5l2.4-2.4L13.6 5" />
     <template v-else-if="name === 'select'"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="3" /><path d="m5.2 8.2 2 2 3.6-4.2" /></template>
     <path v-else-if="name === 'shift'" d="M8 2.2 2.6 8h2.9v5.2h5V8h2.9Z" />
+    <template v-else-if="name === 'repeat'"><path d="M2.8 7.2V6.6a2.4 2.4 0 0 1 2.4-2.4h7.4M10.6 2.2l2 2-2 2" /><path d="M13.2 8.8v.6a2.4 2.4 0 0 1-2.4 2.4H3.4M5.4 13.8l-2-2 2-2" /></template>
     <template v-else-if="name === 'thumbs-down'"><path stroke-width="1.5" d="M11.3 9.4V1.7" /><path stroke-width="1.5" d="M6.1 12.2 6.8 9.4H2.9a1.3 1.3 0 0 1-1.2-1.7l1.5-5.2A1.3 1.3 0 0 1 4.4 1.4h8.8a1.3 1.3 0 0 1 1.3 1.3v5.4a1.3 1.3 0 0 1-1.3 1.3H11.3a1.3 1.3 0 0 0-1.2.8L8.2 14.5a2 2 0 0 1-2.1-2.3Z" /></template>
     <template v-else-if="name === 'help'"><circle cx="8" cy="8" r="6.2" /><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8M8 11.4v.05" /></template>
     <path v-else-if="name === 'pulse'" d="M1.8 8.4h2.6l1.6-4 2.6 8 1.8-5.2.9 1.2h2.9" />

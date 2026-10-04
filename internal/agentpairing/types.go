@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -37,7 +40,7 @@ var CoordinatorPermissions = authz.CoordinatorKeyScopes
 const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 const VerificationSeconds = 60
 
-var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "work_orders.read", "work_orders.write", "nodes.read", "models.read", "account.read", "account.route", "account.probe", "harness.read", "harness.write", "harness.worker"}
+var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "work_orders.read", "work_orders.write", "nodes.read", "models.read", "models.report", "models.refresh", "account.read", "account.route", "account.probe", "harness.read", "harness.write", "harness.worker"}
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var accountRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
@@ -99,22 +102,25 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	LocalProcesses     string   `json:"local_processes"`
-	AccountingState    string   `json:"accounting_state"`
-	VerificationState  string   `json:"verification_state"`
-	VerificationError  string   `json:"verification_error"`
-	VerificationReason string   `json:"verification_reason,omitempty"`
-	AccountID          string   `json:"account_id"`
-	AccountKey         string   `json:"account_key"`
-	Harness            string   `json:"harness"`
-	Label              string   `json:"label"`
-	ProfileID          string   `json:"model_profile_id"`
-	State              string   `json:"state"`
-	Cleanup            string   `json:"local_cleanup"`
-	VerificationRunID  *string  `json:"verification_run_id"`
-	ActiveRunIDs       []string `json:"active_run_ids"`
+	CanVerify                bool     `json:"can_verify"`
+	LocalProcesses           string   `json:"local_processes"`
+	AccountingState          string   `json:"accounting_state"`
+	VerificationExpiredReady bool     `json:"verification_expired_ready"`
+	VerificationState        string   `json:"verification_state"`
+	VerificationError        string   `json:"verification_error"`
+	VerificationReason       string   `json:"verification_reason,omitempty"`
+	AccountID                string   `json:"account_id"`
+	AccountKey               string   `json:"account_key"`
+	Harness                  string   `json:"harness"`
+	Label                    string   `json:"label"`
+	ProfileID                string   `json:"model_profile_id"`
+	State                    string   `json:"state"`
+	Cleanup                  string   `json:"local_cleanup"`
+	VerificationRunID        *string  `json:"verification_run_id"`
+	ActiveRunIDs             []string `json:"active_run_ids"`
 }
 type View struct {
+	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
 	AgentRelease              agentcompat.Release                 `json:"agent_release"`
 	AgentCompatibility        agentcompat.Result                  `json:"agent_compatibility"`
 	HarnessDetails            map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
@@ -177,6 +183,10 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 	if e.Status == 429 {
 		w.Header().Set("Retry-After", "5")
+		var recovery *attachRecoveryLimited
+		if errors.As(err, &recovery) {
+			w.Header().Set("Retry-After", strconv.Itoa(recovery.retryAfter))
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	body := map[string]string{"error": e.Message, "code": e.Code}
@@ -216,7 +226,7 @@ func validateDevice(in deviceRequest) error {
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}
-	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > 7 {
+	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > len(agentverification.Harnesses()) {
 		return fail(400, "invalid_request", "invalid computer, folder, capabilities or account selection")
 	}
 	seen := map[string]bool{}
@@ -225,9 +235,7 @@ func validateDevice(in deviceRequest) error {
 		if !accountRE.MatchString(a.AccountKey) || !safeText(a.Label, 128) || a.ProfileID != "" && !uuidRE.MatchString(a.ProfileID) || seen[a.Harness] || seenAccounts[a.AccountKey] {
 			return fail(400, "invalid_request", "choose exactly one identified account per harness")
 		}
-		switch a.Harness {
-		case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
-		default:
+		if !slices.Contains(agentverification.Harnesses(), a.Harness) {
 			return fail(400, "invalid_request", "unsupported harness")
 		}
 		seen[a.Harness] = true

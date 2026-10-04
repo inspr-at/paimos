@@ -9,12 +9,13 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 // Suggestions are deterministic planning hints, never confirmed estimates of
-// difficulty. Only a fields write with valid hours opts into filling gaps.
+// difficulty. An estimate or role change with valid hours opts into filling gaps.
 func suggestEstimateRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, title string, parent *string, raw, before json.RawMessage) (json.RawMessage, error) {
 	if kind != "ticket" && kind != "task" {
 		return raw, nil
@@ -28,6 +29,19 @@ func suggestEstimateRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, ki
 		return raw, nil
 	}
 	old, err := decodeRouteFields(before)
+	if err != nil {
+		return nil, err
+	}
+	// The update caller supplies the stored fields read under the node lock,
+	// after canonicalizing the incoming estimate and role. A replacement
+	// document carrying unchanged values must not backfill missing hints.
+	if sameEstimateFields(fields, old) {
+		sameRole, err := sameRouteValue(fields, old, "route_role")
+		if err != nil || sameRole {
+			return raw, err
+		}
+	}
+	project, err := routeProject(ctx, tx, parent)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +110,13 @@ func suggestEstimateRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, ki
 		suggest(routeGroups[0], role)
 	}
 	if missing(routeGroups[1]) {
-		suggest(routeGroups[1], area)
+		known, err := modelregistry.KnownRouteArea(ctx, tx, area, project)
+		if err != nil {
+			return nil, err
+		}
+		if known {
+			suggest(routeGroups[1], area)
+		}
 	}
 	oldHours, _ := estimateNumber(old["estimate_hours"])
 	derived := fields["complexity_source"] == "suggested" && fields["complexity"] == old["complexity"]
@@ -148,6 +168,8 @@ func routeHints(title string, fields map[string]any) (role, area string) {
 	backend := has("backend", "api", "sql", "database", "postgres", "migration", "schema", "rls", "auth", "concurrency")
 	frontend := has("frontend", "ui", "vue", "css", "browser", "web", "accessibility")
 	switch {
+	case has("security", "auth", "permissions", "secrets", "sanitising", "sanitizing", "rls"):
+		area = "security"
 	case backend && frontend || has("fullstack") || strings.Contains(text, "full-stack"):
 		area = "full-stack"
 	case backend:

@@ -43,7 +43,9 @@
         "internal/credentialguard/**",
         "internal/unicodeguard/**",
         "internal/agentpairing/**",
+        "internal/stepup/**",
         "internal/agentaccounts/**",
+        "internal/accountprivacy/**",
         "internal/approvals/**",
         "internal/principallink/**",
         "internal/scopecode/**",
@@ -52,6 +54,7 @@
         "internal/tenant/**",
         "internal/tenantbootstrap/**",
         "internal/profile/**",
+        "internal/themes/**",
         "internal/imagework/**",
         "internal/attachwatch/**",
         "internal/linkvault/**",
@@ -63,7 +66,9 @@
         "internal/config/**",
         "internal/httpapi/**",
         "cmd/**",
-        "embed.go"
+        "embed.go",
+        "internal/phoneapprovals/**",
+        "internal/features/**"
       ]
     },
     {
@@ -74,6 +79,7 @@
         "internal/agentd/**",
         "internal/agentsetup/**",
         "internal/harness/**",
+        "internal/servicetier/**",
         "internal/harnesslaunch/**",
         "internal/agentdwire/**",
         "internal/ownedprocess/**",
@@ -92,6 +98,7 @@
         "internal/modelprovider/**",
         "internal/openrouter/**",
         "internal/modelregistry/**",
+        "internal/modelreport/**",
         "internal/modelprefs/**",
         "internal/crossreview/**",
         "internal/reviewgate/**",
@@ -105,6 +112,7 @@
       "paths": [
         "internal/cli/**",
         "internal/inbox/**",
+        "internal/chat/**",
         "internal/client/**",
         "internal/plugins/**",
         "internal/events/**"
@@ -121,7 +129,8 @@
         "internal/knowledge/**",
         "internal/embedding/**",
         "internal/search/**",
-        "internal/greetings/**"
+        "internal/greetings/**",
+        "internal/markdownsource/**"
       ]
     },
     {
@@ -130,6 +139,7 @@
       "title": "Product domain A: nodes, business, imports",
       "paths": [
         "internal/nodes/**",
+        "internal/workstate/**",
         "internal/business/**",
         "internal/importer/**",
         "internal/imports/**",
@@ -151,6 +161,7 @@
         "internal/requirements/**",
         "internal/questions/**",
         "internal/decisiondesk/**",
+        "internal/deskdelivery/**",
         "internal/outcomes/**",
         "internal/relations/**",
         "internal/projectgroups/**",
@@ -181,6 +192,7 @@
         "internal/version/**",
         "internal/perf/**",
         "scripts/**",
+        "web/scripts/**",
         ".github/**",
         "api/**",
         "deploy/**",

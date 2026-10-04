@@ -178,6 +178,9 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 				return err
 			}
 			result.Window = &window
+			if err := redactAccountEvents(ctx, tx, p, result.Items); err != nil {
+				return err
+			}
 			return attachNodeChanges(ctx, tx, p.TenantID, result.Items)
 		}
 		// Quote events use the quote-scoped collaboration stream, which rechecks
@@ -217,6 +220,9 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := redactAccountEvents(ctx, tx, p, result.Items); err != nil {
 			return err
 		}
 		return attachNodeChanges(ctx, tx, p.TenantID, result.Items)
@@ -352,6 +358,19 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 	}
 	var result Event
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Access changes take the tenant fence first. Undo handlers may then
+		// recheck resource permissions without inverting that global lock order.
+		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
+		// The route check ran in an earlier transaction; a revocation may have
+		// committed while this request waited for the tenant fence.
+		if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.RouteScope(r.Context())); err != nil {
+			if errors.Is(err, authz.ErrForbidden) {
+				return ErrForbidden
+			}
+			return err
+		}
 		// Serialize attempts on this original event without modifying history or
 		// taking the event counter before a resource lock (writers take it last).
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 12))`, p.TenantID+":"+strconv.FormatInt(id, 10)); err != nil {
@@ -362,7 +381,17 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
+		ownsActor := e.ActorPrincipalID == p.ID
+		// Theme identity survives principal linking. Its resource undo handler
+		// rechecks the current owner under the authority fence before writing.
+		// This exception is limited to registered theme events, never agents or
+		// unrelated workspace activity.
+		if !ownsActor && p.Kind == tenant.Person && m.undo[e.Type] != nil && strings.HasPrefix(e.Type, "theme.") {
+			if err := tx.QueryRow(r.Context(), `SELECT aeon_theme_owns($1::uuid)`, e.ActorPrincipalID).Scan(&ownsActor); err != nil {
+				return err
+			}
+		}
+		if !ownsActor && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]
@@ -382,7 +411,15 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		}
 		change.UndoOf = &id
 		result, err = Append(r.Context(), tx, p, change)
-		return err
+		if err != nil {
+			return err
+		}
+		items := []Event{result}
+		if err := redactAccountEvents(r.Context(), tx, p, items); err != nil {
+			return err
+		}
+		result = items[0]
+		return nil
 	})
 	if err != nil {
 		failure(w, err)

@@ -24,6 +24,8 @@ type httpError struct {
 
 func (e *httpError) Error() string { return e.msg }
 
+func (e *httpError) StatusCode() int { return e.status }
+
 func fail(status int, msg string) error { return &httpError{status: status, msg: msg} }
 
 var (

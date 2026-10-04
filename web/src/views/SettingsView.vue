@@ -8,6 +8,7 @@ import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
 import BusinessSection from '../components/settings/BusinessSection.vue'
 import PersonalSection from '../components/settings/PersonalSection.vue'
+import ThemeSection from '../components/settings/ThemeSection.vue'
 import DeveloperSection from '../components/settings/DeveloperSection.vue'
 import ProjectsSection from '../components/settings/ProjectsSection.vue'
 import PortalSection from '../components/settings/PortalSection.vue'
@@ -42,8 +43,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, developer: DeveloperSection, policies: PoliciesSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', developer: 'gear', policies: 'shield', 'agent-rules': 'book', accounts: 'gauge', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', 'agent-rules': 'book', accounts: 'gauge', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers', portal: 'globe' }
 
 // A deep link scrolls to its card once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
@@ -82,6 +83,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
           <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
           <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'} for review`" />
         </RouterLink>
+        <nav v-if="current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
       </nav>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
         <component :is="VIEW[current]" v-if="allowed" :key="current" />
@@ -111,6 +113,8 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
 .section-nav { position: sticky; top: 16px; display: grid; gap: 4px; }
+.theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
+@media (pointer: coarse) { .theme-links a { min-height: 44px; } }
 .section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }
@@ -134,6 +138,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
   .layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   /* Narrow: the sections become a two-by-two grid above the page. */
   .section-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .theme-links { grid-column: 1 / -1; }.theme-links a { min-height: 44px; }
   .section-link { grid-template-columns: 28px minmax(0, 1fr) auto; min-height: 48px; padding: 6px 10px; background: var(--glass); box-shadow: 0 0 0 1px var(--line); }
   .link-summary { display: none; }
   /* Narrow, a single section needs no nav above it. */

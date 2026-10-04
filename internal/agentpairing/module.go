@@ -34,6 +34,7 @@ type Module struct {
 	clients               map[string]rate
 	watch                 watchRelay
 	watchKeys             watchPollKeys
+	watchRecovery         watchRecoveryLimits
 	managed               *ManagedSetup
 	accountLinkPepper     []byte
 }
@@ -53,6 +54,7 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*confi
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
 	m.mountAccountLink(mux)
+	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/verify", m.person("account.manage", m.verifyAgain))
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
 	mux.HandleFunc("POST /api/agent-pairing/device", m.device)
 	mux.HandleFunc("POST /api/agent-pairing/redeem", m.redeem)
@@ -143,7 +145,7 @@ func (m *Module) person(permission string, fn func(http.ResponseWriter, *http.Re
 }
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+		if err := LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)

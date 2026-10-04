@@ -21,6 +21,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/stepup"
 )
 
 // Fixed attach refusal codes admitted over the owner-only socket. Keep the
@@ -34,6 +35,7 @@ var attachRefusalCodes = []string{
 	"attach_draining",
 	"attach_enrollment_unavailable",
 	"attach_registration_lost",
+	"attach_poll_key_unknown",
 	"attach_pairing_unavailable",
 	"attach_scope_changed",
 	"attach_computer_limit",
@@ -156,6 +158,9 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}}
 	defer transport.CloseIdleConnections()
 	hc := &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if path == "/v1/step-up" && method == "POST" {
+		hc.Timeout = stepup.ConfirmTimeout + 5*time.Second
+	}
 	r, err := http.NewRequestWithContext(ctx, method, "http://agentd"+path, bytes.NewReader(raw))
 	if err != nil {
 		return errors.New("invalid local request")
@@ -164,10 +169,21 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	r.Header.Set("Content-Type", "application/json")
 	res, err := hc.Do(r)
 	if err != nil {
+		if path == "/v1/step-up" {
+			return errors.New("local Touch ID confirmation unavailable, cancelled or timed out")
+		}
 		return errors.New("local agentd unavailable")
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if path == "/v1/step-up" {
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 769))
+			hint := strings.TrimSpace(string(raw))
+			if readErr == nil && len(raw) <= 768 && validAttachDiagnostic(hint) {
+				return errors.New("Touch ID: " + hint)
+			}
+			return errors.New("local Touch ID confirmation refused")
+		}
 		if path == "/v1/attach" && res.StatusCode == http.StatusConflict {
 			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 1025))
 			if readErr == nil && len(raw) <= 1024 {

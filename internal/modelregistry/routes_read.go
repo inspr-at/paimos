@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -98,7 +99,7 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 						'model_version', COALESCE(d.model_display->>'model_version',''),
 						'effort_level', d.effort_level, 'provider', d.provider)) AS value,
 					r.priority, r.profile_id
-				FROM model_role_routes r
+				FROM (`+agentaccounts.ModelRoleRoutesSQL+`) r
 				JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
 				LEFT JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 				WHERE r.role=$1 ORDER BY r.priority, r.profile_id LIMIT $2

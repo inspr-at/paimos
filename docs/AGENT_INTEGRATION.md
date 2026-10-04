@@ -539,6 +539,27 @@ exact membership source, snapshot capture and offline release-history behavior.
 
 ## Read-only attached watches (AEON-258)
 
+Recovery reads the long-lived computer lifecycle proof from the approved setup
+store for each registration attempt; the transport retains the memory-only poll
+key and pinned origin, without retaining that proof for the daemon lifetime.
+Startup obtains the host and registration proof together in one read. Store or
+Keychain stalls can leave at most one authority reader in flight per daemon;
+cancellation or the total deadline releases the transport gate, and abandoned
+results are discarded rather than used by a later registration.
+Local cleanup, disconnect or configuration changes refuse recovery before a
+registration is sent. Unknown-key diagnostics use a separate server-local budget
+of 30 attempts per minute per authenticated computer principal before computer, scope or watch
+lookups; they never consume the tenant attach request budget. The server holds
+at most 4096 live budgets across tenants. As an accepted AEON-608 limitation,
+new principals (including those in another tenant) are refused until a slot
+expires when that shared cap is full; existing budgets retain their counters.
+A capped call returns `attach_recovery_limited` with
+`Retry-After` seconds, without authorizing registration. The daemon retains
+the server refusal and performs no exchange or registration until that delay
+expires (valid server delays are bounded to one day). If the explicit
+`poll_key_unknown` refusal reaches the helper during cooldown, run attach again
+in a few seconds and give fresh approval; a daemon restart is not required.
+
 The paired daemon uses only `POST /api/agent-pairing/attach` for registration,
 requests, activation, polls and detachment. At startup it registers a fresh random
 poll key using the runtime bearer and computer lifecycle proof. The poll key lives
@@ -547,8 +568,20 @@ pairing.json, a setup store, a database, local replies or logs. Watch operations
 require that key plus the snapshot digest; pairing.json alone cannot authorize
 them. Registration ends every earlier pending, approved or active watch for that
 computer: a daemon restart requires new local consent and owner approval. Server
-restart loses poll authority too; restart the daemon to register again. Registration
-is serialized with exchanges and cannot transfer an earlier approval to a new key.
+restart loses poll authority too. A running daemon re-registers only after a 403
+`attach_refusal=poll_key_unknown`, returned solely to the owning connected computer
+with valid attach scope. Incorrect keys, revoked pairing, draining/removed
+enrollments, ended watches and foreign tenants do not trigger recovery. Older
+servers retain the explicit daemon-restart repair. Recovery makes one registration
+attempt and one replay per rejected call, serialized with other exchanges and
+bounded by a 20-second deadline. Jitter uses half to all of an exponential window
+from 500 ms to 8 seconds, followed by an equal cooldown even on failure. Calls
+during cooldown fail without registration; there is no background loop.
+This narrow exception to the former no-in-process-retry design is safe because
+the server rejects the operation before applying it. Network/decode failures and
+uncertain conversation submissions are never retried. Re-registration cannot
+transfer an earlier approval: previous watches end and require fresh consent;
+new requests can succeed without a daemon restart.
 The pairing fence permits exactly this additional route.
 The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
@@ -725,6 +758,140 @@ creation, Touch ID success/cancel, changed-biometry invalidation and Keychain AC
 refusal to a separate unsigned process before release. Local unsigned checks do
 not supply that hardware or ACL qualification.
 
+### Diagnosing paired daemon startup (AEON-667)
+
+Round-3 account probe trace: `pairedAdapters` takes Claude's executable and
+profile from the approved runtime account's `path` and `home`; Node and SDK
+come from the runtime's `node_path` and `claude_sdk_path`. `resolved` validates
+their physical installations before `probeResolved` invokes that exact Claude
+executable with `auth status --json`. This probe does not invoke the SDK bridge
+or wrap a native CLI in Node; an npm launcher's shebang finds the pinned Node
+directory first on PATH. The working directory is inherited from `serve`.
+PATH consists only of the pinned Node directory, the Claude executable's
+directory, `/usr/bin` and `/bin`; LANG/LC_ALL are `C`. For the default
+`$HOME/.claude` profile, HOME is the user's home and CLAUDE_CONFIG_DIR is absent.
+A separate profile gets HOME and CLAUDE_CONFIG_DIR set to that approved profile.
+USER, LOGNAME and TMPDIR now retain the parent login session's values, when
+present. Credential, provider and loader variables remain excluded.
+
+The installed native Claude artifact selects its Keychain account using USER
+with OS-user lookup as fallback. The previous environment removed USER even
+though OPS's successful minimal-shell check included it. Synthetic probes now
+prove that this context survives both probe and SDK launch; those tests fail
+against the prior implementation. This establishes the environment difference,
+not a confirmed cause on mbp2607: no real pairing, vendor login or Keychain was
+accessed by the worker. `authMethod: "claude.ai"` was already accepted. Bounded,
+duplicate-free JSON must confirm loggedIn and the approved email; a different
+email or API-key login still fails closed, now with its own value-free detail.
+An expired verification remains separate from account sign-in readiness. When
+that account's daemon probe is ready, setup reports `connected` with the
+informational action “Verification expired — run verification again”. Plain
+status includes the expired run and its pending local cleanup on the ready
+account line. Status never retries the run, refills its allowance or acknowledges
+cleanup; failed, cancelled and ownership-lost verification remains a failure.
+An interrupted poll returns its context error without publishing the interrupted
+probe, changing local account health or emitting a polling diagnostic.
+
+Plain `status` now includes ready harnesses and every approved account, including
+distinct states for siblings of one harness. It uses `OpenStoreReadOnly` for
+both snapshot and saved-option/version reads: no migration, lock creation,
+Keychain write or plaintext erasure. ACL denial, conflicting legacy state,
+symlinks, hardlinks and ownership checks remain enforced. Previously even
+`readSnapshot` entered `readVault` and acquired `keychain-migration.lock`, so a
+status client could make the serving daemon's read/save fail with `ErrBusy`.
+
+During a running daemon's lifecycle sync, network errors, HTTP 408/429/5xx and
+local lock contention are retryable. Each tick reserves a separate five-second
+budget for reconciliation and still performs account health probes after such
+a failure; it does not fetch queued work, claim work or launch a run. Fresh
+dispatch resumes only after successful reconciliation and runtime validation.
+Cold-start lifecycle preflight still fails closed. Each distinct failure phase
+and safe cause logs once per daemon lifetime as `pairing_sync_failed`, with
+`first_cause` (for example `http_503`, `store_busy`, `keychain_denied`) and
+`retryable`. Raw server bodies and error text are never logged.
+
+For OPS's next signed-candidate run: keep the existing service drained/stopped,
+run one candidate on the approved root, and call `status` during the run.
+Expect explicit `harness codex ready` / `harness cursor ready` lines when their
+probes succeed, plus an account line for every enrollment. Claude should become
+ready if the removed login environment caused the failure; otherwise its line
+distinguishes signed-out, different-identity and API-key results without showing
+identities or credentials. A retained verification failure may still head the
+output and does not negate ready account lines; an expired request alone cannot
+make its freshly probed ready account report `verification_failed`. Status reads
+must not introduce migration-lock failures. Any remaining pairing failure carries
+the new safe first cause; transient failures keep probing while dispatch remains blocked,
+and recovery clears that block on the next successful tick. Real hardened-runtime
+and Keychain behavior still requires this OPS run.
+
+`aeon-agentd serve --setup-root /physical/approved/root` logs startup failures
+with `slog`, including the logical file or operation and its path. It never logs
+file contents. Missing files retain `errors.Is(err, os.ErrNotExist)` semantics;
+ownership, symlink, mode and executable checks remain enforced.
+
+A plain macOS `go build` (even with `CGO_ENABLED=1` and the release version
+ldflag) does **not** select the Keychain backend. That backend requires
+`-tags aeon_enclave`. After a signed daemon has migrated a pairing, an ordinary
+build still reads `runtime.json`, then fails reading
+`<setup-root>/pairing.json` in `pairedPreflight → SyncFences → Engine.load →
+Store.Read → openFile`. The source file was removed by `readVault` after its
+verified Keychain import. `runtime.key` is likewise absent, but comes later.
+An empty root instead fails at `runtime.json`. `status` can exit successfully
+when the pairing snapshot is absent: it reports provisioning, which does not
+prove that the process can start the paired daemon. Diagnose the named failure
+on the affected host before assuming its pairing was migrated.
+
+Startup file inventory (paths below are relative to the approved setup root
+unless stated otherwise):
+
+| Stage | Reads and checks | Install-layout dependency |
+| --- | --- | --- |
+| Runtime | Private physical root and ancestors; `runtime.json`; in an enclave build, protected `pairing.json` before using the runtime origin | Keychain backend is selected at build time; its ACL validates the running daemon signature, not the Homebrew directory |
+| Lifecycle preflight | `setup.lock`, `pairing.json`; Keychain reads may acquire `keychain-migration.lock` and inspect/import the same legacy disk file; snapshot writes are atomic | Keychain item identity includes the exact physical setup-root path |
+| Optional existing-daemon observation / fences | `daemon/control.json`, referenced socket and `.token`; offline instance lock, journal, checkpoint and `dispatch-fence-all.json` / `dispatch-fence-<account-hash>.json` | Long socket paths use `$HOME/.aeon/run/<state-hash>.sock`; HOME/setup root must agree, independently of binary location |
+| Runtime credential / attach / Touch ID | `runtime.json`, protected `pairing.json`, `runtime.key`; attach and step-up reuse protected pairing proof | Missing/denied proof disables the optional feature; no plaintext fallback after ACL denial |
+| Account pins | Approved launcher files (bounded headers), Node pins and version probes; Claude Node/SDK entry and `package.json`; executable ancestors and repository markers; attach fallback revalidates approved vendor paths | These are saved harness installations, never paths relative to the daemon executable; invalid account pins block that account without vetoing daemon startup |
+| Supervisor | Physical workspace; `daemon/aeon-agentd-<id>.lock`, `.journal`, `.checkpoint.json`, `.checks.json`, `.capacity.json` | No daemon installation dependency; absent journal/capacity files are valid fresh state |
+| Listener | Private socket directory, lifetime `.sock.lock`, socket, `.token`, legacy `.owner.json` and recognized `.s<hex>` residue; then writes `daemon/control.json` | Socket lifetime and inode ownership checks apply to dev builds too |
+
+Gemini/OpenCode adapter construction only stores their approved homes and
+executable pins. Home/config checks occur when probing or launching those
+harnesses, not as a prerequisite to constructing the daemon. `service.json`,
+launchd/systemd unit ownership, `ServiceExecutable` and `managedExecutable`
+belong to setup/service management, not direct paired `serve`. Only service
+installation maps Homebrew `Cellar/aeon-agentd/<version>/bin/aeon-agentd` to its
+verified `opt` link, or `~/.local/lib/aeon/...` to `~/.local/bin/aeon-agentd`.
+Direct serve has no Homebrew-only or `/tmp`-binary prohibition.
+
+There is no developer flag or environment variable that allows an unsigned
+build to use a migrated real pairing. Adding `aeon_enclave` alone still fails
+the native signed-daemon check. Keep the existing pairing intact: do not copy
+its capabilities back to disk, change Keychain ACLs, substitute HOME, or weaken
+ownership checks. The real-root verification route is a candidate produced by
+the existing approved Darwin release/signing pipeline, with the required team,
+identifier and hardened runtime. Once the coordinator has arranged a drained,
+stopped installed service, OPS can verify and run that signed candidate from a
+separate physical path:
+
+```sh
+codesign -dv /physical/candidate/aeon-agentd
+codesign --verify --strict --test-requirement="=notarized" /physical/candidate/aeon-agentd
+/physical/candidate/aeon-agentd serve --setup-root "$HOME/Library/Application Support/aeon/paired"
+```
+
+Use the actual approved physical setup-root path if it differs. Preserve the
+installed artifact and service definition for the coordinator's normal restart
+after verification; do not run two daemons on that root. No signing credentials
+are available to branch/PR workers. Before a signed candidate exists, the safe
+development route is the synthetic local tests below; these do not use an
+operator pairing, Keychain, harness login or production server:
+
+```sh
+GOMAXPROCS=2 go test -p 2 ./internal/agentsetup -run 'Test(StartupFileErrors|MigratedPairing|ServiceExecutableLayout)'
+GOMAXPROCS=2 go test -p 2 ./cmd/aeon-agentd -run TestServeStartupLogsExactMissingFile
+GOMAXPROCS=2 go test -p 2 -tags aeon_enclave ./internal/agentsecurity
+```
+
 ### Signed release daemon (AEON-285)
 
 Release darwin `paimos-agentd` is signed with **Developer ID Application:
@@ -796,9 +963,11 @@ same-user code can still open an independent terminal and request the review.
 Ancestors are identified from kernel metadata only. On Linux that is
 `/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
 ancestor stays acceptable; the target still needs its executable and cwd. On a
-Mac with a browser-pinned local confirmation key, the unsaved default requires
-an enclave-signed confirmation before a session exists, regardless of the daemon's
-capability report. If Touch ID cannot run, activation fails closed. Type `WATCH`,
+Mac with a browser-pinned Secure Enclave public key, the unsaved default also
+requires that key's signature before a session exists, even if the daemon reports
+that Touch ID cannot run. If Touch ID cannot run, activation fails closed. A
+person can explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching** to opt out. Type `WATCH`,
 then open the paired instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
@@ -833,14 +1002,66 @@ This is a capability inventory, not a claim that a login is valid or quota is
 available; a missing observation stays missing. Older daemons without the
 inventory report unavailable rather than an empty successful discovery.
 
-Idle capture follows fresh harness readings and never interrupts a live managed
-run. The default interval is five minutes (`serve --capacity-interval`); failures
-never become a zero-percent reading. Existing Codex app-server readings and
-Claude in-run stream readings remain the source paths from AEON-297.
+Idle checks run at startup, every five minutes (`serve --capacity-interval`), on
+fact expiry/reset, reconnect and Check now. One capture owns the local slot at
+a time and never interrupts a live managed run. Operations have a ten-second
+deadline and bounded owned-process cleanup; unconfirmed cleanup retains the
+local dispatch fence. Measurement failures retry after 1, 2 and 4 minutes, then
+every 30 minutes; the retry deadline survives restart. Check now can request one
+capture before that deadline. Every completion is persisted before delivery.
+Lost automatic observations replay unchanged after restart while their binding
+and resource membership remain current, including after outages longer than 24
+hours. Replay preserves the original observation and reading times, so old room
+stays stale, unresolved hard stops remain recorded and newer facts win.
+A replay acknowledgement lets the next automatic refresh or Check now capture
+new evidence.
+Manual completions retain the 24-hour observation bound and keep their original
+generation, revision and check ID and are dropped when expired or invalidated.
+A restarted daemon sends a generation heartbeat with `measurement_only: true`
+before handling checks. Measurement reports and this heartbeat preserve the health probe's
+timestamp, availability, failure and legacy credit snapshot under the server's
+account write fence, so delayed observations cannot clear a newer health failure.
+Consent and binding are checked again after capture; the final server write enforces
+revocation. Unknown usage never introduces a start limit; identity mismatch
+remains a hard failure. Recovery execution belongs to admission, not this loop.
+
+Codex idle launch is disabled until release-owned qualification covers the exact
+executable, pinned Node, startup hooks, inherited configuration/tools and process
+termination. A successful fake protocol does not qualify a live executable.
+Qualified captures use only initialize → initialized → account/read →
+account/rateLimits/read, with identity matched before quota is read. Claude idle
+get_usage also remains disabled until qualified. Codex run events and Claude run
+events/statusline continue supplying readings; missing measurements stay unknown.
+Pi with an approved OpenRouter profile checks only /key. Its null cap leaves
+remaining credit unknown, and an unavailable measurement does not invalidate a
+locally configured key. No /credits request or management key is introduced;
+null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
+An explicit zero key cap stays exhausted even when `/key` omits remaining.
+In a supervised daemon the capacity scheduler alone owns `/key`; health polls
+and fresh launch qualification inspect the local profile and launcher without
+another provider request. They cannot bypass the persisted 1/2/4/30-minute
+measurement backoff. Standalone probes and captures share a bounded request owner.
+Legacy Pi credit probes also populate the durable key facts, so replacing the
+credit snapshot with a null cap cannot erase a previously confirmed stop.
+Readings with room expire after ten minutes; quota at 100%, zero key caps and
+vendor stops keep blocking until their own reset or newer same-window room
+evidence. Null checks retain the stop's original observation time and cannot
+reset its recovery wait or backoff. Provider-confirmed 402 stops require
+successful recovery inference, which package B owns. Check now has a persisted
+60-second gap and audits each new request; retries reuse the same check and
+decision 2B's one early recovery intent per wait.
+
+Wrong-account `identity_mismatch` and confirmed `authentication_failed` are
+distinct repairs and both block work. Only confirmed sign-out uses the legacy
+probe category `auth_failed`; a mismatched identity uses `unavailable` alongside
+the explicit readiness cause. Measurement `timeout`, `protocol` and
+`launch_failed` remain separate from sign-out. An older identity cause survives
+measurement errors, while a newer confirmed identity failure replaces it.
 
 | Harness | Private home binding | Idle fallback |
 | --- | --- | --- |
-| Codex | Registry `home` → `CODEX_HOME` | `account/read` identity check, then `account/rateLimits/read` |
+| Codex | Registry `home` → `CODEX_HOME` | Not available idle until exact executable/interpreter and startup/cleanup boundaries are qualified |
+| Pi (OpenRouter) | Approved local profile | Key cap from `/key`; total balance stays unknown |
 | Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
@@ -865,6 +1086,64 @@ no production capability or user switch to guess the schema. Tests use a clearly
 synthetic response, not invented vendor fields. No real Grok billing probe or
 Cursor TUI/cookie extraction is used. Native Grok execution bindings and approval
 requirements remain unchanged.
+
+#### Daemon regression execution evidence (AEON-478, fix round 5)
+
+Executed on 2026-10-03 on the approved writable mbp2606 test runner, using
+`remote-test.sh`, its isolated Postgres database and uncached Go tests
+(`-count=1 -v`). The current implementation is
+`b5ce64725b2b3433100a44040441c4c66ad4cdc3`, which merges readiness parent
+`0c4c4b1584d29f88d5fb07e9bab632df638951b8`. All ten top-level `TestFix3` and
+`TestFix4` tests in `internal/agentaccounts` and `internal/agentd` passed.
+The following historical runs compiled and reached the specified assertions;
+runner, compilation and fixture failures were not counted as regressions.
+
+| Regression | Pre-fix implementation | Executed pre-fix failure | Current result |
+| --- | --- | --- | --- |
+| `TestFix3AutomaticHardStopSurvivesFailedDeliveryAndRestart` | `d3a52c4b6cdcf81a9c06909038d1840c8de55814` | `failed automatic hard-stop delivery was not durable` | PASS |
+| `TestFix3CapacityReplayPreservesConcurrentHealthFailure` | same | `measurement replay overwrote concurrent health failure`, for both `auth_failed` and `unavailable` | PASS, both cases |
+| `TestFix3PiHealthPollingCannotOverlapKeyCapture` | same | `health polling overlapped capture: 2 key requests` | PASS |
+| `TestFix3PiHealthPollingRespectsDurableCaptureBackoff` | same | `health poll bypassed persisted retry: 2 calls` | PASS |
+| `TestFix4AutomaticReplayAfterDayOutageAllowsFreshCheckNow` | `1cb669535c92b37b0214bb495bb497523781f7c2` | `aged automatic replay stalled, changed evidence or recaptured: api 400` | PASS |
+| `TestFix4AgedAutomaticFactsKeepFreshnessAndOrdering` | same | HTTP 400, `invalid readiness observation time`, for both 17% and 100% readings | PASS, both cases |
+| `TestFix3RestartFirstReportCarriesOldCheck` | `f867cb6cc24553eba5e4c2a2500799bc890aa415` with the parent's unchanged test file | HTTP 409 without `X-Aeon-Write-Committed` or `stale_binding`, failing `stale completion must report its committed heartbeat` | PASS |
+
+The first four test bodies are byte-for-byte identical between the historical
+run and the current run. The fix-4 test file is also unchanged between its two
+runs; `1cb66953` differs from reviewed `bd37420c` only in this test fixture, so
+its production implementation is the pre-fix implementation. The restart
+compatibility run replaced only `internal/agentaccounts/readiness_test.go` in
+the runner's disposable `f867cb6c` checkout with that file from `b5ce6472`.
+Historical-run adapters changed only the selected Git revision and that
+explicit test overlay; all runner presence, load, reservation and cleanup
+guards remained intact. No source checkout or branch was rewound.
+
+The current targeted command was
+`go test -count=1 -v ./internal/agentaccounts ./internal/agentd -run 'TestFix[34]'`.
+Historical runs selected `TestFix3` at `d3a52c4b`, `TestFix4` at `1cb66953`,
+and `TestFix3RestartFirstReportCarriesOldCheck` at `f867cb6c`; each exited 1
+for the assertion failures above. The current run exited 0. These are
+synthetic regression results, not qualification of live vendor executables.
+
+The merge preserves both protocols: an ordinary heartbeat can commit the new
+daemon generation while explicitly rejecting an old check completion; a
+measurement-only completion with an unestablished or different generation
+still rejects without changing generation or health. Decisions 1C and 2B,
+admission-owned recovery and the idle-launch qualification gates are unchanged.
+
+At the same implementation commit, a separate uncached remote run passed all
+seven affected Go packages: `internal/agentd`, `internal/agentaccounts`,
+`internal/agentsetup`, `internal/openrouter`, `internal/capacity`,
+`cmd/aeon-agentd` and `internal/reportercontract`. The guarded web runner passed
+the Go formatting check, `npm run build`, 652 Node tests and 688 Vitest tests
+across 55 files. Audit slice assignment and `git diff --check` also passed.
+The follow-up evidence commit changes only this documentation.
+
+Browser validation remains open: the approved remote launcher exited 3 before
+launching `usage-dashboard.spec.ts` and `capacity-learning.spec.ts`, because
+the OPS-247 bootstrap and launcher are pending. No Linux Chromium run is
+claimed. No guard was bypassed and no origin push or deployment was performed;
+the coordinator must run these specs on an approved browser lane or hosted CI.
 
 ## Outcome events (AEON-286)
 

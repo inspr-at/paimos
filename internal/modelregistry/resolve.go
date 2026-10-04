@@ -39,9 +39,10 @@ type resolveQuery struct {
 }
 
 type ladderStep struct {
-	Retired bool
+	Retired bool `json:"retired"`
 	Route
-	Profile Profile
+	Profile         Profile
+	SuppressedUntil *time.Time `json:"suppressed_until"`
 }
 
 // validateResolveQuery checks request structure without reading or preparing a catalog.
@@ -125,11 +126,12 @@ func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) 
    (to_jsonb(p) - 'tenant_id') || jsonb_build_object(
     'display_name', d.model_display->>'display_name', 'short_name', d.model_display->>'short_name',
     'model_version', d.model_display->>'model_version', 'effort_level', d.effort_level, 'provider', d.provider),
-   'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id)) AS value,
+   'suppressed_until', o.suppressed_until, 'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id)) AS value,
    r.priority, r.profile_id
-  FROM model_role_routes r
+  FROM (` + agentaccounts.ModelRoleRoutesSQL + `) r
   JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
   JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+  LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
   WHERE r.role = $1 ORDER BY r.priority,r.profile_id`
 	args := []any{role}
 	if limit > 0 {
@@ -182,6 +184,15 @@ func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, h
 	}
 	if q.Harness != "" && step.Profile.Harness != q.Harness {
 		reasons = append(reasons, "harness filter")
+	}
+	if KnownInvalid(step.Profile.Model) {
+		reasons = append(reasons, "known invalid model")
+	}
+	if step.SuppressedUntil != nil && now.Before(*step.SuppressedUntil) {
+		reasons = append(reasons, "model invalid until "+step.SuppressedUntil.UTC().Format(time.RFC3339))
+	}
+	if role.name == "review-gate-security" && step.Profile.Family == "anthropic" {
+		reasons = append(reasons, "security review policy")
 	}
 	if step.Retired {
 		reasons = append(reasons, "retired")

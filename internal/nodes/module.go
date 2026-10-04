@@ -84,8 +84,8 @@ func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Contex
 	})
 }
 
-// lockTree serializes tree edits for this tenant on the same advisory key the
-// node trigger uses, so position assignment and cycle checks cannot race.
+// lockTree serializes tree edits on the node trigger's advisory key. The
+// shared entry takes the FK-compatible tenant fence before tree and pairing.
 func lockTree(ctx context.Context, tx pgx.Tx) error {
 	return db.LockCurrentTree(ctx, tx)
 }

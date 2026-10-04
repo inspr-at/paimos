@@ -7,6 +7,7 @@ func (*ResidencyUnmet) Error() string     { return "account is outside the allow
 func (*ResidencyUnmet) HTTPStatus() int   { return 409 }
 func (*ResidencyUnmet) ErrorCode() string { return "residency_unmet" }
 
+// ScopeTooLarge refuses an oversized atomic re-stamp before writing any run.
 type ScopeTooLarge struct{}
 
 func (*ScopeTooLarge) Error() string     { return "too_many_active_runs" }

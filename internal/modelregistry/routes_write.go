@@ -14,6 +14,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -21,7 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const routesTotalLimit = 250
+const routesTotalLimit = 300
 
 // routeEditToken covers canonical stored content, independent of wall time,
 // input order, timezone spelling, profile display metadata and event position.
@@ -90,7 +91,7 @@ func routeBounds(rows []Route) error {
 
 func boundedStoredRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 	rows, err := tx.Query(ctx, `SELECT role,priority,profile_id::text,state,reason,valid_until
-	 FROM model_role_routes ORDER BY role,priority,profile_id LIMIT 251`)
+	 FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes ORDER BY role,priority,profile_id LIMIT 301`)
 	if err != nil {
 		return nil, err
 	}
@@ -297,8 +298,11 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		if !sameRoutes {
 			if role == "" {
 				_, err = tx.Exec(ctx, `DELETE FROM model_role_routes`)
+				if err == nil {
+					_, err = tx.Exec(ctx, `DELETE FROM model_security_role_routes`)
+				}
 			} else {
-				_, err = tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role=$1`, role)
+				_, err = tx.Exec(ctx, `DELETE FROM `+roleRoutesTable(role)+` WHERE role=$1`, role)
 			}
 			if err != nil {
 				return err

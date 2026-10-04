@@ -5,17 +5,18 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { expectDialRowsFitContent } from './helpers/dial-layout'
 import type { Shell } from './helpers/no-shift-shells'
 
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 async function setup(page: Page, failDecision = false) {
   const work = fixtures()
-  work.preferences['agents.working'] = { cap: 9, view: 'model', model: { codex: 1 } }
+  work.preferences['agents.working'] = { total: 9, limits: { codex: 1 } }
   await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
-  data.accounts = capacity.accounts as unknown as typeof data.accounts
-  await mockAgents(page, data, { capacity, failDecision })
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).map(a => ({ ...a, registered_by_principal_id: me.id }))
+  await mockAgents(page, data, { capacity, failDecision, workingPreference: () => work.preferences['agents.working'] })
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions.push('account.read', 'account.manage')
@@ -25,6 +26,26 @@ async function setup(page: Page, failDecision = false) {
 }
 
 for (const width of [1440, 1024, 390]) {
+  test(`Agents header keeps pause actions and Decision Desk navigation at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await setup(page)
+    await page.goto('/agents')
+    const header = page.locator('.agents-page .page-head')
+    const more = header.getByRole('button', { name: 'More agent actions', exact: true })
+    const add = header.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })
+    await expectStableControls({
+      controls: { more, add },
+      interactions: [{ name: 'open merged navigation', run: async () => {
+        await more.click()
+        const menu = page.getByRole('menu')
+        for (const name of ['Pause all…', 'Resume all…', 'Wind down…', 'Usage', 'Agent keys', 'History', 'Agent settings']) {
+          await expect(menu.getByRole('menuitem').filter({ hasText: name })).toBeVisible()
+        }
+        await expect(menu.getByRole('menuitem', { name: 'Decision Desk', exact: true })).toHaveAttribute('href', '/decision-desk')
+      } }],
+    })
+  })
+
   test(`ticket relation popover keeps its selectors through result changes at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 })
     await mockWork(page, fixtures())
@@ -53,7 +74,7 @@ for (const width of [1440, 1024, 390]) {
     }
   })
 
-  test(`managed Interrupt and Stop controls stay put at ${width}`, async ({ page }) => {
+  test(`managed Interrupt menu and Stop now button stay put at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const data = await setup(page)
     const ownership = { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: new Date().toISOString() }
@@ -66,23 +87,26 @@ for (const width of [1440, 1024, 390]) {
     await page.route('**/api/projects/*/harness-sessions/*/controls/*', route => route.fulfill({ json: { id: request.request_id, session_id: session(1), kind: request.kind, state: 'completed', outcome: 'applied', reason: 'native_interrupt_acknowledged' } }))
     await page.goto(`/agents/${session(1)}`)
     const controls = page.getByRole('region', { name: 'Session controls' })
-    const interrupt = controls.getByRole('button', { name: 'Interrupt', exact: true }), stop = controls.getByRole('button', { name: 'Stop', exact: true })
+    const more = controls.getByRole('button', { name: 'More session controls', exact: true })
+    const interrupt = page.getByRole('menuitem', { name: /^Interrupt this step/ })
+    // The panel has a Stop now button; the session list has a menuitem.
+    const stop = page.getByRole('button', { name: 'Stop now…', exact: true })
+    const dialog = page.getByRole('dialog', { name: /^Stop now / })
+    await more.click()
     await expectStableControls({
-      controls: { interrupt, stop },
+      controls: { interrupt, more, stop },
       interactions: [
-        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied') } },
-        { name: 'open and cancel Stop', run: async () => { await stop.click(); await page.getByRole('button', { name: 'Confirm stop' }).hover(); await page.getByRole('button', { name: 'Cancel', exact: true }).click() } },
+        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied'); await more.click() } },
+        { name: 'open and cancel Stop now', run: async () => { await more.click(); await stop.click(); await dialog.getByRole('button', { name: /^Stop now/ }).hover(); await dialog.getByRole('button', { name: /^Cancel/ }).click(); await more.click() } },
       ],
     })
-    if (width === 390) {
-      await stop.click()
-      const sheet = page.getByRole('dialog', { name: 'Stop', exact: true })
-      await expectStableControls({
-        controls: { sheet, close: sheet.getByRole('button', { name: 'Close' }), confirm: sheet.getByRole('button', { name: 'Confirm stop' }), cancel: sheet.getByRole('button', { name: 'Cancel' }) },
-        scrollAreas: { body: sheet.locator('.sheet-body') },
-        interactions: [{ name: 'hover confirmation', run: () => sheet.getByRole('button', { name: 'Confirm stop' }).hover() }],
-      })
-    }
+    await more.click()
+    await stop.click()
+    await expectStableControls({
+      controls: { ...(width === 390 ? { sheet: dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), confirm: dialog.getByRole('button', { name: /^Stop now/ }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), footer: dialog.locator('.pause-actions') },
+      scrollAreas: { body: dialog.locator('.pause-body') },
+      interactions: [{ name: 'hover confirmation', run: () => dialog.getByRole('button', { name: /^Stop now/ }).hover() }],
+    })
   })
 
   test(`approval choices, typing and failure keep the decision controls put at ${width}`, async ({ page }) => {
@@ -104,22 +128,36 @@ for (const width of [1440, 1024, 390]) {
     })
   })
 
-  test(`Stop confirmation stays the same through the session series at ${width}`, async ({ page }) => {
+  test(`Stop now menu and Pause dialog stay put through the session series at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
-    await setup(page)
+    const data = await setup(page)
+    data.sessions[0]!.display_label = 'worker-one'
+    // Managed names allow 128 characters: cover wrapping words and a single token.
+    data.sessions[1]!.display_label = 'worker '.repeat(18) + 'xx'
+    data.sessions[2]!.display_label = 'x'.repeat(128)
     await page.goto('/agents')
     async function open(n: number) {
-      await page.locator(`[data-row="s:${session(n)}"]`).getByRole('button', { name: /^Actions for/ }).click()
-      await page.getByRole('menuitem', { name: /Stop session/ }).click()
-      await expect(page.locator('.confirm[open]')).toBeVisible()
+      const row = page.locator(`[data-row="s:${session(n)}"]`)
+      const name = data.sessions[n - 1]!.display_label
+      const actions = row.getByRole('button', { name: `Actions for ${name}`, exact: true })
+      await actions.click()
+      const stopItem = page.getByRole('menuitem', { name: 'Stop now…', exact: true })
+      await expectStableControls({
+        controls: { actions, stopItem },
+        interactions: [{ name: 'hover Stop now menuitem', run: () => stopItem.hover() }],
+      })
+      await stopItem.click()
+      await expect(page.getByRole('dialog', { name: `Stop now ${name}`, exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: `Stop now ${name}`, exact: true })).toHaveText(`Stop now ${name}`)
     }
     await open(1)
-    const dialog = page.locator('.confirm[open]')
-    const cancel = dialog.getByRole('button', { name: 'Cancel' })
+    const dialog = page.getByRole('dialog', { name: /^Stop now / })
+    const cancel = dialog.getByRole('button', { name: /^Cancel/ })
+    const stop = dialog.getByRole('button', { name: /^Stop now/ })
     await expectStableControls({
-      controls: { ...(width === 390 ? { dialog } : {}), cancel, stop: dialog.getByRole('button', { name: 'Stop session' }) },
-      scrollAreas: { body: dialog.locator('#confirm-body') },
-      interactions: [2, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(cancel).toBeFocused() } })),
+      controls: { ...(width === 390 ? { dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), actions: dialog.locator('.pause-actions'), cancel, stop, heading: dialog.getByRole('heading') },
+      scrollAreas: { body: dialog.locator('.pause-body'), head: dialog.locator('.pause-head') },
+      interactions: [2, 3, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(stop).toBeFocused() } })),
     })
   })
 
@@ -128,31 +166,58 @@ for (const width of [1440, 1024, 390]) {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await setup(page)
     await page.goto('/agents')
-    const dial = page.getByRole('region', { name: 'Agents working at once' })
-    const more = dial.getByRole('button', { name: 'More agents at once' })
-    const fewer = dial.getByRole('button', { name: 'Fewer agents at once' })
+    const dial = page.getByRole('region', { name: 'Agents at once' })
+    const more = dial.getByRole('button', { name: 'One agent more at once' })
+    const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
+    // Destination labels change with the current value; the stepper controls persist.
+    const rowFewer = row.locator('.lim-step .pm').nth(0), rowMore = row.locator('.lim-step .pm').nth(1)
     await expect(row).toBeVisible()
-    await expect(more).toHaveCSS('transition-property', 'background')
-    const rowCount = await dial.locator('.rows > li').count()
-    const rowsHeight = (await dial.locator('.rows').boundingBox())!.height
-    expect(rowsHeight, 'short lists have no padded rows').toBeLessThanOrEqual(rowCount * 60)
-    expect((await dial.locator('.spare').boundingBox())!.height).toBeLessThan(64)
-    expect((await dial.locator('.foot').boundingBox())!.height).toBeLessThan(38)
+    await page.evaluate(() => document.fonts.ready)
+    // The merged dial uses a separate explanation row and a container breakpoint.
+    // Verify uniform selector rows; the interaction guard below proves stability.
+    const rowHeights = await dial.locator('.rows > li').evaluateAll(items => items.map(item => {
+      const style = getComputedStyle(item)
+      // The first row has no separator; compare the actual content slots.
+      return item.getBoundingClientRect().height - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)
+    }))
+    expect(rowHeights.length).toBeGreaterThan(0)
+    for (const height of rowHeights) {
+      expect(height).toBeGreaterThan(0)
+      expect(Math.abs(height - rowHeights[0]!)).toBeLessThanOrEqual(.5)
+    }
+    await expectDialRowsFitContent(dial)
     await expectStableControls({
-      controls: { more, fewer, selector: dial.getByRole('tablist'), row, rowMore: row.getByRole('button', { name: /^More agents/ }), rowFewer: row.getByRole('button', { name: /^Fewer agents/ }) },
+      controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: [
-        { name: 'hold total stepper', run: async () => { await more.hover(); await page.mouse.down() } },
+        // Theme feedback may animate several properties. Judge the control's
+        // geometry through focus, hover and press instead of its CSS spelling.
+        { name: 'focus total stepper', run: async () => { await more.focus(); await expect(more).toBeFocused() } },
+        { name: 'hover total stepper', run: () => more.hover() },
+        { name: 'hold total stepper', run: () => page.mouse.down() },
         { name: 'release total stepper', run: () => page.mouse.up() },
         ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
-        ...['More', 'Fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: new RegExp(`^${direction} agents`) }).click() })),
+        ...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } })),
       ],
     })
+    await expectDialRowsFitContent(dial)
+  })
+
+  test(`Agents working harness modes stay put at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await setup(page)
+    await page.goto('/agents')
+    const dial = page.getByRole('region', { name: 'Agents at once' })
+    const more = dial.getByRole('button', { name: 'One agent more at once' })
+    const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
+    const row = dial.locator('[data-key="codex"]')
+    await expect(row).toBeVisible()
     await expectStableControls({
-      controls: { more, fewer, selector: dial.getByRole('tablist') },
+      controls: { more, fewer, selector: row.getByRole('radiogroup'), row },
       scrollAreas: { rows: dial.locator('.rows') },
-      interactions: ['By area', 'By model'].map(name => ({ name, run: async () => { await dial.getByRole('tab', { name }).click(); await expect(dial.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true') } })),
+      interactions: ['No limit', 'Off', 'At most'].map(name => ({ name, run: async () => { await row.getByRole('radio', { name, exact: true }).click(); await expect(row.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
     })
   })
 }
@@ -248,6 +313,18 @@ test('stability guard rejects empty interactions and collapse during its animati
     animation.onfinish = () => Object.assign((el as HTMLElement).style, { width: '0px', height: '0px' })
   })
   await expect(expectStableControls({ controls, interactions: [{ name: 'hover', run: () => page.locator('#control').hover() }] })).rejects.toThrow(/sampled control (width|height) must be positive/)
+})
+
+test('dial content budget rejects fixed whitespace, clipped controls and overflow', async ({ page }) => {
+  await page.setContent('<section id="dial" style="width:900px"><ul class="rows" style="width:500px;padding:0;margin:0;list-style:none"><li data-key="codex" style="display:grid;grid-template-columns:1fr 1fr;align-items:center;min-height:76px;box-sizing:border-box;padding:9px 6px"><span>Codex</span><div style="height:56px"><button class="value-slot">1</button><p style="margin:0">No own limit</p></div></li></ul></section>')
+  const dial = page.locator('#dial'), row = dial.locator('li')
+  await expectDialRowsFitContent(dial)
+  await row.evaluate(el => { (el as HTMLElement).style.height = '180px' })
+  await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/row fits its content and approved minimum/)
+  await row.evaluate(el => { Object.assign((el as HTMLElement).style, { minHeight: '0', height: '20px' }) })
+  await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/content stays inside row (top|bottom)/)
+  await row.evaluate(el => { Object.assign((el as HTMLElement).style, { minHeight: '76px', height: 'auto' }); (el.lastElementChild as HTMLElement).style.width = '600px' })
+  await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/content stays inside row right/)
 })
 
 async function mountShell(page: Page, kind: Shell, width: number, above = false) {
@@ -423,6 +500,25 @@ for (const width of [1440, 1024]) {
         { name: 'valid start', run: () => from.fill('2026-10-02') },
         { name: 'invalid end', run: async () => { await to.fill('2026-10-01'); await expect(dialog.getByRole('alert')).toHaveText('The end is before the start.'); await expect(apply).toBeDisabled() } },
         { name: 'valid end', run: async () => { await to.fill('2026-10-03'); await expect(dialog.getByRole('alert')).toHaveCount(0); await expect(apply).toBeEnabled() } },
+      ],
+    })
+  })
+}
+
+for (const width of [390, 1440]) {
+  test(`model estimate picker hints and selection hold every control at ${width}`, async ({ page }) => {
+    await mountShell(page, 'model-picker', width)
+    const picker = page.getByRole('dialog', { name: 'Fixture picker' })
+    const options = picker.getByRole('option')
+    await expect(options).toHaveCount(3)
+    const second = options.nth(1)
+    await expectStableControls({
+      controls: { search: picker.getByRole('searchbox'), group: picker.getByRole('listbox'), first: options.nth(0), clicked: second, last: options.nth(2) },
+      scrollAreas: { list: picker.getByRole('listbox') },
+      interactions: [
+        { name: 'history arrives', run: async () => { await page.evaluate(async () => { const path = '/tests/helpers/no-shift-shells.ts'; const shell = await import(/* @vite-ignore */ path); shell.setModelHistory(true) }); await expect(second).toContainText('typically ~2.4 h') } },
+        { name: 'select a model', run: async () => { await second.click(); await expect(second).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'uncalibrated history', run: async () => { await page.evaluate(async () => { const path = '/tests/helpers/no-shift-shells.ts'; const shell = await import(/* @vite-ignore */ path); shell.setModelHistory(false) }); await expect(second).not.toContainText('typically') } },
       ],
     })
   })

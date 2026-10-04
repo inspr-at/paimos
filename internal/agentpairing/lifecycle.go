@@ -36,6 +36,12 @@ func LockRead(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
+// LockMutation enters an account/lifecycle transaction through the shared
+// tenant, tree, pairing fence before resource rows.
+func LockMutation(ctx context.Context, tx pgx.Tx) error {
+	return Lock(ctx, tx)
+}
+
 type disconnectInput struct {
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 	Mode             string `json:"mode"`
@@ -446,11 +452,12 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 		if agentsetup.KnownHarnessState(detail.State) {
 			statuses[harness] = detail.State
 		}
+		detail = detail.WithProbeDetail(harness, report.ReasonDetail)
 		// Never persist client-supplied commands, paths or diagnostics: the
 		// fix is derived from the harness and reason code. Attention on a
-		// non-ready report is ignored. A ready report keeps only enrolled
-		// accounts that are a proper subset and still need a fix.
-		if detail.State == "ready" {
+		// blocked/login_required report may name every enrolled account;
+		// a ready report requires a proper subset.
+		if detail.State == "ready" || detail.State == "blocked" || detail.State == "login_required" {
 			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
 			detail.Attention = block.Accounts
 			detail.AttentionCount = block.Count

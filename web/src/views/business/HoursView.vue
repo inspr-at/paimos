@@ -129,8 +129,7 @@ function stackAfter(day: Date) {
 }
 async function log(request: LogRequest) {
   const principal = person.value
-  const startMinutes = request.startMinutes ?? stackAfter(request.day)
-  const started = new Date(request.day.getFullYear(), request.day.getMonth(), request.day.getDate(), 0, startMinutes, 0, 0)
+  const started = new Date(request.startedAt)
   const ended = new Date(started.getTime() + request.seconds * 1000)
   if (dayKey(ended) !== dayKey(request.day) && ended.getHours() + ended.getMinutes() > 0) { toast('That entry would run past midnight. Split it across two days.', { tone: 'error' }); return }
   logging.value = true
@@ -476,7 +475,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           </template>
         </div>
 
-        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" :quiet="!!editing" @log="log" /></div>
+        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" :default-start-minutes="stackAfter" :quiet="!!editing" @log="log" /></div>
         <div v-else-if="canLog" class="log-closed"><button type="button" class="btn log-open" @click="openLog"><AppIcon name="plus" :size="14" />Log time</button></div>
         <p v-else-if="isAgent" class="agent-note"><AppIcon name="agent" :size="14" />An agent’s time comes from its finished runs, one entry per run.</p>
 

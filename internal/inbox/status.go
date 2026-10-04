@@ -9,7 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -57,7 +59,7 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 		items = items[:0]
 		rows, err := tx.Query(r.Context(), `SELECT m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by
  FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
- WHERE m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
+ WHERE m.chat_thread_id IS NULL AND m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
 		if err != nil {
 			return err
 		}
@@ -130,9 +132,32 @@ func (m *module) handlePutDeliverySettings(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(), `INSERT INTO inbox_delivery_settings(tenant_id,session_deadline_seconds,unbound_deadline_seconds,max_attempts) VALUES($1::uuid,$2,$3,$4)
+		ctx := r.Context()
+		// Access mutations use this advisory lock followed by the tenant row.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, p.TenantID); err != nil {
+			return err
+		}
+		var tenantID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}); err != nil {
+			return errForbidden
+		}
+		before, err := loadDeliverySettings(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if before == in {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO inbox_delivery_settings(tenant_id,session_deadline_seconds,unbound_deadline_seconds,max_attempts) VALUES($1::uuid,$2,$3,$4)
  ON CONFLICT (tenant_id) DO UPDATE SET session_deadline_seconds=EXCLUDED.session_deadline_seconds,unbound_deadline_seconds=EXCLUDED.unbound_deadline_seconds,max_attempts=EXCLUDED.max_attempts,updated_at=clock_timestamp()`,
 			p.TenantID, in.SessionDeadlineSeconds, in.UnboundDeadlineSeconds, in.MaxAttempts)
+		if err != nil {
+			return err
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "inbox.delivery_settings_changed", Before: before, After: in})
 		return err
 	})
 	if err != nil {

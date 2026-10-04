@@ -80,6 +80,11 @@ const busy = ref(false)
 // Why the server refused a role change, shown in the open picker.
 const roleError = ref('')
 watch(picker, () => { roleError.value = '' })
+function closeRolePicker(restoreFocus: boolean) {
+  const anchor = picker.value?.anchor
+  picker.value = null
+  if (restoreFocus) anchor?.focus({ preventScroll: true })
+}
 async function chooseRole(roleId: string | null) {
   const target = picker.value
   if (!target) return
@@ -231,8 +236,8 @@ onMounted(loadKeys)
 
     <RowMenu v-if="menu" :anchor="menu.anchor" :items="actions" :label="`Actions for ${menu.agent.name}`" @select="act" @close="closeMenu" />
     <RolePicker
-      v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
+      v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :role-details="access.runtimeRoleDetails" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="closeRolePicker"
     />
     <EditKeyScopesSheet v-if="editing" :key="editing.key.id" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
     <NewAgentSheet v-if="creatingAgent" @close="closeAgent" @created="agentCreated" />

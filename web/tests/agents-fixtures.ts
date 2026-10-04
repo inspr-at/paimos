@@ -97,6 +97,7 @@ export type AgentData = ReturnType<typeof agentData>
 export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
 export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
   accountsForbidden?: boolean
@@ -123,12 +124,19 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
+    if (path === '/api/agents/plan' && method === 'GET') {
+      const stored = options.workingPreference?.()
+      const running: Record<string, number> = {}
+      for (const session of data.sessions) if (!session.stopped_at && session.phase !== 'stopped') running[session.harness] = (running[session.harness] ?? 0) + 1
+      return route.fulfill({ json: { total: stored?.total ?? stored?.cap ?? 15, limits: stored?.limits ?? {}, principal_id: data.me, running, running_total: Object.values(running).reduce((n, x) => n + x, 0), source: stored?.total !== undefined ? 'plan' : stored ? 'legacy' : 'default', updated_at: null } })
+    }
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
+    const pausePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/pause$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || readMarkerPath || sessionsPath || pausePath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
     if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
@@ -175,6 +183,15 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     }
     if (provenancePath) {
       return route.fulfill({ json: { session_id: provenancePath[2], revisions: [], truncated: false } })
+    }
+    if (pausePath) {
+      if (method !== 'POST') return route.fulfill({ status: 405, json: { error: 'method not allowed' } })
+      const target = data.sessions.find(s => s.id === pausePath[2] && s.project_id === pausePath[1])
+      if (!target) return route.fulfill({ status: 404, json: { error: 'session not found' } })
+      const input = body as { level: string; note: string }
+      // Acceptance leaves the process live until a later reported exit.
+      Object.assign(target, { revision: Number(target.revision) + 1, pause: { control_id: `pause-${target.id}`, state: 'requested', level: input.level, note: input.note, stop_requested: input.level === 'stop_now', deliver: true } })
+      return route.fulfill({ json: target })
     }
     if (sessionsPath) {
       if (options.sessionsMissing) return route.fulfill({ status: 404, json: { error: 'not found' } })

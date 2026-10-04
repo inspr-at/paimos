@@ -21,7 +21,7 @@ type agentsPlanResponse struct {
 }
 
 func (rt *runtime) cmdAgents() *Command {
-	return &Command{Name: "agents", Short: "Agent start plan", Use: "agents plan", subs: []*Command{{
+	return &Command{Name: "agents", Short: "Agent plans and session settings", Use: "agents <command>", subs: []*Command{rt.cmdAgentsTier(), {
 		Name: "plan", Short: "Show the person's plan and running counts", Use: "agents plan [--json]",
 		Long: "Reads your plan, or your agent key creator's plan with agents.plan.read. Lowering the plan lets running work finish; account capacity is checked separately.",
 		run: func(args []string) error {

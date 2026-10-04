@@ -32,11 +32,23 @@ async function setup(page: Page, options: { stale?: boolean; denied?: boolean; l
     if (!control) return route.fallback()
     return route.fulfill({ json: { ...control, ...(options.pending ? {} : { state: 'completed', outcome: options.reject ? 'rejected' : 'applied', reason: options.reject || (control.kind === 'steer' ? 'queued_next_turn' : control.kind === 'stop' ? 'native_close_exited' : control.kind === 'effort' ? 'setting_applied_next_turn' : control.kind === 'model' || control.kind === 'rename' ? 'setting_applied' : 'native_interrupt_acknowledged') }) } })
   })
+  const pauses: { path: string; body: Record<string, unknown> }[] = []
+  await page.route('**/api/projects/*/harness-sessions/*/pause', route => {
+    const body = route.request().postDataJSON()
+    pauses.push({ path: new URL(route.request().url()).pathname, body })
+    const target = data.sessions[0]!
+    Object.assign(target, { revision: Number(target.revision) + 1, pause: { control_id: 'pause-stop', state: 'requested', level: body.level, note: body.note, stop_requested: body.level === 'stop_now', deliver: true } })
+    return route.fulfill({ json: target })
+  })
   await page.goto(`/agents/${id}`)
   await expect(page.getByRole('region', { name: 'Session controls' })).toBeVisible()
-  return { data, requests, calls }
+  return { data, requests, calls, pauses }
 }
 const controls = (page: Page) => page.getByRole('region', { name: 'Session controls' })
+const more = (page: Page) => controls(page).getByRole('button', { name: 'More session controls', exact: true })
+const interrupt = (page: Page) => page.getByRole('menuitem', { name: /^Interrupt this step/ })
+const stopButton = (page: Page) => page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true })
+async function sendInterrupt(page: Page) { await more(page).click(); await interrupt(page).click() }
 
 test('steer is session-bound, ephemeral input with a real queued receipt', async ({ page }) => {
   const { requests } = await setup(page)
@@ -55,37 +67,50 @@ test('steer is session-bound, ephemeral input with a real queued receipt', async
 test('an accepted control reads the lists again', async ({ page }) => {
   const { calls } = await setup(page)
   const before = sessionListReads(calls)
-  await controls(page).getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await sendInterrupt(page)
   await expect(controls(page).getByRole('status')).toContainText('Interrupt applied')
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
 
-test('interrupt sends directly, stop requires its local confirmation', async ({ page }) => {
-  const { requests } = await setup(page)
-  await controls(page).getByRole('button', { name: 'Interrupt', exact: true }).click()
+test('interrupt sends directly, Stop now confirms a durable stop request', async ({ page }) => {
+  const { requests, pauses } = await setup(page)
+  await sendInterrupt(page)
   await expect(controls(page).getByRole('status')).toContainText('Interrupt applied')
-  await controls(page).getByRole('button', { name: 'Stop', exact: true }).click()
+  await stopButton(page).click()
+  const dialog = page.getByRole('dialog', { name: 'Stop now Focused session', exact: true })
   expect(requests).toHaveLength(1)
-  await controls(page).getByRole('button', { name: 'Confirm stop' }).click()
-  await expect(controls(page).getByRole('status')).toHaveText('Stop applied · session exited.')
-  expect(requests.map(r => r.kind)).toEqual(['interrupt', 'stop'])
+  expect(pauses).toHaveLength(0)
+  await dialog.getByRole('button', { name: /^Stop now/ }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.locator('.toast').filter({ hasText: '1 pause/stop request sent.' })).toBeVisible()
+  expect(requests.map(r => r.kind)).toEqual(['interrupt'])
+  expect(pauses).toEqual([{ path: `/api/projects/p-pharos/harness-sessions/${id}/pause`, body: { level: 'stop_now', note: '' } }])
+  // Accepted stop requests are not evidence that the process has exited.
+  await expect(controls(page).getByRole('status')).not.toContainText('session exited')
 })
 
 for (const condition of ['stale', 'denied'] as const) test(`${condition} session cannot send controls`, async ({ page }) => {
-  const { requests } = await setup(page, { [condition]: true })
-  for (const name of ['Steer', 'Interrupt', 'Stop']) await expect(controls(page).getByRole('button', { name, exact: true })).toBeDisabled()
+  const { requests, pauses } = await setup(page, { [condition]: true })
+  await expect(controls(page).getByRole('button', { name: 'Steer', exact: true })).toBeDisabled()
+  await more(page).click()
+  await expect(interrupt(page)).toBeDisabled()
+  for (const field of ['name', 'model', 'effort']) await expect(page.getByRole('menuitem', { name: `Edit ${field}`, exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  // Permission denial also hides the separate durable Stop now action.
+  if (condition === 'denied') await expect(stopButton(page)).toHaveCount(0)
   expect(requests).toHaveLength(0)
+  expect(pauses).toHaveLength(0)
 })
 
 test('pending and expired are honest daemon outcomes', async ({ page }) => {
   await setup(page, { reject: 'authorization_expired' })
-  await controls(page).getByRole('button', { name: 'Interrupt' }).click()
+  await sendInterrupt(page)
   await expect(controls(page).getByRole('status')).toHaveText('Expired before delivery.')
 })
 
 test('lost POST response preserves the request id for explicit retry', async ({ page }) => {
   const { requests } = await setup(page, { lostResponse: true })
-  await controls(page).getByRole('button', { name: 'Interrupt' }).click()
+  await sendInterrupt(page)
   await expect(controls(page).getByRole('status')).toContainText('Outcome unconfirmed')
   await controls(page).getByRole('button', { name: 'Retry same request' }).click()
   await expect(controls(page).getByRole('status')).toContainText('Interrupt applied')
@@ -120,29 +145,35 @@ test('a lost steer response keeps the receipt and retry inside the phone sheet',
 
 test('phone stop asks before sending, and More reaches Recover and Remove', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const { requests } = await setup(page)
+  const { requests, pauses } = await setup(page)
   await page.route('**/harness-sessions/*/recovery', route => route.fulfill({ json: {
     session_id: id, host: 'imac0', display_label: 'Focused session', observed_revision: 'c'.repeat(64),
     confirmation: `archive ${id} on imac0`, process_state: 'running', process_scope: 'No process will be signalled.',
     can_archive: true, force_stop_available: false, force_stop_reason: 'Force stop is not available.',
   } }))
-  for (const name of ['Steer', 'Interrupt', 'Stop']) await touch(controls(page).getByRole('button', { name, exact: true }))
-  const more = controls(page).getByRole('button', { name: 'More session actions' })
+  await touch(controls(page).getByRole('button', { name: 'Steer', exact: true }))
+  await touch(stopButton(page))
+  const more = controls(page).getByRole('button', { name: 'More session controls' })
+  await more.click()
+  await touch(interrupt(page))
+  await page.keyboard.press('Escape')
   await touch(more)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 
-  await controls(page).getByRole('button', { name: 'Stop', exact: true }).click()
-  const stop = page.getByRole('dialog', { name: 'Stop' })
-  await expect(stop.getByRole('button', { name: 'Confirm stop' })).toBeVisible()
-  await touch(stop.getByRole('button', { name: 'Close' }))
+  await stopButton(page).click()
+  const stop = page.getByRole('dialog', { name: 'Stop now Focused session', exact: true })
+  await expect(stop.getByRole('button', { name: /^Stop now/ })).toBeVisible()
+  await touch(stop.getByRole('button', { name: 'Close pause dialog' }))
   expect(requests).toHaveLength(0)
+  expect(pauses).toHaveLength(0)
   await page.keyboard.press('Escape')
   await expect(stop).toBeHidden()
   expect(requests).toHaveLength(0)
+  expect(pauses).toHaveLength(0)
 
-  await controls(page).getByRole('button', { name: 'Stop', exact: true }).click()
-  await expect(stop.getByRole('button', { name: 'Confirm stop' })).toBeVisible()
-  await stop.getByRole('button', { name: 'Close', exact: true }).click()
+  await stopButton(page).click()
+  await expect(stop.getByRole('button', { name: /^Stop now/ })).toBeVisible()
+  await stop.getByRole('button', { name: 'Close pause dialog', exact: true }).click()
   await expect(stop).toBeHidden()
   expect(requests).toHaveLength(0)
   await expect(page).toHaveURL(new RegExp(id))
@@ -150,7 +181,7 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
   await more.click()
   const menu = page.getByRole('menu', { name: 'More session actions' })
   await expect(menu.locator('p')).toHaveCount(0)
-  await expect(page.getByText('Tools stay bound to this run and its budget.')).toBeVisible()
+  await expect(page.getByText('Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.', { exact: true })).toBeVisible()
   const recoverItem = menu.getByRole('menuitem', { name: 'Recover', exact: true })
   const removeItem = menu.getByRole('menuitem', { name: 'Remove Focused session' })
   await touch(recoverItem)
@@ -175,6 +206,7 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
   await expect(confirm).toBeHidden()
   await expect(page).toHaveURL(new RegExp(id))
   expect(requests).toHaveLength(0)
+  expect(pauses).toHaveLength(0)
 })
 
 test('navigation clears private drafts', async ({ page }) => {
@@ -190,9 +222,9 @@ test('navigation clears private drafts', async ({ page }) => {
 
 test('pending controls block a second action until the daemon responds', async ({ page }) => {
   const { requests } = await setup(page, { pending: true })
-  await controls(page).getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await sendInterrupt(page)
   await expect(controls(page).getByRole('status')).toHaveText('Interrupt pending · waiting for the daemon.')
-  for (const name of ['Steer', 'Interrupt', 'Stop']) await expect(controls(page).getByRole('button', { name, exact: true })).toBeDisabled()
+  for (const name of ['Steer', 'More session controls']) await expect(controls(page).getByRole('button', { name, exact: true })).toBeDisabled()
   expect(requests).toHaveLength(1)
 })
 
@@ -203,14 +235,15 @@ test('a late submission receipt cannot follow navigation to another session', as
     const body = route.request().postDataJSON()
     respond = () => route.fulfill({ status: 201, json: { id: body.request_id, session_id: id, kind: body.kind, state: 'pending', expires_at: new Date(Date.now() + 45000).toISOString() } })
   })
-  await controls(page).getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await sendInterrupt(page)
   await expect(controls(page).getByRole('status')).toHaveText('Request pending · waiting for the server.')
   await expect.poll(() => !!respond).toBe(true)
   await page.locator('[data-row="s:5e000000-0000-4000-8000-000000000002"] .agent-link').click()
   await respond!()
   await page.locator(`[data-row="s:${id}"] .agent-link`).click()
   await expect(controls(page).getByRole('status')).toHaveCount(0)
-  await expect(controls(page).getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
+  await more(page).click()
+  await expect(interrupt(page)).toBeEnabled()
 })
 
 for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`managed steer ${width} ${theme}`, async ({ page }) => {
@@ -222,7 +255,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`ma
     await mkdir(process.env.MANAGED_CONTROL_SHOTS, { recursive: true })
     await page.screenshot({ path: `${process.env.MANAGED_CONTROL_SHOTS}/resting-${width}-${theme}.png`, fullPage: true })
     if (width === 390) {
-      await controls(page).getByRole('button', { name: 'More session actions' }).click()
+      await controls(page).getByRole('button', { name: 'More session controls' }).click()
       await page.screenshot({ path: `${process.env.MANAGED_CONTROL_SHOTS}/menu-${width}-${theme}.png`, fullPage: true })
       await page.keyboard.press('Escape')
     }
@@ -266,7 +299,7 @@ test('setting pending blocks competing settings and process controls', async ({ 
   await controls(page).getByLabel('Name', { exact: true }).fill('New name')
   await controls(page).getByRole('button', { name: 'Save name' }).click()
   await expect(controls(page).getByRole('status')).toHaveText('Name pending · waiting for the daemon.')
-  for (const name of ['Edit name', 'Edit model', 'Edit effort', 'Steer', 'Interrupt', 'Stop']) await expect(controls(page).getByRole('button', { name, exact: true })).toBeDisabled()
+  for (const name of ['Edit name', 'Edit model', 'Edit effort', 'Steer', 'More session controls']) await expect(controls(page).getByRole('button', { name, exact: true })).toBeDisabled()
 })
 
 for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`managed settings ${width} ${theme}`, async ({ page }) => {
@@ -274,7 +307,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`ma
   await setup(page)
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
   if (width === 390) {
-    await controls(page).getByRole('button', { name: 'More session actions' }).click()
+    await controls(page).getByRole('button', { name: 'More session controls' }).click()
     await page.getByRole('menuitem', { name: 'Edit effort' }).click()
     await expect(page.getByRole('dialog', { name: 'Effort' }).getByLabel('Effort', { exact: true })).toBeEnabled()
   } else {

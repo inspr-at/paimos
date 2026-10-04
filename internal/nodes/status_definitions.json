@@ -118,6 +118,11 @@
     "meaning": "Open or Blocked plus a place in the work queue (AEON-522); Blocked waits on its named blocker. When ready, the next free agent picks it up, then it becomes In progress automatically.",
     "is_status": false
   },
+  "recurring": {
+    "label": "Recurring",
+    "meaning": "The loop badge on a ticket's type icon means recurring work created this ticket. Its tooltip gives the schedule and occurrence number. The Recurring pill opens the source recurrence for people allowed to manage it; retired recurrences keep their existing tickets and markers. This is a marker, not a status.",
+    "is_status": false
+  },
   "autopilot": {
     "enabled": true,
     "effective_enabled": true,

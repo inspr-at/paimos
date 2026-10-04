@@ -21,6 +21,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/markdownsource"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -199,17 +200,7 @@ func appendChangelog(body, line string) (string, string) {
 }
 
 func fencedLines(lines []string) []bool {
-	out := make([]bool, len(lines))
-	in := false
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			out[i] = true
-			in = !in
-			continue
-		}
-		out[i] = in
-	}
-	return out
+	return markdownsource.CodeLines(strings.Join(lines, "\n"))
 }
 
 func learningLine(date, text, key, href string) string {

@@ -89,7 +89,10 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 	}
 	queueDone := make(chan int, 1)
 	go func() {
-		queueDone <- f.request(f.person, "POST", "/api/queue", `{"node_id":"`+queueTicket+`"}`, "").Code
+		r := httpRequest(ctx, f.person, "POST", "/api/queue", `{"node_id":"`+queueTicket+`"}`)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		queueDone <- w.Code
 	}()
 	for {
 		var waiting bool
@@ -103,9 +106,28 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			t.Fatal("queue did not wait for the shared tenant fence")
+		case code := <-queueDone:
+			t.Fatalf("queue crossed held tenant fence: %d", code)
 		default:
 			runtime.Gosched()
 		}
+	}
+	// Prove that neither blocked writer holds the tree, independently of the
+	// expected pairing barrier. A misplaced tree acquisition would deadlock.
+	treeProbe, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer treeProbe.Rollback(context.Background())
+	var treeFree bool
+	if err := treeProbe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, f.person.TenantID).Scan(&treeFree); err != nil {
+		t.Fatal(err)
+	}
+	if !treeFree {
+		t.Fatal("pairing waiter already holds tree lock")
+	}
+	if err := treeProbe.Rollback(ctx); err != nil {
+		t.Fatal(err)
 	}
 	close(pause.resume)
 	for _, result := range []struct {

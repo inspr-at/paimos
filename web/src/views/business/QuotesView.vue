@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import type { MutationReceipt } from '../../lib/crm'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { minorMoney } from '../../lib/crm'
@@ -141,8 +142,8 @@ function closeMenu(restore: boolean) {
 }
 const nameOf = (row: QuoteRow) => row.offer_no || row.title || 'The quote'
 const failed = (e: unknown, fallback: string) => toast(lifecycleError(e, fallback), { tone: 'error' })
-const undoing = (id: string, types: string[], after: () => void) => () => {
-  void undoQuote(id, types).then(async () => { await store.load(true); after() }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }))
+const undoing = (receipt: MutationReceipt, after: () => void) => () => {
+  void undoQuote(receipt).then(async () => { await store.load(true); after() }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }))
 }
 async function copyText(text: string, done: string) {
   try { await navigator.clipboard.writeText(text); toast(done) } catch { toast('Copying did not work here.', { tone: 'error' }) }
@@ -173,7 +174,7 @@ async function act(row: QuoteRow, id: QuoteActionId) {
         toast(`Duplicated ${nameOf(row)} as ${copy.offer_no ?? 'a new draft'}.`, {
           actions: [
             { label: 'Open', run: () => open({ quote_node_id: copy.quote_node_id }, true) },
-            { label: 'Undo', run: undoing(copy.quote_node_id, ['quote.duplicated'], () => { if (openId.value === copy.quote_node_id) closeDock() }) },
+            { label: 'Undo', run: undoing(copy, () => { if (openId.value === copy.quote_node_id) closeDock() }) },
           ],
           timeout: 8000,
         })
@@ -206,20 +207,20 @@ async function act(row: QuoteRow, id: QuoteActionId) {
     case 'archive': case 'restore': {
       const archiving = id === 'archive'
       try {
-        await setArchived(row.quote_node_id, row.revision, archiving)
+        const receipt = await setArchived(row.quote_node_id, row.revision, archiving)
         await store.load(true)
         toast(archiving ? `Archived ${nameOf(row)}. It keeps its versions, evidence and files.` : `${nameOf(row)} is back in the list.`, {
-          action: { label: 'Undo', run: undoing(row.quote_node_id, ['quote.visibility_changed'], () => {}) }, timeout: 8000,
+          action: { label: 'Undo', run: undoing(receipt, () => {}) }, timeout: 8000,
         })
       } catch (e) { failed(e, 'That did not work.'); void store.load(true) }
       return
     }
     case 'delete': {
       try {
-        await deleteQuote(row.quote_node_id, row.revision)
+        const receipt = await deleteQuote(row.quote_node_id, row.revision)
         if (openId.value === row.quote_node_id) closeDock()
         if (store.items) store.items = store.items.filter(q => q.quote_node_id !== row.quote_node_id)
-        toast(`Deleted draft ${nameOf(row)}.`, { action: { label: 'Undo', run: undoing(row.quote_node_id, ['quote.deleted'], () => { store.cursor = row.quote_node_id }) }, timeout: 8000 })
+        toast(`Deleted draft ${nameOf(row)}.`, { action: { label: 'Undo', run: undoing(receipt, () => { store.cursor = row.quote_node_id }) }, timeout: 8000 })
       } catch (e) { failed(e, 'The draft was not deleted.'); void store.load(true) }
     }
   }

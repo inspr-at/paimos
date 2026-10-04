@@ -227,6 +227,13 @@ func TestClaimWaitsForProjectAccessMutationWithoutTenantInversion(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer probe.Rollback(context.Background())
+	if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, f.reader.TenantID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+			t.Fatal("project tenant fence blocks foreign-key readers (SQLSTATE 55P03)")
+		}
+		t.Fatalf("unexpected tenant lock probe failure: %v", err)
+	}
 	_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.reader.TenantID)
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {

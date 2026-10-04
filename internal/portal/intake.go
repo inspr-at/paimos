@@ -45,9 +45,15 @@ func (m *Module) submitWish(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "cross-site wish denied")
 		return
 	}
-	in, err := decodeWish(r)
-	if err != nil {
-		fail(w, http.StatusBadRequest, "invalid wish")
+	var in wishIntake
+	if !decodePortalInput(w, r, func() error {
+		var err error
+		in, err = decodeWish(r)
+		if err != nil {
+			return statusError{http.StatusBadRequest, "invalid wish"}
+		}
+		return nil
+	}) {
 		return
 	}
 	title, summary, err := wishText(in.Title, in.Summary)
@@ -63,16 +69,23 @@ func (m *Module) submitWish(w http.ResponseWriter, r *http.Request) {
 	}
 	discarded := strings.TrimSpace(in.Website) != ""
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal wish"), m.pool, tenantID, func(tx pgx.Tx) error {
-		open, err := portalOpen(r.Context(), tx)
-		if err != nil || !open {
-			if err != nil {
-				return err
-			}
-			return errClosed
-		}
-		productID, err := publishedProduct(r.Context(), tx)
+		product, err := publicWriteProduct(r.Context(), tx, r.PathValue("productSlug"))
 		if err != nil {
 			return err
+		}
+		if err := checkProductBinding(r, product); err != nil {
+			return err
+		}
+		if err := allowParticipation(product, false); err != nil {
+			return err
+		}
+		productID := product.ProductID
+		var allowed []string
+		if err := tx.QueryRow(r.Context(), `SELECT k.allowed_child_kinds FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid`, productID).Scan(&allowed); err != nil {
+			return err
+		}
+		if !wishChildAllowed(allowed) {
+			return errClosed
 		}
 		if discarded {
 			return nil
@@ -81,6 +94,11 @@ func (m *Module) submitWish(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errClosed) {
 		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	var se statusError
+	if errors.As(err, &se) {
+		fail(w, se.status, se.msg)
 		return
 	}
 	if err != nil {
@@ -149,31 +167,6 @@ func cleanWish(raw string, max int, multiline bool) (string, error) {
 	return raw, nil
 }
 
-func publishedProduct(ctx context.Context, tx pgx.Tx) (string, error) {
-	var id string
-	var allowed []string
-	err := tx.QueryRow(ctx, `
-		SELECT n.id::text, pk.allowed_child_kinds
-		FROM nodes n
-		JOIN node_kinds pk ON pk.tenant_id = n.tenant_id AND pk.id = n.kind_id
-		WHERE pk.slug = 'portal_product' AND n.parent_id IS NULL AND n.deleted_at IS NULL AND n.state = 'published'
-		ORDER BY n.position, n.key
-		LIMIT 1`).Scan(&id, &allowed)
-	if errors.Is(err, pgx.ErrNoRows) || !uuidPattern.MatchString(id) {
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return "", err
-		}
-		return "", errClosed
-	}
-	if err != nil {
-		return "", err
-	}
-	if !wishChildAllowed(allowed) {
-		return "", errClosed
-	}
-	return id, nil
-}
-
 func wishChildAllowed(slugs []string) bool {
 	if slugs == nil {
 		return true
@@ -186,10 +179,8 @@ func wishChildAllowed(slugs []string) bool {
 	return false
 }
 
+// The caller holds publicWriteProduct's canonical fence before product lookup.
 func insertPendingWish(ctx context.Context, tx pgx.Tx, tenantID, productID, title, summary string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id', true), 0))`); err != nil {
-		return err
-	}
 	var kindID, prefix string
 	err := tx.QueryRow(ctx, `SELECT id::text, short_prefix FROM node_kinds WHERE slug = 'portal_wish'`).Scan(&kindID, &prefix)
 	if errors.Is(err, pgx.ErrNoRows) || !uuidPattern.MatchString(kindID) {

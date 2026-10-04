@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 import { CODENAMES, mockReleases, presentedHistory } from './releases-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
@@ -24,19 +25,6 @@ async function open(page: Page, version?: string, now?: number) {
   await expect(sheet(page)).toBeVisible()
   return history
 }
-
-test('release list screenshot', async ({ page }) => {
-  test.skip(!process.env.RELEASE_LIST_SHOTS, 'Screenshots are opt-in review artifacts.')
-  await page.setViewportSize({ width: 1600, height: 1000 })
-  const now = new Date('2026-10-01T14:01:10Z').getTime()
-  await page.clock.install({ time: new Date(now) })
-  await open(page, undefined, now)
-  await mkdir(process.env.RELEASE_LIST_SHOTS!, { recursive: true })
-  await page.mouse.move(1, 1)
-  await sheet(page).locator('.listbox').focus()
-  await expect(sheet(page).locator('.row').first()).toBeInViewport()
-  await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS!, `${process.env.RELEASE_LIST_SHOT_LABEL ?? 'after'}-desktop.png`) })
-})
 
 test('the marketing name leads every row; codename and Pretty version are both visible', async ({ page }) => {
   const history = await open(page)
@@ -75,7 +63,7 @@ test('the list version uses the dock crossfade without hiding the codename or sh
   const pretty = version.locator('[data-version-character="pretty"]')
   await sheet(page).locator('.shell').evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
   await row.evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
-  // Playwright may scroll the 44 px target into view before hovering it.
+  // Playwright may scroll the copy target into view before hovering it.
   await version.scrollIntoViewIfNeeded()
   const bounds = await version.boundingBox()
   await version.hover()
@@ -133,7 +121,7 @@ test('release list copy controls have accessible interactive row semantics', asy
 })
 
 for (const width of [320, 390, 600, 1600]) {
-  test(`the list version stays on the name line and right-aligned at ${width}px`, async ({ page }) => {
+  test(`the list version sits below the name and stays right-aligned at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await open(page)
     if (width <= 760) {
@@ -144,17 +132,17 @@ for (const width of [320, 390, 600, 1600]) {
     const row = options(page).first()
     const name = row.locator('.row-name')
     const version = row.locator('.row-version')
-    const heading = row.locator('.line1')
-    await expect(row.locator('.row-identity .current-tag')).toBeVisible()
+    const heading = row.locator('.row-foot')
+    await expect(row.locator('.time .current-tag')).toBeVisible()
     const [nameBounds, versionBounds, headingBounds] = await Promise.all([name.boundingBox(), version.boundingBox(), heading.boundingBox()])
     expect(Math.abs(versionBounds!.x + versionBounds!.width - headingBounds!.x - headingBounds!.width)).toBeLessThanOrEqual(1)
-    expect(versionBounds!.y).toBe(nameBounds!.y)
+    expect(versionBounds!.y).toBeGreaterThanOrEqual(nameBounds!.y + nameBounds!.height)
     const button = version.getByRole('button')
     await sheet(page).getByRole('grid').focus()
     await page.keyboard.press('Tab')
     await expect(button).toBeFocused()
     await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
-    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(24)
     expect(await sheet(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
     expect(await row.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
     if (process.env.RELEASE_LIST_SHOTS && width <= 390) {
@@ -164,8 +152,8 @@ for (const width of [320, 390, 600, 1600]) {
   })
 }
 
-// AEON-576: real renderer layers, badges and long names share a single line.
-// Keep reservations opted in so this also works after AEON-556 lands.
+// Revision 4: names and counts share the first line, state badges stay in the
+// timestamp column, and an independent Pretty/canonical copy row follows below.
 for (const width of [1440, 1024, 390, 320]) {
   for (const theme of ['light', 'dark'] as const) {
     test(`release row geometry at ${width}px in ${theme}`, async ({ page }) => {
@@ -179,32 +167,31 @@ for (const width of [1440, 1024, 390, 320]) {
       Object.assign(history.releases[0]!, { codename: 'Sunlit Sonde' })
       Object.assign(history.releases[1]!, { codename: 'Rugged Ratio' })
       Object.assign(history.releases[2]!, { codename: 'Pure Probe', release_sequence: 54 })
-      Object.assign(history.releases[3]!, { codename: 'Deliberately Long Code Name That Must Truncate Before The Version Or Badge' })
+      const longName = 'Absichtlich langer deutscher Release-Name für vollständig lesbare Versionshinweise'
+      Object.assign(history.releases[3]!, { codename: longName })
       data.preferences.releases = { last_seen: history.releases[4]!.version }
       await mockWork(page, data)
       await mockReleases(page, history)
       await page.goto('/releases/all?release_lang=en')
       await expect(options(page)).toHaveCount(history.releases.length)
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-      await expect(options(page).nth(0).locator('.current-tag')).toBeVisible()
-      await expect(options(page).nth(1).locator('.tag').filter({ hasText: 'Rollback target' })).toBeVisible()
+      await expect(options(page).first().locator('.current-tag')).toHaveText('Live')
+      await expect(options(page).nth(1).locator('.rollback-tag')).toHaveText('Rollback')
       await expect(options(page).nth(2)).toContainText('Reserved, never published')
-      await expect(options(page).nth(0).locator('.new-tag')).toBeVisible()
+      await expect(options(page).first().locator('.new-tag')).toHaveText('New')
       await page.evaluate(() => document.fonts.ready)
 
       for (const index of [0, 1, 2, 3]) {
         const row = options(page).nth(index)
         await row.scrollIntoViewIfNeeded()
-        const name = row.locator('.row-name')
-        const version = row.locator('.row-version')
-        const button = version.getByRole('button')
-        const before = await button.boundingBox()
+        const button = row.locator('.row-version').getByRole('button')
         const geometry = await row.evaluate(el => {
-          const name = el.querySelector<HTMLElement>('.row-name')!
-          const text = name.querySelector<HTMLElement>('.rn-name')!
-          const version = el.querySelector<HTMLElement>('.row-version')!
-          const layers = version.querySelector<HTMLElement>('.version-layers')!
-          const heading = el.querySelector<HTMLElement>('.line1')!
+          const rect = (selector: string) => {
+            const box = el.querySelector(selector)!.getBoundingClientRect()
+            return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height }
+          }
+          const text = el.querySelector<HTMLElement>('.rn-name')!
+          const layers = el.querySelector('.version-layers')!
           const baseline = (node: Element) => {
             const marker = document.createElement('span')
             marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
@@ -213,123 +200,105 @@ for (const width of [1440, 1024, 390, 320]) {
             marker.remove()
             return top
           }
-          const rect = (node: Element) => {
-            const box = node.getBoundingClientRect()
-            return { top: box.top, right: box.right, left: box.left, height: box.height, width: box.width }
-          }
-          const canvas = document.createElement('canvas').getContext('2d')!
-          canvas.font = getComputedStyle(text).font
-          canvas.letterSpacing = getComputedStyle(text).letterSpacing
-          const identity = el.querySelector<HTMLElement>('.row-identity')!
-          const badges = [...identity.querySelectorAll<HTMLElement>('.tag')].map(tag => {
-            const label = tag.querySelector<HTMLElement>('.tag-label')!
-            // Measure intrinsic text without changing the badge on screen.
-            const full = tag.cloneNode(true) as HTMLElement
-            full.classList.remove('compact')
-            full.style.cssText = 'position:absolute;visibility:hidden;width:max-content'
-            identity.append(full)
-            const fullWidth = full.getBoundingClientRect().width
-            full.remove()
-            return {
-              ...rect(tag), fullWidth, label: rect(label),
-              labelPosition: getComputedStyle(label).position,
-              baseline: getComputedStyle(label).position === 'absolute' ? null : baseline(label),
-            }
-          })
           return {
-            name: rect(name), text: rect(text), version: rect(version), layers: rect(layers), heading: rect(heading),
-            identity: rect(identity), badgeGap: parseFloat(getComputedStyle(identity).columnGap), badges,
-            nameBaseline: baseline(text),
-            versionBaseline: baseline(version.querySelector('.version-pretty')!),
-            canonicalBaseline: baseline(version.querySelector('.version-canonical')!),
-            renderers: [...layers.children].map(rect),
-            ellipsis: getComputedStyle(text).textOverflow,
-            ellipsisWidth: canvas.measureText('…').width,
-            truncated: text.scrollWidth > text.clientWidth,
-            nowrap: getComputedStyle(text).whiteSpace,
+            name: rect('.row-name'), counts: rect('.counts'), version: rect('.row-version'),
+            foot: rect('.row-foot'), main: rect('.main'), time: rect('.time'),
+            badges: [...el.querySelectorAll('.time-badge')].map(tag => {
+              const box = tag.getBoundingClientRect()
+              return { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
+            }),
+            pretty: rect('.version-pretty'), canonical: rect('.version-canonical'),
+            renderers: [...layers.children].map(node => {
+              const box = node.getBoundingClientRect()
+              return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, height: box.height }
+            }),
+            prettyBaseline: baseline(el.querySelector('.version-pretty')!),
+            canonicalBaseline: baseline(el.querySelector('.version-canonical')!),
+            wrap: getComputedStyle(text).whiteSpace, clip: getComputedStyle(text).webkitLineClamp,
             overflow: el.scrollWidth - el.clientWidth,
           }
         })
         const label = `${width} ${theme} row ${index}`
-        expect(geometry.version.top, label).toBe(geometry.name.top)
-        expect(geometry.layers.top, label).toBe(geometry.text.top)
-        expect(geometry.versionBaseline, `${label} text baseline`).toBe(geometry.nameBaseline)
-        expect(geometry.canonicalBaseline, `${label} canonical baseline`).toBe(geometry.nameBaseline)
-        expect(geometry.heading.height, label).toBe(geometry.version.height)
-        expect(geometry.version.right, label).toBeCloseTo(geometry.heading.right, 0)
-        expect(geometry.text.right, label).toBeLessThanOrEqual(geometry.version.left)
-        expect(geometry.ellipsis, label).toBe('ellipsis')
-        expect(geometry.nowrap, label).toBe('nowrap')
-        if (index === 3) expect(geometry.truncated, label).toBe(true)
-        if (geometry.truncated) expect(geometry.text.width, `${label} ellipsis fits`).toBeGreaterThanOrEqual(geometry.ellipsisWidth)
+        expect(geometry.version.top, label).toBeGreaterThanOrEqual(geometry.name.bottom)
+        expect(geometry.version.right, label).toBeCloseTo(geometry.foot.right, 0)
+        expect(geometry.name.right, label).toBeLessThanOrEqual(geometry.counts.left)
+        expect(geometry.time.right, label).toBeLessThanOrEqual(geometry.main.left)
+        expect(geometry.wrap, label).toBe('normal')
+        expect(geometry.clip, label).toBe('2')
+        if (index === 3) {
+          await expect(row.locator('.row-name')).toHaveAttribute('data-tip', longName)
+          await expect(row.locator('.row-name')).toHaveAttribute('title', longName)
+        }
+        expect(Math.abs(geometry.prettyBaseline - geometry.canonicalBaseline), label).toBeLessThanOrEqual(0.5)
+        expect(geometry.pretty.height, label).toBeGreaterThan(0)
+        expect(geometry.canonical.height, label).toBeGreaterThan(0)
         expect(geometry.overflow, label).toBe(0)
         for (const badge of geometry.badges) {
-          const otherWidth = geometry.badges.reduce((sum, other) => sum + (other === badge ? 0 : other.width), 0)
-          const available = geometry.identity.width - geometry.ellipsisWidth - geometry.badgeGap * geometry.badges.length - otherWidth
-          if (badge.fullWidth <= available) {
-            expect(badge.labelPosition, `${label} fitting badge stays in flow`).toBe('static')
-          } else {
-            expect(badge.labelPosition, `${label} overflowing badge uses its dot`).toBe('absolute')
-          }
-          if (badge.labelPosition === 'static') {
-            expect(badge.baseline, `${label} badge baseline`).toBe(geometry.nameBaseline)
-            expect(badge.label.width, `${label} readable badge`).toBeGreaterThan(1)
-            expect(badge.label.left, label).toBeGreaterThanOrEqual(badge.left)
-            expect(badge.label.right, label).toBeLessThanOrEqual(badge.right)
-          }
-          expect(badge.left, label).toBeGreaterThanOrEqual(geometry.text.right)
-          expect(badge.right, label).toBeLessThanOrEqual(geometry.version.left)
-          expect(badge.top, label).toBeGreaterThanOrEqual(geometry.name.top)
-          expect(badge.top + badge.height, label).toBeLessThanOrEqual(geometry.name.top + geometry.name.height)
+          expect(badge.left, label).toBeGreaterThanOrEqual(geometry.time.left)
+          expect(badge.right, label).toBeLessThanOrEqual(geometry.time.right)
+          expect(badge.top, label).toBeGreaterThanOrEqual(geometry.time.top)
+          expect(badge.bottom, label).toBeLessThanOrEqual(geometry.time.bottom)
         }
         for (const renderer of geometry.renderers) {
           expect(renderer.left, label).toBeGreaterThanOrEqual(geometry.version.left)
           expect(renderer.right, label).toBeLessThanOrEqual(geometry.version.right)
-          expect(renderer.height, label).toBe(geometry.text.height)
+          expect(renderer.top, label).toBeGreaterThanOrEqual(geometry.version.top - 0.5)
+          expect(renderer.bottom, label).toBeLessThanOrEqual(geometry.version.bottom + 0.5)
+          expect(renderer.height, label).toBeLessThanOrEqual(geometry.version.height)
         }
-        if (index === 0 && (width === 1024 || width === 390)) {
-          expect(geometry.badges[0]!.labelPosition, `${label} Current stays readable`).toBe('static')
-        }
-        await row.hover()
-        expect(await button.boundingBox(), `${label} row hover`).toEqual(before)
-        await button.hover()
-        await expect(button).toHaveAttribute('data-version-view', 'revealed')
-        await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
-        expect(await button.boundingBox(), `${label} version hover`).toEqual(before)
-        await button.focus()
-        expect(await button.boundingBox(), `${label} keyboard focus`).toEqual(before)
-        expect((await button.boundingBox())!.height, label).toBeGreaterThanOrEqual(44)
-        const bounds = await name.boundingBox()
-        expect(bounds!.y, `${label} revealed`).toBe((await version.boundingBox())!.y)
+        await expectStableControls({
+          controls: { row, copy: button, name: row.locator('.row-name') },
+          scrollAreas: { list: sheet(page).locator('.list-pane'), row },
+          interactions: [
+            { name: 'row hover', run: () => row.hover() },
+            { name: 'copy hover', run: async () => {
+              await button.hover()
+              await expect(button).toHaveAttribute('data-version-view', 'revealed')
+              await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+            } },
+            { name: 'copy focus', run: () => button.focus() },
+          ],
+        })
+        expect((await button.boundingBox())!.height, label).toBeGreaterThanOrEqual(24)
         await sheet(page).getByRole('grid').focus()
         await page.mouse.move(1, 1)
       }
-      // Keyboard selection keeps the list visible on phones, unlike opening detail.
-      const row = options(page).nth(1)
-      const copy = row.locator('.row-version').getByRole('button')
-      await row.scrollIntoViewIfNeeded()
+      // Selection and translation preserve the row controls in scroll coordinates.
       await sheet(page).getByRole('grid').focus()
-      // Home may scroll a partially hidden first row into view. Measure after
-      // that navigation, so the assertion checks selection rather than scrolling.
       await page.keyboard.press('Home')
       await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
-      const before = await copy.boundingBox()
-      await page.keyboard.press('j')
-      await expect(row).toHaveAttribute('aria-selected', 'true')
-      expect(await copy.boundingBox()).toEqual(before)
-      expect(await sheet(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+      const row = options(page).nth(1)
+      await expectStableControls({
+        controls: { copy: row.locator('.version-copy'), row, languages: sheet(page).getByRole('radiogroup', { name: 'Language' }) },
+        scrollAreas: { sheet: sheet(page), list: sheet(page).locator('.list-pane') },
+        interactions: [
+          { name: 'next release', run: async () => {
+            await page.keyboard.press('j')
+            await expect(row).toHaveAttribute('aria-selected', 'true')
+          } },
+          { name: 'German', run: async () => {
+            await sheet(page).getByRole('radio', { name: 'DE', exact: true }).click()
+            await expect(row.locator('.headline')).toHaveText('Breite Listen')
+          } },
+        ],
+      })
       if (process.env.RELEASE_LIST_SHOTS) {
         await options(page).first().evaluate(el => el.scrollIntoView({ block: 'center' }))
         await mkdir(process.env.RELEASE_LIST_SHOTS, { recursive: true })
         await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `row-${width}-${theme}.png`) })
+        await options(page).nth(3).locator('.row-name').click()
+        await expect(sheet(page).locator('.detail h2')).toContainText(longName)
+        await expect(sheet(page).locator('.detail .changes')).toContainText('PAI-1057')
+        await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `detail-${width}-${theme}.png`) })
+        if (width <= 760) await sheet(page).getByRole('button', { name: 'All releases' }).click()
       }
+      // Badges remain readable rather than collapsing to dots on phones.
       if (width === 390) {
-        const current = options(page).first()
         await page.setViewportSize({ width: 1440, height: 1000 })
-        await expect(current.locator('.new-tag .tag-label')).toHaveCSS('position', 'static')
+        await expect(options(page).first().locator('.new-tag')).toHaveText('New')
         await page.setViewportSize({ width, height: 1000 })
-        await expect(current.locator('.new-tag .tag-label')).toHaveCSS('position', 'absolute')
-        await expect(current.locator('.current-tag .tag-label')).toHaveCSS('position', 'static')
+        await expect(options(page).first().locator('.new-tag')).toHaveText('New')
+        await expect(options(page).first().locator('.current-tag')).toHaveText('Live')
       }
     })
   }
@@ -342,8 +311,8 @@ test('the version track grows with wider monospace glyphs without covering a bad
   await row.locator('.version-copy').evaluate(el => { el.style.fontSize = '16px' })
   await expect.poll(async () => {
     const [identity, version, button, heading] = await Promise.all([
-      row.locator('.row-identity').boundingBox(), row.locator('.row-version').boundingBox(),
-      row.locator('.version-copy').boundingBox(), row.locator('.line1').boundingBox(),
+      row.locator('.time').boundingBox(), row.locator('.row-version').boundingBox(),
+      row.locator('.version-copy').boundingBox(), row.locator('.row-foot').boundingBox(),
     ])
     return identity!.x + identity!.width <= version!.x && version!.width === button!.width && version!.x + version!.width <= heading!.x + heading!.width
   }).toBe(true)

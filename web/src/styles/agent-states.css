@@ -4,7 +4,7 @@
    (tests/agent-palettes.test.ts). Protan, Deutan and Tritan keep the states
    apart under a simulation of that colour vision; words and marks still carry
    the state, since no palette suits every kind of colour vision. */
-:root {
+:root, .agent-theme-preview, .agent-theme-preview.light {
   --agent-standard-working: #287b2c; --agent-standard-waiting: #916400;
   --agent-standard-throttled: #7945b7; --agent-standard-problem: #c33532;
   --agent-protan-working: #2f63c4; --agent-protan-waiting: #8c4a00;
@@ -19,7 +19,7 @@
   --agent-monochrome-throttled: var(--ink); --agent-monochrome-problem: var(--ink);
   --agent-monochrome-inactive: var(--ink-2);
 }
-:root[data-theme="dark"] {
+:root[data-theme="dark"], .agent-theme-preview.dark {
   --agent-standard-working: #89d875; --agent-standard-waiting: #edc351;
   --agent-standard-throttled: #bf9af3; --agent-standard-problem: #ff8b82;
   --agent-protan-working: #9fd0ff; --agent-protan-waiting: #f2c14e;

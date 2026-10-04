@@ -53,7 +53,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 	request := func(principalID, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Roles: []string{"member"}}))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Kind: tenant.Person, Roles: []string{"member"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w

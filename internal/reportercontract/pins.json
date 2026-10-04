@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.4",
-    "sha256": "0fdd1ea84bbc31b15f84537400488fab8663a85bda80baf8567671d67053853e",
+    "version": "harness-session/2.7",
+    "sha256": "3b340a60b30b40dce0636b2a7dc7aef67f9b16bf84c2f50414063b8577d0f9f1",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -879,6 +879,35 @@
             "properties": {
               "brief": {
                 "type": "string"
+              },
+              "desk_answers": {
+                "items": {
+                  "properties": {
+                    "answer_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "replaces": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "answer_id",
+                    "revision"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 100,
+                "type": "array"
               },
               "handover": {
                 "additionalProperties": false,
@@ -1130,6 +1159,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "desk_answers": {
+            "items": {
+              "properties": {
+                "answer_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "question_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "replaces": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "question_id",
+                "answer_id",
+                "revision"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
           "display_label": {
             "maxLength": 128,
             "type": [
@@ -1298,6 +1356,14 @@
           },
           "needs_attention": {
             "type": "boolean"
+          },
+          "owner_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "parent_harness_session_id": {
             "format": "uuid",
@@ -1643,6 +1709,143 @@
               "string",
               "null"
             ]
+          },
+          "service_tier": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest"
+            ],
+            "type": "string"
+          },
+          "service_tier_reports": {
+            "items": {
+              "properties": {
+                "adapter_version": {
+                  "type": "string"
+                },
+                "applies": {
+                  "enum": [
+                    "next_run",
+                    "next_turn"
+                  ],
+                  "type": "string"
+                },
+                "change_instructions": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tiers": {
+                  "items": {
+                    "properties": {
+                      "mechanism": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "enum": [
+                          "Default",
+                          "Fast",
+                          "Fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "offered": {
+                        "type": "boolean"
+                      },
+                      "price_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "speed_factor": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "tier": {
+                        "enum": [
+                          "default",
+                          "fast",
+                          "fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "usage_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "name",
+                      "offered",
+                      "speed_factor",
+                      "price_multiplier",
+                      "usage_multiplier",
+                      "mechanism"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "harness",
+                "model",
+                "harness_version",
+                "adapter_version",
+                "checked_at",
+                "source",
+                "applies",
+                "change_instructions",
+                "tiers"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier_revision": {
+            "minimum": 0,
+            "type": "integer"
           },
           "stop_reason": {
             "type": [
@@ -1958,6 +2161,35 @@
               "brief": {
                 "type": "string"
               },
+              "desk_answers": {
+                "items": {
+                  "properties": {
+                    "answer_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "replaces": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "answer_id",
+                    "revision"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
               "handover": {
                 "additionalProperties": false,
                 "properties": {
@@ -2208,6 +2440,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "desk_answers": {
+            "items": {
+              "properties": {
+                "answer_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "question_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "replaces": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "question_id",
+                "answer_id",
+                "revision"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
           "display_label": {
             "maxLength": 128,
             "type": [
@@ -2376,6 +2637,14 @@
           },
           "needs_attention": {
             "type": "boolean"
+          },
+          "owner_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "parent_harness_session_id": {
             "format": "uuid",
@@ -2722,6 +2991,143 @@
               "null"
             ]
           },
+          "service_tier": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest"
+            ],
+            "type": "string"
+          },
+          "service_tier_reports": {
+            "items": {
+              "properties": {
+                "adapter_version": {
+                  "type": "string"
+                },
+                "applies": {
+                  "enum": [
+                    "next_run",
+                    "next_turn"
+                  ],
+                  "type": "string"
+                },
+                "change_instructions": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tiers": {
+                  "items": {
+                    "properties": {
+                      "mechanism": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "enum": [
+                          "Default",
+                          "Fast",
+                          "Fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "offered": {
+                        "type": "boolean"
+                      },
+                      "price_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "speed_factor": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "tier": {
+                        "enum": [
+                          "default",
+                          "fast",
+                          "fastest"
+                        ],
+                        "type": "string"
+                      },
+                      "usage_multiplier": {
+                        "exclusiveMinimum": 0,
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "name",
+                      "offered",
+                      "speed_factor",
+                      "price_multiplier",
+                      "usage_multiplier",
+                      "mechanism"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "harness",
+                "model",
+                "harness_version",
+                "adapter_version",
+                "checked_at",
+                "source",
+                "applies",
+                "change_instructions",
+                "tiers"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "stop_reason": {
             "type": [
               "string",
@@ -2873,6 +3279,10 @@
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/level",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/reasoning_effort",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items/properties/tiers/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/service_tier_reports/items/properties/tiers/items/properties/tier",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/supported_pause_levels/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/worktree",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/account_label",
@@ -2888,6 +3298,10 @@
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/level",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/reasoning_effort",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items/properties/tiers/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/service_tier_reports/items/properties/tiers/items/properties/tier",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/supported_pause_levels/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/worktree"
     ]
@@ -3229,8 +3643,8 @@
     ]
   },
   "me": {
-    "version": "me/1.2",
-    "sha256": "fc3949fd89221d495d61295bd91cbc732ab595948aef47b8467f89381e155b0a",
+    "version": "me/1.3",
+    "sha256": "e0e5ca9ce7a2904af7b075ac1c59a3ffd6c02b99c0b6d39929daaf148079fc0d",
     "shape": {
       "GET /me 200": {
         "properties": {
@@ -3279,6 +3693,9 @@
           "oidc_display_name": {
             "maxLength": 48,
             "type": "string"
+          },
+          "owner_workstation": {
+            "type": "boolean"
           },
           "principal": {
             "properties": {
@@ -3396,6 +3813,10 @@
               "name"
             ],
             "type": "object"
+          },
+          "workstation_computer_id": {
+            "format": "uuid",
+            "type": "string"
           }
         },
         "required": [

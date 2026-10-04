@@ -36,6 +36,19 @@ export const useAccess = defineStore('access', () => {
   const agents = computed(() => members.value?.agents ?? [])
   const invites = computed(() => members.value?.invites ?? [])
   const roleById = computed(() => new Map(roles.value.map(role => [role.id, role])))
+  // The role payload has no host field; the already-loaded paired identities
+  // supply names through their actual workspace binding, never by parsing IDs.
+  const runtimeRoleDetails = computed(() => {
+    const names = new Map<string, string[]>()
+    for (const agent of agents.value) {
+      const role = roleById.value.get(agent.workspace_role?.id ?? '')
+      if (!(agent.paired_computer || agent.connected_computer) || !role || role.builtin || !role.key.startsWith('paired_')) continue
+      const bound = names.get(role.id) ?? []
+      bound.push(agent.name)
+      names.set(role.id, bound)
+    }
+    return new Map([...names].map(([id, bound]) => [id, bound.join(' · ')]))
+  })
   // Every principal's name, aliases and imported identities included, for the audit.
   const names = computed(() => {
     const out = new Map<string, string>()
@@ -92,7 +105,7 @@ export const useAccess = defineStore('access', () => {
   function agent(id: string): Agent | undefined { return agents.value.find(a => a.principal_id === id) }
 
   return {
-    registry, roles, members, state, error, people, agents, invites, imported, roleById, names,
+    registry, roles, members, state, error, people, agents, invites, imported, roleById, runtimeRoleDetails, names,
     load, settle, person, agent, setWorkspaceRole, deactivate, reactivate, linkAlias, unlinkAlias, invite, retryInviteProvision, revokeInvite,
     createRole, updateRole, deleteRole, setProjectRole, removeProjectMember,
   }

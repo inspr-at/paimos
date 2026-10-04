@@ -73,7 +73,7 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 			FROM inbox_messages m
 			JOIN tenants t ON t.id = m.tenant_id
 			JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
-			WHERE m.id = $1::uuid AND m.sender_principal_id = $2::uuid`, id, p.ID).Scan(
+			WHERE m.chat_thread_id IS NULL AND m.id = $1::uuid AND m.sender_principal_id = $2::uuid`, id, p.ID).Scan(
 			&out.MessageID, &out.IdempotencyKey, &out.Tenant,
 			&out.SenderPrincipalID, &out.RecipientPrincipalID,
 			&out.TargetID, &out.TargetVersion, &out.Adapter, &out.Address, &out.EffectiveLevel,
@@ -94,6 +94,10 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 }
 
 func recordAcceptanceReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string) error {
+	return recordAcceptanceReceiptWith(ctx, tx, p, messageID, func(c events.Change) error { _, err := events.Append(ctx, tx, p, c); return err })
+}
+
+func recordAcceptanceReceiptWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID string, appendEvent func(events.Change) error) error {
 	var targetID *string
 	var state, reason string
 	err := tx.QueryRow(ctx, `SELECT target_id::text, state, reason FROM inbox_message_deliveries WHERE message_id = $1::uuid`, messageID).Scan(&targetID, &state, &reason)
@@ -113,9 +117,9 @@ func recordAcceptanceReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		if reason == "" {
 			reason = "unavailable"
 		}
-		return insertReceipt(ctx, tx, p, messageID, "failed", target, "", reason)
+		return insertReceiptWith(ctx, tx, p, messageID, "failed", target, "", reason, appendEvent)
 	}
-	return insertReceipt(ctx, tx, p, messageID, "queued", target, "", "")
+	return insertReceiptWith(ctx, tx, p, messageID, "queued", target, "", "", appendEvent)
 }
 
 func loadReceiptTarget(ctx context.Context, tx pgx.Tx, id string) (receiptTarget, error) {
@@ -132,6 +136,10 @@ func loadReceiptTarget(ctx context.Context, tx pgx.Tx, id string) (receiptTarget
 }
 
 func insertReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID, state string, target receiptTarget, level, reason string) error {
+	return insertReceiptWith(ctx, tx, p, messageID, state, target, level, reason, func(c events.Change) error { _, err := events.Append(ctx, tx, p, c); return err })
+}
+
+func insertReceiptWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID, state string, target receiptTarget, level, reason string, appendEvent func(events.Change) error) error {
 	targetID, version := receiptArgs(target)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO inbox_receipts (
@@ -143,7 +151,7 @@ func insertReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID
 		p.TenantID, messageID, state, targetID, version, target.Adapter, target.Address, level, reason); err != nil {
 		return err
 	}
-	return appendReceiptEvent(ctx, tx, p, messageID, state, target, level, reason)
+	return appendEvent(receiptEvent(messageID, state, target, level, reason))
 }
 
 // advanceReceipt moves a queued receipt forward. A missing row is inserted.
@@ -220,6 +228,11 @@ func confirmedReceiptTarget(ctx context.Context, tx pgx.Tx, messageID string) (r
 }
 
 func appendReceiptEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID, state string, target receiptTarget, level, reason string) error {
+	_, err := events.Append(ctx, tx, p, receiptEvent(messageID, state, target, level, reason))
+	return err
+}
+
+func receiptEvent(messageID, state string, target receiptTarget, level, reason string) events.Change {
 	kind := "inbox.receipt_queued"
 	switch state {
 	case "handed_off":
@@ -246,6 +259,5 @@ func appendReceiptEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, mess
 	if reason != "" {
 		after["failure_reason"] = reason
 	}
-	_, err := events.Append(ctx, tx, p, events.Change{Type: kind, After: after})
-	return err
+	return events.Change{Type: kind, After: after}
 }

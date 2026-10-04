@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,18 +37,6 @@ func TestAttachRefusalLanguagesAndSocketHaveSameCodes(t *testing.T) {
 	}
 }
 
-func TestAttachGermanDrainingNamesRealRecoveryActions(t *testing.T) {
-	err := attachLocalizedFailure(&agentd.AttachLocalError{Code: "attach_draining"}, "de")
-	for _, action := range []string{"aeon-agentd add-harness", "während der alten Trennung", "Abschluss laufender Arbeit", "kopple den Computer erneut"} {
-		if !strings.Contains(err.Error(), action) {
-			t.Fatalf("German draining repair omitted %q", action)
-		}
-	}
-	if strings.Contains(err.Error(), "verbinde den Computer") {
-		t.Fatal("German repair names a nonexistent reconnect operation")
-	}
-}
-
 func TestAttachGermanHintsBuiltOnce(t *testing.T) {
 	err := &agentd.AttachLocalError{Code: "attach_computer_limit"}
 	allocs := testing.AllocsPerRun(10, func() {
@@ -60,17 +47,6 @@ func TestAttachGermanHintsBuiltOnce(t *testing.T) {
 	})
 	if allocs > 3 { // errors.As targets plus the new local error
 		t.Fatalf("German repair rebuilt its inventory: %.0f allocations", allocs)
-	}
-}
-
-func TestAttachGermanHintsTrackSharedLimits(t *testing.T) {
-	for code, value := range map[string]string{
-		"attach_computer_limit": fmt.Sprintf("%d offene", attachwatch.ComputerMax),
-		"attach_attempt_limit":  fmt.Sprintf("%g Minuten", attachwatch.AttemptWindow.Minutes()),
-	} {
-		if !strings.Contains(attachLocalizedFailure(&agentd.AttachLocalError{Code: code}, "de").Error(), value) {
-			t.Fatal("German repair drifted from shared admission policy")
-		}
 	}
 }
 

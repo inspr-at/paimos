@@ -190,7 +190,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 	}
 }
 func admin(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return authz.ErrForbidden
 	}
 	return authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{})

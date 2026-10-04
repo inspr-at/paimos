@@ -43,13 +43,9 @@ type CatalogPreparation struct {
 }
 
 func catalogReady(ctx context.Context, tx pgx.Tx) (bool, error) {
-	slugs := make([]string, 0, len(catalogProfiles()))
-	for _, p := range catalogProfiles() {
-		slugs = append(slugs, p.Slug)
-	}
-	var count int
-	err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles WHERE slug=ANY($1::text[]) AND version=$2`, slugs, CatalogVersion).Scan(&count)
-	return count == len(slugs), err
+	var ready bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_refresh_settings WHERE catalog_version=$1)`, CatalogVersion).Scan(&ready)
+	return ready, err
 }
 
 func requireCatalog(ctx context.Context, tx pgx.Tx) error {

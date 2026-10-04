@@ -28,6 +28,7 @@ import (
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
@@ -112,6 +113,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("PUT /api/agent-keys/{id}/owner-workstation", m.handleOwnerWorkstation)
+	mux.HandleFunc("GET /api/agentd/step-ups/{challenge_id}", m.handleWorkstationChallenge)
+	mux.HandleFunc("POST /api/agent-keys/{id}/trim-proposals", m.handleProposeKeyTrim)
+	mux.HandleFunc("GET /api/key-trim-proposals", m.handleListKeyTrims)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/decision", m.handleDecideKeyTrim)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/restore", m.handleDecideKeyTrim)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -157,10 +164,30 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		if kind == credAgent {
 			if err := m.pairingBoundary(r, p); err != nil {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "pairing_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
+				if errors.Is(err, authz.ErrForbidden) {
+					writeForbidden(w)
+					return
+				}
 				agentpairing.WriteError(w, err)
 				return
 			}
-			if scope, controlled := coreAgentScope(r); !controlled || scope == "" {
+			scope, controlled := coreAgentScope(r)
+			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
+				scope, controlled = authz.RoutePermissions[r.Pattern], true
+			}
+			if !controlled || scope == "" {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "route_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
 				if receiptRoute(r) {
 					writeReceiptNotFound(w)
 				} else {
@@ -199,6 +226,12 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
 				if errors.Is(err, authz.ErrForbidden) {
 					if receiptRoute(r) {
 						writeReceiptNotFound(w)
@@ -211,6 +244,10 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			r = r.WithContext(ctx)
+		}
+		if authz.OwnerWorkstation(p) {
+			m.serveWorkstation(w, r, p, next)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -291,6 +328,27 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "recurrences":
+		// This is an explicit agent allowlist. Every recurrence handler also
+		// checks the custom role and recurrences.manage key scope in its tenant.
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 2 && parts[1] == "preview" && r.Method == http.MethodPost {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 2 && parts[1] != "" && parts[1] != "preview" && (read || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 3 && parts[1] != "" {
+			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
+				return "recurrences.manage", true
+			}
+		}
+	case "agent-keys":
+		if len(parts) == 3 && parts[2] == "trim-proposals" && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
 	case "agents":
 		if len(parts) == 2 && parts[1] == "plan" && read {
 			return "agents.plan.read", true
@@ -475,6 +533,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 2 {
+			if parts[1] == "refresh" {
+				return "models.refresh", true
+			}
+			if parts[1] == "reports" {
+				return "models.report", true
+			}
+		}
 		if read {
 			return "models.read", true
 		}
@@ -512,6 +578,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "agentd":
+		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
+			return "harness.worker", true
+		}
 	case "agent-pairing":
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
 			return "account.probe", true
@@ -591,7 +661,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}

@@ -106,6 +106,11 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
 
 test('session setup and work context appear from the mocked harness API', async ({ page }) => {
   const { data } = await setup(page)
+  for (const item of data.sessions) Object.assign(item, { service_tier: 'default', service_tier_revision: 1 })
+  await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/tier$/, route => {
+    expect(route.request().method()).toBe('GET')
+    return route.fulfill({ json: { session_id: new URL(route.request().url()).pathname.split('/').at(-2), revision: 1, active_tier: 'default', pending: null, read_only: true, read_only_reason: 'This daemon does not support confirmed tier changes.', reports: [], requests: [] } })
+  })
   Object.assign(data.sessions[1]!, {
     model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro', harness_version: '1.2.3',
     brief: 'AEON-213', worktree: '/Code/aeon-worktrees/tm1-session-metadata', branch: 'tm1.session-metadata',
@@ -130,7 +135,9 @@ test('session setup and work context appear from the mocked harness API', async 
   await expect(workBlock.locator('.commits li')).toHaveText(['abc1234Store session setup', 'def5678Show work context'])
   await row(page, session(3)).locator('.agent-link').click()
   await expect(panel(page).locator('section[aria-labelledby="work-title"]')).toHaveCount(0)
+  await expect(panel(page).locator('.service-tier .tier-head strong')).toHaveText('Default')
   await expect(panel(page)).not.toContainText('Not reported')
+  await expect(panel(page)).not.toContainText('Unmocked route')
 })
 
 test('an approval from an agent with no session and no address shows its name', async ({ page }) => {
@@ -286,7 +293,7 @@ test('read-only people see requests but cannot decide or control', async ({ page
   await expect(row(page, camy).getByRole('button', { name: 'Interrupt camy' })).toHaveCount(0)
   await row(page, camy).hover()
   await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
-  await expect(page.getByRole('menuitem', { name: /Interrupt|Stop session/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: /Interrupt|Stop now|Pause…|Resume/ })).toHaveCount(0)
   await expect(page.locator('[role="menuitem"][aria-disabled="true"]')).toHaveCount(0)
   await expect(page.getByRole('menu')).not.toContainText('Only people who may write')
 })
@@ -326,30 +333,36 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 
-test('interrupt goes straight out, stop asks first, and sessions outside AEON cannot be controlled', async ({ page }) => {
-  const { calls } = await setup(page)
+test('interrupt goes straight out, Stop now asks first, and outside sessions have no managed controls', async ({ page }) => {
+  const { data, calls } = await setup(page)
+  data.sessions.find(s => s.id === camy)!.display_label = 'camy'
   await openAgents(page)
-  await row(page, nova).getByRole('button', { name: 'Interrupt nova' }).click()
+  await row(page, nova).getByRole('button', { name: 'Actions for nova' }).click()
+  await page.getByRole('menuitem', { name: /^Interrupt this step/ }).click()
   await expect(page.locator('.toast').filter({ hasText: 'Interrupt sent to nova.' })).toBeVisible()
   expect(calls.some(c => c.method === 'POST' && c.path.endsWith(`/harness-sessions/${nova}/controls/interrupt`))).toBe(true)
   await expect(page.locator('.toast').filter({ hasText: 'nova applied the interrupt.' })).toBeVisible({ timeout: 8000 })
   // Stop asks first, so it sits in the row's overflow menu.
-  await expect(row(page, camy).getByRole('button', { name: 'Stop camy' })).toHaveCount(0)
+  await expect(row(page, camy).getByRole('button', { name: 'Stop now…', exact: true })).toHaveCount(0)
   await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
-  await page.getByRole('menuitem', { name: /Stop session/ }).click()
-  const dialog = page.getByRole('dialog', { name: 'Stop camy?' })
+  await page.getByRole('menuitem', { name: 'Stop now…', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Stop now camy', exact: true })
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: 'Cancel' }).click()
-  expect(calls.some(c => c.path.endsWith('/controls/stop'))).toBe(false)
+  await dialog.getByRole('button', { name: /^Cancel/ }).click()
+  expect(calls.some(c => c.method === 'POST' && (c.path.endsWith('/pause') || c.path.endsWith('/controls/stop')))).toBe(false)
   await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
-  await page.getByRole('menuitem', { name: /Stop session/ }).click()
-  await page.getByRole('dialog', { name: 'Stop camy?' }).getByRole('button', { name: 'Stop session' }).click()
-  await expect.poll(() => calls.some(c => c.path.endsWith(`/harness-sessions/${camy}/controls/stop`))).toBe(true)
+  await page.getByRole('menuitem', { name: 'Stop now…', exact: true }).click()
+  await dialog.getByRole('button', { name: /^Stop now/ }).click()
+  await expect.poll(() => calls.filter(c => c.method === 'POST' && c.path.endsWith(`/harness-sessions/${camy}/pause`))).toHaveLength(1)
+  expect(calls.find(c => c.path.endsWith(`/harness-sessions/${camy}/pause`))?.body).toEqual({ level: 'stop_now', note: '' })
+  expect(calls.some(c => c.path.endsWith('/controls/stop'))).toBe(false)
   await expect(row(page, session(5)).getByRole('button', { name: 'Interrupt amy' })).toHaveCount(0)
   await row(page, session(5)).hover()
   await row(page, session(5)).getByRole('button', { name: 'Actions for amy' }).click()
-  // Outside AEON: no Interrupt or Stop, one quiet line instead (AEON-291).
-  await expect(page.getByRole('menuitem', { name: /Interrupt|Stop session/ })).toHaveCount(0)
+  // Outside AEON: no managed interrupt; cooperative Pause/Stop use the durable API.
+  await expect(page.getByRole('menuitem', { name: /^Interrupt/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: 'Pause…', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Stop now…', exact: true })).toBeVisible()
   await expect(page.getByRole('menu')).toContainText('Runs outside AEON — stop it in its terminal')
 })
 
@@ -441,7 +454,7 @@ test('Settings lists limits set by hand as Set by you, never as a vendor percent
   const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
   await codex.getByRole('switch', { name: /Agents may use it/ }).click()
   await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
-  await expect(codex.locator('.state')).toHaveText('Paused')
+  await expect(codex.locator('.state')).toHaveText('Paused in Settings')
   expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })
 })
 
