@@ -252,8 +252,18 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 		t.Fatal("dry run must exercise the production smoke build")
 	}
 	tap := readWorkflow(t, "homebrew-tap.yml")
-	if !reflect.DeepEqual(tap.On, map[string]any{"release": map[string]any{"types": []any{"published"}}}) || !reflect.DeepEqual(tap.Permissions, map[string]string{"contents": "read"}) {
-		t.Fatal("Homebrew must remain read-only and publication-triggered")
+	if _, ok := tap.On["workflow_dispatch"]; !ok || len(tap.On) != 1 || !reflect.DeepEqual(tap.Permissions, map[string]string{"contents": "read", "actions": "read"}) {
+		t.Fatal("Homebrew must use read-only main dispatch, never tag-controlled release workflows")
+	}
+	for _, j := range tap.Jobs {
+		if !strings.Contains(j.If, "github.ref == 'refs/heads/main'") || !strings.Contains(j.If, "github.actor_id == '276789'") || j.Environment != "homebrew-tap" {
+			t.Fatal("tap secrets require reviewed main-only coordinator dispatch")
+		}
+		for _, s := range j.Steps {
+			if strings.Contains(s.Uses, "actions/checkout@") && (s.With["ref"] != "${{ github.workflow_sha }}" || s.With["persist-credentials"] != "false") {
+				t.Fatal("tap code must come from the main workflow commit")
+			}
+		}
 	}
 	pin := regexp.MustCompile(`@[a-f0-9]{40}$`)
 	for _, w := range []workflow{release, dry, tap, web} {
