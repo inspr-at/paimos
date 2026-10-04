@@ -42,6 +42,7 @@ import (
 	"github.com/inspr-at/paimos/internal/business/quotes/collaboration"
 	"github.com/inspr-at/paimos/internal/business/quotes/confirmation"
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
+	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
@@ -371,6 +372,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
+			chat.New(pool),
 			harness.New(pool, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,

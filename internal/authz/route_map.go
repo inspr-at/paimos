@@ -24,6 +24,11 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"POST /api/projects/{projectId}/chat-roles":           "chat.bind",
+	"POST /api/projects/{projectId}/chat-threads/resolve": "chat.read",
+	"GET /api/chat-threads/{id}":                          "chat.read",
+	"POST /api/chat-threads/{id}/binding":                 "chat.bind",
+	"POST /api/chat-deliveries/binding/resolve":           "chat.receive",
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",
