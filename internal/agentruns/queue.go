@@ -173,6 +173,13 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
 			}
 		}
 	}
+	if err == nil && t.Kind == "work" {
+		var leaf bool
+		err = tx.QueryRow(ctx, `SELECT aeon_work_leaf($1::uuid) AND aeon_work_pending($1::uuid) IS NULL`, id).Scan(&leaf)
+		if !leaf {
+			t.Kind = "parent"
+		}
+	}
 	return t, err
 }
 func readiness(t queueTicket) workqueue.Readiness {

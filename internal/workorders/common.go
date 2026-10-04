@@ -85,6 +85,11 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var result any
 		err := db.InTenant(r.Context(), pool, p.TenantID, func(tx pgx.Tx) error {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				if err := db.LockWorkTreeTx(r.Context(), tx); err != nil {
+					return err
+				}
+			}
 			if err := authorizeKey(r, tx, p, scope); err != nil {
 				return err
 			}
@@ -175,6 +180,10 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
+		if pg.ConstraintName == "work_leaf_required" || pg.ConstraintName == "busy_work_leaf" || pg.ConstraintName == "work_handover_pending" {
+			httpapi.WriteJSON(w, 409, map[string]string{"error": pg.Message, "code": pg.ConstraintName})
+			return
+		}
 		switch pg.Code {
 		case "23503", "23514", "22P02", "22003", "P0001":
 			httpapi.WriteError(w, 400, "invalid value or related resource")

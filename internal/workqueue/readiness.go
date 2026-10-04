@@ -69,7 +69,7 @@ func Check(kind, state, title, body string, fields map[string]any, namedBlocker 
 	}
 	switch State(state) {
 	case "new", "open", "backlog", "blocked":
-		r.Queueable = kind == "ticket" || kind == "task"
+		r.Queueable = kind == "ticket" || kind == "task" || kind == "work"
 	}
 	if !r.Queueable {
 		r.Missing = append(r.Missing, "status")

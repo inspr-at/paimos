@@ -6,6 +6,88 @@ info:
 servers:
   - url: /api
 paths:
+  /nodes/{nodeId}/work-lifecycle:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewWorkLifecycle
+      summary: Leaf shape, open leaf count, and this person's pending action
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Bounded preview; only work children make a parent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecyclePreview'}
+        '403': {description: Person with nodes.read required}
+    post:
+      operationId: requestWorkLifecycle
+      summary: Split into children or cancel with its open children after graceful handover
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, kind, expected_updated_at, expected_open_leaves, expected_scope_revision]
+              additionalProperties: false
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [split, cancel]}
+                expected_updated_at: {type: string, format: date-time}
+                expected_open_leaves: {type: integer, minimum: 0, maximum: 100}
+                expected_scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+                children:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [title]
+                    additionalProperties: false
+                    properties:
+                      title: {type: string, minLength: 1, maxLength: 500}
+                      body: {type: string, maxLength: 16000}
+      responses:
+        '200':
+          description: Waiting or completed action; waiting never means success. Replays preserve the original action.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '400': {description: Invalid request or bounded scope exceeded}
+        '403': {description: Person with current nodes.write and any required harness.control/run.create permissions}
+        '409': {description: Stale preview, another pending intent, or a run without cooperative handover delivery}
+  /nodes/{nodeId}/work-lifecycle/{actionId}:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      operationId: abandonWorkLifecycle
+      summary: Release this person's pending intent without killing or resuming any agent
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Abandoned intent; existing handover requests and completed leaf writes remain
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '403': {description: Original requester with current nodes.write required}
+  /nodes/{nodeId}/work-lifecycle/{actionId}/continue:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: continueWorkLifecycle
+      summary: Recheck permissions and confirmed stops, then apply the saved intent atomically
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Waiting or completed; repeat requests cannot create children or cancel a leaf twice
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '403': {description: Original requester with current target permissions required}
+        '409': {description: Split target changed or original targets no longer form the previewed scope}
   /settings/quota-warnings:
     get:
       summary: Workspace low-quota warning thresholds
@@ -9715,6 +9797,27 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    WorkLifecyclePreview:
+      type: object
+      required: [is_leaf, busy, open_leaves, updated_at, scope_revision, pending]
+      properties:
+        is_leaf: {type: boolean}
+        busy: {type: boolean}
+        open_leaves: {type: integer, minimum: 0, maximum: 100}
+        updated_at: {type: string, format: date-time}
+        scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+        pending: {oneOf: [{$ref: '#/components/schemas/WorkLifecycleAction'}, {type: 'null'}]}
+    WorkLifecycleAction:
+      type: object
+      required: [id, node_id, kind, state, target_count, waiting_count, result]
+      properties:
+        id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [split, cancel]}
+        state: {type: string, enum: [waiting, completed, abandoned]}
+        target_count: {type: integer, minimum: 0, maximum: 100}
+        waiting_count: {type: integer, minimum: 0, maximum: 100}
+        result: {type: array, maxItems: 100, items: {type: string, format: uuid}}
     StepUpRequired:
       type: object
       additionalProperties: false
