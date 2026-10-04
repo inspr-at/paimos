@@ -470,8 +470,10 @@ in-flight results. Leases recover after restart. Leaves keep the bilingual Done
 gate; published snapshots remain immutable. Migration `1237` stores only job and
 provenance metadata on existing nodes. `GET /api/nodes/{id}/benefit-generation`
 reports status; the person-only retry POST requires the displayed generation and
-node revision. A generated write emits `node.benefits_generated` for live refresh;
-it has no generic node Undo, which could overwrite unrelated fields.
+node revision. Retry bodies have a 4 KiB limit and a five-second HTTP read deadline
+before decoding and mutation locks. A generated write emits
+`node.benefits_generated` for live refresh; it has no generic node Undo, which
+could overwrite unrelated fields.
 Leaf completion checks use the same tenant state categories as parent derivation,
 including custom Done states. Cancellation and archival do not require benefits,
 and edits to already-completed historical records remain available.
@@ -3165,7 +3167,9 @@ decodes its bounded confirmation before taking any transaction locks, then
 re-checks permissions and original child revisions under access-change fences
 even if the flag was disabled, and reverses the cause once. Parents are derived
 again while the feature is enabled. Later child edits, hidden/ambiguous causes, active
-work and unsupported reverse operations refuse the action atomically.
+work and unsupported reverse operations refuse the action atomically. Causal
+preview and confirmed Undo enforce the leaf's bilingual benefits when restoring
+completion, using the current tenant state categories, including custom Done.
 
 The initial implementation deliberately serializes flagged tenant transactions
 and prelocks their work rows to avoid taking ancestor locks after the event

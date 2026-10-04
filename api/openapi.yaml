@@ -4401,7 +4401,7 @@ paths:
     post:
       operationId: retryParentBenefitGeneration
       security: *auth
-      description: Person-only retry requiring nodes.write in the current project. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
+      description: Person-only retry requiring nodes.write in the current project. Request bodies are limited to 4 KiB with a five-second read deadline before decoding or mutation locks. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
       requestBody:
         required: true
         content:
@@ -4836,7 +4836,7 @@ paths:
       - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
     get:
       operationId: previewCausalUndo
-      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision and mutation permissions as Undo without committing writes. Reversing roadmap publication, a human-check completion or its person provenance requires a person, including for imported child changes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
+      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision, mutation permissions and bilingual benefit completion requirements as Undo without committing writes, including tenant-defined Done categories. Reversing roadmap publication, a human-check completion or its person provenance requires a person, including for imported child changes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
       security: *auth
       responses:
         '200':

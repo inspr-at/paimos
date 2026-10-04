@@ -257,3 +257,98 @@ func TestBenefitCompletionCategoryOverridesLiteralNames(t *testing.T) {
 		t.Fatalf("category override bypassed leaf gate: %d %s", code, raw)
 	}
 }
+
+func TestTicketBenefitsCausalUndoCompletion(t *testing.T) {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, complete := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/benefits=%t", state, method, complete), func(t *testing.T) {
+					p := newPrincipal(t, "causal-benefits")
+					k := kindBySlug(t, p, "work")
+					setBenefitStateCatalog(t, p.TenantID, k.ID)
+					parent := workNodeTest(t, p, "", "open")
+					child := workNodeTest(t, p, parent.ID, "open")
+					parentState := "done"
+					if state == "accepted" || state == "delivered" {
+						parentState = state
+					}
+					fields := "{}"
+					if complete {
+						fields = benefitFields
+					}
+					// Seed historical completion before enabling derivation. Reopening
+					// and both Undo routes then use the actual HTTP write path.
+					if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+						if _, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2,fields=$3::jsonb WHERE id=$1`, child.ID, state, fields); err != nil {
+							return err
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, parent.ID, parentState)
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+					enableWorkStatusTest(t, p)
+					if currentWorkTest(t, p, parent.ID).State != parentState {
+						t.Fatal("historical fixture lost its completed parent state")
+					}
+					// The restored snapshot, rather than the fields currently on
+					// screen, must decide whether re-entering Done is allowed.
+					reopenedFields := benefitFields
+					if complete {
+						reopenedFields = "{}"
+					}
+					code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+child.ID, fmt.Sprintf(`{"state":"open","fields":%s}`, reopenedFields))
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					id, cause := lastDerivedTest(t, p, parent.ID)
+					beforeChild := currentWorkTest(t, p, child.ID)
+					beforeParent := currentWorkTest(t, p, parent.ID)
+					countEvents := func() int {
+						t.Helper()
+						var count int
+						if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+							return tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&count)
+						}); err != nil {
+							t.Fatal(err)
+						}
+						return count
+					}
+					beforeEvents := countEvents()
+					code, raw = causalCallTest(t, p, method, id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+					want := http.StatusConflict
+					if complete {
+						want = http.StatusOK
+						if method == http.MethodPost {
+							want = http.StatusCreated
+						}
+					}
+					if code != want || !complete && !strings.Contains(string(raw), `"code":"conflict"`) {
+						t.Fatalf("causal completion gate: %d want %d: %s", code, want, raw)
+					}
+					if !complete || method == http.MethodGet {
+						for _, before := range []nodeJSON{beforeChild, beforeParent} {
+							after := currentWorkTest(t, p, before.ID)
+							if after.State != before.State || !after.UpdatedAt.Equal(before.UpdatedAt) || !reflectJSONEqual(after.Fields, before.Fields) {
+								t.Fatal("refused Undo or preview changed child/parent", after)
+							}
+						}
+						if countEvents() != beforeEvents {
+							t.Fatal("refused Undo or preview appended events")
+						}
+					} else {
+						restored := currentWorkTest(t, p, child.ID)
+						var restoredFields, expectedFields map[string]any
+						if err := json.Unmarshal(restored.Fields, &restoredFields); err != nil {
+							t.Fatal(err)
+						}
+						if err := json.Unmarshal([]byte(fields), &expectedFields); err != nil {
+							t.Fatal(err)
+						}
+						if restored.State != state || !reflectJSONEqual(restoredFields, expectedFields) || currentWorkTest(t, p, parent.ID).State != parentState || countEvents() <= beforeEvents {
+							t.Fatal("valid causal completion did not restore child and derive parent", restored)
+						}
+					}
+				})
+			}
+		}
+	}
+}

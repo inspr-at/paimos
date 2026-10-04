@@ -152,6 +152,14 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 		fail(w, fault{400, "invalid node id"})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	// Context cancellation alone cannot interrupt a blocked network Body.Read.
+	// Bound both decodes at the transport before taking any mutation fences.
+	controller := http.NewResponseController(w)
+	deadline, _ := ctx.Deadline()
+	_ = controller.SetReadDeadline(deadline)
+	defer controller.SetReadDeadline(time.Time{})
 	var in struct {
 		Generation string    `json:"expected_generation"`
 		Revision   time.Time `json:"expected_revision"`
@@ -168,8 +176,6 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 		fail(w, fault{400, "invalid request"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
 	var out target
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := fence(ctx, tx, p.TenantID); err != nil {
