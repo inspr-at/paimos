@@ -2422,6 +2422,24 @@
           "listedTests": 4
         }
       ]
+    },
+    {
+      "id": "agent-pause",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/agent-pause.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        }
+      ]
     }
   ],
   "sourceRevision": "068611ab87b80319ed1f0843bbad79ca897b7dcb",

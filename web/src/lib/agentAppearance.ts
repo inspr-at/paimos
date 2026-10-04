@@ -18,7 +18,7 @@ export function useAgentAppearance() {
   return { choice, ready: preference.ready, save, appearance }
 }
 export const agentStateAppearance = (state: AgentState, choice: AgentStatePreference) => ({
-    '--agent-state-color': `var(--agent-${choice.palette}-${inactiveState(state) ? 'inactive' : state === 'unresponsive' ? 'problem' : state === 'awaiting' ? 'waiting' : state === 'done' ? 'working' : state})`,
+    '--agent-state-color': state === 'paused' ? 'var(--ink-2)' : `var(--agent-${choice.palette}-${state === 'pausing' ? 'working' : inactiveState(state) ? 'inactive' : state === 'unresponsive' ? 'problem' : state === 'awaiting' ? 'waiting' : state === 'done' ? 'working' : state})`,
     '--agent-state-opacity': String(inactiveState(state) && choice.dimInactive ? choice.inactiveOpacity / 100 : 1),
     '--agent-state-saturation': inactiveState(state) || choice.palette === 'monochrome' ? '0' : '1',
   })

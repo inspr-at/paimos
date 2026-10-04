@@ -25,6 +25,26 @@ async function setup(page: Page, failDecision = false) {
 }
 
 for (const width of [1440, 1024, 390]) {
+  test(`Agents header keeps pause actions and Decision Desk navigation at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await setup(page)
+    await page.goto('/agents')
+    const header = page.locator('.agents-page .page-head')
+    const more = header.getByRole('button', { name: 'More agent actions', exact: true })
+    const add = header.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })
+    await expectStableControls({
+      controls: { more, add },
+      interactions: [{ name: 'open merged navigation', run: async () => {
+        await more.click()
+        const menu = page.getByRole('menu')
+        for (const name of ['Pause all…', 'Resume all…', 'Wind down…', 'Usage', 'Agent keys', 'History', 'Agent settings']) {
+          await expect(menu.getByRole('menuitem').filter({ hasText: name })).toBeVisible()
+        }
+        await expect(menu.getByRole('menuitem', { name: 'Decision Desk', exact: true })).toHaveAttribute('href', '/decision-desk')
+      } }],
+    })
+  })
+
   test(`ticket relation popover keeps its selectors through result changes at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 })
     await mockWork(page, fixtures())
@@ -53,7 +73,7 @@ for (const width of [1440, 1024, 390]) {
     }
   })
 
-  test(`managed Interrupt and Stop controls stay put at ${width}`, async ({ page }) => {
+  test(`managed Interrupt menu and Stop now button stay put at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const data = await setup(page)
     const ownership = { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: new Date().toISOString() }
@@ -66,23 +86,26 @@ for (const width of [1440, 1024, 390]) {
     await page.route('**/api/projects/*/harness-sessions/*/controls/*', route => route.fulfill({ json: { id: request.request_id, session_id: session(1), kind: request.kind, state: 'completed', outcome: 'applied', reason: 'native_interrupt_acknowledged' } }))
     await page.goto(`/agents/${session(1)}`)
     const controls = page.getByRole('region', { name: 'Session controls' })
-    const interrupt = controls.getByRole('button', { name: 'Interrupt', exact: true }), stop = controls.getByRole('button', { name: 'Stop', exact: true })
+    const more = controls.getByRole('button', { name: 'More session controls', exact: true })
+    const interrupt = page.getByRole('menuitem', { name: /^Interrupt this step/ })
+    // The panel has a Stop now button; the session list has a menuitem.
+    const stop = page.getByRole('button', { name: 'Stop now…', exact: true })
+    const dialog = page.getByRole('dialog', { name: /^Stop now / })
+    await more.click()
     await expectStableControls({
-      controls: { interrupt, stop },
+      controls: { interrupt, more, stop },
       interactions: [
-        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied') } },
-        { name: 'open and cancel Stop', run: async () => { await stop.click(); await page.getByRole('button', { name: 'Confirm stop' }).hover(); await page.getByRole('button', { name: 'Cancel', exact: true }).click() } },
+        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied'); await more.click() } },
+        { name: 'open and cancel Stop now', run: async () => { await more.click(); await stop.click(); await dialog.getByRole('button', { name: /^Stop now/ }).hover(); await dialog.getByRole('button', { name: /^Cancel/ }).click(); await more.click() } },
       ],
     })
-    if (width === 390) {
-      await stop.click()
-      const sheet = page.getByRole('dialog', { name: 'Stop', exact: true })
-      await expectStableControls({
-        controls: { sheet, close: sheet.getByRole('button', { name: 'Close' }), confirm: sheet.getByRole('button', { name: 'Confirm stop' }), cancel: sheet.getByRole('button', { name: 'Cancel' }) },
-        scrollAreas: { body: sheet.locator('.sheet-body') },
-        interactions: [{ name: 'hover confirmation', run: () => sheet.getByRole('button', { name: 'Confirm stop' }).hover() }],
-      })
-    }
+    await more.click()
+    await stop.click()
+    await expectStableControls({
+      controls: { ...(width === 390 ? { sheet: dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), confirm: dialog.getByRole('button', { name: /^Stop now/ }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), footer: dialog.locator('.pause-actions') },
+      scrollAreas: { body: dialog.locator('.pause-body') },
+      interactions: [{ name: 'hover confirmation', run: () => dialog.getByRole('button', { name: /^Stop now/ }).hover() }],
+    })
   })
 
   test(`approval choices, typing and failure keep the decision controls put at ${width}`, async ({ page }) => {
@@ -104,22 +127,36 @@ for (const width of [1440, 1024, 390]) {
     })
   })
 
-  test(`Stop confirmation stays the same through the session series at ${width}`, async ({ page }) => {
+  test(`Stop now menu and Pause dialog stay put through the session series at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
-    await setup(page)
+    const data = await setup(page)
+    data.sessions[0]!.display_label = 'worker-one'
+    // Managed names allow 128 characters: cover wrapping words and a single token.
+    data.sessions[1]!.display_label = 'worker '.repeat(18) + 'xx'
+    data.sessions[2]!.display_label = 'x'.repeat(128)
     await page.goto('/agents')
     async function open(n: number) {
-      await page.locator(`[data-row="s:${session(n)}"]`).getByRole('button', { name: /^Actions for/ }).click()
-      await page.getByRole('menuitem', { name: /Stop session/ }).click()
-      await expect(page.locator('.confirm[open]')).toBeVisible()
+      const row = page.locator(`[data-row="s:${session(n)}"]`)
+      const name = data.sessions[n - 1]!.display_label
+      const actions = row.getByRole('button', { name: `Actions for ${name}`, exact: true })
+      await actions.click()
+      const stopItem = page.getByRole('menuitem', { name: 'Stop now…', exact: true })
+      await expectStableControls({
+        controls: { actions, stopItem },
+        interactions: [{ name: 'hover Stop now menuitem', run: () => stopItem.hover() }],
+      })
+      await stopItem.click()
+      await expect(page.getByRole('dialog', { name: `Stop now ${name}`, exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: `Stop now ${name}`, exact: true })).toHaveText(`Stop now ${name}`)
     }
     await open(1)
-    const dialog = page.locator('.confirm[open]')
-    const cancel = dialog.getByRole('button', { name: 'Cancel' })
+    const dialog = page.getByRole('dialog', { name: /^Stop now / })
+    const cancel = dialog.getByRole('button', { name: /^Cancel/ })
+    const stop = dialog.getByRole('button', { name: /^Stop now/ })
     await expectStableControls({
-      controls: { ...(width === 390 ? { dialog } : {}), cancel, stop: dialog.getByRole('button', { name: 'Stop session' }) },
-      scrollAreas: { body: dialog.locator('#confirm-body') },
-      interactions: [2, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(cancel).toBeFocused() } })),
+      controls: { ...(width === 390 ? { dialog } : {}), close: dialog.getByRole('button', { name: 'Close pause dialog' }), actions: dialog.locator('.pause-actions'), cancel, stop, heading: dialog.getByRole('heading') },
+      scrollAreas: { body: dialog.locator('.pause-body'), head: dialog.locator('.pause-head') },
+      interactions: [2, 3, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(stop).toBeFocused() } })),
     })
   })
 

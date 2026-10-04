@@ -131,7 +131,7 @@ func pauseController(r *http.Request, tx pgx.Tx, p tenant.Principal, coordinator
 }
 
 func pauseAllowed(s Session, owner string, admin bool, parent string) bool {
-	return admin || owner != "" && s.ownerID != nil && *s.ownerID == owner || parent != "" && s.ParentID != nil && *s.ParentID == parent
+	return admin || owner != "" && s.OwnerPrincipalID != nil && *s.OwnerPrincipalID == owner || parent != "" && s.ParentID != nil && *s.ParentID == parent
 }
 
 func savePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, next Pause, event string) (Session, error) {

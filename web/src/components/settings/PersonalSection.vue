@@ -13,6 +13,7 @@ import KeyCap from '../KeyCap.vue'
 import ProfileCard from './ProfileCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import AgentIndicatorSettings from './AgentIndicatorSettings.vue'
+import AgentPauseSettings from './AgentPauseSettings.vue'
 import GraphMotionSettings from './GraphMotionSettings.vue'
 import SessionWatchingSettings from './SessionWatchingSettings.vue'
 import PhoneApprovalSettings from './PhoneApprovalSettings.vue'
@@ -100,6 +101,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
 
     <SettingsCard v-if="profile || profileError" title="Agents" icon="agent" anchor="agents">
       <template #lead>Heartbeat warnings and how estimates are shown. Agent appearance is in Theme.</template>
+      <AgentPauseSettings />
       <AgentIndicatorSettings />
       <div class="eta-display">
         <span id="eta-display-label">Estimates show as</span>

@@ -86,7 +86,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'play'" d="M5.4 3.6v8.8l7-4.4z" stroke-linejoin="round" />
     <rect v-else-if="name === 'stop'" x="3.8" y="3.8" width="8.4" height="8.4" rx="1.6" />
     <template v-else-if="name === 'shield'"><path d="M8 1.9 13 3.8v3.9c0 3-2.1 5.4-5 6.4-2.9-1-5-3.4-5-6.4V3.8Z" /><path d="m5.9 8 1.5 1.5 2.8-2.9" /></template>
-    <template v-else-if="name === 'interrupt'"><circle cx="8" cy="8" r="6.2" /><path d="M6.5 5.7v4.6M9.5 5.7v4.6" /></template>
+    <template v-else-if="name === 'interrupt'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2.6" /><path d="M10.2 10.4 5.8 6M5.8 9V6h3" /></template>
     <template v-else-if="name === 'halt'"><path d="M5.5 1.9h5l3.6 3.6v5l-3.6 3.6h-5l-3.6-3.6v-5Z" /><rect x="6" y="6" width="4" height="4" rx=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'send'" d="M14 2 7.2 8.8M14 2 9.6 14 7.2 8.8 2 6.4Z" />
     <path v-else-if="name === 'bolt'" d="M9 1.8 3.6 9h4l-.8 5.2L12.4 7h-4Z" />
