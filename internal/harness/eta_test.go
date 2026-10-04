@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -181,9 +182,9 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 	}
 
 	task, epic, bare := uid(), uid(), uid()
-	f.addNode(t, task, "ETA-2", "task", f.project, "Task with a live estimate")
-	f.addNode(t, epic, "ETA-3", "epic", f.project, "Epic rejects a direct live estimate")
-	f.addNode(t, bare, "ETA-4", "ticket", f.project, "No agent")
+	f.addNode(t, task, "ETA-2", "work", f.project, "Task with a live estimate")
+	f.addNode(t, epic, "ETA-3", "work", f.project, "Work parent rejects a direct live estimate")
+	f.addNode(t, bare, "ETA-4", "work", epic, "No agent")
 	expect(t, f.call(f.agent, "PUT", "/api/nodes/"+task+"/live-eta", map[string]any{"eta_live_at": liveAt.Format(time.RFC3339)}, "wrong-lease-000000000000000000000099"), 403)
 	taskWorker := f.registerSession(t, f.agent.ID, "worker", task, "eta-ref-0000000000000003", "eta-lease-000000000000000000000003")
 	w := f.call(f.agent, "PUT", "/api/nodes/"+task+"/live-eta", map[string]any{"eta_live_at": liveAt.Format(time.RFC3339)}, coordLease)
@@ -212,15 +213,15 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 	flat, inner, outer := uid(), uid(), uid()
 	t1, t2, t3 := uid(), uid(), uid()
 	n1, n2, n3 := uid(), uid(), uid()
-	f.addNode(t, flat, "ETA-5", "epic", f.project, "Flat epic")
-	f.addNode(t, t1, "ETA-6", "ticket", flat, "Half")
-	f.addNode(t, t2, "ETA-7", "ticket", flat, "Done")
-	f.addNode(t, t3, "ETA-8", "ticket", flat, "Unknown child")
-	f.addNode(t, outer, "ETA-9", "epic", f.project, "Outer epic")
-	f.addNode(t, n1, "ETA-10", "ticket", outer, "Finished child")
-	f.addNode(t, inner, "ETA-11", "epic", outer, "Inner epic")
-	f.addNode(t, n2, "ETA-12", "ticket", inner, "Zero a")
-	f.addNode(t, n3, "ETA-13", "ticket", inner, "Zero b")
+	f.addNode(t, flat, "ETA-5", "work", f.project, "Flat epic")
+	f.addNode(t, t1, "ETA-6", "work", flat, "Half")
+	f.addNode(t, t2, "ETA-7", "work", flat, "Done")
+	f.addNode(t, t3, "ETA-8", "work", flat, "Unknown child")
+	f.addNode(t, outer, "ETA-9", "work", f.project, "Outer epic")
+	f.addNode(t, n1, "ETA-10", "work", outer, "Finished child")
+	f.addNode(t, inner, "ETA-11", "work", outer, "Inner epic")
+	f.addNode(t, n2, "ETA-12", "work", inner, "Zero a")
+	f.addNode(t, n3, "ETA-13", "work", inner, "Zero b")
 	s1 := f.registerSession(t, f.agent.ID, "worker", t1, "eta-ref-0000000000000011", "eta-lease-000000000000000000000011")
 	s2 := f.registerSession(t, beau, "worker", t2, "eta-ref-0000000000000012", "eta-lease-000000000000000000000012")
 	_ = f.registerSession(t, f.agent.ID, "worker", t3, "eta-ref-0000000000000013", "eta-lease-000000000000000000000013")
@@ -244,8 +245,9 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 		return err
 	})
 	flatRow := f.nodeEta(t, flat)
-	if flatRow.progress == nil || *flatRow.progress != 75 {
-		t.Fatalf("flat percent %v, want 75", flatRow.progress)
+	// Unified work averages all leaves: an unreported leaf contributes zero.
+	if flatRow.progress == nil || *flatRow.progress != 50 {
+		t.Fatalf("flat percent %v, want 50", flatRow.progress)
 	}
 	if flatRow.ready == nil || flatRow.readyBy == nil || *flatRow.readyBy != "Beau" {
 		t.Fatalf("flat ready should be Beau's later estimate: %+v", flatRow)
@@ -254,8 +256,8 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 		t.Fatalf("flat ready time %+v", flatRow)
 	}
 	outerRow := f.nodeEta(t, outer)
-	if outerRow.progress == nil || *outerRow.progress != 50 {
-		t.Fatalf("nested percent %v, want 50", outerRow.progress)
+	if outerRow.progress == nil || *outerRow.progress != 33 {
+		t.Fatalf("nested percent %v, want 33", outerRow.progress)
 	}
 	if outerRow.ready == nil || outerRow.ready.Before(time.Now().Add(70*time.Minute)) || outerRow.readyBy == nil || *outerRow.readyBy != "Beau" {
 		t.Fatalf("nested ready should be the furthest child: %+v", outerRow)
@@ -347,7 +349,7 @@ func TestRebindClearsEstimate(t *testing.T) {
 	got := f.beat(t, session, lease, 1, map[string]any{"eta_ready_at": ready, "progress_pct": 80})
 	revision := int(got["revision"].(float64))
 	other := uid()
-	f.addNode(t, other, "ETA-20", "ticket", f.project, "Rebound ticket")
+	f.addNode(t, other, "ETA-20", "work", f.project, "Rebound ticket")
 	w := f.call(f.person, "PATCH", "/api/projects/"+f.project+"/harness-sessions/"+session+"/binding", map[string]any{
 		"expected_revision": revision, "ticket_node_id": other, "work_shape": "ship",
 	}, "")
@@ -413,9 +415,9 @@ func TestLiveEtaWaitsOutAProjectMove(t *testing.T) {
 	target := uid()
 	f.addNode(t, target, "DST-1", "project", "", "Destination project")
 
-	// Hold the key counter the move takes only after it has locked the ticket
-	// FOR UPDATE, so the ETA's FOR SHARE can wait, the move can then commit,
-	// and the resumed read has to see the new project.
+	// Hold the key counter after the move has acquired the tree and node locks.
+	// The heartbeat waits on the same tree fence before reading its target,
+	// so the resumed live ETA write has to see the committed project move.
 	blocker, err := f.db.Admin.Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -437,15 +439,26 @@ func TestLiveEtaWaitsOutAProjectMove(t *testing.T) {
 		moveCh <- w
 	}()
 	waitForLock(t, f, "%aeon_next_node_key%")
+	var mover uint32
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT pid FROM pg_stat_activity
+		WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%aeon_next_node_key%'`).Scan(&mover); err != nil {
+		t.Fatal(err)
+	}
 
 	etaCh := make(chan *httptest.ResponseRecorder, 1)
+	etaDone := make(chan struct{})
 	go func() {
 		etaCh <- f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/heartbeat", map[string]any{
 			"phase": "working", "activity": "busy", "activity_sequence": 2,
 			"eta_live_at": time.Now().Add(6 * time.Hour).UTC().Format(time.RFC3339),
 		}, lease)
+		close(etaDone)
 	}()
-	waitForLock(t, f, "%FOR SHARE OF n%")
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	if lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, mover, etaDone); lock != "advisory" {
+		t.Fatalf("live ETA did not wait on the move's tree fence: %q", lock)
+	}
 	if err = blocker.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -518,6 +531,55 @@ func TestLiveEtaUsesTheLeaseProof(t *testing.T) {
 	}
 }
 
+func TestLiveEtaRechecksWorkPermission(t *testing.T) {
+	f := fixture(t)
+	lease := "live-eta-permission-lease-" + uid()
+	session := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "live-eta-permission-ref-"+uid(), lease)
+	var role string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'eta_reporter','ETA reporter') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission)
+			VALUES($1,$2,'nodes.read'),($1,$2,'harness.read'),($1,$2,'harness.worker')`, f.person.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.agent.ID, role)
+		return err
+	})
+	at := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	path := "/api/nodes/" + f.ticket + "/live-eta"
+	expect(t, f.call(f.agent, "PUT", path, map[string]any{"eta_live_at": at.Format(time.RFC3339)}, lease), 200)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id=$1 AND permission='harness.worker'`, role)
+		return err
+	})
+	// Keep the same scoped key and visible target: only the current role grant
+	// is revoked, so the owning generation proof cannot authorize the write.
+	w := f.call(f.agent, "PUT", path, map[string]any{"eta_live_at": at.Add(time.Hour).Format(time.RFC3339)}, lease)
+	expect(t, w, 403)
+	if decode(t, w)["reason_code"] != "missing_role_permission" {
+		t.Fatal("revoked live ETA authority failed for the wrong reason")
+	}
+	w = f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/heartbeat", map[string]any{
+		"phase": "working", "activity": "busy", "activity_sequence": 1, "eta_live_at": at.Add(time.Hour).Format(time.RFC3339),
+	}, lease)
+	expect(t, w, 403)
+	if decode(t, w)["reason_code"] != "missing_role_permission" {
+		t.Fatal("revoked heartbeat ETA authority failed for the wrong reason")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var stored time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT eta_live_at FROM ticket_live_eta WHERE node_id=$1`, f.ticket).Scan(&stored); err != nil {
+			return err
+		}
+		if !stored.Equal(at) {
+			t.Fatal("revoked coordinator changed the live ETA")
+		}
+		return nil
+	})
+}
+
 func TestLiveEtaTimestampsArePerTicket(t *testing.T) {
 	f := fixture(t)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -530,7 +592,7 @@ func TestLiveEtaTimestampsArePerTicket(t *testing.T) {
 	first := f.beat(t, coord, lease, 1, map[string]any{"eta_live_at": liveAt.Format(time.RFC3339)})
 	reported := first["eta_reported_at"].(string)
 	other := uid()
-	f.addNode(t, other, "ETA-22", "ticket", f.project, "Other ticket")
+	f.addNode(t, other, "ETA-22", "work", f.project, "Other ticket")
 	f.registerSession(t, f.agent.ID, "worker", other, "eta-ref-0000000000000107", "eta-lease-000000000000000000000107")
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE ticket_live_eta SET reported_at=clock_timestamp() - interval '21 minutes' WHERE node_id=$1`, f.ticket); err != nil {

@@ -125,7 +125,9 @@ BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0));
  IF slug='work_order' THEN
   PERFORM aeon_require_work_leaf(NEW.parent_id);
- ELSIF aeon_work_busy(NEW.parent_id) THEN
+ -- Only a work leaf is becoming a parent. A project, or an existing work
+ -- parent with busy children, can still receive independent sibling work.
+ ELSIF aeon_work_leaf(NEW.parent_id) AND aeon_work_busy(NEW.parent_id) THEN
   RAISE EXCEPTION 'busy leaf requires graceful handover before adding work children' USING ERRCODE='23514',CONSTRAINT='busy_work_leaf';
  END IF;
  RETURN NEW;

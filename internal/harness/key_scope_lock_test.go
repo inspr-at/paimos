@@ -21,7 +21,7 @@ func TestKeyScopeUsageRegistrationVersusMoveLockOrder(t *testing.T) {
 			f.agent.Scopes = []string{"harness.write", "harness.worker", "nodes.move"}
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id)
-				 SELECT $1,$2,'HTS-3',id,'Destination epic',$3 FROM node_kinds WHERE slug='epic'`, f.person.TenantID, destination, f.project); err != nil {
+				 SELECT $1,$2,'HTS-3',id,'Destination epic',$3 FROM node_kinds WHERE slug='work'`, f.person.TenantID, destination, f.project); err != nil {
 					return err
 				}
 				return tx.QueryRow(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1 RETURNING id::text`, f.agent.ID, f.agent.Scopes).Scan(&f.agent.KeyID)

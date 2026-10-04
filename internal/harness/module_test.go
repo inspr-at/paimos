@@ -48,7 +48,7 @@ func fixture(t *testing.T) *harnessFixture {
 }
 
 func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixture {
-	return fixtureWithKind(t, now, "ticket")
+	return fixtureWithKind(t, now, "work")
 }
 
 func fixtureWithKind(t *testing.T, now func() time.Time, kind string) *harnessFixture {

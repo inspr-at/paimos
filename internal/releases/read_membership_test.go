@@ -33,6 +33,39 @@ func (f *ticketFixture) readMembership(ids ...string) []nativeMembership {
 	return out.Tickets
 }
 
+func TestNativeWorkMembershipReadProjection(t *testing.T) {
+	f := ticketSetup(t)
+	a := f.existing("work", f.project, "Assigned work", "open")
+	b := f.existing("work", f.project, "Unassigned work", "open")
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"release":{"label":"Imported release"},"keep":true}' WHERE id=ANY($1::uuid[])`, []string{a, b}); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,walker_position,source)
+			VALUES($1,$2,$3,$4,$5,0,'manual')`, f.person.TenantID, a, f.project, f.feature, f.release)
+		return err
+	})
+	before := f.counts()
+	rows := f.readMembership(b, a)
+	if len(rows) != 2 || rows[0].TicketID != b || rows[0].ReleaseID != nil || rows[0].ReleaseTitle != nil || rows[0].ReleaseState != nil ||
+		rows[1].TicketID != a || rows[1].ReleaseID == nil || *rows[1].ReleaseID != f.release || rows[1].ReleaseTitle == nil || *rows[1].ReleaseTitle != "release" || rows[1].ReleaseState == nil || *rows[1].ReleaseState != "planning" {
+		t.Fatalf("work membership projection or request order lost: %+v", rows)
+	}
+	if f.counts() != before {
+		t.Fatal("membership read mutated journey or audit history")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE id=ANY($1::uuid[]) AND fields='{"release":{"label":"Imported release"},"keep":true}'::jsonb`, []string{a, b}).Scan(&count); err != nil {
+			return err
+		}
+		if count != 2 {
+			t.Fatal("membership projection changed imported fields")
+		}
+		return nil
+	})
+}
+
 func TestNativeMembershipReadsAssignmentRemovalAndUndo(t *testing.T) {
 	f := ticketSetup(t)
 	a := f.existing("ticket", f.project, "First", "open")

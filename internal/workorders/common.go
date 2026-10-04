@@ -133,6 +133,7 @@ func workBindingMutation(r *http.Request) bool {
 		"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding",
 		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",
 		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit",
+		"PUT /api/nodes/{nodeId}/live-eta",
 		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/resume":
 		return true
 	}

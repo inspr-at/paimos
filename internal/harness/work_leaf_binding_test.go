@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"runtime"
@@ -18,7 +19,46 @@ import (
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func TestWorkLeafBusyScopeAllowsSiblingWork(t *testing.T) {
+	f := fixtureWithKind(t, nil, "work")
+	parent, child := uid(), uid()
+	f.addNode(t, parent, "SIB-1", "work", f.project, "Existing work parent")
+	f.addNode(t, child, "SIB-2", "work", parent, "Busy child")
+	f.registerSession(t, f.agent.ID, "worker", f.ticket, "sibling-project-ref-"+uid(), "sibling-project-lease-"+uid())
+	f.registerSession(t, f.agent.ID, "worker", child, "sibling-work-ref-"+uid(), "sibling-work-lease-"+uid())
+	// Neither a project nor an existing work parent becomes a busy leaf merely
+	// because it contains busy work. New independent siblings remain admissible.
+	sibling, nestedSibling := uid(), uid()
+	f.addNode(t, sibling, "SIB-3", "work", f.project, "Project sibling")
+	f.addNode(t, nestedSibling, "SIB-4", "work", parent, "Work sibling")
+	for _, target := range []string{f.ticket, child} {
+		err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
+				SELECT $1,'BAD-1',id,'Forbidden child',$2 FROM node_kinds WHERE slug='work'`, f.person.TenantID, target)
+			return err
+		})
+		var constraint *pgconn.PgError
+		if !errors.As(err, &constraint) || constraint.Code != "23514" || constraint.ConstraintName != "busy_work_leaf" {
+			t.Fatalf("busy leaf child rejected for wrong reason: %v", err)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE id=ANY($1::uuid[])`, []string{sibling, nestedSibling}).Scan(&count); err != nil {
+			return err
+		}
+		if count != 2 {
+			t.Fatalf("only %d sibling writes persisted", count)
+		}
+		return nil
+	})
+}
 
 func TestWorkLeafRegistrationBindingAndGracefulDeadline(t *testing.T) {
 	f := fixtureWithKind(t, nil, "work")

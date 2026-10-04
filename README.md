@@ -17,6 +17,11 @@ claims, session registration/binding and work-order placement share the tree
 fence with child creation. A busy leaf cannot gain work children; historical
 sessions keep their original IDs and bindings.
 
+Busy work does not prevent adding siblings to its project or existing work
+parent. Coordinator live ETA writes accept work leaves, reject work parents,
+and recheck current authority under the tree fence. Work leaves also retain
+missing-estimate guidance and their saved dispatch model placement.
+
 In a work item's **Work actions** sheet, **Split into children** saves up to
 20 child titles and requests an AEON-479 cooperative handover before creating
 them. **Cancel with its open children** previews up to 100 open leaves, cancels

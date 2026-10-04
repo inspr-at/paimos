@@ -422,7 +422,7 @@ func TestPendingApprovalStateRespectsProjectVisibility(t *testing.T) {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title)
-            SELECT $1,$2,'SC1-4',id,'Unassigned resource' FROM node_kinds WHERE slug='ticket'`, f.person.TenantID, unassigned); err != nil {
+            SELECT $1,$2,'SC1-4',id,'Unassigned resource' FROM node_kinds WHERE slug='work'`, f.person.TenantID, unassigned); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Project reader')`, reader.TenantID, reader.ID); err != nil {

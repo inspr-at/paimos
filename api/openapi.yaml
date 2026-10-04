@@ -56,7 +56,7 @@ paths:
               schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
         '400': {description: Invalid request or bounded scope exceeded}
         '403': {description: Person with current nodes.write and any required harness.control/run.create/work_orders.write permissions}
-        '409': {description: Stale preview, another pending intent, or a run without cooperative handover delivery}
+        '409': {description: 'Stale preview, another pending intent, or a run without cooperative handover delivery'}
   /nodes/{nodeId}/work-lifecycle/{actionId}:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6744,7 +6744,7 @@ paths:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
     put:
       operationId: putNodeLiveEta
-      description: A coordinator session reports when a ticket or task in its project is live. Epics roll up from children and reject this write. Null clears the live estimate. Requires the worker lease of an active coordinator session in the node's project.
+      description: A coordinator session reports when a work leaf in its project is live. Work parents roll up from children and reject this write. Existing ticket and task kinds remain supported. Null clears the live estimate. Requires current harness.worker authority and the worker lease of an active coordinator session in the node's project.
       requestBody:
         required: true
         content:
@@ -6756,7 +6756,7 @@ paths:
                 eta_live_at: {type: [string, 'null'], format: date-time}
       responses:
         '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
-        '400': {description: 'Not a ticket or task, or the timestamp is not RFC3339'}
+        '400': {description: 'Not a work leaf or supported legacy ticket or task, or the timestamp is not RFC3339'}
         '403': {description: No active coordinator session for this agent in the project}
         '404': {description: Node not found}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
@@ -7477,7 +7477,7 @@ paths:
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: project_id, in: query, description: Optional project for model preference placement and the starter's residency trace., schema: {type: string, format: uuid}}
-        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
+        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
         - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
@@ -8142,7 +8142,7 @@ paths:
     get:
       operationId: readReleaseMemberships
       summary: Read native release membership for visible project tickets
-      description: Returns up to 100 requested ticket or task nodes in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Null release values mean no live native membership (including backlog and unprojected tickets); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
+      description: Returns up to 100 requested work items or legacy ticket or task nodes in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Null release values mean no live native membership (including backlog and unprojected tickets); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -14606,7 +14606,7 @@ components:
         continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
         warnings:
           type: array
-          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
+          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound work item or legacy ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
           items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
         limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
