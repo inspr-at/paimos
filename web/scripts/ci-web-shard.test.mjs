@@ -350,10 +350,10 @@ test('runtime reconciliation leaves new specs ungated, drops removed specs and r
   assert.equal(reconcileManifest(manifest, files(manifest)).manifest.groups.length, manifest.groups.length)
   assert.throws(() => reconcileManifest({ ...manifest, groups: [...manifest.groups, { ...group, id: 'unlisted' }] }, [...discovered, 'tests/x.spec.ts']), /reserved/)
   assert.equal(parseArgs(['--check', '--strict']).strict, true)
-  // The real manifest includes the three newly gated specs.
+  // The real manifest includes the three newly gated specs and main’s key-layout spec.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  assert.equal(JSON.parse(out.pop()).specs, 52)
+  assert.equal(JSON.parse(out.pop()).specs, 53)
 })
 
 test('main --strict rejects unlisted-only, stale-only and combined drift and accepts a clean tree', async () => {

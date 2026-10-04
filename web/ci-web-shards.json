@@ -803,6 +803,25 @@
       ]
     },
     {
+      "id": "key-layout",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/key-layout.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        }
+      ]
+    },
+    {
       "id": "planning",
       "config": "playwright.ui.config.ts",
       "project": null,
@@ -1444,6 +1463,11 @@
           "listedTests": 16
         },
         {
+          "file": "tests/decision-text.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-default"
+        },
+        {
           "file": "tests/delivery-guarantee.spec.ts",
           "weightSeconds": 17.756098,
           "weightSource": "unmeasured-test-rate",
@@ -1550,6 +1574,11 @@
           "weightSeconds": 46.609756,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 21
+        },
+        {
+          "file": "tests/headings.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-default"
         },
         {
           "file": "tests/hours-edit.spec.ts",

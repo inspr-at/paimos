@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -71,7 +72,12 @@ func legacySocketAside(name string) bool {
 // pinned directory fd. A same-uid process can disrupt a daemon by deleting or
 // replacing its lock file or directory; this is outside the protection boundary
 // (that process can already signal or kill the daemon).
-func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[string]os.FileInfo) error {
+func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[string]os.FileInfo) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("clean local socket artifacts %s: %w", filepath.Join(s.path, name), resultErr)
+		}
+	}()
 	if err := s.verifyLock(name+".lock", lock); err != nil {
 		return err
 	}
@@ -111,18 +117,18 @@ func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[strin
 			continue
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("stat socket artifact %s: %w", filepath.Join(s.path, item.name), err)
 		}
 		if item.kind == 0 {
 			item.kind = uint32(st.Mode) & unix.S_IFMT
 		}
 		if (item.kind != unix.S_IFSOCK && item.kind != unix.S_IFREG) || !privateArtifact(&st, item.kind) {
-			return ErrUnsafePath
+			return fmt.Errorf("validate socket artifact %s: %w", filepath.Join(s.path, item.name), ErrUnsafePath)
 		}
 		if owned != nil {
 			original, ok := owned[item.name].Sys().(*syscall.Stat_t)
 			if !ok || uint64(original.Dev) != uint64(st.Dev) || uint64(original.Ino) != uint64(st.Ino) {
-				return ErrCollision
+				return fmt.Errorf("socket artifact %s: %w", filepath.Join(s.path, item.name), ErrCollision)
 			}
 		}
 		item.dev, item.ino = uint64(st.Dev), uint64(st.Ino)
@@ -135,10 +141,10 @@ func (s *Store) cleanSocketArtifacts(name string, lock *os.File, owned map[strin
 		var st unix.Stat_t
 		if err := unix.Fstatat(int(s.root.Fd()), item.name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil ||
 			!privateArtifact(&st, item.kind) || uint64(st.Dev) != item.dev || uint64(st.Ino) != item.ino {
-			return ErrCollision
+			return fmt.Errorf("socket artifact %s: %w", filepath.Join(s.path, item.name), ErrCollision)
 		}
 		if err := unix.Unlinkat(int(s.root.Fd()), item.name, 0); err != nil {
-			return err
+			return fmt.Errorf("unlink socket artifact %s: %w", filepath.Join(s.path, item.name), err)
 		}
 	}
 	return unix.Fsync(int(s.root.Fd()))

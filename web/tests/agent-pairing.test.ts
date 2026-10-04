@@ -1163,6 +1163,22 @@ test('only incompatible computers display update advice', async () => {
 })
 
 
+test('AEON-667: pairing failures retain a safe cause without becoming probe timeouts', async () => {
+  const detail = 'the pairing response contains an unapproved account'
+  const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [enrollment({ harness: 'claude' })], harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'pairing_sync_failed', reason_detail: detail } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(parsed.harness_details?.claude?.reason_detail, detail)
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Pairing sync failed')
+  assert.match(describeHarnessHint(parsed, 'claude'), /pairing sync failed: the pairing response contains an unapproved account/)
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' })?.hint, `Claude: pairing sync failed: ${detail}.`)
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  report.harness_details!.claude!.reason_detail = '/private/profile: arbitrary error'
+  const rejected = (await listPairingComputers())[0]!
+  assert.equal(rejected.harness_details?.claude?.reason_detail, undefined)
+  assert.equal(describeHarnessHint(rejected, 'claude').includes('/private'), false)
+})
+
 test('AEON-623: safe probe diagnostics survive parsing and select the exact repair', async () => {
   const detail = 'the default Claude profile is not private (requires mode 0700)'
   const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [enrollment({ harness: 'claude' })], harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'probe_failed', reason_detail: detail, fix: { kind: 'restart', command: 'untrusted command' } } } })

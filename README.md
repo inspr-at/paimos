@@ -4,6 +4,10 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
+Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
+
+Capped Done gate, Rules Preview and document-profile headings reveal their complete text on hover, keyboard focus or tap. Their reader stays inside the viewport and scrolls for long identities. Press Arrow Down on a clipped heading to enter the reader; Escape closes it and returns focus to the heading. Heading and action positions stay in place. Rules Preview reserves the width of both **Change** and **Done** labels so toggling the selectors keeps the button still without a fixed pixel width.
+
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
@@ -580,6 +584,20 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+CI runs on pushes to `main`, pull requests, merge-queue check requests and manual
+dispatches. A new push to `main` cancels superseded main CI runs to free runner
+capacity (AEON-585). Main's group is separate from PR and merge-queue groups:
+PRs keep their existing per-PR cancellation, while each queue and manual run
+keeps a unique group. Required checks remain `go`, `web`, `release-check` and
+`e2e`; the external `gate/cross-family` status is unchanged.
+
+The separate release rehearsal already cancels superseded runs per ref. Release
+tag builds still require a successful `release-image-check.yml` rehearsal for
+the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
+does not satisfy that gate. Main validation is retained, including when a merge
+group tested the same tree. Workflow policy tests live in
+`scripts/ci-runner-guard` and `scripts/releaseworkflow`.
+
 The ordinary activity tests check exact pagination through 240 same-ticket
 imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
 imported events, plus the node index definition. They impose no latency budget.
@@ -1143,7 +1161,7 @@ Successful authorization records a tenant-isolated timestamp per authenticating 
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
-`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
+`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes `whoami`, `ask`, `ask_status`, issue list/get/create/update/comment, knowledge list/get/create/update, and search over stdio. Work tools reuse the CLI application operations and scoped HTTP APIs; updates preserve revision checks and kind changes remain person-only. JSON field writes preserve exact numeric tokens. Node walks fail explicitly if a cursor repeats or remains after fifty pages. Project-scoped issue search resolves ancestor membership and continues search pages up to the requested limit within the server’s ranked window of 200 matches. An ancestor returning not-found excludes that path from the visible descendant set; other lookup errors and traversal limits still fail the search. Onboarding `--check` compares the complete rendered bundle, options and managed header, normalizing only its generation timestamp.
 
 Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
 
@@ -2343,6 +2361,15 @@ with read-only `aeon-agentd status --json` for the affected account. Queue error
 can therefore explain a subsequent probe timeout; the timeout alone does not
 identify the underlying cause. Raw errors and private bindings are not logged.
 
+Pairing reconciliation and runtime refresh failures report `pairing_sync_failed`
+with a fixed short cause in local account/harness status and subsequent lifecycle
+reports. They log `agentd pairing diagnostic` once per distinct cause per daemon
+process, without raw errors, paths or credentials. Polling stays blocked until
+reconciliation and runtime validation succeed; recovery clears the diagnostic.
+Revoked enrollments retain their fences without requiring an old local candidate;
+live enrollments match the approved account key and harness, independently of a
+changed display label. Unapproved live accounts still block reconciliation.
+
 ### Paired daemon socket paths
 
 Paired mode uses `<setup-root>/daemon/agentd.sock`. If that exceeds the
@@ -2772,11 +2799,15 @@ the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
 ancestors are acceptable. The selected target still requires its executable
 and working directory.
 Those checks are defence in depth. A program running as the same user can open
-another terminal and request the review. On a Mac that can use Touch ID, attach
-approval asks for it by default until the person saves a choice. People without
-Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
-Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
-Mac that can show Touch ID prompts on that Mac's screen.
+another terminal and request the review. On a Mac whose browser-approved pairing
+pinned a Secure Enclave public key, attach approval requires that key's Touch ID
+signature by default until the person saves a choice, even when the daemon
+reports that Touch ID cannot run. Linux and older pairings without a pinned key
+keep approval in Aeon. To allow an upgraded Mac without a graphical login or
+usable Touch ID, explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching**. Saving Mac confirmation
+fails closed where Touch ID cannot run. SSH to a Mac that can show Touch ID
+prompts on that Mac's screen.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 
