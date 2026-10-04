@@ -53,7 +53,8 @@ type LearningSample struct {
 // counters. Mixed-model/placement tickets, missing active time and unknown
 // identity are excluded rather than attributed to a guessed model. Legacy
 // runs with no waiting_ms measurement and tickets with multiple baselines do
-// not train this path; episode ownership remains a separate design decision. Wall time
+// not train this path; episode ownership remains a separate design decision.
+// Project-RLS subsets never certify a ticket sample. Wall time
 // and elapsed_seconds include waits and must never substitute for active_ms.
 // visible gates both the source project and the outcome project.
 //
@@ -128,6 +129,8 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
 	candidates, err := tx.Query(ctx, `SELECT o.ticket_node_id::text,o.project_id::text
  FROM outcome_events o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.ticket_node_id
  WHERE o.kind='ticket_done' AND o.session_id IS NOT NULL AND n.deleted_at IS NULL
+ -- RLS subsets cannot establish a whole ticket's effort.
+ AND (SELECT aeon_visible_all())
  AND ($1::text='' OR o.project_id=NULLIF($1,'')::uuid)
  AND NOT EXISTS (SELECT 1 FROM outcome_events newer WHERE newer.tenant_id=o.tenant_id
   AND newer.ticket_node_id=o.ticket_node_id AND newer.kind='ticket_done' AND newer.session_id IS NOT NULL
@@ -183,6 +186,7 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
  s.model_profile_id,s.model_raw,s.reasoning_effort,s.work_placement,
  r.active_ms,u.tokens,
  (s.stopped_at IS NOT NULL AND s.stopped_at<=d.recorded_at AND r.status='completed'
+  AND s.created_at>=snap.started_at
   AND s.project_id=d.project_id AND s.project_id=snap.source_project_id
   AND r.waiting_ms IS NOT NULL AND r.waiting_ms>=0
   AND r.active_ms + r.waiting_ms = floor(extract(epoch FROM r.ended_at-r.started_at)*1000)::bigint
@@ -198,11 +202,11 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
  LEFT JOIN LATERAL (SELECT sum(x.input_tokens+x.output_tokens)::float8 AS tokens,
   bool_and(x.input_tokens IS NOT NULL AND x.output_tokens IS NOT NULL AND x.cached_input_tokens IS NOT NULL AND NOT x.provisional) AS complete
   FROM harness_session_usage x WHERE x.tenant_id=s.tenant_id AND x.session_id=s.id) u ON true
- WHERE snap.started_at IS NOT NULL AND s.created_at>=snap.started_at
+ WHERE snap.started_at IS NOT NULL
  -- Reopened/multiple baselines need the separately decided episode model.
  AND (SELECT count(*) FROM (SELECT 1 FROM ticket_estimate_snapshots x
   WHERE x.tenant_id=s.tenant_id AND x.ticket_node_id=d.ticket_node_id LIMIT 2) baselines)=1
- AND ((SELECT aeon_visible_all()) OR s.project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
+ AND (SELECT aeon_visible_all())
 ), tickets AS (
  SELECT ticket_node_id,project_id,recorded_at,min(source_project::text) AS source_project,
  min(model_profile_id::text) AS profile_id,min(coalesce(model_raw,'')) AS raw,

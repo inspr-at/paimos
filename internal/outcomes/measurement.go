@@ -164,9 +164,14 @@ func (m *Module) measurement(w http.ResponseWriter, r *http.Request) {
 			}
 			if len(commits) >= 20 {
 				out.Truncated = true
+				commits = commits[:20]
 			}
 			for _, c := range commits {
 				c.SHA = strings.ToLower(c.SHA)
+				if len(c.SHA) < 7 || len(c.SHA) > 40 || strings.Trim(c.SHA, "0123456789abcdef") != "" {
+					diffKnown = false
+					continue
+				}
 				if old, ok := seen[c.SHA]; ok {
 					if !sameDiff(old, c) {
 						diffKnown = false
@@ -197,10 +202,15 @@ func (m *Module) measurement(w http.ResponseWriter, r *http.Request) {
 				diffKnown = false
 				continue
 			}
+			valid := true
 			for _, v := range []*int64{c.Added, c.Deleted, c.Files} {
 				if *v < 0 || *v > 1000000000 {
-					diffKnown = false
+					valid = false
 				}
+			}
+			if !valid {
+				diffKnown = false
+				continue
 			}
 			a += *c.Added
 			d += *c.Deleted

@@ -70,9 +70,9 @@ func TestTicketMeasurementEvidenceKinds(t *testing.T) {
 	}
 	t.Run("diff", func(t *testing.T) {
 		inTenant(t, d, p, func(tx pgx.Tx) error {
-			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,commits)
- VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker',decode(md5('ref'),'hex'),decode(md5('lease'),'hex'),$5::jsonb),
- ($1,$2,$3,$4,'codex','test','unmanaged','worker',decode(md5('ref2'),'hex'),decode(md5('lease2'),'hex'),$5::jsonb)`, p.TenantID, project, ticket, p.ID, `[{"sha":"abcdef0","subject":"Measured","lines_added":17,"lines_deleted":3,"files_changed":2}]`)
+			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,agent_principal_id,harness,host,management,role,work_shape,ref_digest,lease_digest,commits)
+ VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',decode(md5('ref'),'hex'),decode(md5('lease'),'hex'),$5::jsonb),
+ ($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',decode(md5('ref2'),'hex'),decode(md5('lease2'),'hex'),$5::jsonb)`, p.TenantID, project, ticket, p.ID, `[{"sha":"abcdef0","subject":"Measured","lines_added":17,"lines_deleted":3,"files_changed":2}]`)
 			return err
 		})
 		got := read()
@@ -88,6 +88,27 @@ func TestTicketMeasurementEvidenceKinds(t *testing.T) {
 			t.Fatal("missing diff became zero", got)
 		}
 	})
+	var scoped tenant.Principal
+	scoped.Kind = tenant.Person
+	scoped.TenantID = p.TenantID
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Scoped measurement') RETURNING id::text`, p.TenantID).Scan(&scoped.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, p.TenantID, scoped.ID, project)
+		return err
+	})
+	r := callAs(t, mod, scoped, "GET", "/api/outcomes/measurement?ticket_node_id="+ticket, "")
+	if r.Code != 200 {
+		t.Fatalf("scoped evidence: %d %s", r.Code, r.Body.String())
+	}
+	var scopedView ticketMeasurement
+	if err := json.Unmarshal(r.Body.Bytes(), &scopedView); err != nil {
+		t.Fatal(err)
+	}
+	if scopedView.Added != nil || scopedView.Deleted != nil || scopedView.Files != nil || !strings.Contains(strings.Join(scopedView.Gaps, ","), "diff_visibility_incomplete") {
+		t.Fatal("restricted view certified a diff subset", scopedView)
+	}
 	foreign := newPerson(t, d, "measurement-foreign")
 	if r := callAs(t, mod, foreign, "GET", "/api/outcomes/measurement?ticket_node_id="+ticket, ""); r.Code != 404 {
 		t.Fatalf("foreign: %d %s", r.Code, r.Body.String())

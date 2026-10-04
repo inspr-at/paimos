@@ -15643,6 +15643,13 @@ components:
         started_at: {type: string, format: date-time}
         source: {type: string, enum: [session, status]}
         estimate_hours: {type: [number, 'null']}
+        work_classification:
+          type: object
+          description: Area, role and complexity frozen with the estimate; absent on legacy snapshots.
+          properties:
+            area: {type: string}
+            route_role: {type: string}
+            complexity: {type: string}
         model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimated_tokens: {type: [integer, 'null']}
         estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}

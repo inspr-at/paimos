@@ -3296,5 +3296,7 @@ AEON-502e remains the only model/kind/complexity estimator. Its existing learnin
 query now requires paired measured active/waiting time, final token evidence,
 a frozen source-project baseline and a single baseline per ticket. Legacy,
 missing timing, provisional tokens, moved sources and reopened/multiple-baseline
-work do not train this path. Episode boundaries, retained contributor ownership,
-completion receipts and interval rebinding remain a separate concept decision.
+work do not train this path. Restricted node visibility also excludes samples
+so an RLS subset cannot certify whole-ticket effort. Episode boundaries, retained
+contributor ownership, completion receipts and interval rebinding remain a
+separate concept decision.

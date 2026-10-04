@@ -109,8 +109,11 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO ticket_estimate_snapshots(tenant_id,ticket_node_id,snapshot,source_project_id)
-        VALUES(current_setting('aeon.tenant_id')::uuid,$1::uuid,$2::jsonb,NULLIF($3,'')::uuid)
+	// The binding and baseline are one atomic work-start transaction. Its start
+	// precedes the initiating session row, so that row is not accidentally
+	// excluded from measured learning by a later snapshot INSERT timestamp.
+	_, err = tx.Exec(ctx, `INSERT INTO ticket_estimate_snapshots(tenant_id,ticket_node_id,snapshot,source_project_id,started_at)
+        VALUES(current_setting('aeon.tenant_id')::uuid,$1::uuid,$2::jsonb,NULLIF($3,'')::uuid,transaction_timestamp())
         ON CONFLICT (tenant_id,ticket_node_id) WHERE closed_at IS NULL DO NOTHING`, id, string(raw), project)
 	return err
 }
