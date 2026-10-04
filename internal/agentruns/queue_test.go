@@ -508,11 +508,22 @@ func TestStaleQueueEligibility(t *testing.T) {
 // Mutation responses feed the row store directly. No GET/readiness reload may
 // be required between an ordinary edit and queueing idle In progress work.
 func TestStaleQueueAfterNodeMutation(t *testing.T) {
-	for _, change := range []string{"title", "body", "fields", "estimate", "same_kind", "move", "convert", "create"} {
+	for _, change := range []string{"title", "body", "fields", "estimate", "same_kind", "move", "convert", "create", "unassign"} {
 		t.Run(change, func(t *testing.T) {
 			f := setup(t)
 			nodes.New(f.d.App, nil).Mount(f.mux)
-			id := f.ticket(t, "in_progress", "high", nil)
+			fields := map[string]any{"estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}
+			if change == "unassign" {
+				fields["assignee"] = f.person.ID
+			}
+			id := f.ticket(t, "in_progress", "high", fields)
+			if change == "unassign" {
+				var ready struct{ Queueable, Stale bool }
+				f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
+				if ready.Queueable || ready.Stale {
+					t.Fatal("assigned fixture must be ineligible before unassignment")
+				}
+			}
 			var kindID string
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				return tx.QueryRow(t.Context(), `SELECT kind_id::text FROM nodes WHERE id=$1`, id).Scan(&kindID)
@@ -526,6 +537,8 @@ func TestStaleQueueAfterNodeMutation(t *testing.T) {
 				patch = map[string]any{"body": "Edited description"}
 			case "fields":
 				patch = map[string]any{"fields": map[string]any{"priority": "low", "estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
+			case "unassign":
+				patch = map[string]any{"fields": map[string]any{"assignee": nil, "priority": "high", "estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}
 			case "estimate":
 				patch = map[string]any{"estimate_hours": 3}
 			case "same_kind":

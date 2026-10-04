@@ -431,3 +431,74 @@ test('stale progress queued through readiness fixes also offers Undo', async ({ 
   expect(state.ids).not.toContain('n-2')
   expect(data.nodes.find(n => n.id === 'n-2')!.fields.acceptance_criteria).toBe('- [ ] Recovery verified')
 })
+
+test('successful Undo refreshes membership and reports a failed ticket read honestly', async ({ page }) => {
+  const { state, data } = await world(page, { stale: true })
+  const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
+  await ticket.hover(); await queue.click()
+  await expect(queue).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
+  let failedReads = 0
+  await page.route('**/api/nodes/n-2', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    failedReads++
+    return route.fulfill({ status: 503, json: { error: 'Ticket refresh unavailable' } })
+  })
+  const queueReads = () => state.queueCalls.filter(call => call.method === 'GET' && call.path === '/api/queue').length
+  const before = queueReads()
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'Undo with failed ticket refresh', run: async () => {
+      await page.getByRole('button', { name: 'Undo', exact: true }).click()
+      await expect(page.getByText('Undone, but the ticket could not be refreshed: Ticket refresh unavailable. Reload before another change.', { exact: true })).toBeVisible()
+      await expect(queue).toHaveAttribute('aria-pressed', 'false')
+      await ticket.hover()
+    } },
+  ] })
+  expect(failedReads).toBe(1)
+  expect(queueReads()).toBe(before + 1)
+  expect(state.queueCalls.filter(call => call.method === 'POST' && call.path === '/api/queue/n-2/undo')).toHaveLength(1)
+  expect(state.ids).not.toContain('n-2')
+  expect(data.nodes.find(n => n.id === 'n-2')!.state).toBe('in_progress')
+  await expect(page.getByText('PHAROS-12 returned to In progress', { exact: true })).toHaveCount(0)
+})
+
+test('unassigning In progress work enables Queue directly from the mutation response', async ({ page }) => {
+  const { calls, state, data } = await world(page, { assigned: true })
+  const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
+  await expect(queue).toHaveAttribute('aria-disabled', 'true')
+  await expect(queue).toHaveAttribute('data-tip', "Already in progress (Markus Barta), can't be queued.")
+  const node = data.nodes.find(n => n.id === 'n-2')!
+  let unassignments = 0
+  // Model the node PATCH projection, which the matching Go regression verifies.
+  await page.route('**/api/nodes/n-2', route => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    const patch = route.request().postDataJSON() as { fields: Record<string, unknown> }
+    expect(patch.fields.assignee).toBeNull()
+    unassignments++
+    node.fields = patch.fields
+    node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString()
+    node.queue_stale = true
+    return route.fulfill({ json: { ...node, kind_id: 'k-ticket', position: '0', deleted_at: null } })
+  })
+  const reads = () => calls.filter(call => call.method === 'GET' && call.path === '/api/nodes/n-2').length
+  const before = reads()
+  await ticket.getByRole('button', { name: /Change assignee/ }).click()
+  const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-12', exact: true })
+  await menu.getByRole('menuitemradio', { name: 'Unassigned', exact: true }).click()
+  await expect(ticket.locator('.c-assignee')).toContainText('Unassigned')
+  await expect(queue).toHaveAttribute('aria-disabled', 'false')
+  await expect(queue).toHaveAttribute('data-tip', 'In progress, but nobody is working on it. Queue it for the next free agent · q')
+  await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
+  expect(unassignments).toBe(1)
+  expect(reads()).toBe(before)
+  await ticket.hover()
+  await expectStableControls({ controls: { queue, copyKey: ticket.locator('.key-btn'), clickedRow: ticket }, interactions: [
+    { name: 'queue immediately after unassignment', run: async () => {
+      await queue.click()
+      await expect(queue).toHaveAttribute('aria-pressed', 'true')
+      await expect(ticket.locator('.c-status')).toContainText('Open')
+    } },
+  ] })
+  expect(state.ids).toContain('n-2')
+  expect(node.fields.assignee).toBeNull()
+})

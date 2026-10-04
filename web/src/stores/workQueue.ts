@@ -60,15 +60,29 @@ export const useWorkQueue = defineStore('workQueue', () => {
     }).finally(() => { if (checking.get(key) === request) checking.delete(key) })
     checking.set(key, request); return request
   }
-  async function write<T>(project: string, action: () => Promise<T>) {
+  async function write<T>(project: string, action: () => Promise<T>, ticket?: string, saved = 'Saved') {
     if (busy.value) throw new Error('A queue change is already being saved.')
     const started = epoch
     busy.value = true
     try {
       const result = await action()
       if (started === epoch) {
-        await load(project, true)
-        if (errors[project]) throw new Error(`Saved, but the queue could not be refreshed: ${errors[project]}. Retry its read before another change.`)
+        // A completed mutation must refresh queue membership even if its
+        // ticket read fails or is still pending. Keep both reads identity-fenced.
+        const [ticketRead] = await Promise.allSettled([
+          (async () => {
+            if (!ticket) return
+            const sent = rowStore.mark()
+            const node = await getNode(ticket)
+            if (started === epoch) rowStore.adoptNode(node, sent, { show: true })
+          })(),
+          load(project, true),
+        ])
+        if (started !== epoch) return
+        const failures: string[] = []
+        if (ticketRead.status === 'rejected') failures.push(`the ticket could not be refreshed: ${ticketRead.reason instanceof Error ? ticketRead.reason.message : 'request failed'}`)
+        if (errors[project]) failures.push(`the queue could not be refreshed: ${errors[project]}`)
+        if (failures.length) throw new Error(`${saved}, but ${failures.join('; ')}. Reload before another change.`)
       }
       return started === epoch ? result : undefined
     }
@@ -91,21 +105,13 @@ export const useWorkQueue = defineStore('workQueue', () => {
       throw e
     }
     if (started !== epoch) return
-    const sent = rowStore.mark()
-    const node = await getNode(ticket).catch(e => { throw new Error(`Saved, but the ticket could not be refreshed: ${e instanceof Error ? e.message : 'request failed'}. Reload it before another change.`) })
-    if (started === epoch) rowStore.adoptNode(node, sent, { show: true })
     return result
-  })
+  }, ticket)
   const undoAdd = (project: string, ticket: string, token: QueueUndoToken) => write(project, async () => {
-    const started = epoch
     const result = await undoQueueAddition(ticket, token)
     if (!result.removed) throw new Error('The queue change was not undone.')
-    if (started !== epoch) return
-    const sent = rowStore.mark()
-    const node = await getNode(ticket)
-    if (started === epoch) rowStore.adoptNode(node, sent, { show: true })
     return result
-  })
+  }, ticket, 'Undone')
   const remove = (project: string, ticket: string) => write(project, () => removeFromQueue(ticket))
   const reset = (project: string) => write(project, () => resetQueue())
   function order(project: string, ids: string[], ticket: string) {
