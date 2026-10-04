@@ -377,6 +377,10 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+On phones, the configurable project header keeps the queue action visible in
+Compact and Comfortable while folding the activity timestamp. Expanding a
+collapsed header restores the queue action.
+
 ## Model preferences
 
 `aeon model resolve --ticket AEON-123` resolves the ticket's work kind,
