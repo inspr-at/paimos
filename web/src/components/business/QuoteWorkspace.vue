@@ -542,7 +542,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
 </script>
 
 <template>
-  <section ref="root" class="quote-ws" :class="[`layout-${layout}`, `side-${sideMode}`, { 'side-open': !!pane && !!document, compact }]" :aria-label="layout === 'dock' ? `Quote ${offerNo}`.trim() : 'Quote editor'" tabindex="-1">
+  <section ref="root" class="quote-ws" :data-recovery-ready="live?.recoveryReady.value ?? false" :class="[`layout-${layout}`, `side-${sideMode}`, { 'side-open': !!pane && !!document, compact }]" :aria-label="layout === 'dock' ? `Quote ${offerNo}`.trim() : 'Quote editor'" tabindex="-1">
     <QuoteTitleBar
       class="quote-titlebar" :offer-no="offerNo" :status="status" :archived="!!projection?.archived" :revising="revising" :local="viewing !== null ? 'read-only' : view?.local ?? 'loading'"
       :can-save="saveReady" :save-hint="saveHint" :can-undo="canUndo" :can-redo="canRedo" :zoom="effectiveZoom" :percent="percent" :pane="pane" :can-format="canFormat"
