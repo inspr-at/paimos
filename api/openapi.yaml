@@ -3941,7 +3941,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
+          description: Projects with counts of live descendant work leaves (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total only. The response fields are unchanged.
           content:
             application/json:
               schema:
@@ -4105,7 +4105,7 @@ paths:
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. State facets count work leaves only, so status-grid and Hide counts omit grouping parents. Other facets retain row semantics. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -14621,14 +14621,14 @@ components:
           type: object
           required: [spent, input, output, cached, sessions, unreported, estimated]
           properties:
-            spent: {type: [integer, 'null'], description: 'Input plus output tokens over the node''s sessions and those of its open or done ticket and task children and grandchildren (cached input is part of input). Null when nothing was reported.'}
+            spent: {type: [integer, 'null'], description: 'Input plus output tokens over all historical sessions in the node subtree, including sessions from former leaves and closed or archived work; each session is counted once (cached input is part of input). Null when nothing was reported.'}
             input: {type: integer, minimum: 0}
             output: {type: integer, minimum: 0}
             cached: {type: integer, minimum: 0}
             sessions: {type: integer, minimum: 0}
             running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
-            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. Ticket and task rows also return default-rate figures with calibration.basis=default; clients must label or hide these uncalibrated figures. An epic sums only calibrated open and done children; excluded default estimates are counted in children.uncalibrated. Null without a contributing estimate.'}
+            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. Ticket and task rows also return default-rate figures with calibration.basis=default; clients must label or hide these uncalibrated figures. A parent sums only calibrated eligible work leaves at any depth; excluded default estimates are counted in children.uncalibrated. Its own typed planned estimate is separate from the sum. Null without a contributing estimate.'}
             calibration:
               description: The rate behind a ticket's estimate.
               type: object
@@ -14646,7 +14646,7 @@ components:
           required: [list_spent, list_estimated, list_unpriced, paid_spent, paid_estimated, paid_unknown, plans]
           properties:
             list_spent: {type: [string, 'null'], description: 'Spent tokens at API list prices, whatever the billing.'}
-            list_estimated: {type: [string, 'null'], description: 'Ticket and task rows also return uncalibrated default-rate figures when tokens.calibration.basis=default; clients must label or hide them. Epics include only calibrated children. The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
+            list_estimated: {type: [string, 'null'], description: 'Ticket and task rows also return uncalibrated default-rate figures when tokens.calibration.basis=default; clients must label or hide them. Parents include only calibrated eligible work leaves. The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
             list_unpriced: {type: boolean, description: 'Some reported usage or the route''s model has no list price. A session without a usage row does not set this flag.'}
             paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
             paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
@@ -14658,7 +14658,7 @@ components:
         model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
-          description: 'Epics only: open and done ticket and task children, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
+          description: 'Parents only: eligible work leaves at any depth, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
           type: object
           required: [total, estimated]
           properties:
@@ -17531,7 +17531,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, parent eligible-leaf sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over all historical sessions in the node subtree, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction

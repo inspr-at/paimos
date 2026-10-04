@@ -604,7 +604,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				ids[i] = page.Items[i].ID
 			}
-			estimates, err := loadEstimates(ctx, tx, ids)
+			estimates, views, err := loadWorkTotals(ctx, tx, ids)
 			if err != nil {
 				return err
 			}
@@ -622,10 +622,6 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			for i := range page.Items {
 				page.Items[i].Planning = planning[page.Items[i].ID]
-			}
-			views, err := eta.Load(ctx, tx, ids)
-			if err != nil {
-				return err
 			}
 			for i := range page.Items {
 				if view, ok := views[page.Items[i].ID]; ok {

@@ -7,17 +7,19 @@ SET LOCAL lock_timeout = '5s';
 -- terminates even corrupt cycles; there is no silent depth limit. Facts and
 -- leaf session reads are shared across overlapping requested roots.
 CREATE FUNCTION aeon_work_scope(roots uuid[])
-RETURNS TABLE(root uuid, id uuid, kind_slug text, fields jsonb, bucket text, is_leaf boolean)
+RETURNS TABLE(root uuid, id uuid, kind_slug text, fields jsonb, bucket text, is_leaf boolean, project_id uuid)
 LANGUAGE sql STABLE AS $$
  WITH RECURSIVE walk(root,id) AS (
   SELECT n.id,n.id FROM nodes n
   WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
    AND n.id=ANY(roots) AND n.deleted_at IS NULL
   UNION
-  SELECT w.root,c.id FROM walk w JOIN nodes c
-   ON c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=w.id AND c.deleted_at IS NULL
+  SELECT w.root,c.id FROM walk w CROSS JOIN LATERAL (
+   SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+    AND parent_id=w.id AND deleted_at IS NULL ORDER BY updated_at DESC OFFSET 0
+  ) c
  ), facts AS MATERIALIZED (
-  SELECT n.id,k.slug,n.fields,
+  SELECT n.id,k.slug,n.fields,n.project_id,
    CASE aeon_work_status_category(n.state,k.field_schema)
     WHEN 'delivered' THEN 'done' WHEN 'accepted' THEN 'done' WHEN 'blocked' THEN 'open'
     ELSE aeon_work_status_category(n.state,k.field_schema) END AS bucket,
@@ -25,9 +27,41 @@ LANGUAGE sql STABLE AS $$
     SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
     WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL
      AND ck.slug IN ('work','epic','ticket','task')) AS is_leaf
-  FROM (SELECT DISTINCT id FROM walk) u JOIN nodes n ON n.id=u.id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid
-  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- ) SELECT w.root,f.id,f.slug,f.fields,f.bucket,f.is_leaf FROM walk w JOIN facts f ON f.id=w.id;
+  FROM (SELECT DISTINCT id FROM walk) u CROSS JOIN LATERAL (
+   SELECT id,tenant_id,kind_id,fields,state,project_id FROM nodes WHERE id=u.id
+    AND tenant_id=current_setting('aeon.tenant_id')::uuid OFFSET 0
+  ) n CROSS JOIN LATERAL (
+   SELECT slug,field_schema FROM node_kinds WHERE tenant_id=n.tenant_id AND id=n.kind_id OFFSET 0
+  ) k
+ ) SELECT w.root,f.id,f.slug,f.fields,f.bucket,f.is_leaf,f.project_id FROM walk w JOIN facts f ON f.id=w.id;
+$$;
+
+-- Direct session evidence only: no kind-dependent recursion, and no report
+-- from an archived session or an obsolete project binding.
+CREATE FUNCTION aeon_leaf_eta(target uuid)
+RETURNS TABLE (eta_ready_at timestamptz,eta_live_at timestamptz,progress_pct integer,
+ ready_reported_at timestamptz,live_reported_at timestamptz,ready_by text,live_by text,ready_stale boolean,live_stale boolean)
+LANGUAGE sql STABLE AS $$
+ SELECT w.eta_ready_at,l.eta_live_at,w.progress_pct::integer,w.eta_reported_at,l.reported_at,w.ready_by,l.live_by,
+  coalesce(w.eta_reported_at<now()-aeon_eta_interval()*2,false),
+  coalesce(l.reported_at<now()-aeon_eta_interval()*2,false)
+ FROM nodes n
+ LEFT JOIN LATERAL (
+  SELECT s.eta_ready_at,s.progress_pct,s.eta_reported_at,pr.name AS ready_by
+  FROM harness_sessions s LEFT JOIN principals pr ON pr.tenant_id=s.tenant_id AND pr.id=s.agent_principal_id
+  WHERE s.tenant_id=n.tenant_id AND s.ticket_node_id=n.id AND s.project_id=n.project_id
+   AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.role='worker'
+   AND (s.eta_ready_at IS NOT NULL OR s.progress_pct IS NOT NULL)
+  ORDER BY s.eta_reported_at DESC NULLS LAST,s.id LIMIT 1
+ ) w ON true
+ LEFT JOIN LATERAL (
+  SELECT t.eta_live_at,t.reported_at,pr.name AS live_by FROM ticket_live_eta t
+  LEFT JOIN principals pr ON pr.tenant_id=t.tenant_id AND pr.id=t.reported_by
+  WHERE t.tenant_id=n.tenant_id AND t.node_id=n.id AND t.eta_live_at IS NOT NULL
+   AND EXISTS(SELECT 1 FROM harness_sessions o WHERE o.tenant_id=n.tenant_id AND o.ticket_node_id=n.id
+    AND o.project_id=n.project_id AND o.stopped_at IS NULL AND o.archived_at IS NULL)
+ ) l ON true
+ WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=target AND n.deleted_at IS NULL;
 $$;
 
 CREATE FUNCTION aeon_work_aggregates(roots uuid[])
@@ -49,10 +83,11 @@ LANGUAGE sql STABLE AS $$
    CASE WHEN f.bucket='done' OR coalesce(d.finished,false) THEN 100 ELSE coalesce(e.progress_pct,0) END AS pct,
    e.*,coalesce(d.finished,false) AS worker_finished,
    EXISTS(SELECT 1 FROM harness_sessions s WHERE s.tenant_id=current_setting('aeon.tenant_id')::uuid
+    AND s.project_id=f.project_id
     AND s.ticket_node_id=f.id AND s.phase='working' AND s.stopped_at IS NULL AND s.archived_at IS NULL
     AND s.role IN ('worker','coordinator')) AS working
-  FROM (SELECT DISTINCT id,fields,bucket FROM scope WHERE is_leaf AND bucket NOT IN ('archived','cancelled')) f
-  CROSS JOIN LATERAL aeon_node_eta(f.id) e
+  FROM (SELECT DISTINCT id,fields,bucket,project_id FROM scope WHERE is_leaf AND bucket NOT IN ('archived','cancelled')) f
+  CROSS JOIN LATERAL aeon_leaf_eta(f.id) e
   LEFT JOIN LATERAL aeon_node_completion(f.id) d ON true
  ), totals AS (
   SELECT s.root,sum(l.hours) AS hours,count(l.id)::int AS leaves,count(l.hours)::int AS estimated,
@@ -72,7 +107,7 @@ LANGUAGE sql STABLE AS $$
   CASE WHEN NOT own.is_leaf AND jsonb_typeof(own.fields->'estimate_hours')='number' THEN
    CASE WHEN (own.fields->>'estimate_hours')::numeric>0 AND (own.fields->>'estimate_hours')::numeric<=200
     THEN (own.fields->>'estimate_hours')::numeric END END,
-  NOT own.is_leaf,t.leaves,t.estimated,t.open,
+  NOT own.is_leaf AND own.kind_slug IN ('work','ticket','task','epic'),t.leaves,t.estimated,t.open,
   CASE WHEN own.is_leaf AND own.bucket<>'done' AND NOT coalesce(d.finished,false)
     AND NOT EXISTS(SELECT 1 FROM leaf f WHERE f.id=t.root AND f.progress_pct IS NOT NULL)
     THEN NULL ELSE t.pct END,CASE WHEN t.estimated>0 THEN 'estimate' ELSE 'leaves' END,
@@ -89,6 +124,16 @@ $$;
 
 -- Preserve the published signature for older binaries without its depth cutoff.
 CREATE OR REPLACE FUNCTION aeon_node_eta_progress(target uuid, depth int DEFAULT 0)
+RETURNS TABLE (eta_ready_at timestamptz,eta_live_at timestamptz,progress_pct integer,
+ ready_reported_at timestamptz,live_reported_at timestamptz,ready_by text,live_by text,ready_stale boolean,live_stale boolean)
+LANGUAGE sql STABLE AS $$
+ SELECT a.eta_ready_at,a.eta_live_at,a.progress_pct,a.ready_reported_at,a.live_reported_at,
+  a.ready_by,a.live_by,a.ready_stale,a.live_stale FROM aeon_work_aggregates(ARRAY[target]) a;
+$$;
+
+-- Previous binaries calling the original name get the same bounded scope
+-- semantics. Keep the historical optional depth argument; it is no cutoff.
+CREATE OR REPLACE FUNCTION aeon_node_eta(target uuid, depth int DEFAULT 0)
 RETURNS TABLE (eta_ready_at timestamptz,eta_live_at timestamptz,progress_pct integer,
  ready_reported_at timestamptz,live_reported_at timestamptz,ready_by text,live_by text,ready_stale boolean,live_stale boolean)
 LANGUAGE sql STABLE AS $$

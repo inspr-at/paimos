@@ -304,8 +304,8 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
 }
 
 export function totalFrom(facets: Facets | undefined): number | null {
-  const kinds = facets?.kind
-  return kinds ? Object.values(kinds).reduce((sum, count) => sum + count, 0) : null
+  const counts = facets?.state ?? facets?.kind
+  return counts ? Object.values(counts).reduce((sum, count) => sum + count, 0) : null
 }
 
 // ---------- Facet options ----------

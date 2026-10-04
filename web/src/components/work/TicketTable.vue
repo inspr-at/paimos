@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { vClipTip } from '../../directives/clipTip'
-import { estimateDisplay } from '../../lib/estimates'
+import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
@@ -772,13 +772,14 @@ defineExpose({
                   <span v-else class="empty" aria-label="No cost unit">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'estimate'" class="c-estimate" :data-column-label="column.label"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
+              <td v-else-if="column.id === 'estimate'" class="c-estimate" :data-column-label="column.label"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft, 'aggregate-estimate': entry.row.estimate?.is_parent }" :data-tip="estimateDisplay(entry.row).tip"><template v-if="entry.row.estimate?.is_parent"><span class="aggregate-line">{{ entry.row.estimate.hours == null ? '—' : formatEstimate(entry.row.estimate.hours) }} leaves</span><span v-if="entry.row.estimate.planned_hours != null" class="aggregate-line">{{ formatEstimate(entry.row.estimate.planned_hours) }} planned</span></template><template v-else>{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></template></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
               <td v-else-if="column.id === 'created'" class="c-created" :data-column-label="column.label"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'updated'" class="c-updated" :data-column-label="column.label"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'progress'" class="c-progress" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="progressOf(entry.row)" class="progress-read" :class="{ stale: progressOf(entry.row)!.stale }" role="img" :aria-label="progressOf(entry.row)!.label" :data-tip="progressOf(entry.row)!.label">
-                    <span class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
+                    <span v-if="!entry.row.estimate?.is_parent" class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
+                    <span v-else class="leaf-coverage" aria-hidden="true">{{ entry.row.eta?.estimated_leaves ?? 0 }}/{{ entry.row.eta?.leaf_count ?? 0 }} est.</span>
                     <span class="pct" aria-hidden="true">{{ progressOf(entry.row)!.pct }}%</span>
                   </span>
                   <span v-else class="empty" aria-label="No progress">—</span>
@@ -1031,8 +1032,12 @@ td.c-title { position: relative; overflow: hidden; }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .c-estimate .mono.estimate-draft { color: var(--ink-3); }
 .estimate-mark { font-size: 10px; }
+.aggregate-estimate { display: grid; gap: 0; min-width: 0; max-width: 100%; line-height: 14px; text-align: right; }
+.aggregate-line { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.c-estimate .mono.aggregate-estimate { font-size: 10.5px; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .progress-read { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; color: var(--ink-2); }
+.leaf-coverage { color: var(--ink-3); font: 10px var(--mono); white-space: nowrap; }
 .progress-read .bar { width: 36px; height: 4px; flex: none; box-shadow: none; }
 .progress-read .bar > i { box-shadow: none; }
 .progress-read .pct { flex: none; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink-2); }

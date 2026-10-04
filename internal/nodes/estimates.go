@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -105,37 +106,29 @@ func estimateHoursSQL(fields string) string {
 	return `CASE WHEN jsonb_typeof(` + fields + `->'estimate_hours')='number' THEN CASE WHEN (` + fields + `->>'estimate_hours')::numeric>0 AND (` + fields + `->>'estimate_hours')::numeric<=200 THEN (` + fields + `->>'estimate_hours')::numeric END END`
 }
 
-// source selects id, fields and kind_slug. One scope traversal supplies all
-// requested totals, with the parent's typed estimate separate from its leaves.
-func estimateSQL(source string) string {
-	return `WITH source AS MATERIALIZED (` + source + `)
- SELECT n.id,a.hours,a.estimated_leaves,a.leaf_count,author.id::text,author.name,
- a.planned_hours,a.is_parent,a.leaf_count,a.estimated_leaves
- FROM source n JOIN aeon_work_aggregates(ARRAY(SELECT id FROM source)) a ON a.id=n.id
- LEFT JOIN principals author ON author.tenant_id=current_setting('aeon.tenant_id')::uuid
- AND author.id=CASE WHEN n.fields->>'estimate_by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN (n.fields->>'estimate_by')::uuid END`
-}
-
-func loadEstimates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, error) {
-	rows, err := tx.Query(ctx, estimateSQL(`SELECT n.id,n.fields,k.slug AS kind_slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL`), ids)
+// loadWorkTotals shares the ETA/estimate traversal for a selected list page.
+func loadWorkTotals(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, map[string]eta.View, error) {
+	aggregates, err := eta.LoadAggregates(ctx, tx, ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer rows.Close()
-	out := map[string]*estimateView{}
-	for rows.Next() {
-		var id string
-		var byID, byName *string
-		view := &estimateView{}
-		if err := rows.Scan(&id, &view.Hours, &view.EstimatedChildren, &view.OpenChildren, &byID, &byName, &view.PlannedHours, &view.IsParent, &view.LeafCount, &view.EstimatedLeaves); err != nil {
-			return nil, err
+	estimates := map[string]*estimateView{}
+	views := map[string]eta.View{}
+	for id, a := range aggregates {
+		view := &estimateView{Hours: a.Hours, PlannedHours: a.PlannedHours, IsParent: a.IsParent, LeafCount: a.LeafCount, EstimatedLeaves: a.EstimatedLeaves, EstimatedChildren: a.EstimatedLeaves, OpenChildren: a.LeafCount}
+		if a.EstimateByID != nil && a.EstimateByName != nil {
+			view.By = &estimatePerson{*a.EstimateByID, *a.EstimateByName}
 		}
-		if byID != nil && byName != nil {
-			view.By = &estimatePerson{*byID, *byName}
+		if view.Hours != nil || view.PlannedHours != nil || view.IsParent || view.LeafCount > 0 {
+			estimates[id] = view
 		}
-		if view.Hours != nil || view.OpenChildren > 0 || view.PlannedHours != nil || view.IsParent {
-			out[id] = view
+		if !a.Blank() {
+			views[id] = a.View
 		}
 	}
-	return out, rows.Err()
+	return estimates, views, nil
+}
+func loadEstimates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, error) {
+	estimates, _, err := loadWorkTotals(ctx, tx, ids)
+	return estimates, err
 }

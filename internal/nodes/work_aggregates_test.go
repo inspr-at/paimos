@@ -72,7 +72,7 @@ func TestWorkAggregatesCoverageRegroupingCountsAndSort(t *testing.T) {
 	doing := aggregateNode(t, w, "AGG-4", top.ID, "in_progress", 6)
 	unknown := aggregateNode(t, w, "AGG-5", top.ID, "open", nil)
 	aggregateNode(t, w, "AGG-6", top.ID, "cancelled", 100)
-	archived := aggregateNode(t, w, "AGG-7", top.ID, "archived", 100)
+	aggregateNode(t, w, "AGG-7", top.ID, "archived", 100)
 	deleted := aggregateNode(t, w, "AGG-8", top.ID, "open", 100)
 	if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted.ID); err != nil {
 		t.Fatal(err)
@@ -120,7 +120,16 @@ func TestWorkAggregatesCoverageRegroupingCountsAndSort(t *testing.T) {
 	if len(projects.Items) != 1 || projects.Items[0].Open != 1 || projects.Items[0].InProgress != 1 || projects.Items[0].Done != 1 || projects.Items[0].Cancelled != 1 || projects.Items[0].Total != 5 {
 		t.Fatalf("project counts %+v", projects)
 	}
-	// Custom categories and archived-only parents stay honest.
+	// ETA uses the latest open leaf independently for ready/live. A much later
+	// report on a closed leaf must never delay its parent.
+	aggregateETA(t, w, unknown.ID, 25, ready.Add(2*time.Hour), live.Add(3*time.Hour))
+	aggregateETA(t, w, done.ID, 100, ready.Add(24*time.Hour), live.Add(24*time.Hour))
+	_, ev = aggregateRead(t, w.admin, top.ID)
+	latest := ev[top.ID]
+	if latest.ReadyAt == nil || !latest.ReadyAt.Equal(ready.Add(2*time.Hour)) || latest.LiveAt == nil || !latest.LiveAt.Equal(live.Add(3*time.Hour)) || latest.ReadyPartial || latest.LivePartial {
+		t.Fatalf("latest open leaves %+v", latest)
+	}
+	// Custom categories stay honest.
 	if _, err := adminPool.Exec(t.Context(), `UPDATE node_kinds SET field_schema=field_schema||'{"states":[{"state":"shipped","category":"done"}]}'::jsonb WHERE tenant_id=$1 AND slug='work'`, w.admin.TenantID); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +140,15 @@ func TestWorkAggregatesCoverageRegroupingCountsAndSort(t *testing.T) {
 	if *ev[top.ID].Progress != 63 {
 		t.Fatal("custom Done not counted")
 	}
-	_ = archived
+	// Old project bindings cannot supply a ready ETA, progress or working hint.
+	oldProject := mustNode(t, w.admin, `{"kind_id":"`+kindBySlug(t, w.admin, "project").ID+`","title":"Former session project"}`)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE harness_sessions SET project_id=$1 WHERE ticket_node_id=$2`, oldProject.ID, doing.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, ev = aggregateRead(t, w.admin, doing.ID)
+	if ev[doing.ID].ReadyAt != nil || ev[doing.ID].Progress != nil || ev[doing.ID].HasWorkingSession {
+		t.Fatalf("obsolete binding contributes %+v", ev[doing.ID])
+	}
 }
 
 func TestWorkAggregatesUnweightedAndHistoricalSpend(t *testing.T) {
@@ -140,8 +157,9 @@ func TestWorkAggregatesUnweightedAndHistoricalSpend(t *testing.T) {
 	// This stopped session belongs to a former leaf, which now gains children.
 	w.session(t, top.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 1, 100, 20, 0, "subscription", "Team")
 	group := aggregateNode(t, w, "SPEND-2", top.ID, "open", nil)
-	a := aggregateNode(t, w, "SPEND-3", group.ID, "done", nil)
-	b := aggregateNode(t, w, "SPEND-4", group.ID, "open", nil)
+	sub := aggregateNode(t, w, "SPEND-6", group.ID, "open", nil)
+	a := aggregateNode(t, w, "SPEND-3", sub.ID, "done", nil)
+	b := aggregateNode(t, w, "SPEND-4", sub.ID, "open", nil)
 	w.session(t, a.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 1, 200, 30, 0, "subscription", "Team")
 	aggregateNode(t, w, "SPEND-5", top.ID, "open", nil)
 	_, views := aggregateRead(t, w.admin, top.ID, group.ID)
@@ -178,12 +196,15 @@ func TestWorkAggregatesDeepWideAndRLS(t *testing.T) {
 	if e[root].LeafCount != 200 || *e[root].Hours != 200 || *v[root].Progress != 50 || v[root].OpenLeaves != 100 {
 		t.Fatalf("deep/wide truncated: %+v %+v", e[root], v[root])
 	}
+	var invisibleCount int
 	err := db.InTenant(context.Background(), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
-		var n int
-		return tx.QueryRow(t.Context(), `SELECT count(*) FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&n)
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&invisibleCount)
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if invisibleCount != 0 {
+		t.Fatal("unbound transaction bypassed project RLS")
 	}
 	// A principal without a project grant gets no aggregate, even with the root id.
 	guest := insertPerson(t, w.admin.TenantID, "No project")
@@ -230,8 +251,7 @@ func kindBySlugTB(t testing.TB, p tenant.Principal, slug string) string {
 }
 
 func BenchmarkWorkAggregatesRLS(b *testing.B) {
-	// Run after a fixture-only test initializes the package database. This benchmark
-	// creates its own tenant; it never bypasses the app role's RLS on measured reads.
+	// This benchmark initializes an isolated package database and its own tenant; it never bypasses the app role's RLS on measured reads.
 	ctx := context.Background()
 	setupOnce.Do(func() { setupErr = setupDB() })
 	if setupErr != nil {
@@ -255,17 +275,69 @@ func BenchmarkWorkAggregatesRLS(b *testing.B) {
 		depth, width int
 	}{{"wide", 1, 2000}, {"deep", 256, 1}, {"mixed", 32, 1000}} {
 		root := seedAggregateTree(b, w, shape.depth, shape.width)
-		b.Run(shape.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				if err := db.InTenant(dbtest.Seed(ctx), appPool, tenantID, func(tx pgx.Tx) error {
-					var leaves int
-					return tx.QueryRow(ctx, `SELECT leaf_count FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&leaves)
-				}); err != nil {
-					b.Fatal(err)
+		// Bulk-loaded fixtures need the same planner statistics autovacuum supplies
+		// in production; analyze only this benchmark's isolated database.
+		if _, err := adminPool.Exec(ctx, `ANALYZE nodes; ANALYZE node_kinds; ANALYZE harness_sessions; ANALYZE ticket_live_eta`); err != nil {
+			b.Fatal(err)
+		}
+		for _, mode := range []string{"total", "progress_sort", "estimate_sort", "eta_sort"} {
+			b.Run(shape.name+"/"+mode, func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					if err := db.InTenant(dbtest.Seed(ctx), appPool, tenantID, func(tx pgx.Tx) error {
+						var leaves int
+						if mode == "total" {
+							return tx.QueryRow(ctx, `SELECT leaf_count FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&leaves)
+						}
+						column := map[string]string{"progress_sort": "progress_pct", "estimate_sort": "hours", "eta_sort": "eta_ready_at"}[mode]
+						// Scope discovery is performed once; all requested sort values are one batch.
+						return tx.QueryRow(ctx, `WITH targets AS MATERIALIZED(SELECT id FROM aeon_work_scope(ARRAY[$1::uuid])),
+      values AS MATERIALIZED(SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM targets))),
+      page AS(SELECT id FROM values ORDER BY `+column+` DESC NULLS LAST,id LIMIT 50)
+      SELECT count(*)::int FROM page`, root).Scan(&leaves)
+					}); err != nil {
+						b.Fatal(err)
+					}
 				}
-			}
-		})
+			})
+		}
+	}
+}
+
+func TestWorkAggregatesCalibratedTokenEstimates(t *testing.T) {
+	w := planningSetup(t)
+	for i := range calibrationMinimum {
+		n := aggregateNode(t, w, fmt.Sprintf("CAL-%d", i+1), w.root.ID, "done", 1)
+		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 1, 1000, 0, 0, "subscription", "Team")
+	}
+	parent := aggregateNode(t, w, "CAL-20", w.root.ID, "open", 100)
+	group := aggregateNode(t, w, "CAL-21", parent.ID, "open", 100)
+	leaf := aggregateNode(t, w, "CAL-22", group.ID, "open", 2)
+	for _, sort := range []string{"key", "tokens", "-tokens", "list_cost", "paid"} {
+		got := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+sort)
+		a, b := got[parent.Key], got[leaf.Key]
+		if a == nil || b == nil || a.Tokens.Estimated == nil || b.Tokens.Estimated == nil || *a.Tokens.Estimated != 120000 || *a.Tokens.Estimated != *b.Tokens.Estimated || a.Children == nil || a.Children.Total != 1 || a.Children.Estimated != 1 {
+			t.Fatalf("leaf token sum sort %s parent=%+v leaf=%+v", sort, a, b)
+		}
+	}
+	// Only leaves capture a new baseline; a former leaf's old snapshot stays put.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if err := CapturePlanningStart(t.Context(), tx, parent.ID, "session"); err != nil {
+			return err
+		}
+		if err := CapturePlanningStart(t.Context(), tx, leaf.ID, "session"); err != nil {
+			return err
+		}
+		var parents, leaves int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE ticket_node_id=$1),count(*) FILTER(WHERE ticket_node_id=$2) FROM ticket_estimate_snapshots`, parent.ID, leaf.ID).Scan(&parents, &leaves); err != nil {
+			return err
+		}
+		if parents != 0 || leaves != 1 {
+			return fmt.Errorf("snapshots parent=%d leaf=%d", parents, leaves)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -26,12 +26,10 @@ import (
 // it, and, for callers who may see usage (harness.read on the row's project),
 // what those tokens cost at API list prices and what was actually paid.
 //
-// Spent covers the node's own sessions and those of its ticket and task
-// children and grandchildren that are not cancelled or archived: an epic rolls
-// up its open and done children, a ticket includes its tasks. Tokens are
-// input plus output; cached input is part of input. Estimated is
-// estimate_hours × the route's tokens per hour; an epic sums its open and done
-// ticket and task children.
+// Spent covers all historical sessions in the work subtree, each once per
+// scope, including former leaves and closed work. Tokens are input plus output;
+// cached input is part of input. Estimated is estimate_hours × the route's
+// tokens per hour; parents sum non-archived, non-cancelled leaves at any depth.
 const (
 	// Tokens per hour is the median over the last calibrationWindow finished
 	// tickets whose main session ran on the route, once calibrationMinimum
@@ -137,16 +135,16 @@ func planningStatesCTE() string {
 // planningOpenChild joins kind and state for child alias c: a ticket or task
 // that is not cancelled or archived.
 func planningOpenChild(c string) string {
-	return ` JOIN node_kinds ` + c + `k ON ` + c + `k.tenant_id=` + c + `.tenant_id AND ` + c + `k.id=` + c + `.kind_id AND ` + c + `k.slug IN ('ticket','task')
+	return ` JOIN node_kinds ` + c + `k ON ` + c + `k.tenant_id=` + c + `.tenant_id AND ` + c + `k.id=` + c + `.kind_id AND ` + c + `k.slug IN ('work','ticket','task')
     LEFT JOIN plan_states ` + c + `s ON ` + c + `s.kind_id=` + c + `.kind_id AND ` + c + `s.norm=` + workStateNormSQL(c+".state")
 }
 func planningOpenWhere(c string) string {
 	return c + `.deleted_at IS NULL AND ` + workCountBucketSQL(c+".state", c+"s") + ` NOT IN ('cancelled','archived')`
 }
 
-// planningSubtreeSQL lists (root, id) for each root in the relation roots
-// (one uuid column named root): the root, its open or done ticket and task
-// children, and theirs. Needs plan_states in scope.
+// planningSubtreeSQL lists each historical work node once per requested root.
+// The page flag is retained for the shared caller interface; scope traversal
+// applies the same rules to pages and aggregate sorts.
 func planningSubtreeSQL(roots string, page bool) string {
 	// Keep historical spend even when a former leaf gains children or closes.
 	// The scope returns one (root,id) pair, so no session can be counted twice.
@@ -969,8 +967,8 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 	return out, rows.Err()
 }
 
-// loadPlanRows reads each row's placement and hours, including the open and
-// done ticket and task children of page epics. A nil viewer is the snapshot path.
+// loadPlanRows reads root placement and hours plus eligible leaf placements
+// at any depth. A nil viewer is the snapshot path.
 func loadPlanRows(ctx context.Context, tx pgx.Tx, ids []string, viewer *string) ([]planRow, error) {
 	hours := estimateHoursSQL("n.fields")
 	rows, err := tx.Query(ctx, `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope($1::uuid[]))
@@ -1278,6 +1276,9 @@ func calibrationSampleSQL() string {
         SELECT n.id, n.updated_at FROM nodes n` + planningOpenChild("n") + `
         WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
             AND ` + workCountBucketSQL("n.state", "ns") + `='done'
+            AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+             WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL
+              AND ck.slug IN ('work','ticket','task','epic'))
     ), vis AS (
         SELECT s.ticket_node_id AS ticket, s.id AS session, s.harness,
             coalesce(s.model,'') AS session_model,
