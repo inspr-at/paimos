@@ -35,6 +35,7 @@ var attachRefusalCodes = []string{
 	"attach_draining",
 	"attach_enrollment_unavailable",
 	"attach_registration_lost",
+	"attach_poll_key_unknown",
 	"attach_pairing_unavailable",
 	"attach_scope_changed",
 	"attach_computer_limit",

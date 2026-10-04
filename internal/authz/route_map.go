@@ -35,7 +35,11 @@ var RoutePermissions = map[string]string{
 	"POST /api/themes/{themeId}/duplicate": "profile.write|profile.portal_write|settings.manage",
 	"PUT /api/me/theme":                    "profile.write|profile.portal_write",
 
-	"GET /api/model-preferences": "models.read",
+	"POST /api/agent-keys/{id}/trim-proposals":           "approvals.request",
+	"GET /api/key-trim-proposals":                        "keys.manage",
+	"POST /api/key-trim-proposals/{proposalId}/decision": "keys.manage",
+	"POST /api/key-trim-proposals/{proposalId}/restore":  "keys.manage",
+	"GET /api/model-preferences":                         "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
 	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
@@ -70,10 +74,6 @@ var RoutePermissions = map[string]string{
 	"POST /api/questions/{questionId}/decision":                                 "questions.decide",
 	"GET /api/decision-desk":                                                    "questions.read",
 	"GET /api/decision-desk/projection":                                         "profile.read",
-	"POST /api/agent-keys/{id}/trim-proposals":                                  "approvals.request",
-	"GET /api/key-trim-proposals":                                               "keys.manage",
-	"POST /api/key-trim-proposals/{proposalId}/decision":                        "keys.manage",
-	"POST /api/key-trim-proposals/{proposalId}/restore":                         "keys.manage",
 	"GET /api/models/refresh":                                                   "models.read",
 	"POST /api/models/refresh":                                                  "models.refresh",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/model-reports": "harness.worker",
