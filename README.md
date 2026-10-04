@@ -341,6 +341,23 @@ why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
 commands are read-only; role-only `model resolve build` retains its existing
 advisory response.
 
+In the web app, open **Model preferences** from the Agents gear or a project's
+agents popover. The **Why this model?** planning cell opens its kind of work.
+Choose Automatic, follow new versions or pin a version at Default, You or
+Project. Kinds can be added or removed at Default and Project; system kinds stay.
+Row locks have a Set by menu and an Option/Alt-click shortcut. A looser provider
+choice below a lock is allowed with a warning. Retired versions are hidden;
+review qualification and provider evidence explain disabled picker choices.
+Save progress, failures and refreshed conflicts appear beside the pinned footer
+actions, in a reserved two-line slot that wraps and scrolls for longer messages.
+Opening reset confirmation clears stale feedback and announces the reset scope.
+Keyboard resets return focus to the row’s model chip; removing a kind returns
+focus to Everything else. Adding a kind retains focus during save and returns
+focus to Add a kind of work afterward.
+
+Model-cell hovers retain the planned and measured details and show the
+**Why this model?** action. These buttons do not add sequential tab stops to the list.
+
 The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
 `/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
 Use a level's returned `revision` for edits and the DELETE `revision` query
@@ -1122,9 +1139,15 @@ Manual rotation rechecks live permissions inside the replacement transaction. Sh
 
 People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. **Full access** selects every agent-grantable scope within the agent’s role, editor and original creator ceilings. Per-group **All / None** changes only visible scopes in that group; presets and **All** never extend the agent’s role. A quiet note names the person-only actions: managing members, roles, keys and settings, reading keys, the access audit log, approval decisions, rule publishing, conversation watching, harness force-stop and recovery, ownership transfer and the customer portal. **Expires after** starts at **Keep current**, or can set 30, 90 or 365 days from saving, or **Never**, without rotation. The API accepts optional `expires_at`: omission preserves expiry, `null` means Never, and a timestamp must be in the future. Scopes and expiry apply atomically, retaining the same ID and secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`, `models.report` and `models.refresh`; migration `1061_agent_roles_models_read.sql` adds only `models.read` to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
 
+Agent key reductions can also be proposed as protected approval memos on the **Decision Desk** (AEON-615). `POST /api/agent-keys/{id}/trim-proposals` requires `approvals.request` and accepts an idempotent `request_id`, the analysed `expected_scopes`, a strict-subset `candidate_scopes`, expiry (up to seven days), and evidence with an observation date and a consequence for each dropped scope. It creates a proposal and leaves the key unchanged. Confirm the ops candidate with OPS before proposing it. A person with `keys.manage` reads `/api/key-trim-proposals` and uses **Approve** or **Decline** in one click. Approval rechecks the live scope digest, recent use and editor/agent/original-creator ceilings under the tenant and key usage fences; scope changes audit `agent_key.scopes_changed` without credential material. The applied memo offers **Restore** for thirty days. Restore compares against the applied candidate digest and rechecks live grant ceilings, so it cannot overwrite another scope edit or restore permissions the key may no longer hold. Replayed decisions never apply or audit twice. Both Open and Decided have **Next key trims** and **First key trims** controls when paginated; each displays at most 100 key trims, with continuation to any later proposal.
+
+Keyed-agent transactions acquire the authenticating-key usage fence before tenant, tree or resource locks, including harness registration and node moves. Different keys remain independent. Proposals declare their complete target/authenticating-key batch before transaction entry and acquire it in sorted order; person-owned decisions acquire the target-key fence before the tenant access fence. Later `RequireTx` checks re-enter the held fence and re-read the live scope ceiling. Callers must carry the authenticating principal in the `InTenant` context. Usage recording and scope reductions remain atomic, with the event counter acquired last.
+
+Successful authorization records a tenant-isolated timestamp per authenticating key and scope, with at most one persisted write per minute and no request payload, route or address. A trim refuses to drop any scope used in the last 24 hours, with a conservative one-minute margin for debounce. Reads recheck that guard and expose a blocked memo if use or scopes changed after analysis. Missing timestamps mean unknown use; they do not establish that a scope was never used. Protected memo responses and their audit events contain no key secret, prefix or credential hash. Existing key creation, rotation and manual scope editing retain their contracts.
+
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
-`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
+`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes `whoami`, `ask`, `ask_status`, issue list/get/create/update/comment, knowledge list/get/create/update, and search over stdio. Work tools reuse the CLI application operations and scoped HTTP APIs; updates preserve revision checks and kind changes remain person-only. JSON field writes preserve exact numeric tokens. Node walks fail explicitly if a cursor repeats or remains after fifty pages. Project-scoped issue search resolves ancestor membership and continues search pages up to the requested limit within the server’s ranked window of 200 matches. An ancestor returning not-found excludes that path from the visible descendant set; other lookup errors and traversal limits still fail the search. Onboarding `--check` compares the complete rendered bundle, options and managed header, normalizing only its generation timestamp.
 
 Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
 
@@ -2043,6 +2066,17 @@ menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
+
+Clipped names using the shared clip-tip reveal their full text on mouse hover
+or keyboard focus. On touch, tapping performs the row or link's action; holding
+for 500 ms reveals the text without selecting or navigating. Moving more than
+8 px, scrolling or cancelling the pointer before that threshold cancels the
+hold. A clipped-name hold takes precedence over phone row selection; a hold
+elsewhere on the row can still start selection. The next tap keeps its normal action.
+The revealed text remains until an outside tap or Escape. Phone list and
+picker names use two lines; picker rows retain their fixed height.
+Project links also bind each pointer gesture to its starting record and name;
+a record change before release cancels navigation.
 
 Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
 4096 pixels per side, with a square crop up to 2048 pixels. Attachment images
