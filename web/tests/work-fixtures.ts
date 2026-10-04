@@ -271,7 +271,7 @@ function shownAssignee(data: Fixtures, node: MockNode): string {
 }
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
-  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
+  if (!['work', 'ticket'].includes(node.kind_slug) || completedTicketState(node.state) || !completedTicketState(nextState)) return null
   const issues = benefitIssues(fields)
   if (!issues.length) return null
   return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }

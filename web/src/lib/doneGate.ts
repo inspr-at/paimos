@@ -13,10 +13,10 @@ export interface BenefitText {
   hide_from_release_notes?: boolean
 }
 
-// True only when a ticket is about to enter done, accepted or delivered without
-// the four texts. Hidden tickets are not exempt. Already-completed tickets are.
+// Work and legacy tickets entering done, accepted or delivered need the four
+// texts. Hidden items are not exempt. Already-completed items are.
 export function needsBenefitPrompt(node: { kind_slug?: string; state: string; fields?: Record<string, unknown> | null }, next: string): boolean {
-  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(next)) return false
+  if (!['work', 'ticket'].includes(node.kind_slug ?? '') || completedTicketState(node.state) || !completedTicketState(next)) return false
   return benefitIssues(node.fields ?? {}).length > 0
 }
 

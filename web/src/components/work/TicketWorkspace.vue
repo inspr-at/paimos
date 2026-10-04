@@ -595,7 +595,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
+        <TicketBenefits v-if="['work', 'ticket'].includes(item.kind_slug)" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
         <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
@@ -646,7 +646,7 @@ defineExpose({
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
             </div>
-            <TicketBenefits v-if="item.kind_slug === 'ticket'" class="ws-benefits" :fields="item.fields" :done="completedTicketState(item.state)" :editable="editable" @edit="startEdit('benefit')" />
+            <TicketBenefits v-if="['work', 'ticket'].includes(item.kind_slug)" class="ws-benefits" :fields="item.fields" :done="completedTicketState(item.state)" :editable="editable" @edit="startEdit('benefit')" />
           </div>
 
           <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
