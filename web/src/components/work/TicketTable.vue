@@ -156,7 +156,7 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   if (!eta || typeof eta.progress !== 'number') return null
   const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
   const stale = !!eta.stale || !!props.liveStale
-  let label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone)
+  let label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone, eta)
   if (row.eta?.leaf_count && row.eta.leaf_count > 1) label += `; ${row.eta.estimated_leaves ?? 0} of ${row.eta.leaf_count} leaves estimated${row.eta.progress_basis === 'leaves' ? '; progress counts leaves' : ''}`
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }

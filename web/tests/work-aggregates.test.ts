@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { estimateDisplay, estimateHours } from '../src/lib/estimates.ts'
 import { apiParams, filtersFromQuery, totalFrom } from '../src/lib/ticketList.ts'
-import { etaFromTicket, formatEta } from '../src/lib/eta.ts'
+import { etaFromTicket, formatEta, progressAccessibleName, progressReportedAt } from '../src/lib/eta.ts'
 
 const parent = { kind_slug: 'work', fields: { estimate_hours: 40 }, estimate: { hours: 32, planned_hours: 40, is_parent: true, estimated_children: 6, open_children: 9, estimated_leaves: 6, leaf_count: 9 } }
 test('parent sums and plans stay distinct even above the leaf estimate limit', () => {
@@ -51,6 +51,11 @@ for (const scenario of [
     const now = Date.parse('2026-10-04T10:00:00Z')
     const input = etaFromTicket({ finished: false, leaf_count: 2, progress_basis: 'estimate',
       ...scenario, eta_ready_at: '2026-10-04T09:45:00Z', ready_reported_at: '2026-10-04T09:00:00Z', ready_stale: true })
+    for (const stale of [false, true]) {
+      const label = progressAccessibleName(100, stale, stale ? progressReportedAt({ finished: false, ready_stale: true, ready_reported_at: '2026-10-04T09:00:00Z' }) : null, now, 'UTC', input)
+      assert.equal(label, `100% progress; work remains${stale ? ', estimate stale since 09:00' : ''}`)
+      assert.doesNotMatch(label, /100% done/)
+    }
     for (const mode of ['relative', 'clock', 'both'] as const) {
       const view = formatEta(input, mode, now)!
       assert.equal(view.kind, 'Ready')
@@ -73,6 +78,15 @@ test('only closed aggregate leaves or explicit completion suppress a parent ETA 
     progress_basis: 'estimate' as const, open_leaves: 0, eta_ready_at: '2026-10-04T09:45:00Z', ready_stale: true }
   const closed = formatEta(etaFromTicket(eta), 'relative', now)!
   assert.deepEqual([closed.text, closed.stale, closed.overdue, closed.done], [null, false, false, false])
+  assert.equal(progressAccessibleName(100, false, null, now, 'UTC', etaFromTicket(eta)), '100% done')
   const finished = formatEta(etaFromTicket({ ...eta, finished: true, open_leaves: 1 }), 'relative', now)!
   assert.deepEqual([finished.text, finished.stale, finished.overdue, finished.done], [null, false, false, true])
+  assert.equal(progressAccessibleName(100, false, null, now, 'UTC', etaFromTicket({ ...eta, finished: true, open_leaves: 1 })), '100% done')
+})
+
+test('unknown leaf completion cannot declare 100% done even without an ETA column', () => {
+  const now = Date.parse('2026-10-04T10:00:00Z')
+  const input = etaFromTicket({ finished: false, progress_pct: 100, leaf_count: 2, estimated_leaves: 1, progress_basis: 'estimate' })
+  assert.equal(progressAccessibleName(100, true, null, now, 'UTC', input), '100% progress; work remains, estimate stale')
+  assert.match(formatEta(input, 'relative', now)!.tip, /100% progress; work remains/)
 })

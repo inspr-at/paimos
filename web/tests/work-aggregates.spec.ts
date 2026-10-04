@@ -122,8 +122,12 @@ for (const type of ['status_autopilot.changed', 'status_autopilot.undone', 'impo
   })
 }
 
-for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
-  test(`unfinished weighted 100% parent retains ETA at ${width} ${theme}`, async ({ page }) => {
+for (const scenario of [
+  { name: 'weighted 100%', progress: 100, estimated: 1, partial: true },
+  { name: 'server-rounded 100%', progress: 100, estimated: 2, partial: false },
+  { name: 'formatter-rounded 100%', progress: 99.6, estimated: 2, partial: false },
+]) for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+  test(`unfinished ${scenario.name} parent retains ETA and honest Progress at ${width} ${theme}`, async ({ page }) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))
@@ -154,35 +158,46 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'estimate', 'progress', 'eta'] }
     const parent = data.nodes.find(node => node.id === 'n-1')!
     parent.title = 'Zuverlässige Fortschrittsberechnung für verschachtelte Arbeitsbereiche und langfristige Lieferplanung'
-    parent.estimate = { hours: 32, planned_hours: 40, is_parent: true, estimated_children: 1, open_children: 2, leaf_count: 2, estimated_leaves: 1 }
-    parent.eta = { finished: false, progress_pct: 100, leaf_count: 2, estimated_leaves: 1, progress_basis: 'estimate', open_leaves: 1, ready_leaves: 0, ready_partial: true, eta_ready_at: '2026-10-04T12:00:00Z', ready_reported_at: '2026-10-04T08:00:00Z', ready_stale: true }
+    parent.estimate = { hours: 32, planned_hours: 40, is_parent: true, estimated_children: scenario.estimated, open_children: 2, leaf_count: 2, estimated_leaves: scenario.estimated }
+    parent.eta = { finished: false, progress_pct: scenario.progress, leaf_count: 2, estimated_leaves: scenario.estimated, progress_basis: 'estimate', open_leaves: 1, ready_leaves: scenario.partial ? 0 : 1, ready_partial: scenario.partial, eta_ready_at: '2026-10-04T12:00:00Z', ready_reported_at: '2026-10-04T08:00:00Z', ready_stale: true }
     await mockWork(page, data)
     await page.goto('/p/PHAROS')
     await expect(page.locator('.list-freshness')).toHaveText('Live')
     const row = page.locator('#row-n-1')
     const eta = row.locator('.eta-cell')
-    await expect(eta.locator('.shown')).toHaveText('~2 h · partial')
+    const progress = row.locator('.progress-read')
+    const label = new RegExp(`100% progress; work remains, estimate stale since .*; ${scenario.estimated} of 2 leaves estimated`)
+    await expect(progress.locator('.pct')).toHaveText('100%')
+    await expect(progress).toHaveAccessibleName(label)
+    await expect(progress).toHaveAttribute('data-tip', label)
+    await expect(progress).not.toHaveAttribute('data-tip', /100% done/)
+    await expect(eta.locator('.shown')).toHaveText(`~2 h${scenario.partial ? ' · partial' : ''}`)
     await expect(eta).toHaveClass(/stale/)
     await expect(eta).toHaveAttribute('data-tip', /work remains/)
     await expect(eta).not.toHaveAttribute('data-tip', /100% done/)
     const title = row.locator('.title-text')
-    await expectStableControls({ controls: { 'parent row': row, 'open parent': title }, scrollAreas: { document: page.locator('html') }, interactions: [{ name: 'read unfinished ETA', run: async () => {
+    await expectStableControls({ controls: { 'parent row': row, 'open parent': title, 'parent progress': progress }, scrollAreas: { document: page.locator('html') }, interactions: [{ name: 'read unfinished Progress', run: async () => {
+      await progress.hover()
+      await expect(progress).toHaveAttribute('data-tip', label)
+      await page.mouse.move(0, 0)
+    } }, { name: 'read unfinished ETA', run: async () => {
       await eta.hover()
-      await expect(eta).toHaveAttribute('data-tip', /Partial ETA/)
+      if (scenario.partial) await expect(eta).toHaveAttribute('data-tip', /Partial ETA/)
+      else await expect(eta).not.toHaveAttribute('data-tip', /Partial ETA/)
       await page.mouse.move(0, 0)
     } }] })
-    await page.screenshot({ path: `test-results/aeon-651-fix6/unfinished-list-${width}-${theme}.png`, fullPage: true })
+    await page.screenshot({ path: `test-results/aeon-651-fix7/${scenario.name.replaceAll(' ', '-')}-list-${width}-${theme}.png`, fullPage: true })
     await title.click()
     const panel = page.getByRole('complementary', { name: 'Ticket details' })
     const plan = panel.getByRole('button', { name: /^Parent estimate:/ })
     await expect(plan).toBeVisible()
-    await expect(panel.locator('.eta-cell .shown')).toContainText('~2 h · partial')
+    await expect(panel.locator('.eta-cell .shown')).toHaveText(`~2 h${scenario.partial ? ' · partial' : ''}`)
     await expectStableControls({ controls: { 'parent plan': plan }, scrollAreas: { panel }, interactions: [{ name: 'read parent plan', run: async () => {
       await plan.hover()
       await expect(plan).toHaveAttribute('data-tip', /kept separately/)
       await page.mouse.move(0, 0)
     } }] })
-    await page.screenshot({ path: `test-results/aeon-651-fix6/unfinished-parent-${width}-${theme}.png`, fullPage: true })
+    await page.screenshot({ path: `test-results/aeon-651-fix7/${scenario.name.replaceAll(' ', '-')}-parent-${width}-${theme}.png`, fullPage: true })
     expect(errors).toEqual([])
   })
 }

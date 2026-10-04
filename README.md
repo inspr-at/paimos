@@ -3204,6 +3204,9 @@ Tests use the current starter catalog; historic mixed-kind cases define their ow
 tenant kinds.
 Lists without sized work skip calibration reads that cannot produce an estimate,
 while still resolving displayed routes and retaining historical usage.
+Progress tooltips and accessibility labels share ETA's completion rule: weighted
+or rounded 100% still says “work remains” while leaves are open or their completion
+is unknown. The displayed percentage and estimate coverage remain visible.
 
 The unreleased 1230 migration bounds every shared scope traversal to 4096 input
 roots and 50000 distinct root/node pairs, counting overlapping roots against the

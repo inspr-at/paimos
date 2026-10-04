@@ -140,6 +140,10 @@ function sideTip(side: EtaSide, now: number, timeZone: string): string[] {
 // additionally need all leaves closed.
 // Weighted or rounded 100% can leave work open, so retain its ETA and staleness.
 // Only the server's positive completion evidence reads Done.
+function progressComplete(input: EtaInput): boolean {
+  return (typeof input.progress === 'number' && input.progress >= 100 && (!input.coverage || input.coverage.open === 0)) || !!input.finished
+}
+
 function doneTip(finished: NonNullable<EtaInput['finished']>, now: number, timeZone: string): string {
   const who = finished.by?.trim()
   return `All work reported${who ? ` by ${who}` : ''}${valid(finished.at) ? ` at ${clock(finished.at, now, timeZone)}` : ''}`
@@ -152,7 +156,7 @@ export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now
   const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side && valid(side.at))
   const pct = typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : null
   if (!sides.length && pct == null && !input.finished) return null
-  const complete = (typeof input.progress === 'number' && input.progress >= 100 && (!input.coverage || input.coverage.open === 0)) || !!input.finished
+  const complete = progressComplete(input)
   const main = complete ? null : sides[0] ?? null
   const stale = connectionStale || (!complete && (!!input.stale || sides.some(side => side.stale)))
   const tip = input.finished ? [doneTip(input.finished, now, timeZone)] : complete ? ['100% done'] : [
@@ -191,8 +195,8 @@ export function progressReportedAt(eta: TicketEta | null | undefined): string | 
 
 // What a screen reader says for the compact progress cell, including when the
 // ETA column is hidden. The clock matches the estimate tooltip.
-export function progressAccessibleName(pct: number, stale: boolean, reportedAt: string | null | undefined, now: number, timeZone = 'UTC'): string {
-  const done = `${pct}% done`
+export function progressAccessibleName(pct: number, stale: boolean, reportedAt: string | null | undefined, now: number, timeZone = 'UTC', input?: EtaInput | null): string {
+  const done = pct === 100 && input && !progressComplete(input) ? `${pct}% progress; work remains` : `${pct}% done`
   if (!stale) return done
   if (!valid(reportedAt)) return `${done}, estimate stale`
   return `${done}, estimate stale since ${clock(reportedAt, now, timeZone)}`
