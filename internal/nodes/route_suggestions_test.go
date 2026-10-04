@@ -5,9 +5,14 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"reflect"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestEstimateComplexityBucketsAndHints(t *testing.T) {
@@ -122,6 +127,70 @@ func TestEstimatedTicketSuggestionsAndConfirmation(t *testing.T) {
 	after := routeFieldMap(t, n.Fields)
 	if after["complexity"] != "M" || after["complexity_at"] != fields["complexity_at"] {
 		t.Fatal(after)
+	}
+}
+
+func TestReleaseTextEditPreservesMissingRouteHints(t *testing.T) {
+	p := newPrincipal(t, "release-text-routes")
+	agent := estimateAgent(t, p)
+	kind := kindBySlug(t, p, "ticket")
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Docker deployment","body":"Keep this body","fields":{"estimate_hours":4,"priority":"high","hide_from_release_notes":true,"notes":{"nested":["keep",42]},"pill_en":"Old release text","pill_de":"Alter kurzer Text","benefit_en":"Old benefit.","benefit_de":"Alter Nutzen."}}`, kind.ID))
+	// Seed an existing estimated ticket from before route suggestions existed.
+	// Keep its real estimate provenance so a replacement document is not a new estimate.
+	fields := estimateFieldsOf(t, n)
+	for _, key := range []string{
+		"route_role", "route_role_source", "route_role_by", "route_role_at", "route_role_confirmed",
+		"area", "area_source", "area_by", "area_at", "area_confirmed",
+		"complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed",
+	} {
+		delete(fields, key)
+	}
+	seed, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, n.ID, seed)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, raw := call(t, &agent, "GET", "/api/nodes/"+n.ID, "")
+	n = decode[nodeJSON](t, code, raw, 200)
+	if got := estimateFieldsOf(t, n); !reflect.DeepEqual(got, fields) {
+		t.Fatalf("legacy fixture changed: got %#v, want %#v", got, fields)
+	}
+	want := maps.Clone(fields)
+	want["pill_en"], want["pill_de"] = "Clear release text", "Klarer kurzer Text"
+	want["benefit_en"], want["benefit_de"] = "Release notes describe the change.", "Versionshinweise beschreiben die Änderung."
+	fields = maps.Clone(want)
+	// Equal numeric hours are unchanged even if their JSON spelling differs.
+	fields["estimate_hours"] = json.Number("4.0")
+	body, err := json.Marshal(map[string]any{"fields": fields})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, string(body))
+	updated := decode[nodeJSON](t, code, raw, 200)
+	if got := estimateFieldsOf(t, updated); !reflect.DeepEqual(got, want) {
+		t.Fatalf("release text edit changed unrelated fields: got %#v, want %#v", got, want)
+	}
+	code, raw = call(t, &agent, "GET", "/api/nodes/"+n.ID, "")
+	stored := decode[nodeJSON](t, code, raw, 200)
+	if got := estimateFieldsOf(t, stored); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stored fields differ after release text edit: got %#v, want %#v", got, want)
+	}
+	if stored.Title != n.Title || stored.Body != n.Body || stored.State != n.State || stored.Key != n.Key || stored.KindID != n.KindID || !reflect.DeepEqual(stored.ParentID, n.ParentID) {
+		t.Fatal("release text edit changed unrelated node properties")
+	}
+	// A real estimate change still fills the previously missing hints.
+	code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"estimate_hours":9}`)
+	updated = decode[nodeJSON](t, code, raw, 200)
+	got := estimateFieldsOf(t, updated)
+	for key, value := range map[string]string{"route_role": "build", "area": "infra", "complexity": "L"} {
+		if got[key] != value || got[key+"_source"] != "suggested" || got[key+"_by"] != agent.ID || got[key+"_confirmed"] != false {
+			t.Fatalf("changed estimate did not suggest %s: %#v", key, got)
+		}
 	}
 }
 
