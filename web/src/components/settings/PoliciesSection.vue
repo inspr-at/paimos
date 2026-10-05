@@ -35,8 +35,14 @@ function load() {
   if (tab.value === 'ladders' && modelView.value === 'preferences') { reader.reset(); state.value = permitted.value ? 'loaded' : 'denied'; return }
   void reader.load(tab.value, role.value, permitted.value)
 }
-watch(() => [scopeOwner(session.identity), tab.value, modelView.value, role.value, ready.value, permitted.value, permissionsAvailable()] as const, load, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(() => { reader.reset(); sheet.value?.close(); load() })
+// Compare each authority/source value, rather than a newly allocated tuple on
+// every permission-cache revision (including unchanged focus answers).
+watch([() => scopeOwner(session.identity), tab, modelView, role, ready, permitted, permissionsAvailable], load, { immediate: true, flush: 'sync' })
+const stopAccess = onAccessChange(change => {
+  // Same-person refresh belongs to the mounted editor. Resetting the parent
+  // would unmount it and discard its captured draft, write and confirmed Undo.
+  if (change === 'reset' || tab.value !== 'ladders' || state.value !== 'loaded') { reader.reset(); sheet.value?.close(); load() }
+})
 onBeforeUnmount(() => { stopAccess(); reader.dispose() })
 function tabKey(event: KeyboardEvent, index: number) {
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return

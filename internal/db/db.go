@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/tenant"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -56,19 +58,27 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // admission fence before fn can lock resources. WithKeyScopeUse adds target
 // keys to the sorted admission batch for operations that touch several keys.
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
-	return inTenant(ctx, pool, tenantID, pgx.TxOptions{}, fn)
+	return inTenant(ctx, pool, tenantID, pgx.TxOptions{}, true, fn)
 }
 
 // InTenantReadSnapshot reads permissions, canonical identity and response data
-// from one read-only snapshot after any independently committed preparation.
+// from one snapshot after any independently committed preparation. Guarded and
+// keyed reads allow authorization row locks and scope-use evidence writes;
+// ordinary reads remain read-only. Neither runs work-status derivation.
 func InTenantReadSnapshot(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
 	if HasTransaction(ctx) {
 		return fmt.Errorf("tenant read snapshot requires an independent transaction")
 	}
-	return inTenant(ctx, pool, tenantID, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, fn)
+	options := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+	_, guarded := ctx.Value(tenantGuardKey{}).(TenantGuard)
+	p, keyed := tenant.PrincipalFrom(ctx)
+	if guarded || keyed && p.Kind == tenant.Agent && p.KeyID != "" {
+		options.AccessMode = pgx.ReadWrite
+	}
+	return inTenant(ctx, pool, tenantID, options, false, fn)
 }
 
-func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options pgx.TxOptions, fn func(pgx.Tx) error) error {
+func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options pgx.TxOptions, deriveWorkStatus bool, fn func(pgx.Tx) error) error {
 	var tx pgx.Tx
 	var err error
 	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
@@ -93,7 +103,7 @@ func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options 
 		return err
 	}
 	var active bool
-	if options.AccessMode != pgx.ReadOnly {
+	if deriveWorkStatus {
 		active, err = beginWorkStatus(ctx, tx)
 		if err != nil {
 			return err

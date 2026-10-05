@@ -251,3 +251,45 @@ test('canonical person change during focus refresh drops old preference drafts a
  mock.state.document.person_id='third-canonical-person';await focusRefresh(page);await expect(page.getByLabel('normal preference mode')).toBeDisabled();await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','true')
  expect(mock.state.writes).toHaveLength(1)
 })
+
+for(const width of [390,1024,1440])for(const theme of ['light','dark'] as const)test(`focus refresh preserves ladder draft, pending save, Undo and controls ${width} ${theme}`,async({page})=>{
+ await page.setViewportSize({width,height:width===390?844:1000})
+ const mock=await mockPolicyEditors(page,theme);await page.goto('/settings/policies')
+ const frame=page.locator('.editor-frame'),position=page.getByLabel('Ladder position'),step=page.getByLabel('Selected ladder step')
+ await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','false')
+ const prior=structuredClone(mock.state.ladders.get('review-gate')!.routes),capturedToken=mock.state.ladders.get('review-gate')!.edit_token
+ await frame.getByTestId('policy-edit').click();await expect(page.getByLabel('Add ladder model').locator('option[value="profile-2"]')).toHaveCount(1);await position.fill('2');await position.dispatchEvent('change');await expect(step).toHaveValue('1')
+ const held=mock.holdNext()
+ try {
+  await expectStableControls({controls:{...actions(frame),status:status(frame),position,step,...(width===390?{phoneFrame:frame}:{roles:page.getByTestId('policies-role-group')})},scrollAreas:{body:frame.getByTestId('policy-editor-body')},interactions:[
+   {name:'refresh with a captured draft',run:async()=>{await focusRefresh(page);await expect(position).toBeEnabled();await expect(position).toHaveValue('2');await expect(step).toHaveValue('1');await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','false')}},
+   {name:'refresh while save awaits confirmation',run:async()=>{await frame.getByTestId('policy-save').click();await held.started;await focusRefresh(page);await expect(status(frame)).toContainText('Saving…');await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','true');await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','true')}},
+   {name:'confirm the original save',run:async()=>{held.release();await expect(status(frame)).toContainText('Saved.');await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false')}},
+   {name:'refresh with confirmed Undo',run:async()=>{await focusRefresh(page);await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false');await shot(page,'focus-ladder',width,theme)}},
+   {name:'restore the captured order',run:async()=>{await frame.getByTestId('policy-undo').click();await expect(status(frame)).toContainText('Order restored.')}},
+  ]})
+ } finally {held.release()}
+ expect(mock.state.writes).toHaveLength(2);expect(mock.state.writes[0]!.headers['if-match']).toBe(capturedToken)
+ expect(mock.state.ladders.get('review-gate')!.routes).toEqual(prior)
+})
+
+for(const permission of ['models.manage','models.read'])for(const stage of ['draft','undo','saving'] as const)test(`permission loss during focus refresh invalidates ladder ${permission} ${stage}`,async({page})=>{
+ const mock=await mockPolicyEditors(page);await page.goto('/settings/policies');const frame=page.locator('.editor-frame')
+ await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','false');await frame.getByTestId('policy-edit').click()
+ const held=stage==='saving'?mock.holdNext():null
+ if(stage!=='draft')await frame.getByTestId('policy-save').click()
+ if(held)await held.started
+ if(stage==='undo')await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','false')
+ mock.base.data.grants=mock.base.data.grants.filter(grant=>grant!==permission)
+ try {
+  await focusRefresh(page)
+  if(permission==='models.read') { await expect(frame).toHaveCount(0);await expect(page.getByRole('tabpanel')).toContainText("You can't see this") }
+  else {
+   await expect(frame.getByTestId('policy-edit')).toHaveAttribute('aria-disabled','true');await expect(frame.getByTestId('policy-save')).toHaveAttribute('aria-disabled','true');await expect(frame.getByTestId('policy-undo')).toHaveAttribute('aria-disabled','true')
+   await expect(page.getByLabel('Ladder position')).toBeDisabled();await frame.getByTestId('policy-undo').dispatchEvent('click')
+  }
+ } finally {held?.release()}
+ if(held)await held.settled
+ expect(mock.state.writes).toHaveLength(stage==='draft'?0:1)
+ await expect(page.locator('.policies')).not.toContainText('Saved.')
+})
