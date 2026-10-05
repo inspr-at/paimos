@@ -468,9 +468,9 @@ P3 must use each pending effect's deadline rather than the source answer's human
 grace deadline. Corrections retain the original per-asker reuse pointers. Active
 Always publication and post-dispatch corrections remain P4/P3 responsibilities.
 
-AEON-503-simple reserves `1213_run_waiting_measurement.sql` for nullable
-`agent_runs.waiting_ms`. It sorts after release 122's 1209; 1214 remains free for
-this package, while 1215, 1225 and 1230–1239 belong to work-node packages. The
+AEON-503-simple reserves `1243_run_waiting_measurement.sql` for nullable
+`agent_runs.waiting_ms`. It sorts after release 123's 1240 using the coordinator's
+reserved number; work-node migrations keep their published filenames. The
 migration preserves legacy run fields, estimate snapshots and outcomes exactly.
 No historical timing is reconstructed. The field is personal agent-run timing
 telemetry, located by `(tenant_id,id)`; add this classification to the DSAR
@@ -497,8 +497,9 @@ ticket status change or model review ran.
 
 AEON-503 merge-main round retains `origin/main` `4d7e7de34` in normal merge
 `3276ad4051`, preserving both migration README sections, both OpenAPI change
-sets and all route permissions. Migration 1213 retains its reserved filename;
-1214 remains unused. Independent preservation checks retained 23 branch and
+sets and all route permissions. That earlier round retained the original
+reservation; fix round 3 renumbers the same SQL to 1243, after the released 1240
+migration. Independent preservation checks retained 23 branch and
 123 main files byte-for-byte, including main's deletions. Twelve unlisted Go
 cases are explicitly NIGHTLY, with post-gate provenance so the tier regression
 continues checking every legacy classification.
