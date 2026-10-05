@@ -3902,6 +3902,7 @@
     {"kind":"go","package":"internal/agentd","name":"TestManagedStartHostReportFailureNeverClaims","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereAppendsNestedEventsAfterEveryTargetLock","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningSettingsUndoRejectsInterveningWrite","tier":"ESSENTIAL"}
   ],
   "timingWeights": {

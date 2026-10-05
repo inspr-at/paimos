@@ -319,8 +319,7 @@ func createVerificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, c
 	return verificationRetry{AccountID: account, RunID: run, ExpiresAt: expires, WorkOrderID: order}, nil
 }
 func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind string, after any) error {
-	_, err := events.Append(ctx, tx, p, events.Change{Type: kind, After: after})
-	return err
+	return appendEvent(ctx, tx, p, events.Change{Type: kind, After: after})
 }
 func (m *Module) deny(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	var out View

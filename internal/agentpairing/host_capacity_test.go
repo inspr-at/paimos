@@ -2,14 +2,19 @@
 package agentpairing_test
 
 import (
+	"context"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestHostCapacityOwnerRevisionRuntimeAndClaimFence(t *testing.T) {
@@ -98,5 +103,101 @@ func TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts(t *testing
 	}
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,local_cleanup FROM agent_pairing_enrollments WHERE account_id=$1`, shared.AccountID).Scan(&state, &cleanup); err != nil || state != "revoked" || cleanup != "pending" {
 		t.Fatal("complete canonical set was not signed out", err)
+	}
+}
+
+// Bulk sign-out cancels a pending account link on each computer. Those events
+// must wait until every target row is changed: the barrier holds the second
+// computer's link while the first one is already processed, and the event
+// counter must still be free at that point.
+func TestSignOutEverywhereAppendsNestedEventsAfterEveryTargetLock(t *testing.T) {
+	f := newFixture(t)
+	firstProposal := f.propose("codex")
+	f.approve(firstProposal, "connect_only")
+	first := f.redeem(firstProposal)
+	secondProposal := f.propose("codex")
+	f.approve(secondProposal, "connect_only")
+	second := f.redeem(secondProposal)
+	a, b := first, second
+	if *b.ComputerID < *a.ComputerID {
+		a, b = b, a
+	}
+	accounts := []string{a.Enrollments[0].AccountID, b.Enrollments[0].AccountID}
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1 WHERE id=ANY($2::uuid[])`, strings.Repeat("b", 64), accounts); err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range accounts {
+		if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO account_person_link_requests(tenant_id,account_id,user_code_hash,account_revision) VALUES($1,$2,$3,0)`, f.tenantID, account, hash(nonce())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var counted bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM event_counters WHERE tenant_id=$1)`, f.tenantID).Scan(&counted); err != nil || !counted {
+		t.Fatal("fixture needs an existing event counter row to observe its lock", err)
+	}
+	cancelledBefore := f.events("account.link_cancelled")
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	blocker, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	var blockerPID int
+	if err = blocker.QueryRow(ctx, `SELECT pg_backend_pid() FROM account_person_link_requests WHERE account_id=$1 FOR UPDATE`, b.Enrollments[0].AccountID).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"targets": []map[string]any{
+		{"computer_id": a.ComputerID, "account_id": a.Enrollments[0].AccountID, "expected_revision": a.Revision},
+		{"computer_id": b.ComputerID, "account_id": b.Enrollments[0].AccountID, "expected_revision": b.Revision},
+	}}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, f.request("POST", "/api/agent-pairing/accounts/sign-out", body, true, ""))
+		done <- w
+	}()
+	for waiting := false; !waiting; {
+		select {
+		case w := <-done:
+			t.Fatalf("sign-out returned before reaching the second computer's link: %d %s", w.Code, w.Body.String())
+		case <-ctx.Done():
+			t.Fatal("sign-out never waited on the second computer's link")
+		default:
+		}
+		if err = f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'
+		 AND $1::int=ANY(pg_blocking_pids(pid)) AND query LIKE '%account_person_link_requests%')`, blockerPID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probe, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = probe.Exec(ctx, `SELECT 1 FROM event_counters WHERE tenant_id=$1 FOR UPDATE NOWAIT`, f.tenantID)
+	_ = probe.Rollback(ctx)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+		t.Fatal("bulk sign-out held the event counter while acquiring another target lock")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	if err = blocker.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case w := <-done:
+		if w.Code != 200 {
+			t.Fatalf("sign-out failed: %d %s", w.Code, w.Body.String())
+		}
+	case <-ctx.Done():
+		t.Fatal("sign-out did not finish")
+	}
+	if got := f.events("account.link_cancelled") - cancelledBefore; got != 2 {
+		t.Fatalf("cancelled link events = %d, want 2", got)
+	}
+	var last string
+	if err = f.db.Admin.QueryRow(t.Context(), `SELECT type FROM events WHERE tenant_id=$1 ORDER BY id DESC LIMIT 1`, f.tenantID).Scan(&last); err != nil || last != "agent_pairing.signed_out_everywhere" {
+		t.Fatalf("summary event must be last, got %q (%v)", last, err)
 	}
 }
