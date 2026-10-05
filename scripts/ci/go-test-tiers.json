@@ -3924,7 +3924,18 @@
     {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/deliveryvote","name":"TestMigratedWorkRetainsDeliveryRatingsAndVisibility","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionFrozenGateEvidence","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionClosedVocabulary","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionReplayVisibilityAndOwnership","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionWaitPaginationAndRevocation","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionResultBindingsAndRollback","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRechecksAccessAfterEarlierAuthorization","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestIdentityNeverAddsHiddenNodeReference","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestIdentitySurvivesChangedVisibility","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestUniquenessScope","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
   ],
   "timingWeights": {
     "runId": "37341114152",
