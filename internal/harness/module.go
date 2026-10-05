@@ -157,6 +157,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete", "harness.worker", true, 200, m.completeControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop", "harness.worker", true, 200, m.markStopped},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit", "harness.worker", true, 200, m.confirmExit},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent", "harness.control", false, 200, m.diagnoseRecovery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent", "harness.control", false, 201, m.requestAgentRecovery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent/{requestId}", "harness.read", false, 200, m.readAgentRecovery},
+		{"POST /api/harness-recoveries/claim", "harness.worker", true, 200, m.claimAgentRecoveries},
+		{"POST /api/harness-recoveries/{requestId}/complete", "harness.worker", true, 200, m.completeAgentRecovery},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery", "harness.read", false, 200, m.recovery},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove", "harness.read", false, 200, m.remove},
 		{"POST /api/projects/{projectId}/harness-sessions/remove-stale", "harness.read", false, 200, m.removeStale},
@@ -567,7 +572,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, servicetier.Capability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, recoveryCapability, servicetier.Capability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -578,7 +583,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 			out = append(out, v)
 		}
 	}
-	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability] || seen[servicetier.Capability]) {
+	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability] || seen[recoveryCapability] || seen[servicetier.Capability]) {
 		return nil, workorders.Fail(400, "unmanaged session cannot own controls")
 	}
 	sort.Strings(out)

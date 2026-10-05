@@ -2438,6 +2438,22 @@
     "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
   ],
   "tests": [
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"Restart requests the exact row and keeps destructive actions behind the separator","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"Reconnect waits for reporting confirmation and rejected recovery stays an error","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"offline and unauthorized sessions offer no Restart or Reconnect","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"node","file":"tests/session-actions.test.ts","name":"recovery offers only the server diagnosis for the exact visible session and current person authority","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"switching the visible session discards a late recovery result","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"accepted recovery stays pending until verified result and never calls queued work restarted","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"rejected or expired recovery surfaces failure and stops polling","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"person changes discard a late accepted request and clear owned state","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"disposal and wrong-session responses cannot produce a recovery success","tier":"ESSENTIAL"},
+
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > a node read moving a canonical leaf from A to cached work B replaces both ancestry projections","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > an unresolved replacement parent clears old ancestry until an authoritative list supplies it","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > a cached non-grouping parent cannot retain the former work ancestor","tier":"GATED-FULL"},

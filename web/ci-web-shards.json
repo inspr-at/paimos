@@ -1035,6 +1035,11 @@
           }
         },
         {
+          "file": "tests/agent-recovery.spec.ts",
+          "weightSeconds": 20,
+          "listedTests": 9
+        },
+        {
           "file": "tests/session-recovery.spec.ts",
           "weightSeconds": 37.192982,
           "weightSource": "web-13",

@@ -155,6 +155,16 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"package":"internal/harness","name":"TestAgentRecoveryOpenAPIContractsAgree","kind":"go","tier":"ESSENTIAL"},
+    {"package":"internal/auth","name":"TestAgentRecoveryRuntimeRouteCeiling","kind":"go","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryDiagnosisDoesNotGuessExitOrAuth","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRequestAuthorityAndSingleClaim","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRestartQueuesOneBoundContinuation","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRevocationExpiryAndObservationFence","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryRestartWaitsForExitAndRetriesOnlyOutcome","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryGenerationIdentityAndDeadlineRefuseSignals","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryReconnectRefreshesReportingWithoutStopping","tier":"ESSENTIAL"},
+
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachFallbackRefreshCannotWidenApprovedRoot","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupDropsOnlyUnverifiableFallbacks","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupRegistersWithUnverifiableFallback","tier":"GATED-FULL"},

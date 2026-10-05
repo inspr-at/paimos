@@ -204,6 +204,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		"account_label":           s.AccountLabel,
 		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
 	}
+	if s.DisplayLabel != nil {
+		body["display_label"] = *s.DisplayLabel
+	}
 	if s.Model != "" {
 		body["model"] = s.Model
 		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) {

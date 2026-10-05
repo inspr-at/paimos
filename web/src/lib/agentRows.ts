@@ -33,6 +33,8 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 // HarnessSession in lib/agents.ts for the type the page works with.
 export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
+  agent_recovery?: { session_id: string; observed_revision: string; cause: string; detail: string; action: '' | 'restart' | 'reconnect' }
+
   supported_pause_levels?: readonly import('./agentPause').PauseLevel[]
   pause_can_interrupt?: boolean
   pause_progress?: import('./agentPause').PauseProgress
