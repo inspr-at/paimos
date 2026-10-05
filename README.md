@@ -1566,9 +1566,10 @@ paimos mcp
 `GET /api/status/help`: the ordered status definitions, hints, Queued explanation
 and effective workspace rules. `--project KEY` resolves that project's
 Inherit/On/Off override. The help sheet and agents use the same definitions.
-The endpoint is read-only tenant metadata available to authenticated people and
-agents, including keys without scopes or role bindings. Project names and
-overrides still require project visibility; inaccessible projects return 404.
+The endpoint is read-only tenant metadata available to authenticated agents,
+including keys without scopes or role bindings. People retain the `nodes.read`
+permission check, which denies customer sessions without that permission.
+Project names and overrides still require project visibility; inaccessible projects return 404.
 Customer portal restrictions and pairing lifecycle checks remain in place.
 This read grants no ticket or settings write permission.
 The API reads live Status autopilot limits when its settings tables are present,

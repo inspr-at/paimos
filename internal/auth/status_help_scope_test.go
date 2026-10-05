@@ -14,8 +14,91 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestStatusHelpCustomerSessionDenied(t *testing.T) {
+	reset(t)
+	tid := insertTenant(t, "status-help-customers", "Status help customers")
+	m, err := New(Config{Env: envDev, SessionKey: make([]byte, 32)}, appPool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := (&httpapi.Server{
+		Pool: appPool, Modules: []httpapi.Module{m, nodes.New(appPool, nil)},
+		Middleware: []func(http.Handler) http.Handler{m.Middleware},
+	}).Handler()
+	settings := statusautopilot.Defaults()
+	settings.Rules["accept"] = statusautopilot.Rule{Enabled: true, Days: 45}
+	rules, err := json.Marshal(settings.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var project string
+	if err := testInTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title)
+			SELECT $1::uuid,id,'SH-1','Status project' FROM node_kinds WHERE tenant_id=$1::uuid AND slug='project'
+			RETURNING id::text`, tid).Scan(&project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO status_autopilot_settings(tenant_id,enabled,rules) VALUES($1,true,$2)
+			ON CONFLICT(tenant_id) DO UPDATE SET enabled=true,rules=excluded.rules`, tid, rules)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"customer", "member", "guest"} {
+		t.Run(role, func(t *testing.T) {
+			id, identity := signinPerson(t, tid, role, role, role+"@example.invalid", role+"@example.invalid", role)
+			token, err := m.startSession(t.Context(), identity, tid, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := func(method, path string) *httptest.ResponseRecorder {
+				t.Helper()
+				r := httptest.NewRequest(method, path, nil)
+				r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				return w
+			}
+			// Prove this is a live, correctly identified session, not a 401.
+			me := request(http.MethodGet, "/api/me")
+			var identityResponse struct{ Principal tenant.Principal }
+			if me.Code != http.StatusOK || json.Unmarshal(me.Body.Bytes(), &identityResponse) != nil || identityResponse.Principal.ID != id || len(identityResponse.Principal.Roles) != 1 || identityResponse.Principal.Roles[0] != role {
+				t.Fatalf("session identity: status %d, body %s", me.Code, me.Body.String())
+			}
+			for _, path := range []string{"/api/status/help", "/api/status/help?project_id=" + project} {
+				for _, method := range []string{http.MethodGet, http.MethodHead} {
+					w := request(method, path)
+					if role == "member" {
+						var help struct {
+							LimitsSource string `json:"limits_source"`
+							Autopilot    struct {
+								Rules map[string]statusautopilot.Rule
+							}
+						}
+						if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &help) != nil || help.LimitsSource != "workspace" || help.Autopilot.Rules["accept"].Days != 45 {
+							t.Fatalf("member %s %s missed live settings: status %d, body %s", method, path, w.Code, w.Body.String())
+						}
+						continue
+					}
+					var denial struct {
+						Code       string `json:"code"`
+						ReasonCode string `json:"reason_code"`
+					}
+					if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &denial) != nil || denial.Code != "forbidden" || denial.ReasonCode != "missing_role_permission" {
+						t.Fatalf("%s %s %s must fail at the permission gate: status %d, body %s", role, method, path, w.Code, w.Body.String())
+					}
+					if strings.Contains(w.Body.String(), "autopilot") || strings.Contains(w.Body.String(), "Status project") {
+						t.Fatal("denial leaked live settings or project data")
+					}
+				}
+			}
+		})
+	}
+}
 
 // Exercise the production middleware and handler together: handler-only tests
 // cannot catch a missing agent allowlist entry or an unwanted nodes.read gate.
