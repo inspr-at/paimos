@@ -147,3 +147,64 @@ func TestLeadQueueDispatchAndWorkerGenerationFence(t *testing.T) {
 	})
 	f.call(t, f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", claimBody(ids), 200, nil)
 }
+
+func TestLegacyQueueSkipsOtherProjectDispatchAuthorities(t *testing.T) {
+	for _, state := range []string{"open", "blocked", "unready"} {
+		t.Run(state, func(t *testing.T) {
+			f := setup(t)
+			f.queueAccount(t, 1000000)
+			configured, legacy := uuid(), uuid()
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				for i, id := range []string{configured, legacy} {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,$3,id,'Queue project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, id, "MQ-"+strconv.Itoa(i+1)); err != nil {
+						return err
+					}
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'waiting_for_room')`, f.person.TenantID, configured, f.person.ID)
+				return err
+			})
+			first := f.ticket(t, "open", "high", nil)
+			later := f.ticket(t, "open", "low", nil)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, first, configured); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, later, legacy)
+				return err
+			})
+			e := f.addQueue(t, first, nil)
+			f.addQueue(t, later, nil)
+			if got := keys(f.queuePage(t)); len(got) != 2 || got[0] != first || got[1] != later {
+				t.Fatalf("fixture order=%v", got)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				switch state {
+				case "blocked":
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='blocked' WHERE id=$1`, first)
+					return err
+				case "unready":
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{}'::jsonb WHERE id=$1`, first)
+					return err
+				}
+				return nil
+			})
+			var result struct {
+				Entry *qEntry `json:"entry"`
+			}
+			f.call(t, f.person, "POST", "/api/queue/next", map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}, 200, &result)
+			if result.Entry == nil || result.Entry.NodeID != later || result.Entry.Run.QueueRoutedAt == nil {
+				t.Fatalf("legacy pickup=%+v", result.Entry)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var routed bool
+				if err := tx.QueryRow(t.Context(), `SELECT queue_routed_at IS NOT NULL FROM agent_runs WHERE id=$1`, e.Run.ID).Scan(&routed); err != nil {
+					return err
+				}
+				if routed {
+					t.Fatal("legacy caller routed lead-controlled work")
+				}
+				return nil
+			})
+		})
+	}
+}

@@ -53,7 +53,7 @@ paths:
   /projects/{projectId}/lead/claim:
     post:
       summary: Bind a proven coordinator generation to the project lead intent
-      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. No process is launched.
+      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. No process is launched.
       parameters:
         - $ref: '#/components/parameters/projectId'
         - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}

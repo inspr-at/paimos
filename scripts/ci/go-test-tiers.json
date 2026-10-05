@@ -155,6 +155,9 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/auth","name":"TestProjectLeadThroughProductionAuthentication","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestLegacyQueueSkipsOtherProjectDispatchAuthorities","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadOpenAPIContract","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueDispatchAndWorkerGenerationFence","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLifecycleAndExplicitMigration","tier":"ESSENTIAL"},

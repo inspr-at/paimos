@@ -488,3 +488,70 @@ func TestProjectLeadOpenAPIContract(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectLeadReportingCadenceAndBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		age   time.Duration
+		fresh bool
+	}{
+		{"before_default_beat", 49 * time.Second, true},
+		{"default_beat", 50 * time.Second, true},
+		{"one_missed_beat", 100 * time.Second, true},
+		{"freshness_boundary", 120 * time.Second, true},
+		{"expired", 120*time.Second + time.Microsecond, false},
+		{"future", -time.Microsecond, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := leadFixture(t, readyLeadChecks)
+			session, lease, _ := leadCandidate(t, f)
+			l := startLead(t, f, 0)
+			now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='working',heartbeat_at=$2 WHERE id=$1`, session, now.Add(-tc.age))
+				return err
+			})
+			raw, _ := json.Marshal(map[string]any{"expected_revision": l["revision"], "session_id": session})
+			r := httptest.NewRequest("POST", "/api/projects/"+f.project+"/lead/claim", strings.NewReader(string(raw)))
+			r.SetPathValue("projectId", f.project)
+			r.Header.Set("X-Aeon-Worker-Lease", lease)
+			err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.agent.TenantID, func(tx pgx.Tx) error {
+				_, err := harness.ClaimLeadInTx(f.db.App, readyLeadChecks, r, harness.FreezeLeadReportingClock(tx, now), f.agent)
+				return err
+			})
+			if tc.fresh {
+				if err != nil {
+					t.Fatalf("healthy cadence rejected: %v", err)
+				}
+			} else {
+				if err == nil || err.Error() != "fresh reporting generation required" {
+					t.Fatalf("stale claim rejected for wrong reason: %v", err)
+				}
+				// Set an existing working lead to exercise projection/dispatch as well.
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE project_leads SET session_id=$2,generation=1,state='working' WHERE project_id=$1`, f.project, session)
+					return err
+				})
+			}
+			binding, _ := json.Marshal(map[string]any{"session_id": session, "generation": 1})
+			err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.agent.TenantID, func(tx pgx.Tx) error {
+				return harness.RequireAssignedLeadTx(t.Context(), harness.FreezeLeadReportingClock(tx, now), f.agent, f.project, binding)
+			})
+			if tc.fresh && err != nil {
+				t.Fatalf("healthy worker assignment rejected: %v", err)
+			}
+			if !tc.fresh && (err == nil || err.Error() != "assignment lead generation unavailable") {
+				t.Fatalf("stale assignment rejected for wrong reason: %v", err)
+			}
+			err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.agent.TenantID, func(tx pgx.Tx) error {
+				return harness.RequireCurrentLeadTx(t.Context(), harness.FreezeLeadReportingClock(tx, now), f.agent, f.project, session, 1)
+			})
+			if tc.fresh && err != nil {
+				t.Fatalf("healthy dispatch rejected: %v", err)
+			}
+			if !tc.fresh && (err == nil || err.Error() != "lead generation unavailable") {
+				t.Fatalf("stale dispatch rejected for wrong reason: %v", err)
+			}
+		})
+	}
+}

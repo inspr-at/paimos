@@ -81,6 +81,12 @@ func leadWait(checks LeadChecks, now time.Time) string {
 	return ""
 }
 
+// The CLI reports every 50 seconds by default. Allow one missed report and
+// bounded delivery delay, independently of the stricter admission gate age.
+// A future-dated report never proves current liveness. Reuse this predicate
+// for claim, projection, dispatch and assigned-worker eligibility.
+const leadReportingFreshSQL = `coalesce(heartbeat_at,created_at) BETWEEN clock_timestamp()-interval '2 minutes' AND clock_timestamp()`
+
 const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text`
 
 func scanLead(row pgx.Row) (Lead, error) {
@@ -159,7 +165,7 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Le
 		var archived, stopped *time.Time
 		var fresh bool
 		var pausing bool
-		err = tx.QueryRow(ctx, `SELECT phase,archived_at,stopped_at,coalesce(heartbeat_at,created_at)>clock_timestamp()-interval '30 seconds',coalesce(pause_record->>'state' IN ('requested','planned','paused','resume_requested'),false) OR coalesce((pause_record->>'stop_requested')::boolean,false) FROM harness_sessions WHERE id=$1`, *l.SessionID).Scan(&phase, &archived, &stopped, &fresh, &pausing)
+		err = tx.QueryRow(ctx, `SELECT phase,archived_at,stopped_at,`+leadReportingFreshSQL+`,coalesce(pause_record->>'state' IN ('requested','planned','paused','resume_requested'),false) OR coalesce((pause_record->>'stop_requested')::boolean,false) FROM harness_sessions WHERE id=$1`, *l.SessionID).Scan(&phase, &archived, &stopped, &fresh, &pausing)
 		if err != nil {
 			return l, err
 		}
@@ -316,7 +322,7 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, workorders.Fail(403, "proven owned root coordinator required")
 	}
 	var fresh bool
-	if err = tx.QueryRow(ctx, `SELECT coalesce(heartbeat_at,created_at)>clock_timestamp()-interval '30 seconds' FROM harness_sessions WHERE id=$1`, s.ID).Scan(&fresh); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT `+leadReportingFreshSQL+` FROM harness_sessions WHERE id=$1`, s.ID).Scan(&fresh); err != nil {
 		return nil, err
 	}
 	if !fresh {

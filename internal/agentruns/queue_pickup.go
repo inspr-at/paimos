@@ -66,6 +66,18 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		if leadProject != "" && (e.ProjectID == nil || *e.ProjectID != leadProject) {
 			continue
 		}
+		// queueLock holds the tenant/tree access fence. Select only work this
+		// caller can dispatch; another project's lead intent is not a failure
+		// of the shared scan, even if its entry is blocked or not ready.
+		if leadProject == "" && e.ProjectID != nil {
+			var configured bool
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_leads WHERE project_id=$1)`, *e.ProjectID).Scan(&configured); err != nil {
+				return nil, err
+			}
+			if configured {
+				continue
+			}
+		}
 		var leadBinding json.RawMessage
 		if e.ProjectID != nil {
 			if err := harness.RequireLeadDispatchTx(r.Context(), tx, r, p, *e.ProjectID, m.leadAdmission); err != nil {

@@ -3,18 +3,21 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -187,4 +190,151 @@ func workspacePermissions(t *testing.T, tenantID, principalID string) []string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// Exercise the matched production routes with real person sessions and bearer
+// keys, rather than preloading a principal directly into the handler context.
+func TestProjectLeadThroughProductionAuthentication(t *testing.T) {
+	reset(t)
+	ctx := t.Context()
+	tid := insertTenant(t, "lead-auth", "Lead authorization")
+	m := newMod(t, Config{Env: "prod"})
+	owner := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	if err := adminPool.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Lead owner') RETURNING id::text`, tid).Scan(&owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, testDB, tid, owner.ID, "admin")
+	key, err := m.createAgentKey(ctx, owner, "lead-auth", "", append(append([]string{}, authz.CoordinatorKeyScopes...), "harness.control"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := m.createAgentKey(ctx, owner, "lead-reader", "", []string{"harness.read", "nodes.read"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := m.createAgentKey(ctx, owner, "unrelated-lead-worker", "", authz.CoordinatorKeyScopes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlOnly, err := m.createAgentKey(ctx, owner, "lead-control-only", "", []string{"nodes.read", "harness.control"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Prepare a control-only role to verify owner pause without worker authority.
+	var project, identity, role string
+	if err := testInTenant(ctx, appPool, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'LA-1','Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'lead_owner','Lead owner') RETURNING id::text`, tid).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, tid, role, []string{"nodes.read", "harness.read", "harness.write", "harness.control", "run.create"}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adminPool.QueryRow(ctx, `INSERT INTO identities(issuer,subject) VALUES('lead-auth','owner') RETURNING id::text`).Scan(&identity); err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := m.startSession(tenant.WithPrincipal(ctx, owner), identity, tid, owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherOwner := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	if err := adminPool.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other person') RETURNING id::text`, tid).Scan(&otherOwner.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, testDB, tid, otherOwner.ID, "admin")
+	var otherIdentity string
+	if err := adminPool.QueryRow(ctx, `INSERT INTO identities(issuer,subject) VALUES('lead-auth','other') RETURNING id::text`).Scan(&otherIdentity); err != nil {
+		t.Fatal(err)
+	}
+	otherCookie, err := m.startSession(tenant.WithPrincipal(ctx, otherOwner), otherIdentity, tid, otherOwner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	admission := func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
+		var now time.Time
+		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+		g := harness.LeadGate{State: "available", CheckedAt: now}
+		return harness.LeadChecks{Dial: g, Harness: g, Account: g, Host: g}, err
+	}
+	harness.NewWithLeadAdmission(appPool, admission).Mount(mux)
+	secured := m.Middleware(mux)
+	call := func(token, method, path string, body any, lease string, want int) map[string]any {
+		t.Helper()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
+		if token == "other-person" {
+			r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: otherCookie})
+		} else if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		} else {
+			r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookie})
+		}
+		r.Header.Set("X-Aeon-Worker-Lease", lease)
+		_, r.Pattern = mux.Handler(r)
+		w := httptest.NewRecorder()
+		secured.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, w.Code, want, w.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	base := "/api/projects/" + project
+	for _, token := range []string{"", key.Token, reader.Token} {
+		if got := call(token, "GET", base+"/lead", nil, "", 200); got["state"] != "none" {
+			t.Fatalf("implicit lead: %v", got)
+		}
+	}
+	call(key.Token, "POST", base+"/lead", map[string]any{"expected_revision": 0}, "", 403)
+	l := call("", "POST", base+"/lead", map[string]any{"expected_revision": 0}, "", 200)
+	lease := "lead-auth-lease-000000000000000000000000"
+	s := call("", "POST", base+"/harness-sessions", map[string]any{"agent_principal_id": key.PrincipalID, "harness": "codex", "host": "local", "management_mode": "unmanaged", "role": "coordinator", "harness_session_ref": "lead-auth-reference", "worker_lease": lease, "advertised_capabilities": []string{"inbox", "pause"}}, "", 201)
+	claim := map[string]any{"expected_revision": l["revision"], "session_id": s["id"]}
+	call(reader.Token, "POST", base+"/lead/claim", claim, lease, 403)
+	if got := call(key.Token, "POST", base+"/lead/claim", claim, "wrong-proof-000000000000000000000000000", 403); got["error"] != "harness worker proof rejected" {
+		t.Fatalf("claim rejected for wrong reason: %v", got)
+	}
+	l = call(key.Token, "POST", base+"/lead/claim", claim, lease, 200)
+	if l["generation"] != float64(1) {
+		t.Fatalf("claim=%v", l)
+	}
+	pause := map[string]any{"expected_revision": l["revision"], "generation": 1}
+	call(reader.Token, "POST", base+"/lead/pause", pause, lease, 403)
+	call(controlOnly.Token, "POST", base+"/lead/pause", pause, lease, 403)
+	if got := call("other-person", "POST", base+"/lead/pause", pause, "", 403); got["error"] != "lead owner required" {
+		t.Fatalf("nonowner rejected for wrong reason: %v", got)
+	}
+	if got := call(unrelated.Token, "POST", base+"/lead/pause", pause, lease, 403); got["error"] != "current lead worker proof required" {
+		t.Fatalf("unrelated worker rejected for wrong reason: %v", got)
+	}
+	if got := call(key.Token, "POST", base+"/lead/pause", pause, "wrong-proof-000000000000000000000000000", 403); got["error"] != "current lead worker proof required" {
+		t.Fatalf("pause rejected for wrong reason: %v", got)
+	}
+	l = call(key.Token, "POST", base+"/lead/pause", pause, lease, 200)
+	if l["state"] != "paused" || l["process_active"] != true {
+		t.Fatalf("worker pause=%v", l)
+	}
+	if err := testInTenant(ctx, appPool, tid, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, owner.ID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	l = call("", "POST", base+"/lead/pause", map[string]any{"expected_revision": l["revision"], "generation": 1}, "", 200)
+	if l["state"] != "paused" || l["process_active"] != true {
+		t.Fatalf("owner pause=%v", l)
+	}
 }
