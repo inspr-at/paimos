@@ -151,6 +151,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/status-autopilot/attention", m.attention)
 	mux.HandleFunc("POST /api/status-autopilot/attention/actions", m.attentionActions)
 	mux.HandleFunc("GET /api/status-autopilot/changes", m.changes)
+	mux.HandleFunc("GET /api/status-autopilot/projects", m.projects)
 	mux.HandleFunc("GET /api/status-autopilot/proposals", m.proposals)
 	mux.HandleFunc("PUT /api/status-autopilot/proposals/{eventId}", m.resolveProposal)
 }
@@ -224,7 +225,10 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
-			if err := lock(r.Context(), tx); err != nil {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
 		}
@@ -287,7 +291,10 @@ func (m *Module) project(w http.ResponseWriter, r *http.Request) {
 			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
-			if err := lock(r.Context(), tx); err != nil {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
 		}

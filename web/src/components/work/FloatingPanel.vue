@@ -1,12 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { isSettingsField } from '../../lib/settingsOverlays'
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // A popover anchored to a trigger. It is teleported to <body> so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -79,6 +80,9 @@ function escape(event: KeyboardEvent) {
   // Let the open disclosure consume Escape before dismissing its menu.
   if (panel.value?.querySelector('.read-name-detail:popover-open')) return
   event.preventDefault(); event.stopImmediatePropagation()
+  if (props.settingsKeys && isSettingsField(event.target)) {
+    (event.target as HTMLElement).blur(); panel.value?.focus({ preventScroll: true }); return
+  }
   emit('close', true)
 }
 let scrollFrame = 0

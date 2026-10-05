@@ -213,7 +213,7 @@ func TestAttentionBulkReturnsPartialResultsAndGuardsUndo(t *testing.T) {
 type attentionFenceProbe struct{ reached chan struct{} }
 
 func (p attentionFenceProbe) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
-	if q.SQL == `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE` {
+	if q.SQL == `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE` || q.SQL == `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE` {
 		select {
 		case p.reached <- struct{}{}:
 		default:
@@ -674,4 +674,73 @@ func TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges(t *testing.
 			})
 		})
 	}
+}
+
+func TestSettingsRevocationAtFinalWriteFence(t *testing.T) {
+	f := setup(t)
+	editor := attentionMember(f)
+	dbtest.BindRole(t, f.d, f.p.TenantID, editor.ID, "admin")
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	blocker, err := f.d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err = blocker.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true)`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = blocker.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	config, err := pgxpool.ParseConfig(f.d.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := attentionFenceProbe{make(chan struct{}, 1)}
+	config.ConnConfig.Tracer = probe
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	// The override writer waits at the tenant fence after its preliminary check.
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		r := httptest.NewRequest("PUT", "/api/projects/"+f.project+"/status-autopilot", strings.NewReader(`{"mode":"off","expected_revision":0}`))
+		r.SetPathValue("projectId", f.project)
+		r = r.WithContext(tenant.WithPrincipal(ctx, editor))
+		w := httptest.NewRecorder()
+		New(pool).project(w, r)
+		done <- w
+	}()
+	select {
+	case <-probe.reached:
+	case <-ctx.Done():
+		t.Fatal("override writer never reached tenant fence")
+	}
+	if _, err = blocker.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, editor.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case w := <-done:
+		if w.Code != 403 || !strings.Contains(w.Body.String(), "permission denied") {
+			t.Fatalf("revoked write: %d %s", w.Code, w.Body)
+		}
+	case <-ctx.Done():
+		t.Fatal("override writer did not finish")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM status_autopilot_projects WHERE project_id=$1`, f.project).Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			t.Fatal("revoked override persisted")
+		}
+		return nil
+	})
 }
