@@ -7707,6 +7707,8 @@ paths:
         turn a reported success into wait. Gate freshness is frozen at server recording time.
         request_id is idempotent within the project: exact metadata replays the original evidence, divergent
         reuse returns 409. A different, stopped, archived or revoked generation cannot replay the request.
+        Tenant/project/request identity remains unique even when a referenced node moves out of visibility;
+        conflicts never return hidden evidence or bypass event visibility.
         Review links are checked against the existing exact-commit binding and freeze its base/head hashes.
       parameters:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}

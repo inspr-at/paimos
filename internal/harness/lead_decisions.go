@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -384,6 +385,14 @@ func (m *Module) recordLeadDecision(r *http.Request, tx pgx.Tx, p tenant.Princip
 	}
 	e, err := events.Append(ctx, tx, p, events.Change{NodeID: &projectID, Type: leadDecisionEvent, After: stored, At: &now, Metadata: metadata})
 	if err != nil {
+		// The replay lookup obeys event RLS, but request uniqueness must not.
+		// A previously recorded decision can become hidden after a node move.
+		// Reject reuse without reading that snapshot or disclosing PG detail;
+		// the transaction rolls back the failed append and counter allocation.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "events_lead_decision_request_identity" {
+			return nil, workorders.Fail(409, "lead decision request_id already bound to recorded evidence")
+		}
 		return nil, err
 	}
 	out.EventID = e.ID

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -373,5 +375,127 @@ func TestLeadDecisionRequestIdentityNeverAddsHiddenNodeReference(t *testing.T) {
 	expect(t, w, 200)
 	if decode(t, w)["replayed"] != true || leadEventCount(t, f) != 1 {
 		t.Fatal("request identity broke idempotency")
+	}
+}
+
+func TestLeadDecisionRequestIdentitySurvivesChangedVisibility(t *testing.T) {
+	f := fixture(t)
+	f.agent.Scopes = append(f.agent.Scopes, "nodes.read")
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=array_append(scopes,'nodes.read') WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, f.agent.ID)
+		return err
+	})
+	session, lease := leadFixture(t, f, "coordinator")
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/lead-decisions"
+	list := "/api/projects/" + f.project + "/lead-decisions"
+	body := leadBody(f)
+	w := f.call(f.agent, "POST", path, body, lease)
+	expect(t, w, 200)
+	first := decode(t, w)["decision"].(map[string]any)
+
+	// Limit the coordinator to this project, then move the referenced ticket
+	// elsewhere. The original immutable event remains stored but its node_refs
+	// make it unreadable through both history and the duplicate lookup.
+	hiddenProject := uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.agent.TenantID, f.agent.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.agent.TenantID, f.agent.ID, f.project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'HTS-5',id,'Hidden project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, hiddenProject); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE tenant_id=$2 AND id=$3`, hiddenProject, f.person.TenantID, f.ticket)
+		return err
+	})
+	w = f.call(f.agent, "GET", list, nil, "")
+	expect(t, w, 200)
+	if len(decode(t, w)["items"].([]any)) != 0 || leadEventCount(t, f) != 1 {
+		t.Fatal("fixture did not hide the retained decision")
+	}
+	// Make the submitted evidence valid in the original project, but different
+	// from the hidden decision. Request identity must still prevent the append.
+	body["ticket_node_id"] = ""
+	body["policy_revision"] = 8
+	w = f.call(f.agent, "POST", path, body, lease)
+	expect(t, w, 409)
+	if !strings.Contains(w.Body.String(), "lead decision request_id") || strings.Contains(w.Body.String(), f.ticket) || strings.Contains(w.Body.String(), hiddenProject) {
+		t.Fatal("conflict reason was incorrect or disclosed hidden evidence")
+	}
+	if leadEventCount(t, f) != 1 {
+		t.Fatal("changed visibility allowed request identity reuse")
+	}
+	// The failed append rolls back its counter allocation and leaves the exact
+	// original snapshot available to a member who can still see both projects.
+	w = f.call(f.person, "GET", list, nil, "")
+	expect(t, w, 200)
+	items := decode(t, w)["items"].([]any)
+	if len(items) != 1 {
+		t.Fatal("conflict changed retained history")
+	}
+	a, _ := json.Marshal(items[0])
+	b, _ := json.Marshal(first)
+	if string(a) != string(b) {
+		t.Fatal("conflict changed original evidence")
+	}
+	body["request_id"] = uid()
+	w = f.call(f.agent, "POST", path, body, lease)
+	expect(t, w, 200)
+	if decode(t, w)["decision"].(map[string]any)["event_id"] != first["event_id"].(float64)+1 || leadEventCount(t, f) != 2 {
+		t.Fatal("conflict consumed an event ID or blocked a fresh request")
+	}
+}
+
+func TestLeadDecisionRequestUniquenessScope(t *testing.T) {
+	f := fixture(t)
+	otherProject, requestID := uid(), uid()
+	// Reuse the project UUID across tenants so omitting tenant_id from the
+	// index would reject the otherwise valid foreign request.
+	foreignProject := f.project
+	for _, project := range []struct {
+		principal tenant.Principal
+		id        string
+	}{{f.person, otherProject}, {f.foreign, foreignProject}} {
+		f.tx(t, project.principal, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'HTS-5',id,'Other project' FROM node_kinds WHERE slug='project'`, project.principal.TenantID, project.id)
+			return err
+		})
+	}
+	// Exercise the storage boundary directly, without the handler's replay
+	// lookup, to prove uniqueness is tenant/project scoped and limited to this
+	// event type. No generation ID is part of the database identity.
+	appendDecision := func(p tenant.Principal, projectID, eventType string) error {
+		return db.InTenant(dbtest.Seed(t.Context()), f.db.App, p.TenantID, func(tx pgx.Tx) error {
+			_, err := events.Append(t.Context(), tx, p, events.Change{
+				NodeID: &projectID, Type: eventType, After: map[string]string{"project_id": projectID},
+				Metadata: json.RawMessage(`{"lead_decision_request_id":"` + requestID + `"}`),
+			})
+			return err
+		})
+	}
+	for _, scope := range []struct {
+		principal tenant.Principal
+		projectID string
+		eventType string
+	}{
+		{f.person, f.project, "node.lead_decision_recorded"},
+		{f.person, otherProject, "node.lead_decision_recorded"},
+		{f.foreign, foreignProject, "node.lead_decision_recorded"},
+		{f.person, f.project, "node.updated"},
+		{f.person, f.project, "node.updated"},
+	} {
+		if err := appendDecision(scope.principal, scope.projectID, scope.eventType); err != nil {
+			t.Fatalf("request ID should be reusable outside its decision scope: %v", err)
+		}
+	}
+	err := appendDecision(f.person, f.project, "node.lead_decision_recorded")
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "events_lead_decision_request_identity" {
+		t.Fatalf("duplicate must fail on lead decision request identity, got %v", err)
+	}
+	if leadEventCount(t, f) != 2 {
+		t.Fatal("storage conflict appended a duplicate or lost another project's evidence")
 	}
 }

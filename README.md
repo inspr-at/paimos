@@ -1813,6 +1813,11 @@ coordinator generation records bounded, typed metadata with
 write; current project permission is checked inside the fenced transaction,
 including on replay. Identical `request_id` metadata replays its original event;
 different metadata or a different generation returns a conflict.
+Migration `1263` enforces request uniqueness per tenant and project even when
+a referenced ticket moves out of the coordinator's visibility. Reusing that
+identity for otherwise valid evidence returns a redacted 409, retaining the
+hidden snapshot and rolling back the failed append's event-counter allocation.
+Replay and history still obey event visibility and current authorization.
 
 `aeon project decisions AEON --limit 50 [--after EVENT-ID] [--session UUID]`
 reads a page of redacted reports, with `--json` preserving all evidence and the
