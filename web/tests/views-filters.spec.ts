@@ -60,7 +60,7 @@ test('an excluded value filters with "not", shows in its control and travels in 
   expect(errors).toEqual([])
 })
 
-test('Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date', async ({ page }) => {
+test('Shift F opens every filter: labels, parent, cost unit and release by name, and a relative date', async ({ page }) => {
   const calls = await mockWork(page, world())
   await page.goto('/p/PHAROS?closed=1')
   await expect(rows(page)).toHaveCount(7)
@@ -68,7 +68,7 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await page.keyboard.press('Shift+F')
   const more = page.getByRole('menu', { name: 'Filter by' })
   await expect(more).toBeVisible()
-  await expect(more.getByRole('menuitem')).toContainText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Epic', 'Cost unit', 'Imported release', 'Date'])
+  await expect(more.getByRole('menuitem')).toContainText(['Status', 'Priority', 'Assignee', 'Parents / Leaves', 'Depth', 'Legacy type', 'Labels', 'Human check', 'Parent', 'Cost unit', 'Imported release', 'Date'])
   await more.getByRole('menuitem', { name: 'Labels' }).click()
   const labels = page.getByRole('dialog', { name: 'Filter by Labels' })
   // Label counts are asked for when the menu opens.
@@ -80,17 +80,18 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await expect(keys(page)).toHaveText(['PHAROS-13'])
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Remove Labels filter/ }).click()
-  // Epic: the project's epics by title; the list asks for the epic's id.
+  // Parent by title retains the legacy epic query for saved-view compatibility.
+  // Match exactly: the menu also offers the separate Parents / Leaves filter.
   await page.getByRole('button', { name: 'Filter by more' }).click()
-  await page.getByRole('menuitem', { name: 'Epic' }).click()
-  const epics = page.getByRole('dialog', { name: 'Filter by Epic' })
+  await more.getByRole('menuitem', { name: 'Parent', exact: true }).click()
+  const epics = page.getByRole('dialog', { name: 'Filter by Parent' })
   await epics.getByText('Guarded multi-cloud provisioning').click()
   await expect.poll(() => lastList(calls).query.get('epic')).toBe('n-epic')
   await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   await page.keyboard.press('Escape')
-  await expect(selectedFilter(page, 'Epic')).toHaveAccessibleName('Edit Epic filter: Guarded multi-cloud provisioning')
-  await expect(selectedFilter(page, 'Epic')).toContainText('Guarded multi-cloud provisioning')
-  await page.getByRole('button', { name: /Remove Epic filter/ }).click()
+  await expect(selectedFilter(page, 'Parent')).toHaveAccessibleName('Edit Parent filter: Guarded multi-cloud provisioning')
+  await expect(selectedFilter(page, 'Parent')).toContainText('Guarded multi-cloud provisioning')
+  await page.getByRole('button', { name: /Remove Parent filter/ }).click()
   // Cost unit: native and imported labels alike.
   await page.getByRole('button', { name: 'Filter by more' }).click()
   await page.getByRole('menuitem', { name: 'Cost unit' }).click()

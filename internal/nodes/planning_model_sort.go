@@ -39,7 +39,7 @@ func modelNameSortSQL(namesArg string) (string, string) {
    coalesce(nullif(pk.model,''),nullif(s.model,''),nullif(s.model_raw,''),usage.model,'') AS model,
    d.model_display,usage.tokens,
    CASE WHEN pk.model IN ('opus','sonnet','haiku','fable') THEN coalesce(d.model_display->>'model_version','') ELSE '' END AS version_key
-  FROM (` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task')`, false) + `) t
+  FROM (` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('work','ticket','task','epic')`, false) + `) t
   JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
    AND ((SELECT aeon_visible_all()) OR s.project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
   LEFT JOIN model_profiles p ON p.tenant_id=s.tenant_id AND p.id=s.model_profile_id
@@ -67,7 +67,7 @@ func modelNameSortSQL(namesArg string) (string, string) {
   CROSS JOIN LATERAL (SELECT ` + planPlacementColumns("("+namesArg+"::jsonb->>'_viewer')") + `) pk
   LEFT JOIN model_used used ON used.root=f.id
   LEFT JOIN LATERAL (SELECT id,snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=f.id ORDER BY started_at DESC,id DESC LIMIT 1) snap ON true
-  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id AND f.kind_slug IN ('ticket','task')
+  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id AND f.kind_slug IN ('work','ticket','task','epic')
  ) route ON true`
 	return cte, join
 }

@@ -139,6 +139,7 @@
       "title": "Product domain A: nodes, business, imports",
       "paths": [
         "internal/nodes/**",
+        "internal/fieldschema/**",
         "internal/workstate/**",
         "internal/business/**",
         "internal/importer/**",
@@ -170,6 +171,7 @@
         "internal/tenantbrand/**",
         "internal/brand/**",
         "internal/ticketbenefits/**",
+        "internal/parentbenefits/**",
         "internal/statusautopilot/**",
         "internal/recurrences/**",
         "internal/usagedashboard/**",

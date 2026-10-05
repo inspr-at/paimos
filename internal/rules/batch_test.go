@@ -450,7 +450,7 @@ func (w *batchWorld) task() string {
 	w.t.Helper()
 	var id string
 	err := db.InTenant(dbtest.Seed(w.t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
-		return tx.QueryRow(w.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'RBT-1','A task',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='task' RETURNING id::text`, w.tid, w.project).Scan(&id)
+		return tx.QueryRow(w.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'RBT-1','A task',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, w.tid, w.project).Scan(&id)
 	})
 	if err != nil {
 		w.t.Fatal(err)

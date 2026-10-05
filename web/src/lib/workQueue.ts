@@ -25,15 +25,15 @@ export interface QueueTarget {
 }
 export type ReadyGap = 'estimate' | 'criteria' | 'blocker'
 export const QUEUE_STATES = ['new', 'open', 'backlog', 'blocked']
-type QueueRow = Pick<ListItem, 'kind_slug' | 'state'> & Partial<Pick<ListItem, 'assignee' | 'lead_worker' | 'fields' | 'queue_stale'>>
+type QueueRow = Pick<ListItem, 'kind_slug' | 'state'> & Partial<Pick<ListItem, 'assignee' | 'lead_worker' | 'fields' | 'queue_stale' | 'estimate' | 'is_leaf'>>
 export function staleProgress(row: QueueRow): boolean {
-  return (row.kind_slug === 'ticket' || row.kind_slug === 'task') && statusMeta(row.state).key === 'progress' && !row.assignee && !row.lead_worker
+  return row.is_leaf !== false && (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? row.estimate?.is_parent === false)) && statusMeta(row.state).key === 'progress' && !row.assignee && !row.lead_worker
 }
 export function staleWork(row: QueueRow): boolean {
   return staleProgress(row) && row.queue_stale === true
 }
 export function queueable(row: QueueRow): boolean {
-  return (row.kind_slug === 'ticket' || row.kind_slug === 'task') && (QUEUE_STATES.includes(normaliseState(row.state)) || staleWork(row))
+  return row.is_leaf !== false && (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? row.estimate?.is_parent === false)) && (QUEUE_STATES.includes(normaliseState(row.state)) || staleWork(row))
 }
 export function queueIneligibleReason(row: QueueRow): string {
   const status = statusMeta(row.state)

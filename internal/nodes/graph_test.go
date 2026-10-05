@@ -26,9 +26,10 @@ import (
 
 func TestTicketGraphShapeClosedFilterAndIsolation(t *testing.T) {
 	p := newPrincipal(t, "ticket-graph")
+	customKind(t, p, "task", "task")
 	projectKind := kindBySlug(t, p, "project")
-	epicKind := kindBySlug(t, p, "epic")
-	ticketKind := kindBySlug(t, p, "ticket")
+	epicKind := kindBySlug(t, p, "work")
+	ticketKind := kindBySlug(t, p, "work")
 	taskKind := kindBySlug(t, p, "task")
 	memoryKind := kindBySlug(t, p, "memory")
 	releaseKind := kindBySlug(t, p, "release")
@@ -84,7 +85,7 @@ func TestTicketGraphShapeClosedFilterAndIsolation(t *testing.T) {
 	if g.Truncated {
 		t.Fatal("small graph truncated")
 	}
-	for _, absent := range []string{done.ID, cancelled.ID, archived.ID, accepted.ID, delivered.ID, task.ID, memory.ID, hidden.ID, elsewhere.ID} {
+	for _, absent := range []string{done.ID, cancelled.ID, archived.ID, accepted.ID, delivered.ID, memory.ID, hidden.ID, elsewhere.ID} {
 		if graphHasNode(g, absent) || strings.Contains(string(body), absent) {
 			t.Fatalf("closed, other-kind or other-project id %s leaked", absent)
 		}
@@ -92,15 +93,19 @@ func TestTicketGraphShapeClosedFilterAndIsolation(t *testing.T) {
 	if graphHasNode(g, release.ID) {
 		t.Fatal("release is not a graph node")
 	}
-	if len(g.Nodes) != 4 { // epic, open, doing, qa
+	if len(g.Nodes) != 5 { // work parent, open, doing, qa, legacy task
 		t.Fatalf("nodes %d", len(g.Nodes))
 	}
+	taskNode := graphNode(t, g, task.ID)
+	if taskNode.Type != "task" || taskNode.StatusCategory != "open" || taskNode.ParentID != nil {
+		t.Fatalf("legacy task projection %+v", taskNode)
+	}
 	openNode := graphNode(t, g, open.ID)
-	if openNode.Key == "" || openNode.Title != "Rotate keys" || openNode.Type != "ticket" || openNode.Status != "new" || openNode.StatusCategory != "open" || openNode.Priority == nil || *openNode.Priority != "high" || openNode.ParentID == nil || *openNode.ParentID != epic.ID || openNode.ReleaseID == nil || *openNode.ReleaseID != release.ID || openNode.UpdatedAt.IsZero() {
+	if openNode.Key == "" || openNode.Title != "Rotate keys" || openNode.Type != "work" || openNode.Status != "new" || openNode.StatusCategory != "open" || openNode.Priority == nil || *openNode.Priority != "high" || openNode.ParentID == nil || *openNode.ParentID != epic.ID || openNode.ReleaseID == nil || *openNode.ReleaseID != release.ID || openNode.UpdatedAt.IsZero() {
 		t.Fatalf("open node %+v", openNode)
 	}
 	epicNode := graphNode(t, g, epic.ID)
-	if epicNode.Type != "epic" || epicNode.StatusCategory != "open" || epicNode.Priority != nil || epicNode.ParentID != nil || epicNode.ReleaseID != nil {
+	if epicNode.Type != "work" || epicNode.StatusCategory != "open" || epicNode.Priority != nil || epicNode.ParentID != nil || epicNode.ReleaseID != nil {
 		t.Fatalf("epic %+v", epicNode)
 	}
 	if graphNode(t, g, doing.ID).StatusCategory != "doing" || graphNode(t, g, qa.ID).StatusCategory != "doing" {
@@ -145,8 +150,8 @@ func TestTicketGraphShapeClosedFilterAndIsolation(t *testing.T) {
 	if !graphHasLink(closed, TicketGraphLink{Source: open.ID, Target: done.ID, Kind: "blocks"}) || !graphHasLink(closed, TicketGraphLink{Source: done.ID, Target: epic.ID, Kind: "parent"}) {
 		t.Fatalf("closed links %+v", closed.Links)
 	}
-	if graphHasNode(closed, task.ID) || graphHasNode(closed, hidden.ID) || strings.Contains(string(body), hidden.ID) {
-		t.Fatal("include_closed pulled in a task or another project")
+	if !graphHasNode(closed, task.ID) || graphHasNode(closed, hidden.ID) || strings.Contains(string(body), hidden.ID) {
+		t.Fatal("include_closed lost the legacy task or leaked another project")
 	}
 	assertGraphLinkCounts(t, closed)
 
@@ -203,7 +208,7 @@ func TestTicketGraphCap(t *testing.T) {
 	}
 	p := newPrincipal(t, "ticket-graph-cap")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Large"}`, projectKind.ID))
 	ids := map[string]string{}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -271,7 +276,7 @@ func TestTicketGraphCap(t *testing.T) {
 func TestTicketGraphQueryCount(t *testing.T) {
 	p := newPrincipal(t, "ticket-graph-queries")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Queries"}`, projectKind.ID))
 	insertGraphTickets(t, p, ticketKind.ID, project.ID, 1, 10)
 	tracer := &ticketGraphTracer{}
@@ -330,7 +335,7 @@ func TestTicketGraphQueryCount(t *testing.T) {
 func TestTicketGraphAgentKeyScope(t *testing.T) {
 	p := newPrincipal(t, "ticket-graph-agent")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Agent"}`, projectKind.ID))
 	ticket := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Visible","parent_id":%q,"state":"new"}`, ticketKind.ID, project.ID))
 	mod, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{7}, 32)}, appPool)

@@ -17,7 +17,7 @@ import (
 // Suggestions are deterministic planning hints, never confirmed estimates of
 // difficulty. An estimate or role change with valid hours opts into filling gaps.
 func suggestEstimateRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, title string, parent *string, raw, before json.RawMessage) (json.RawMessage, error) {
-	if kind != "ticket" && kind != "task" {
+	if kind != "work" && kind != "ticket" && kind != "task" {
 		return raw, nil
 	}
 	fields, err := decodeRouteFields(raw)

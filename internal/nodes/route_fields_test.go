@@ -18,11 +18,11 @@ import (
 func TestCanonicalRouteFields(t *testing.T) {
 	person := tenant.Principal{ID: "11111111-1111-4111-8111-111111111111", Kind: tenant.Person}
 	kept := []byte(`{"priority":"low","route_role":"build","route_role_source":"person","route_role_by":"11111111-1111-4111-8111-111111111111","route_role_at":"2026-09-29T00:00:00Z"}`)
-	out, err := canonicalRouteFields(person, "ticket", kept, kept)
+	out, err := canonicalRouteFields(person, "work", kept, kept)
 	if err != nil || string(out) != string(kept) {
 		t.Fatalf("unchanged: %s %v", out, err)
 	}
-	trimmed, err := canonicalRouteFields(person, "ticket", []byte(`{"route_role":" build ","area":" backend "}`), nil)
+	trimmed, err := canonicalRouteFields(person, "work", []byte(`{"route_role":" build ","area":" backend "}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,14 +37,14 @@ func TestCanonicalRouteFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{`{"route_role":"gruntwork"}`, `{"route_role":""}`, `{"area":"bad area"}`, `{"route_role":1}`} {
-		if _, err := canonicalRouteFields(person, "ticket", []byte(raw), nil); err == nil {
+		if _, err := canonicalRouteFields(person, "work", []byte(raw), nil); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
-	if _, err := canonicalRouteFields(person, "ticket", []byte(`{"route_role":"scout","route_role_source":"agent"}`), nil); err == nil || !strings.Contains(err.Error(), "route_role_source") {
+	if _, err := canonicalRouteFields(person, "work", []byte(`{"route_role":"scout","route_role_source":"agent"}`), nil); err == nil || !strings.Contains(err.Error(), "route_role_source") {
 		t.Fatal(err)
 	}
-	cleared, err := canonicalRouteFields(person, "ticket", []byte(`{"priority":"low","route_role":null,"route_role_source":"person"}`), kept)
+	cleared, err := canonicalRouteFields(person, "work", []byte(`{"priority":"low","route_role":null,"route_role_source":"person"}`), kept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestCanonicalRouteFields(t *testing.T) {
 	}
 
 	before := []byte(`{"priority":"low","route_role":"build","route_role_source":"person","route_role_by":"` + person.ID + `","route_role_at":"2026-09-29T00:00:00Z","area":"backend","area_source":"person","area_by":"` + person.ID + `","area_at":"2026-09-29T00:00:00Z"}`)
-	forged, err := canonicalRouteFields(person, "ticket", []byte(`{"priority":"low","route_role":"build","route_role_source":"agent","route_role_by":"spoof","area":" backend "}`), before)
+	forged, err := canonicalRouteFields(person, "work", []byte(`{"priority":"low","route_role":"build","route_role_source":"agent","route_role_by":"spoof","area":" backend "}`), before)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestCanonicalRouteFields(t *testing.T) {
 		t.Fatalf("unchanged value restamped: %#v", fields)
 	}
 	agent := tenant.Principal{ID: "22222222-2222-4222-8222-222222222222", Kind: tenant.Agent}
-	changed, err := canonicalRouteFields(agent, "ticket", []byte(`{"priority":"low","route_role":"mechanical","area":"backend"}`), before)
+	changed, err := canonicalRouteFields(agent, "work", []byte(`{"priority":"low","route_role":"mechanical","area":"backend"}`), before)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +82,8 @@ func TestCanonicalRouteFields(t *testing.T) {
 func TestRouteRoleAndAreaProvenance(t *testing.T) {
 	p := newPrincipal(t, "route-fields")
 	agent := routeAgent(t, p.TenantID)
-	ticketKind := kindBySlug(t, p, "ticket")
-	taskKind := kindBySlug(t, p, "task")
+	ticketKind := kindBySlug(t, p, "work")
+	taskKind := kindBySlug(t, p, "work")
 	if !strings.Contains(string(ticketKind.FieldSchema), `"route_role"`) || !strings.Contains(string(taskKind.FieldSchema), `"area"`) {
 		t.Fatalf("seed schema ticket %s task %s", ticketKind.FieldSchema, taskKind.FieldSchema)
 	}

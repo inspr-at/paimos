@@ -36,6 +36,10 @@ type Proposal struct {
 // the ticket, its flags, timestamps or comments. The episode key deduplicates
 // restarts; dismissed episodes also retain a receipt so On cannot replay them.
 func enact(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision, mode string) error {
+	parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
+	if err != nil || parent {
+		return err
+	}
 	if mode == "off" {
 		return nil
 	}
@@ -46,7 +50,7 @@ func enact(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 		return nil
 	}
 	var seen bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)
  OR EXISTS(SELECT 1 FROM status_autopilot_proposals WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen)
 	if err != nil || seen {
 		return err

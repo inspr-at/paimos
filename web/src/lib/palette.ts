@@ -5,6 +5,7 @@
 import type { ListItem, WorkNode } from './api.ts'
 import type { KnowledgeItem, KnowledgeType } from './knowledge.ts'
 import type { Recent } from './recents.ts'
+import { isWorkItem } from './workVocabulary.ts'
 
 export interface TicketResult { type: 'ticket'; id: string; key: string; title: string; state: string; kind: string; projectKey: string | null }
 export interface ProjectResult { type: 'project'; id: string; key: string; title: string; description: string; archived: boolean }
@@ -35,7 +36,7 @@ export function ticketResults(
   const seen = new Set<string>()
   const push = (result: TicketResult) => { if (!seen.has(result.id)) { seen.add(result.id); out.push(result) } }
   for (const item of listed) {
-    if (!['ticket', 'task', 'epic'].includes(item.kind_slug)) continue
+    if (!isWorkItem(item)) continue
     push({ type: 'ticket', id: item.id, key: item.key, title: item.title, state: item.state, kind: item.kind_slug, projectKey: projectFor(item.key) })
   }
   for (const node of hits) {

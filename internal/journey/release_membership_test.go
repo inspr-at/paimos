@@ -31,7 +31,7 @@ func TestOpenFirstReleaseWithFiveExistingTicketsAtomic(t *testing.T) {
 	ids := make([]string, 5)
 	for i := range ids {
 		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id) SELECT $1,aeon_next_node_key($1,short_prefix),id,$3,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, f.tenant, project, fmt.Sprintf("Existing %d", i+1)).Scan(&ids[i])
+			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id) SELECT $1,aeon_next_node_key($1,short_prefix),id,$3,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING nodes.id::text`, f.tenant, project, fmt.Sprintf("Existing %d", i+1)).Scan(&ids[i])
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func TestOpenFirstReleaseWithFiveExistingTicketsAtomic(t *testing.T) {
 }
 
 // Two application connections establish an actual database lock barrier. The
-// direct request holds the tenant lock; the atomic action must wait there before
+// direct request holds the pairing lock; the atomic action must wait there before
 // taking the journey row. NOWAIT detects the old inverse order deterministically
 // instead of relying on a race or waiting for PostgreSQL's deadlock detector.
 func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
@@ -95,7 +95,7 @@ func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
 					if i == 4 {
 						state = "done"
 					}
-					if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,state) SELECT $1,aeon_next_node_key($1,short_prefix),id,$3,$2,$4 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, f.tenant, project, fmt.Sprintf("Concurrent %d", i+1), state).Scan(&ids[i]); err != nil {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,state) SELECT $1,aeon_next_node_key($1,short_prefix),id,$3,$2,$4 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING nodes.id::text`, f.tenant, project, fmt.Sprintf("Concurrent %d", i+1), state).Scan(&ids[i]); err != nil {
 						return err
 					}
 				}
@@ -112,7 +112,7 @@ func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
 			defer cancel()
 			err := db.InTransaction(ctx, f.db.App, func(held context.Context) error {
 				if err := db.InTenant(held, f.db.App, f.tenant, func(tx pgx.Tx) error {
-					_, err := tx.Exec(held, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`)
+					_, err := tx.Exec(held, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id',true),0))`)
 					return err
 				}); err != nil {
 					return err
@@ -150,7 +150,7 @@ func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
 					var locked string
 					return tx.QueryRow(held, `SELECT project_node_id::text FROM journey_projects WHERE project_node_id=$1 FOR UPDATE NOWAIT`, project).Scan(&locked)
 				}); err != nil {
-					return fmt.Errorf("journey row was taken before tenant advisory lock: %w", err)
+					return fmt.Errorf("journey row was taken before pairing advisory lock: %w", err)
 				}
 				method := http.MethodPost
 				body := fmt.Sprintf(`{"expected_revision":1,"ticket_node_ids":[%q]}`, ids[0])
@@ -219,7 +219,7 @@ func TestPlanNextReleaseWithExistingTickets(t *testing.T) {
 	ids := make([]string, 5)
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		for i := range ids {
-			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id) SELECT $1,aeon_next_node_key($1,short_prefix),id,$3,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, f.tenant, project, fmt.Sprintf("Next %d", i+1)).Scan(&ids[i]); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id) SELECT $1,aeon_next_node_key($1,short_prefix),id,$3,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING nodes.id::text`, f.tenant, project, fmt.Sprintf("Next %d", i+1)).Scan(&ids[i]); err != nil {
 				return err
 			}
 		}

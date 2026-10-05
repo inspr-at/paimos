@@ -120,7 +120,7 @@ func TestSettingsOwnershipVaultAndRevision(t *testing.T) {
 	w := f.call(f.admin, "GET", "/api/settings/model-provider", nil)
 	expect(t, w, 200)
 	c := configOf(t, w)
-	if c.Enabled || c.Features.CRMNoteRewrite || c.Features.Embeddings || c.Revision != 0 || c.HasAPIKey {
+	if c.Enabled || c.Features.CRMNoteRewrite || c.Features.Embeddings || c.Features.ParentBenefits || c.Revision != 0 || c.HasAPIKey {
 		t.Fatal("fresh workspace models enabled")
 	}
 	for _, p := range []tenant.Principal{f.member, f.agent} {
@@ -319,5 +319,39 @@ func TestFailedWorkspaceProviderDoesNotStarveOtherIndexQueues(t *testing.T) {
 	expect(t, w, 200)
 	if !strings.Contains(w.Body.String(), "Model search fixture") {
 		t.Fatal("search did not share the indexing provider vector space")
+	}
+}
+
+func TestParentBenefitsRequiresSeparateOptInAndRevision(t *testing.T) {
+	f := setup(t)
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("wrong endpoint %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": "bilingual fixture summary"}, "finish_reason": "stop"}}})
+	}))
+	defer srv.Close()
+	settings := Settings{Enabled: true, BaseURL: srv.URL + "/v1", ChatModel: "fixture", Features: Features{CRMNoteRewrite: true}}
+	c, err := f.s.Save(tenant.WithPrincipal(t.Context(), f.admin), f.admin, Write{Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := []Message{{Role: "user", Content: "Fixture leaf benefits"}}
+	if _, err := f.s.ParentBenefits(t.Context(), f.admin.TenantID, c.ProviderID, c.Revision, ms); err != ErrDisabled || calls != 0 {
+		t.Fatal("CRM permission enabled parent summaries", err, calls)
+	}
+	settings.Features = Features{ParentBenefits: true}
+	c, err = f.s.Save(tenant.WithPrincipal(t.Context(), f.admin), f.admin, Write{Settings: settings, ExpectedRevision: c.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.s.ParentBenefits(t.Context(), f.admin.TenantID, c.ProviderID, c.Revision, ms)
+	if err != nil || result.Text != "bilingual fixture summary" || calls != 1 {
+		t.Fatal("opted-in provider did not run", err, calls)
+	}
+	if _, err := f.s.ParentBenefits(t.Context(), f.admin.TenantID, c.ProviderID, c.Revision-1, ms); err == nil || calls != 1 {
+		t.Fatal("stale provider revision sent a request")
 	}
 }

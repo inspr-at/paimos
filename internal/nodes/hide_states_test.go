@@ -25,11 +25,13 @@ func TestHideStatesBoundsAndNormalisation(t *testing.T) {
 
 func TestHideStatesAPIBucketsFacetsAndPaging(t *testing.T) {
 	p := newPrincipal(t, "hide-states")
+	// Tenant-defined ticket keeps same-state, different-category coverage.
+	customKind(t, p, "ticket", "ticket")
 	root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Hide choices"}`)
 	create := func(kind, state string) nodeJSON {
 		t.Helper()
 		body := map[string]any{"kind_id": kindBySlug(t, p, kind).ID, "parent_id": root.ID, "title": kind + " " + state, "state": state}
-		if kind == "ticket" {
+		if kind == "ticket" || kind == "work" {
 			body["fields"] = json.RawMessage(benefitFields)
 		}
 		raw, _ := json.Marshal(body)
@@ -37,11 +39,11 @@ func TestHideStatesAPIBucketsFacetsAndPaging(t *testing.T) {
 	}
 	states := map[string]nodeJSON{}
 	for _, state := range []string{"open", "done", "delivered", "accepted", "cancelled", "canceled", "archived", " QA "} {
-		states[state] = create("task", state)
+		states[state] = create("work", state)
 	}
 	visibleAccepted := create("ticket", "accepted")
 	// Same spellings can have different buckets on different work kinds.
-	task := kindBySlug(t, p, "task")
+	task := kindBySlug(t, p, "work")
 	var schema map[string]any
 	if err := json.Unmarshal(task.FieldSchema, &schema); err != nil {
 		t.Fatal(err)
@@ -59,7 +61,7 @@ func TestHideStatesAPIBucketsFacetsAndPaging(t *testing.T) {
 	status, body = call(t, &p, "PATCH", "/api/kinds/"+ticket.ID, string(raw))
 	decode[kindJSON](t, status, body, 200)
 	other := addPrincipal(t, "hide-other")
-	foreign := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "task").ID+`","title":"Foreign accepted","state":"accepted"}`)
+	foreign := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Foreign accepted","state":"accepted","fields":`+benefitFields+`}`)
 	base := "/api/nodes?within=" + root.ID + "&kind=ticket,task,epic&sort=key&facets=state,kind"
 	for _, check := range []struct {
 		query  string

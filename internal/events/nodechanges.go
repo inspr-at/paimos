@@ -33,14 +33,15 @@ type NodeChange struct {
 // Event types whose snapshots are nodes (node.project_moved wraps it in
 // "node", node.bulk_changed lists them in "items").
 var nodeChangeTypes = map[string]bool{
-	"status_autopilot.changed": true, "status_autopilot.undone": true,
-	"node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
+	"status_autopilot.derived": true, "import.node_updated": true, "import.node_created": true,
+	"status_autopilot.changed": true, "status_autopilot.undone": true, "import.parent_changed": true,
+	"node.benefits_generated": true, "node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
 	"node.project_moved": true, "node.deleted": true, "node.bulk_changed": true,
 }
 
 // The node attributes a change names, in this order; custom fields follow
 // as fields.<name>. Timestamps and event annotations are not attributes.
-var nodeAttributes = []string{"key", "kind_id", "title", "body", "state", "human_check", "parent_id", "position", "deleted_at", "status_autopilot"}
+var nodeAttributes = []string{"key", "kind_id", "title", "body", "state", "human_check", "parent_id", "project_id", "position", "deleted_at", "status_autopilot"}
 
 type snapshotObject map[string]json.RawMessage
 
@@ -247,6 +248,9 @@ func summarizeNodeChanges(e Event) []NodeChange {
 // each node's project in the reader's transaction. A node the reader cannot
 // see has no project here (the event would not be visible either).
 func attachNodeChanges(ctx context.Context, tx pgx.Tx, tenantID string, items []Event) error {
+	if err := attachDerivation(ctx, tx, tenantID, items); err != nil {
+		return err
+	}
 	ids := make([]string, 0)
 	seen := make(map[string]bool)
 	for i := range items {
@@ -263,7 +267,7 @@ func attachNodeChanges(ctx context.Context, tx pgx.Tx, tenantID string, items []
 		}
 	}
 	if len(ids) == 0 {
-		return nil
+		return attachUsageChanges(ctx, tx, tenantID, items)
 	}
 	rows, err := tx.Query(ctx, `SELECT id::text, project_id::text FROM nodes WHERE tenant_id=$1 AND id = ANY($2::uuid[])`, tenantID, ids)
 	if err != nil {
@@ -288,5 +292,51 @@ func attachNodeChanges(ctx context.Context, tx pgx.Tx, tenantID string, items []
 			items[i].NodeChanges[j].ProjectID = projects[items[i].NodeChanges[j].ID]
 		}
 	}
-	return nil
+	return attachUsageChanges(ctx, tx, tenantID, items)
+}
+
+// Usage snapshots identify a session, not a ticket. Resolve its current
+// binding in one bounded page query under the reader's session/node RLS;
+// stopped sessions remain eligible because their final usage may arrive late.
+// Never interpret a usage-row id as a node id or publish usage values here.
+func attachUsageChanges(ctx context.Context, tx pgx.Tx, tenantID string, items []Event) error {
+	sessions := make([]string, 0)
+	bySession := make(map[string][]int)
+	for i, event := range items {
+		if event.Type != "harness.usage_reported" || event.NodeID == nil {
+			continue
+		}
+		session := stringOf(objectOf(event.After)["session_id"])
+		if session == nil || !validUUID(*session) {
+			continue
+		}
+		if _, seen := bySession[*session]; !seen {
+			sessions = append(sessions, *session)
+		}
+		bySession[*session] = append(bySession[*session], i)
+	}
+	if len(sessions) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT s.id::text,s.project_id::text,n.id::text,n.project_id::text
+ FROM harness_sessions s JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id=s.ticket_node_id
+ WHERE s.tenant_id=$1 AND s.id=ANY($2::uuid[])`, tenantID, sessions)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var session, sessionProject, node string
+		var project *string
+		if err := rows.Scan(&session, &sessionProject, &node, &project); err != nil {
+			return err
+		}
+		for _, i := range bySession[session] {
+			if *items[i].NodeID != sessionProject {
+				continue
+			}
+			items[i].NodeChanges = []NodeChange{{ID: node, ProjectID: project, Change: "updated", Fields: []string{"estimate", "planning"}}}
+		}
+	}
+	return rows.Err()
 }

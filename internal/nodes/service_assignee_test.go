@@ -17,7 +17,7 @@ import (
 
 func TestServicePrincipalsCannotBeAssignees(t *testing.T) {
 	p := newPrincipal(t, "no-service-assignee")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	var systemID, operatorID, agentID string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		actor, err := systemactor.Ensure(t.Context(), tx, p.TenantID)

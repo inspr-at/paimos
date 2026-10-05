@@ -10,7 +10,7 @@ import { useSession } from '../../stores/session'
 // with a scrim. It is not in the browser's top layer, so menus and pickers
 // opened inside it show above it. Focus moves in and stays in; Escape and the
 // scrim close it (unless a menu is open, which closes first); focus returns.
-const props = withDefaults(defineProps<{ title: string; label?: string; size?: 'side' | 'center'; wide?: boolean; actionsFirst?: boolean; submitShortcut?: boolean }>(), { label: undefined, size: 'side', wide: false, actionsFirst: false, submitShortcut: false })
+const props = withDefaults(defineProps<{ title: string; label?: string; size?: 'side' | 'center'; wide?: boolean; actionsFirst?: boolean; submitShortcut?: boolean; escapeFieldFirst?: boolean }>(), { label: undefined, size: 'side', wide: false, actionsFirst: false, submitShortcut: false })
 const emit = defineEmits<{ close: []; submit: [] }>()
 const route = useRoute()
 const session = useSession()
@@ -26,7 +26,7 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation()
     const target = document.activeElement
-    if (props.actionsFirst && target instanceof HTMLElement && target.matches('input:not([type=checkbox]):not([type=radio]), textarea, select, [contenteditable=true]')) target.blur()
+    if ((props.actionsFirst || props.escapeFieldFirst) && target instanceof HTMLElement && target.matches('input:not([type=checkbox]):not([type=radio]), textarea, select, [contenteditable=true]')) target.blur()
     else if (!session.requiresSignIn) emit('close')
   }
   else if (event.key === 'Tab') {

@@ -7,11 +7,12 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createScope } from '../src/lib/identityScope'
 import * as Recurrences from '../src/lib/recurrences'
+import * as workVocabulary from '../src/lib/workVocabulary'
 import type { Recurrence } from '../src/lib/recurrences'
 import type { ListItem, NodeRecurrence } from '../src/lib/api'
 
 const scopes: Vue.EffectScope[] = []
-afterEach(() => { for (const scope of scopes.splice(0)) scope.stop() })
+afterEach(() => { for (const scope of scopes.splice(0)) scope.stop(); vi.unstubAllGlobals() })
 const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); await Vue.nextTick() }
 const project = { id: 'source-project', routeKey: 'SOURCE' }
 const definition = (id = 'source', projectId = project.id): Recurrence => ({ id, project_id: projectId, parent_id: projectId, template: { name: id, title: id, description: '', acceptance_criteria: [], estimate_hours: 0, priority: 'medium', tags: [], type: 'ticket' }, trigger: { kind: 'time' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one', paused: false, revision: 1, occurrence_count: 4, next_at: null, created_at: '2026-10-01T12:00:00Z', updated_at: '2026-10-01T12:00:00Z' })
@@ -97,7 +98,7 @@ function ticket(fields: Record<string, unknown>, recurrence: NodeRecurrence | nu
   expect(block.length).toBeGreaterThan(500)
   const manage = Vue.ref(options.manage ?? true)
   const get = vi.fn(options.getRecurrence ?? (async (id: string) => definition(id)))
-  const state = setup<{ originRecurrence: Vue.Ref<Recurrence | null>; recurrenceEdit: Vue.Ref<Recurrence | null>; sourceProject?: Vue.ComputedRef<typeof project | null>; originLoaded: (value: Recurrence) => void; editRecurrence: () => void }>(`<script setup lang="ts">
+  const state = setup<{ originRecurrence: Vue.Ref<Recurrence | null>; recurrenceEdit: Vue.Ref<Recurrence | null>; sourceProject?: Vue.ComputedRef<typeof project | null>; mayRepeat: Vue.ComputedRef<boolean>; repeatSource: Vue.Ref<ListItem | null>; repeat: () => void; originLoaded: (value: Recurrence) => void; editRecurrence: () => void }>(`<script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { item, props, ticket, can, getRecurrence, useIdentityScope, recurrenceName, toast, queueRouter } from 'fixture'
 ${block}
@@ -105,7 +106,7 @@ ${block}
     vue: Vue,
     fixture: { item, props, ticket: { gone: Vue.ref(false), readOnly: Vue.ref(false) }, can: (_permission: string, projectId: string) => projectId === project.id ? manage.value : true, getRecurrence: get, useIdentityScope: identityScope, recurrenceName: Recurrences.recurrenceName, toast: vi.fn(), queueRouter: { push: vi.fn() } },
   })
-  return { item, state, get, manage }
+  return { item, props, state, get, manage }
 }
 
 it('editable metadata cannot create source-edit state without authoritative provenance', () => {
@@ -194,4 +195,37 @@ it('source permission revocation cancels an in-flight edit even after regrant', 
   manage.value = true
   answer(definition()); await settle()
   expect(state.recurrenceEdit.value).toBeNull()
+})
+
+it('canonical leaves and parents can repeat, and identity changes close the bound snapshot', async () => {
+  const { item, props, state } = ticket({}, null)
+  for (const is_leaf of [true, false]) {
+    item.value = { ...item.value, kind_slug: 'work', is_leaf, work_children_count: is_leaf ? 0 : 2, fields: { description: 'Original' } }
+    expect(state.mayRepeat.value).toBe(true)
+    state.repeat()
+    expect(state.repeatSource.value).toMatchObject({ id: item.value.id, kind_slug: 'work', is_leaf })
+    expect(state.repeatSource.value!.fields).not.toBe(item.value.fields)
+    item.value.fields.description = 'Changed'
+    expect(state.repeatSource.value!.fields.description).toBe('Original')
+  }
+  item.value = { ...item.value, id: 'next-work' }
+  props.item = item.value
+  await settle()
+  expect(state.repeatSource.value).toBeNull()
+})
+
+it('Repeat creates children of a canonical parent and siblings of a canonical leaf', () => {
+  vi.stubGlobal('navigator', { platform: 'Mac' })
+  for (const is_leaf of [false, true]) {
+    const sourceItem = { id: 'work-source', key: 'WORK-1', title: 'Recurring work', kind_slug: 'work', parent_id: 'existing-parent', is_leaf, work_children_count: is_leaf ? 0 : 2, fields: {}, body: '', priority: 'medium' } as ListItem
+    const state = setup<{ parent: Vue.Ref<string>; parentLabel: Vue.Ref<string>; input: Vue.ComputedRef<Recurrences.RecurrenceInput> }>(source('components/recurrences/RecurrenceEditor.vue'), { project, source: sourceItem }, {
+      vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: Vue.onScopeDispose },
+      '../../lib/api': { createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
+      '../../lib/authz': { can: () => true }, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences,
+      '../../stores/workVocabulary': { useWorkVocabulary: () => ({ leaf: { name: 'Arbeitsschritt', icon: 'check' } }) }, '../../lib/workVocabulary': workVocabulary,
+    })
+    expect(state.parent.value).toBe(is_leaf ? 'existing-parent' : 'work-source')
+    expect(state.input.value.template.type).toBe('work')
+    if (!is_leaf) expect(state.parentLabel.value).toBe('WORK-1 · Recurring work')
+  }
 })
