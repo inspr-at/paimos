@@ -41,9 +41,12 @@ class Probe:
     def seed(self):
         self.login()
         kinds = {item['slug']: item['id'] for item in self.call('/api/kinds')['items']}
+        work_kind_id = kinds.get('work') or kinds.get('ticket')
+        if work_kind_id is None:
+            raise AssertionError('previous release has no supported work kind')
         project = self.call('/api/nodes', {'kind_id': kinds['project'], 'title': 'Migration compatibility project'})
-        ticket = self.call('/api/nodes', {'kind_id': kinds['ticket'], 'parent_id': project['id'],
-                                          'title': 'Migration compatibility ticket'})
+        ticket = self.call('/api/nodes', {'kind_id': work_kind_id, 'parent_id': project['id'],
+                                          'title': 'Migration compatibility work'})
         return {'project': project['id'], 'ticket': ticket['id']}
 
     def check(self, state, version):
