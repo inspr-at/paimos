@@ -218,6 +218,15 @@ export const readSessionControl = async (project: string, session: string, contr
   (await call<SessionControl>(sessionResource(project, session, `controls/${enc(control)}`))).body
 export const requestManagedSessionControl = async (session: { project_id: string; id: string; process_ownership?: Readonly<ProcessOwnership> }, kind: 'interrupt' | 'stop'): Promise<SessionControl> =>
   (await call<SessionControl>(sessionResource(session.project_id, session.id, 'managed-controls'), 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })).body
+// AEON-731: a recovery receipt is the answer to a control, never a session row.
+export interface AgentRecoveryReceipt {
+  id: string; session_id: string; action: 'restart' | 'reconnect'; state: 'pending' | 'claimed' | 'completed' | 'expired'
+  outcome: 'reconnected' | 'continuation_queued' | 'rejected' | 'unconfirmed' | null; next_run_id: string | null
+}
+export const requestAgentRecovery = async (project: string, session: string, body: { request_id: string; expected_revision: string; action: 'restart' | 'reconnect' }): Promise<AgentRecoveryReceipt> =>
+  (await call<AgentRecoveryReceipt>(sessionResource(project, session, 'recover-agent'), 'POST', body)).body
+export const readAgentRecovery = async (project: string, session: string, id: string): Promise<AgentRecoveryReceipt> =>
+  (await call<AgentRecoveryReceipt>(sessionResource(project, session, `recover-agent/${enc(id)}`))).body
 export const sendSessionRequest = (project: string, session: string, body: unknown, signal?: AbortSignal) => api(sessionResource(project, session, 'requests'), { ...post(body), signal })
 export const readSessionRecovery = (project: string, session: string) => api(sessionResource(project, session, 'recovery'))
 export const archiveSession = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'archive'), post(body))

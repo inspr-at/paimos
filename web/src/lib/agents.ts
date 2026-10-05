@@ -195,10 +195,3 @@ export function putQuotaPool(account_ids: string[], quota_fingerprint: string, c
 export const readPauseDefault = () => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings')
 export const savePauseDefault = (default_level: import('./agentPause').PauseLevel) => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings', 'PUT', { default_level })
 export const readEstimateInterval = () => request<{ interval_minutes: number }>('/settings/eta-interval')
-
-export interface AgentRecoveryReceipt {
-  id: string; session_id: string; action: 'restart' | 'reconnect'; state: 'pending' | 'claimed' | 'completed' | 'expired'
-  outcome: 'reconnected' | 'continuation_queued' | 'rejected' | 'unconfirmed' | null; next_run_id: string | null
-}
-export const requestAgentRecovery = (project: string, session: string, body: { request_id: string; expected_revision: string; action: 'restart' | 'reconnect' }) => request<AgentRecoveryReceipt>(`/projects/${enc(project)}/harness-sessions/${enc(session)}/recover-agent`, 'POST', body)
-export const readAgentRecovery = (project: string, session: string, id: string) => request<AgentRecoveryReceipt>(`/projects/${enc(project)}/harness-sessions/${enc(session)}/recover-agent/${enc(id)}`)

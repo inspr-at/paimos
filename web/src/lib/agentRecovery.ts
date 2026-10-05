@@ -2,7 +2,8 @@
 import { onScopeDispose, reactive, watch } from 'vue'
 import { useSession } from '../stores/session'
 import { can } from './authz'
-import { readAgentRecovery, requestAgentRecovery, type HarnessSession } from './agents'
+import { readAgentRecovery, requestAgentRecovery } from './agentRows'
+import type { HarnessSession } from './agents'
 import { toast } from './toast'
 import { recoveryAction } from '../components/agents/sessionActions'
 

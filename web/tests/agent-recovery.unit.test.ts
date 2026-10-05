@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn(), read: vi.fn(), toast: vi.fn(
 const identity = reactive({ principal: { id: 'person-1', kind: 'person' } })
 vi.mock('../src/stores/session', () => ({ useSession: () => ({ identity }) }))
 vi.mock('../src/lib/authz', () => ({ can: () => true }))
-vi.mock('../src/lib/agents', () => ({ requestAgentRecovery: mocks.request, readAgentRecovery: mocks.read }))
+vi.mock('../src/lib/agentRows', () => ({ requestAgentRecovery: mocks.request, readAgentRecovery: mocks.read }))
 vi.mock('../src/lib/toast', () => ({ toast: mocks.toast }))
 import { useAgentRecovery } from '../src/lib/agentRecovery'
 
