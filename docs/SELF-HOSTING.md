@@ -222,3 +222,23 @@ and weekly. The mock cannot issue tokens; full authentication remains covered
 by the auth package tests and must be verified with your own provider during
 installation. The release image workflow separately builds and tests candidate
 Dockerfiles. Do not add the CI-only Compose overlay to an actual installation.
+
+### Work-kind migration (AEON-649)
+
+Migration 1215 replaces the Epic, Ticket and Task kind definitions with Work.
+It preserves node keys/content and historical session/Decision Desk identities,
+but older binaries that expect the retired kinds are incompatible with the new
+database. This package is prepared as part of the work-node chain; the coordinator
+must complete the dependent runtime packages before deploying it. Derived
+status and workspace naming remain behind AEON-429.
+
+Before that rollout, publish release 122, drain the merge/work queues and stop
+writers. Verify an instance-specific pre-migration database/files backup on a
+separate recovery host before upgrading; do not restart writers between the
+verified backup and migration. The migration refuses schema conflicts or busy
+work parents and rolls back atomically. It reports tenant/node identifiers so
+schemas can be reconciled and agents can hand over gracefully before retrying.
+The local synthetic drill and its retained archive/evidence are documented in
+[the migration guide](../internal/db/migrations/README.md); they do not replace
+an installation-specific backup. Restore the verified pre-migration backup and
+its exact old binary to roll back. Node Undo cannot restore deleted kind definitions.

@@ -17,6 +17,10 @@ type Query struct {
 	KindID        *string   `json:"kind_id"`
 	KindsNot      []string  `json:"kinds_not,omitempty"`
 	Kinds         []string  `json:"kinds"`
+	Shapes        []string  `json:"shapes,omitempty"`
+	ShapesNot     []string  `json:"shapes_not,omitempty"`
+	Depths        []string  `json:"depths,omitempty"`
+	DepthsNot     []string  `json:"depths_not,omitempty"`
 	States        []string  `json:"states"`
 	Priorities    []string  `json:"priorities"`
 	Assignees     []string  `json:"assignees"`
@@ -129,9 +133,6 @@ func SQL(q Query, sortFields bool) (string, []any) {
 	not := func(match func([]string) string) func([]string) string {
 		return func(values []string) string { return "NOT (" + match(values) + ")" }
 	}
-	add(q.KindsNot, func(v []string) string {
-		return `NOT (k.slug=ANY(` + arg(v) + `::text[]) OR n.kind_id::text=ANY(` + arg(v) + `::text[]))`
-	})
 	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
 	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
 	add(q.WorkStates, func(v []string) string { return workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[])` })
@@ -174,34 +175,64 @@ func SQL(q Query, sortFields bool) (string, []any) {
 	}
 	add(q.HumanChecks, checkMatch)
 	add(q.HumanChecksNot, not(checkMatch))
-	// Epic subtrees: members of the named epics, or of every epic when "none"
-	// is asked for. The walk only runs when an epic filter is set.
+	// Named parents retain their subtree membership. Parent absence needs only
+	// a set of descendant IDs, not one overlapping subtree per Work ancestor.
 	epicCTE := ""
 	if len(q.Epics)+len(q.EpicsNot) > 0 {
-		ids, all := []string{}, false
+		ids, absence := []string{}, false
 		for _, v := range append(append([]string{}, q.Epics...), q.EpicsNot...) {
 			if v == "none" {
-				all = true
+				absence = true
 			} else {
 				ids = append(ids, v)
 			}
 		}
-		epicCTE = `, epic_members(id, epic_id) AS (
-        SELECT c.id, e.id FROM node_kinds ek CROSS JOIN LATERAL (
-            SELECT id,tenant_id FROM nodes WHERE tenant_id=ek.tenant_id AND kind_id=ek.id AND deleted_at IS NULL OFFSET 0
-        ) e
+		if len(ids) > 0 {
+			epicCTE = `, epic_members(id, epic_id) AS (
+        SELECT c.id, e.id FROM nodes e
+        JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
         CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
-        WHERE ek.tenant_id=current_setting('aeon.tenant_id')::uuid AND ek.slug='epic'
-          AND (` + arg(all) + `::bool OR e.id::text=ANY(` + arg(ids) + `::text[]))
+        WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.deleted_at IS NULL
+          AND ek.slug IN ('epic','work') AND e.id::text=ANY(` + arg(ids) + `::text[])
           AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
         UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
         ) c
     )`
+		}
+		if absence {
+			// UNION removes duplicate seeds and visits each descendant once, even
+			// when every ancestor is Work. Keep scope, visibility and live-row
+			// checks identical to the named-parent walk.
+			epicCTE += `, parented_work(id) AS (
+        SELECT c.id FROM nodes c
+        JOIN nodes e ON e.tenant_id=c.tenant_id AND e.id=c.parent_id
+        JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
+        WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid
+          AND c.deleted_at IS NULL AND e.deleted_at IS NULL AND ek.slug IN ('epic','work')
+          AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
+        UNION SELECT c.id FROM parented_work m CROSS JOIN LATERAL (
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
+        ) c
+    )`
+		}
 		epicMatch := func(values []string) string {
-			p := arg(values)
-			return `(n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(` + p + `::text[]))
-            OR ('none'=ANY(` + p + `::text[]) AND k.slug<>'epic' AND n.id NOT IN (SELECT id FROM epic_members)))`
+			named, none := []string{}, false
+			for _, v := range values {
+				if v == "none" {
+					none = true
+				} else {
+					named = append(named, v)
+				}
+			}
+			matches := []string{}
+			if len(named) > 0 {
+				matches = append(matches, `n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(`+arg(named)+`::text[]))`)
+			}
+			if none {
+				matches = append(matches, `n.id NOT IN (SELECT id FROM parented_work)`)
+			}
+			return "(" + strings.Join(matches, " OR ") + ")"
 		}
 		add(q.Epics, epicMatch)
 		add(q.EpicsNot, not(epicMatch))
@@ -229,7 +260,27 @@ func SQL(q Query, sortFields bool) (string, []any) {
 			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
 		}
 	}
+	if len(q.KindsNot) > 0 {
+		p := arg(q.KindsNot)
+		conditions += " AND NOT (k.slug=ANY(" + p + "::text[]) OR (k.slug='work' AND " + p + "::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY(" + p + "::text[]))"
+	}
+	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot) > 0 {
+		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`
+		depth := `(SELECT s.depth::text FROM aeon_work_shape(n.id) s)`
+		for _, f := range []struct {
+			expr    string
+			in, out []string
+		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}} {
+			if len(f.in) > 0 {
+				conditions += " AND " + f.expr + "=ANY(" + arg(f.in) + "::text[])"
+			}
+			if len(f.out) > 0 {
+				conditions += " AND NOT (" + f.expr + "=ANY(" + arg(f.out) + "::text[]))"
+			}
+		}
+	}
 	from, scopeCondition := "nodes n", ""
+	kindCTE := ""
 	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
 	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
 	scopeSeed := ""
@@ -248,8 +299,11 @@ func SQL(q Query, sortFields bool) (string, []any) {
 		// Keep kind lookup dependent on the node. Stale tenant statistics on
 		// node_kinds can otherwise put kinds before scope and repeat the entire
 		// scoped node lookup and its JSON filters once per kind (AEON-248).
+		kindCTE = `, list_kinds AS MATERIALIZED (
+            SELECT id,slug FROM node_kinds WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+        )`
 		kindJoin = ` JOIN LATERAL (
-            SELECT slug FROM node_kinds WHERE id=n.kind_id AND tenant_id=n.tenant_id OFFSET 0
+            SELECT slug FROM list_kinds WHERE id=n.kind_id OFFSET 0
         ) k ON true `
 		if q.Within != nil {
 			scopeCondition = ` AND n.id<>$7::uuid`
@@ -303,13 +357,13 @@ func SQL(q Query, sortFields bool) (string, []any) {
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
             ORDER BY updated_at DESC OFFSET 0
         ) c
-    )` + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
+    )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
             ` + assigneeID + ` AS assignee_id,n.state,k.slug AS kind_slug,
             coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeSQL + deliveryJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
-        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
+        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR (k.slug='work' AND $2::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY($2::text[]))
         AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
         ` + assigneePredicate + `

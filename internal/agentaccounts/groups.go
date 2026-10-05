@@ -665,7 +665,7 @@ func deletePin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID, har
 // node RLS and require the same project write authority as a ticket edit.
 func canEditPin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID string) error {
 	var project *string
-	err := tx.QueryRow(ctx, `SELECT n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug='ticket' FOR UPDATE OF n`, ticketID).Scan(&project)
+	err := tx.QueryRow(ctx, `SELECT n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('work','ticket') FOR UPDATE OF n`, ticketID).Scan(&project)
 	if isNoRows(err) {
 		return fail(http.StatusNotFound, "ticket not found")
 	}
@@ -935,9 +935,9 @@ func runTicketID(ctx context.Context, tx pgx.Tx, runID string) (string, error) {
 			FROM up
 			JOIN nodes p ON p.tenant_id=up.tenant_id AND p.id=up.parent_id
 			JOIN node_kinds pk ON pk.tenant_id=p.tenant_id AND pk.id=p.kind_id
-			WHERE up.slug<>'ticket' AND up.depth<32
+			WHERE up.slug NOT IN ('work','ticket') AND up.depth<32
 		)
-		SELECT id::text FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1`, runID)
+		SELECT id::text FROM up WHERE slug IN ('work','ticket') ORDER BY depth LIMIT 1`, runID)
 }
 
 func loadFences(ctx context.Context, tx pgx.Tx, harness string) (map[string]groupFence, error) {

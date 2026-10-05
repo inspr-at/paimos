@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -178,6 +179,14 @@ func loadCandidate(ctx context.Context, tx pgx.Tx, id string, now time.Time) (ca
 }
 
 func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision) error {
+	parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
+	if err != nil {
+		return err
+	}
+	if parent {
+		return events.ErrConflict
+	}
+
 	var seen bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen); err != nil || seen {
 		return err
@@ -294,6 +303,13 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 		return events.Change{}, events.ErrForbidden
 	}
 	if !c.Node.Updated.Equal(after.Updated) || c.Node.State != after.State {
+		return events.Change{}, events.ErrConflict
+	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, before.ID)
+	if err != nil {
+		return events.Change{}, err
+	}
+	if parent {
 		return events.Change{}, events.ErrConflict
 	}
 	marks, err := json.Marshal(before.Marks)

@@ -684,7 +684,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "confirm-exit", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}

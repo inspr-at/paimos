@@ -46,8 +46,8 @@ type listProject struct {
 	Title string `json:"title"`
 }
 
-// listEpic is the nearest epic above an item: a ticket's own epic, or for a
-// task the epic of its ticket. Nil when the item sits under no epic.
+// listEpic retains its legacy name and projects the nearest Work or Epic
+// ancestor. Nil when no such ancestor exists before the project boundary.
 type listEpic struct {
 	ID    string `json:"id"`
 	Key   string `json:"key"`
@@ -106,8 +106,12 @@ type sortKey struct {
 }
 type listQuery struct {
 	KindID      *string   `json:"kind_id"`
-	KindsNot    []string  `json:"kinds_not,omitempty"`
 	Kinds       []string  `json:"kinds"`
+	KindsNot    []string  `json:"kinds_not,omitempty"`
+	Shapes      []string  `json:"shapes,omitempty"`
+	ShapesNot   []string  `json:"shapes_not,omitempty"`
+	Depths      []string  `json:"depths,omitempty"`
+	DepthsNot   []string  `json:"depths_not,omitempty"`
 	States      []string  `json:"states"`
 	Priorities  []string  `json:"priorities"`
 	Assignees   []string  `json:"assignees"`
@@ -144,8 +148,8 @@ type listQuery struct {
 	ShipsInNot     []string `json:"ships_in_not,omitempty"`
 	HumanChecks    []string `json:"human_checks,omitempty"`
 	HumanChecksNot []string `json:"human_checks_not,omitempty"`
-	// Epics match everything below an epic (its subtree, not the epic itself);
-	// "none" is work under no epic.
+	// Epics match everything below a named Work or legacy Epic ancestor;
+	// "none" excludes rows with any such ancestor in the selected scope.
 	Epics    []string `json:"epics,omitempty"`
 	EpicsNot []string `json:"epics_not,omitempty"`
 	// One date field with an inclusive start and exclusive end instant. Dates
@@ -182,7 +186,7 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "order": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "ships_in": true, "human_check": true}
+var validFacet = map[string]bool{"shape": true, "depth": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "ships_in": true, "human_check": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -275,6 +279,18 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	var err error
 	if err = workquery.Bounds(v); err != nil {
 		return out, badRequest(err.Error())
+	}
+	if out.Shapes, out.ShapesNot, err = negatedList(r, "shape", func(v string) (string, bool) { return v, v == "parent" || v == "leaf" }); err != nil {
+		return out, err
+	}
+	if out.Depths, out.DepthsNot, err = negatedList(r, "depth", func(v string) (string, bool) {
+		n, e := strconv.Atoi(v)
+		return strconv.Itoa(n), e == nil && n >= 1 && n <= 50000
+	}); err != nil {
+		return out, err
+	}
+	if len(out.Depths)+len(out.DepthsNot) > 32 {
+		return out, badRequest("too many depths")
 	}
 	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", func(s string) (string, bool) {
 		id, ok := parseUUID(s)
@@ -534,6 +550,8 @@ func listFingerprint(q listQuery) string {
 	return hex.EncodeToString(sum[:])
 }
 func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
+	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
+	defer cancel()
 	identity := listFingerprint(q)
 	if len(q.ShipsIn)+len(q.ShipsInNot) > 0 {
 		p, _ := tenant.PrincipalFrom(ctx)
@@ -739,7 +757,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				ids[i] = page.Items[i].ID
 			}
-			estimates, err := loadEstimates(ctx, tx, ids)
+			estimates, views, err := loadWorkTotals(ctx, tx, ids)
 			if err != nil {
 				return err
 			}
@@ -768,16 +786,19 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				page.Items[i].Planning = planning[page.Items[i].ID]
 			}
-			views, err := eta.Load(ctx, tx, ids)
-			if err != nil {
-				return err
-			}
 			for i := range page.Items {
 				if view, ok := views[page.Items[i].ID]; ok {
 					copied := view
 					page.Items[i].Eta = &copied
 				}
 			}
+		}
+		projected := make([]*nodeJSON, len(page.Items))
+		for i := range page.Items {
+			projected[i] = &page.Items[i].nodeJSON
+		}
+		if err := enrichNodes(ctx, tx, projected); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -1079,7 +1100,7 @@ const tagElems = `(SELECT btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}'
 const tagNamesSQL = `(SELECT coalesce(array_agg(lower(e.name)),ARRAY[]::text[]) FROM ` + tagElems + ` e WHERE coalesce(e.name,'')<>'')`
 
 func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
-	shared := workquery.Query{HideStates: q.HideStates, WorkStates: q.WorkStates, WorkStatesNot: q.WorkStatesNot, WorkBuckets: q.WorkBuckets, KindID: q.KindID, Kinds: q.Kinds, KindsNot: q.KindsNot, States: q.States, Priorities: q.Priorities, Assignees: q.Assignees, Q: q.Q, Within: q.Within, ParentSet: q.ParentSet, ParentID: q.ParentID, Descendants: q.Descendants, HideClosed: q.HideClosed, FacetNames: q.FacetNames, Limit: q.Limit, Cursor: q.Cursor, StatesNot: q.StatesNot, PrioritiesNot: q.PrioritiesNot, AssigneesNot: q.AssigneesNot, Tags: q.Tags, TagsNot: q.TagsNot, CostUnits: q.CostUnits, CostUnitsNot: q.CostUnitsNot, Releases: q.Releases, ReleasesNot: q.ReleasesNot, ShipsIn: q.ShipsIn, ShipsInNot: q.ShipsInNot, HumanChecks: q.HumanChecks, HumanChecksNot: q.HumanChecksNot, Epics: q.Epics, EpicsNot: q.EpicsNot, DateField: q.DateField, DateFrom: q.DateFrom, DateTo: q.DateTo, IDs: q.IDs}
+	shared := workquery.Query{Shapes: q.Shapes, ShapesNot: q.ShapesNot, Depths: q.Depths, DepthsNot: q.DepthsNot, HideStates: q.HideStates, WorkStates: q.WorkStates, WorkStatesNot: q.WorkStatesNot, WorkBuckets: q.WorkBuckets, KindID: q.KindID, Kinds: q.Kinds, KindsNot: q.KindsNot, States: q.States, Priorities: q.Priorities, Assignees: q.Assignees, Q: q.Q, Within: q.Within, ParentSet: q.ParentSet, ParentID: q.ParentID, Descendants: q.Descendants, HideClosed: q.HideClosed, FacetNames: q.FacetNames, Limit: q.Limit, Cursor: q.Cursor, StatesNot: q.StatesNot, PrioritiesNot: q.PrioritiesNot, AssigneesNot: q.AssigneesNot, Tags: q.Tags, TagsNot: q.TagsNot, CostUnits: q.CostUnits, CostUnitsNot: q.CostUnitsNot, Releases: q.Releases, ReleasesNot: q.ReleasesNot, ShipsIn: q.ShipsIn, ShipsInNot: q.ShipsInNot, HumanChecks: q.HumanChecks, HumanChecksNot: q.HumanChecksNot, Epics: q.Epics, EpicsNot: q.EpicsNot, DateField: q.DateField, DateFrom: q.DateFrom, DateTo: q.DateTo, IDs: q.IDs}
 	for _, key := range q.Sort {
 		shared.Sort = append(shared.Sort, workquery.SortKey{Name: key.Name, Desc: key.Desc})
 	}
@@ -1123,7 +1144,7 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
 			// The number the cell shows: a finished ticket is 100, like its ETA view.
-			parts = append(parts, eta.ProgressSQL("eta", "fin")+" IS NULL ASC", eta.ProgressSQL("eta", "fin")+" "+dir)
+			parts = append(parts, eta.ProgressSQL("eta", "eta")+" IS NULL ASC", eta.ProgressSQL("eta", "eta")+" "+dir)
 		case "model":
 			// Full model name and version, independent of the person's display choices.
 			parts = append(parts, "route.name IS NULL ASC", "route.name "+dir)
@@ -1187,7 +1208,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
-		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta_progress(f.id) eta ON true ` + eta.CompletionJoin("f.id", "fin")
+		etaJoin = ` LEFT JOIN work_values eta ON eta.id=f.id`
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {
@@ -1218,9 +1239,13 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 		moneyCols = `, ` + usdMicrosTextSQL("pm.list_spent_micros") + `, ` + usdMicrosTextSQL("pm.list_est_micros") + `, ` + usdMicrosTextSQL("pm.paid_spent_micros") + `, ` + usdMicrosTextSQL("pm.paid_est_micros")
 	}
 	if sortsBy(q, "estimate") {
-		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
+		estimateJoin = ` LEFT JOIN work_values est ON est.id=f.id`
 	}
-	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn,f.delivery_order` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
+	aggregateCTE := ""
+	if etaJoin != "" || estimateJoin != "" {
+		aggregateCTE = `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
+	}
+	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn,f.delivery_order` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),
     selected AS (SELECT * FROM ordered WHERE (SELECT valid FROM cursor_guard) AND rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
@@ -1248,14 +1273,14 @@ func listSQL(q listQuery, anchor any) (string, []any) {
         ) SELECT a.id,a.key,a.title FROM ancestors a JOIN node_kinds ak ON ak.id=a.kind_id WHERE ak.slug='project' ORDER BY a.depth LIMIT 1
     ) project ON true
     LEFT JOIN LATERAL (
-        -- The nearest epic above the item; the walk stops at the first epic or project.
+        -- The nearest Work or legacy Epic ancestor, stopping at the project.
         WITH RECURSIVE up AS (
             SELECT par.id,par.parent_id,par.kind_id,par.key,par.title,1 AS depth WHERE par.id IS NOT NULL
             UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,up.depth+1 FROM up
-                JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('epic','project')
+                JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('work','epic','project')
                 JOIN nodes a ON a.id=up.parent_id AND a.deleted_at IS NULL
             WHERE up.depth<32
-        ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug='epic' ORDER BY u.depth LIMIT 1
+        ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug IN ('epic','work') ORDER BY u.depth LIMIT 1
     ) epic ON true` + moneyJoin + `
     ) SELECT page_rows.*,cursor_guard.valid FROM cursor_guard LEFT JOIN page_rows ON true ORDER BY page_rows.rn`
 	return sql, args
@@ -1275,6 +1300,12 @@ func facetSQL(q listQuery) (string, []any) {
 	// Tag, cost unit and release counts read fields per row; they are only part
 	// of the query when asked for.
 	extra := ""
+	if want("shape") {
+		extra += ` UNION ALL SELECT 'shape',CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
+	}
+	if want("depth") {
+		extra += ` UNION ALL SELECT 'depth',s.depth::text FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
+	}
 	if want("human_check") {
 		extra += `
     UNION ALL SELECT 'human_check',CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END FROM filtered f JOIN nodes n ON n.id=f.id`
@@ -1302,8 +1333,21 @@ func facetSQL(q listQuery) (string, []any) {
 		labelColumn = "label.title"
 		labelJoin = ` LEFT JOIN nodes label ON c.name='ships_in' AND label.tenant_id=current_setting('aeon.tenant_id')::uuid AND label.id::text=c.value AND label.deleted_at IS NULL`
 	}
-	sql := prefix + `, facet_values AS (
-    SELECT 'state' AS name,f.state AS value FROM filtered f
+	// Read visible work-parent identities once, rather than probing child
+	// rows and their RLS for every state facet row.
+	stateParents, stateJoin, stateWhere := "", "", ""
+	if want("state") {
+		stateParents = `, state_parents AS MATERIALIZED (
+ SELECT DISTINCT c.parent_id AS id FROM nodes c
+ JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+ WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
+ AND ck.slug IN ('work','ticket','task','epic')
+ AND c.parent_id IN (SELECT id FROM filtered))`
+		stateJoin = ` LEFT JOIN state_parents sp ON sp.id=f.id`
+		stateWhere = ` WHERE f.kind_slug NOT IN ('work','ticket','task','epic') OR sp.id IS NULL`
+	}
+	sql := prefix + stateParents + `, facet_values AS (
+    SELECT 'state' AS name,f.state AS value FROM filtered f` + stateJoin + stateWhere + `
     UNION ALL SELECT 'kind',f.kind_slug FROM filtered f
     UNION ALL SELECT 'priority',f.priority FROM filtered f
     UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
@@ -1461,7 +1505,12 @@ func (m *Module) nodeTree(ctx context.Context, tenantID string, q treeQuery) (tr
 		for i, item := range items {
 			page.Items[i] = treeEntry{Node: item.node, Depth: item.depth}
 		}
-		return nil
+		rows.Close()
+		projected := make([]*nodeJSON, len(page.Items))
+		for i := range page.Items {
+			projected[i] = &page.Items[i].Node
+		}
+		return enrichNodes(ctx, tx, projected)
 	})
 	return page, err
 }
@@ -1544,27 +1593,35 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,c.kind_id,s.depth+1
                 FROM subtree s JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid
                     AND c.parent_id=s.node_id AND c.deleted_at IS NULL
-            ), `+workStateCategoryCTE()+`, counted AS (
+            ), `+workStateCategoryCTE()+`, work_parents AS MATERIALIZED (
+                SELECT DISTINCT ch.parent_id AS id FROM nodes ch
+                JOIN node_kinds ck ON ck.tenant_id=ch.tenant_id AND ck.id=ch.kind_id
+                WHERE ch.tenant_id=current_setting('aeon.tenant_id')::uuid AND ch.deleted_at IS NULL
+                    AND ck.slug IN ('work','ticket','task','epic')
+                    AND ch.parent_id IN (SELECT node_id FROM subtree)
+            ), counted AS MATERIALIZED (
                 SELECT p.id,p.key,p.title,p.state,s.depth,k.slug,s.updated_at,
+                    wp.id IS NULL AS is_leaf,
                     `+workStatusSQL("s.state")+` AS work_state,
                     `+workCountBucketSQL("s.state", "c")+` AS bucket
                 FROM projects p JOIN subtree s ON s.project_id=p.id
+                LEFT JOIN work_parents wp ON wp.id=s.node_id
                 JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
                 LEFT JOIN configured c ON c.kind_id=s.kind_id AND c.norm=`+workStateNormSQL("s.state")+`
             ), summary AS (
                 SELECT id,key,title,state,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='open')::int AS open,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='done')::int AS done,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic') AND bucket='archived')::int AS archived,
-                    count(*) FILTER (WHERE depth>0 AND slug IN ('ticket','task','epic'))::int AS total,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='open')::int AS open,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='in_progress')::int AS in_progress,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='done')::int AS done,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='cancelled')::int AS cancelled,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic') AND bucket='archived')::int AS archived,
+                    count(*) FILTER (WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic'))::int AS total,
                     max(updated_at) AS last_activity
                 FROM counted
                 GROUP BY id,key,title,state
             ), status_tallies AS (
                 SELECT id,work_state,bucket,count(*)::int AS count
-                FROM counted WHERE depth>0 AND slug IN ('ticket','task','epic')
+                FROM counted WHERE depth>0 AND is_leaf AND slug IN ('work','ticket','task','epic')
                 GROUP BY id,work_state,bucket
             ), status_ranked AS (
                 SELECT *,row_number() OVER (PARTITION BY id ORDER BY work_state,bucket) AS rank FROM status_tallies

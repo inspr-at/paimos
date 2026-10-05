@@ -376,17 +376,17 @@ func (w *accessWorld) seed() {
 		}
 		node("A", "project", "PA-1", "")
 		node("B", "project", "PB-1", "")
-		node("TA", "ticket", "TA-1", "A")
-		node("TA2", "ticket", "TA-2", "A")
-		node("TB", "ticket", "TB-1", "B")
+		node("TA", "work", "TA-1", "A")
+		node("TA2", "work", "TA-2", "A")
+		node("TB", "work", "TB-1", "B")
 		// Work of B that is moved into A later (review findings 1 and 2).
-		node("TB2", "ticket", "TB-2", "B")
-		node("TB3", "ticket", "TB-3", "B")
-		node("TB4", "ticket", "TB-4", "B")
+		node("TB2", "work", "TB-2", "B")
+		node("TB3", "work", "TB-3", "B")
+		node("TB4", "work", "TB-4", "B")
 		node("GA", "guideline", "GA-1", "A")
 		node("GB", "guideline", "GB-1", "B")
 		var ticketKind string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, w.tid).Scan(&ticketKind); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, w.tid).Scan(&ticketKind); err != nil {
 			return err
 		}
 		w.ids["ticketKind"] = ticketKind

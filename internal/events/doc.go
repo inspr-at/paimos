@@ -14,6 +14,8 @@
 // attribute names, revision); nothing about them is stored.
 // Knowledge learning decisions name their source node and its authorized
 // project with a learning field and null revision, since the node is unchanged.
+// Late harness.usage_reported events attach a projection hint for the current
+// readable session binding, so spend can refresh after a session has stopped.
 //
 // Every resource mutation must call Append(ctx, tx, principal, Change{...})
 // inside its existing db.InTenant callback, after taking resource locks. Append

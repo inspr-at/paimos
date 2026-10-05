@@ -79,8 +79,7 @@ func (e *queueError) ErrorCode() string { return e.Code }
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
-	return err
+	return db.LockWorkTreeTx(ctx, tx)
 }
 func (m *module) mountQueue(mux *http.ServeMux) {
 	for _, route := range []struct {
@@ -109,7 +108,10 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
+				workorders.WriteError(w, workorders.Fail(400, "request body could not be read within limits"))
+				return
+			}
 			var out any
 			err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 				if err := authz.RequireTx(r.Context(), tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {
@@ -182,6 +184,13 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
 		var stale map[string]bool
 		stale, err = workqueue.Stale(ctx, tx, []string{id})
 		t.Stale = stale[id]
+	}
+	if err == nil && t.Kind == "work" {
+		var leaf bool
+		err = tx.QueryRow(ctx, `SELECT aeon_work_leaf($1::uuid) AND aeon_work_pending($1::uuid) IS NULL`, id).Scan(&leaf)
+		if !leaf {
+			t.Kind = "parent"
+		}
 	}
 	return t, err
 }

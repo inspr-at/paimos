@@ -64,13 +64,13 @@ async function addTicket() {
     toast(missing ? 'This server cannot add tickets to a plan yet.' : `The ticket was not added: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
   } finally { adding.value = false }
 }
-async function addedExisting(payload: { count: number; result: MembershipResult }) {
+async function addedExisting(payload: { count: number | null; result: MembershipResult }) {
   picking.value = false
   ctx.data.patchWalker(payload.result.walker)
   void ctx.data.loadWork(true)
   void store.load(ctx.project.value.id, true)
   const label = ctx.releaseLabel.value
-  toast(`Added ${plural(payload.count, 'ticket')} to ${label.toLowerCase()}.`, {
+  toast(`Added ${payload.count === null ? 'selected work' : plural(payload.count, 'leaf', 'leaves')} to ${label.toLowerCase()}.`, {
     timeout: 8000,
     action: payload.result.event_id ? { label: 'Undo', run: () => void undoAdded(payload.result.event_id) } : undefined,
   })
@@ -79,7 +79,7 @@ async function undoAdded(eventId: number) {
   try {
     await undoEvent(eventId)
     if (ctx.release.value) await ctx.data.loadWalker(ctx.release.value.id, true)
-    toast('Undone: those tickets left the release.')
+    toast('Undone: those leaves left the release.')
   } catch (e) {
     toast(e instanceof APIError && e.status === 409 ? 'The release changed since, so nothing was undone.' : `Undo did not work: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
   }

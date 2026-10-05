@@ -43,7 +43,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 		}
 		projectA = insert("project", "PRJ-1", nil)
 		projectB = insert("project", "PRJ-2", nil)
-		ticket = insert("ticket", "TKT-1", &projectA)
+		ticket = insert("work", "TKT-1", &projectA)
 		return nil
 	}))
 

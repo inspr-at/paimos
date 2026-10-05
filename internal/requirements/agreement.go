@@ -228,8 +228,14 @@ func generateWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, project st
 	}
 	for _, s := range suggestions {
 		var exists bool
-		// Read lineage from the immutable creation event, not editable node fields.
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_tickets t JOIN events e ON e.tenant_id=t.tenant_id AND e.node_id=t.ticket_node_id AND e.type='node.created' WHERE t.feature_node_id=$1 AND t.source='requirements' AND e.after->'fields'->>'intake_draft_id'=$2 AND e.after->'fields'->>'intake_ordinal'=$3)`, *feature, *origin, fmt.Sprint(s.ordinal)).Scan(&exists); err != nil {
+		// Both lineage and generation provenance are immutable. A generated
+		// leaf may leave the live membership projection when it becomes a parent;
+		// that must not permit the same accepted suggestion to generate again.
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events generated
+ JOIN events created ON created.tenant_id=generated.tenant_id AND created.node_id=generated.node_id AND created.type='node.created'
+ WHERE generated.type='journey.ticket_generated' AND generated.after->>'feature_node_id'=$1
+ AND generated.after->>'source'='requirements' AND created.after->'fields'->>'intake_draft_id'=$2
+ AND created.after->'fields'->>'intake_ordinal'=$3)`, *feature, *origin, fmt.Sprint(s.ordinal)).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {

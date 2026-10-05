@@ -377,6 +377,95 @@ replaces it, while delayed readings remain blocked across reset transitions.
 Classify this table as personal quota telemetry, located by
 `(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
 
+AEON-649 reserves **1215** from its coordinator-assigned 1215–1224 range for
+`1215_one_work_kind.sql`. Its same-transaction runner hook reconciles legacy
+work schemas under FORCE RLS, validates existing fields against the merged
+schema, rewrites allowed-child references and substitutes the work kind on
+live and deleted epic/ticket/task nodes. Keys, IDs, parent links, timestamps,
+status, fields, estimates and release-note settings stay unchanged. Historical
+sessions, Decision Desk nodes/projections and journey memberships retain their
+IDs and references. One append-only `node.work_kind_migrated` snapshot per
+changed node records the old kind and the backup-only rollback policy.
+
+Property definitions and state categories must agree wherever they overlap;
+required sets must agree across kinds. Incompatible constraints, a pre-existing
+reserved `work` slug, invalid historical fields or fields over the bounded
+1 MiB validation limit stop the entire migration with tenant/node identifiers,
+without exposing field values. Reconcile explicitly, then retry. A live work
+parent with a bound session, queued/active claim or running child work order
+also stops the migration and reports up to 100 keys. Only live work children
+make a parent; stopped historical sessions and non-work children do not block.
+
+This is a maintenance migration, not an expand-safe upgrade. The exact-byte
+policy exception is a coordinator review artifact. Release 122 must be
+published and the merge/work queues drained; stop writers, verify an
+instance-specific pre-upgrade database/files backup by restoring it elsewhere,
+and deploy the completed work-node chain before AEON-596 ship adoption.
+The worker does not approve, push or deploy it. New naming and derived status
+remain downstream features behind AEON-429; this package changes no UI.
+
+The migration takes pairing → tree → tenant → resource locks before publishing
+any events. The tenant table fence prevents concurrent seeding, and maintenance
+table locks freeze sessions, runs and work orders. The tree validator is disabled
+only while substituting kind IDs, so tombstones under deleted parents migrate;
+it is restored before event publication in the same transaction, including on
+rollback. Other validators, RLS and the append-only event guard remain active.
+No resource mutation or resource lock follows the final event-counter pass.
+
+Local drill: with `aeon-dev-db` running, execute the targeted
+`TestWorkNodesVerifiedBackupRestoreDrill` test in `internal/db`, using the local
+`AEON_TEST_DATABASE_URL`. It creates synthetic disposable databases, retains a
+custom-format archive and SHA-256 evidence at `tmp/aeon-649-wn/`, compares every
+public table plus starter/tree-function digest, and migrates the restored old
+schema with an ordinary non-bypass role. The already-installed pgvector
+extension is excluded from the archive and supplied by the recovery bootstrap.
+This proves the local fixture round trip, not a production restore. Rollback
+restores the matching old database/files backup and exact old binary; per-node
+Undo and running an old binary against the migrated database are unsupported.
+Importer replay keeps `fields.classic.type` and normalizes only the exact recorded
+kind substitution, so person edits still conflict. Existing classic journey
+ticket membership semantics use retained provenance, including stored import
+events during relation backfill; broader parent/leaf release placement belongs
+to AEON-652. No permanent tables or columns are added for DSAR classification.
+
+## AEON-650 reservation and activation
+
+**1225** is the engine migration in AEON-650's coordinator-reserved **1225–1229**
+range. The coordinator must append `1225 AEON-650 (work parent status engine)`
+to its shared ledger; the worker does not author outside its worktree. Slots
+1226–1229 remain unused. No permanent user-data tables or columns are added.
+
+The engine defaults OFF with no AEON-429 table/override and honors tenant ON,
+project OFF, and null inheritance using the exact AEON-429 storage contract.
+Register `work-parent-status` in that package's catalog and provision System
+before activation, in a committed transaction while the flag is OFF. It refuses
+missing actors rather than acquiring a principal-link lock after an event
+counter. Every flagged work write must enter `db.InTenant`; grouped operations
+use `db.InTransaction`. SQL guards cover imports, requirements, quick-create,
+bulk, move, delete, restore, Undo and category updates. Changed children schedule
+both ancestor chains; final derivation reads locked canonical rows and emits at
+most one transition per parent. Retention has a separate audit event.
+
+Capacity counts live work rows and checks the final tree before commit; crossing
+creates, restores or kind conversions roll back. Tombstones do not consume the
+live-row limit. If an already enabled tenant exceeds it, entry leaves derivation
+inactive and restores caller visibility, allowing reads and feature disablement
+while the work-write guard fails closed. Causal Undo independently fences access
+changes when the flag is disabled, and reads confirmation before transaction
+entry. Ordinary Undo also takes its tree fence before its event fence across
+activation. Cause snapshots are bounded on expanded JSON size in Postgres before
+transfer. Kind conversion away from the last work child emits retention evidence
+with the conversion cause. Cause references stay in private metadata and are
+exposed only through the visibility-checked event envelope; legacy snapshots
+are redacted on read.
+
+The migration does not backfill statuses or enable flags. Initial reconciliation
+is caused by child changes or state-category configuration changes. Before any
+rollout, the coordinator validates the AEON-429 integration and whole chain,
+including the parent UI, under AEON-649's maintenance/verified-backup gate. See
+the root README for the API contract, explicit bounds and read-serialization
+tradeoff. This worker neither pushes nor deploys.
+
 AEON-619 merge-main round incorporates release-122 `origin/main` (`068611ab`)
 into reviewed branch head `769876fd` with a normal local merge. Both route maps
 and README sections are retained. Git-blob checks preserve all 282 main-only
@@ -433,3 +522,78 @@ checks do not claim that validation. Evidence is retained in
 `tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
 `r123-*` logs. No feature change, origin push, deployment, migration renumbering,
 ticket status change or model review ran.
+
+Migration 1230 also admits `status_autopilot.undone` to project-visible events,
+under the same target and referenced-node visibility checks. This lets another
+person's leaf Undo refresh aggregates when the parent status is unchanged.
+
+The exact-byte policy records for 1225 and 1230 pin their owning tickets and
+source commits in `scripts/migration-policy-exceptions.json`. They expose the
+non-allowlisted function bodies, helper replacements and event-policy widening
+for the coordinator's consolidated review; they are not evidence that byte
+approval or previous-binary compatibility has passed. The owner-accepted
+AEON-648 concept and Q17 rollout remain binding: release 122 first, drained
+queues, stopped writers and an instance-specific verified backup/restore under
+AEON-649, plus AEON-429 activation integration and whole-chain validation.
+The static guard passing grants no merge, activation or deployment approval.
+
+## AEON-653 release placement and recurring leaves
+
+Coordinator-reserved **1233–1234** belong only to AEON-653. The coordinator
+records their individual purposes in its shared ledger; workers author only in
+their own worktree. Migration 1233 adds `work_parent_releases`: tenant, parent,
+project and release UUIDs are metadata, located by `(tenant_id,parent_node_id)`.
+The DSAR inventory does not exist in this stack or its local origin/main;
+classify these four columns and 1237's retained membership projection when
+integrating AEON-490's inventory. The retained object stores journey UUIDs,
+source, position, estimate and scope/access flags as metadata at the same locator.
+
+`ticket_node_ids` accepts parents and leaves. Placement expands work edges in
+the same project and deduplicates overlapping roots, with at most 100 roots,
+1000 resulting leaves and a separate 50,000-node traversal bound; intermediate
+parents do not count against the leaf limit. Excess rolls back. Parent
+intent is separate from release membership. Future leaves inherit the nearest
+placed ancestor's release only while it is planning. Otherwise they remain
+unassigned, become Backlog and carry `release_inheritance_note=parent_release_closed`.
+A fresh inherited leaf advances project/release revisions, invalidating stale
+plans and Undo. Undo restores both leaf membership and parent intent, only while
+its fenced result is current. Membership reads report actual distinct leaf
+releases, not intent, and return bounded leaf identities for honest client counts.
+Scopes stop at non-work children and nested projects; caller RLS stays active.
+
+Migration 1234 normalizes stored recurrence template references to work and
+increments definition revisions without rewriting occurrence receipts or prior
+sessions. REST keeps epic/ticket/task template aliases. Each occurrence creates
+a work leaf; the existing AEON-650 engine reopens its parent when
+`work-parent-status` is enabled through AEON-429. Parent Done is never a
+recurrence trigger. Historical sessions and Decision Desk IDs are untouched.
+
+Migration 1237 (AEON-653 fix2) reconciles current planning membership on work
+creation, moves, restoration and deletion. A leaf becoming a parent keeps its
+placement and the complete bounded membership projection as intent and leaves
+the live member set. Returning to leaf restores feature, position, source,
+estimate and scope/access flags; Undo follows the same reconciliation path.
+Explicit membership changes synchronize retained intent, including plan
+removal to backlog and compensating Undo, so subsequent children follow the
+latest choice. A current parent intent row, including explicit backlog, takes
+precedence over historical membership when future children inherit placement.
+Undo restores the previous intent or removes it; without intent, inheritance
+falls back to the preserved membership and its release-open check.
+Changing parent placement invalidates its retained scope approval,
+including an ordinary move back to the original release. Membership events capture that
+flag so compensating Undo can restore the prior approval; restoration also
+requires fresh scope review when older retained metadata names another release.
+Other retained planning metadata stays intact. Released/frozen member rows
+and stored note snapshots remain unchanged. Live walkers, current-release journey
+calculations and new note captures exclude parents. Quick-create applies explicit inclusion
+even after automatic inheritance and advances each revision once. Membership
+reads additionally return `assigned_leaf_count`; clients compare it with current
+leaf identities before confirming that a replay placed the entire subtree.
+
+Integration seams: the existing release-note capture helper and manifest
+backfill accept work leaves (AEON-596 P3/P6); immutable published snapshots stay
+unchanged. System recurrence queue entry explicitly checks leaf shape before
+using the legacy readiness helper (AEON-652), pending its consolidated lifecycle
+changes. Review both seams when merging siblings. Neither migration enables the
+rollout flag. Whole-chain acceptance, verified backup/rollback, push and deployment
+remain the coordinator's gates; this worker performs local checks and commits.

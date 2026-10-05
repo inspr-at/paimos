@@ -4,7 +4,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, w
 import { createRecurrence, getNode, previewRecurrenceDraft, updateRecurrence, type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
-import { copyRecurrenceInput, parseCriteria, recurrenceEstimate, recurrenceName, recurrenceZone, renderTitle, ruleParts, templateFrom, templateProblems, triggerWords, weekdays, when, zones, type Recurrence, type RecurrenceInput } from '../../lib/recurrences'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
+import { workNoun } from '../../lib/workVocabulary'
+import { copyRecurrenceInput, parseCriteria, recurrenceEstimate, recurrenceName, recurrenceSourceIsParent, recurrenceZone, renderTitle, ruleParts, templateFrom, templateProblems, triggerWords, weekdays, when, zones, type Recurrence, type RecurrenceInput } from '../../lib/recurrences'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import EpicPicker from '../work/EpicPicker.vue'
@@ -12,12 +14,13 @@ import TemplateTitle from './TemplateTitle.vue'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title?: string }; source?: ListItem | null; recurrence?: Recurrence }>()
 const emit = defineEmits<{ close: []; saved: [item: Recurrence] }>()
+const vocabulary = useWorkVocabulary()
 const uid = useId(), dialog = ref<HTMLDialogElement>(), body = ref<HTMLElement>(), nameField = ref<HTMLInputElement>()
 const initial = props.recurrence, source = props.source, rule = ruleParts(initial?.trigger.rrule)
-const template = reactive(initial ? copyRecurrenceInput(initial).template : templateFrom(source))
+const template = reactive(initial ? { ...copyRecurrenceInput(initial).template, type: 'work' as const } : templateFrom(source))
 if (initial && !template.name) template.name = recurrenceName(initial).slice(0, 80)
-const parent = ref(initial?.parent_id ?? (source?.kind_slug === 'epic' ? source.id : source?.parent_id || props.project.id))
-const parentLabel = ref(source?.kind_slug === 'epic' ? `${source.key} · ${source.title}` : parent.value === props.project.id ? 'No parent (top level of the project)' : 'Loading parent…')
+const parent = ref(initial?.parent_id ?? (recurrenceSourceIsParent(source) && source ? source.id : source?.parent_id || props.project.id))
+const parentLabel = ref(recurrenceSourceIsParent(source) && source ? `${source.key} · ${source.title}` : parent.value === props.project.id ? 'No parent (top level of the project)' : 'Loading parent…')
 const anchorDate = initial?.trigger.start_date ? new Date(`${initial.trigger.start_date}T00:00:00Z`) : null
 const schedule = reactive({ kind: initial?.trigger.kind || 'time', frequency: rule.FREQ || 'WEEKLY', days: rule.BYDAY?.split(',') || [anchorDate ? ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][anchorDate.getUTCDay()]! : 'MO'], interval: rule.INTERVAL || '1', day: rule.BYMONTHDAY || String(anchorDate?.getUTCDate() || 1), time: initial?.trigger.time_of_day || '09:00', zone: initial?.trigger.timezone || initial?.trigger.event_timezone || (initial?.trigger.kind === 'event' ? 'UTC' : Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC', start: initial?.trigger.event_start || 'now' })
 // Name/template edits must keep overdue work and pending publications. Preserve
@@ -74,7 +77,7 @@ function keys(event: KeyboardEvent) {
 function chooseParent(value: { id: string; key: string; title: string } | null) { parent.value = value?.id || props.project.id; parentLabel.value = value ? `${value.key} · ${value.title}` : 'No parent (top level of the project)'; const anchor = picker.value; picker.value = null; anchor?.focus() }
 onMounted(() => {
   dialog.value?.showModal(); void nextTick(() => nameField.value?.focus())
-  if (parent.value !== props.project.id && source?.kind_slug !== 'epic') void scope.run(({ after }) => after(getNode(parent.value), node => { parentLabel.value = `${node.key} · ${node.title}` }), { failed: () => { parentLabel.value = 'Parent unavailable' } })
+  if (parent.value !== props.project.id && !recurrenceSourceIsParent(source)) void scope.run(({ after }) => after(getNode(parent.value), node => { parentLabel.value = `${node.key} · ${node.title}` }), { failed: () => { parentLabel.value = 'Parent unavailable' } })
 })
 onBeforeUnmount(() => { clearTimeout(timer); dialog.value?.close() })
 </script>
@@ -83,14 +86,14 @@ onBeforeUnmount(() => { clearTimeout(timer); dialog.value?.close() })
   <Teleport to="body">
     <dialog ref="dialog" class="recurrence-editor" :aria-labelledby="`${uid}-heading`" @cancel.prevent="close" @keydown.stop="keys" @click="event => { if (event.target === dialog) close() }">
       <header class="editor-head">
-        <div class="editor-titles"><h2 :id="`${uid}-heading`">{{ initial ? 'Edit recurring work' : 'Repeat' }}</h2><p>{{ initial ? `Edit ${recurrenceName(initial)}` : source?.kind_slug === 'epic' ? `Creates child tickets of ${source.key}` : source ? `Repeats ${source.key} as a template` : `New recurring work in ${project.title || project.routeKey}` }}</p></div>
+        <div class="editor-titles"><h2 :id="`${uid}-heading`">{{ initial ? 'Edit recurring work' : 'Repeat' }}</h2><p>{{ initial ? `Edit ${recurrenceName(initial)}` : recurrenceSourceIsParent(source) && source ? `Creates a child ${workNoun(vocabulary.leaf.name)} of ${source.key} each time` : source ? `Repeats ${source.key} as a template` : `New recurring work in ${project.title || project.routeKey}` }}</p></div>
         <div class="editor-actions"><button type="button" class="btn sm ghost" :disabled="busy" @click="close">Cancel<KeyCap k="esc" /></button><button type="button" class="btn sm primary save" :disabled="!allowed || busy || !!problems.length || previewBusy || !!previewError" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" @click="save"><span>{{ busy ? 'Saving…' : initial ? 'Save' : 'Create' }}</span><span class="keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button></div>
       </header>
       <div ref="body" class="editor-body" tabindex="-1">
         <section class="editor-section" :aria-labelledby="`${uid}-what`"><p :id="`${uid}-what`" class="eyebrow">What</p>
           <div class="field-row"><label :for="`${uid}-name`">Name</label><input :id="`${uid}-name`" ref="nameField" v-model="template.name" class="field" maxlength="80" placeholder="e.g. Weekly tool sweep" /></div>
           <div class="field-row top"><span :id="`${uid}-title`" class="field-label">Title</span><TemplateTitle v-model="template.title" :event="schedule.kind === 'event'" :label-id="`${uid}-title`" /></div>
-          <div class="field-row"><span class="field-label">Ticket</span><div class="field-line"><div class="seg" role="radiogroup" aria-label="Type"><button v-for="type in (['ticket', 'task'] as const)" :key="type" type="button" role="radio" :aria-checked="template.type === type" @click="template.type = type">{{ type === 'ticket' ? 'Ticket' : 'Task' }}</button></div><select v-model="template.priority" class="field priority" aria-label="Priority"><option v-for="value in ['critical', 'high', 'medium', 'low']" :key="value" :value="value">{{ value[0]!.toUpperCase() + value.slice(1) }}</option></select><input v-model="estimate" class="field estimate" aria-label="Estimate" placeholder="Estimate" /></div></div>
+          <div class="field-row"><span class="field-label">{{ vocabulary.leaf.name }}</span><div class="field-line"><select v-model="template.priority" class="field priority" aria-label="Priority"><option v-for="value in ['critical', 'high', 'medium', 'low']" :key="value" :value="value">{{ value[0]!.toUpperCase() + value.slice(1) }}</option></select><input v-model="estimate" class="field estimate" aria-label="Estimate" placeholder="Estimate" /></div></div>
           <div class="field-row top"><label :for="`${uid}-description`">Description</label><textarea :id="`${uid}-description`" v-model="template.description" class="field" rows="3" maxlength="65536" placeholder="What each run is about" /></div>
           <div class="field-row top"><label :for="`${uid}-criteria`">Criteria</label><textarea :id="`${uid}-criteria`" v-model="criteria" class="field mono" rows="3" placeholder="- [ ] What must be true when it is done" /></div>
         </section>

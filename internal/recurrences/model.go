@@ -97,7 +97,7 @@ func (in *Input) normalize(now time.Time) error {
 		return fmt.Errorf("name must be at most 80 bytes")
 	}
 	if t.Type == "" {
-		t.Type = "ticket"
+		t.Type = "work"
 	}
 	if t.Priority == "" {
 		t.Priority = "medium"
@@ -108,8 +108,11 @@ func (in *Input) normalize(now time.Time) error {
 	if t.Tags == nil {
 		t.Tags = []string{}
 	}
-	if t.Type != "ticket" && t.Type != "task" {
-		return fmt.Errorf("template type must be ticket or task")
+	if t.Type == "ticket" || t.Type == "task" || t.Type == "epic" {
+		t.Type = "work"
+	}
+	if t.Type != "work" {
+		return fmt.Errorf("template type must be work (ticket, task and epic are compatibility aliases)")
 	}
 	switch t.Priority {
 	case "critical", "high", "medium", "low":

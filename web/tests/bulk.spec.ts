@@ -74,7 +74,7 @@ test('keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the
   expect(bulkCalls(calls)[0].body).toMatchObject({ state: 'qa' })
 })
 
-test('assignee, priority, labels and epic change in one request each; skipped tickets say why', async ({ page }) => {
+test('assignee, priority, labels and parent change in one request each; stale tickets say why', async ({ page }) => {
   const data = fixtures()
   data.nodes.find(n => n.id === 'n-4')!.fields.tags = [{ name: 'BUG', color: 'red' }]
   const calls = await mockWork(page, data)
@@ -106,13 +106,18 @@ test('assignee, priority, labels and epic change in one request each; skipped ti
   await labels.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByText('Changed the labels of 2 tickets')).toBeVisible()
   expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], tags_add: [{ name: 'release-blocker' }], tags_remove: ['BUG'], if_unmodified_since: revisions('n-2', 'n-4') })
-  // Epic: the picker's No epic takes them out; a task cannot go under an epic and is skipped.
+  // Parent: nesting is unrestricted by the retired kinds. A newer revision
+  // refuses only the stale item and reports why without overwriting it.
   await pick('PHAROS-13')
+  const stale = data.nodes.find(n => n.id === 'n-3')!
+  stale.updated_at = '2026-09-23T13:00:00.000Z'
   await bulkBar(page).getByRole('button', { name: 'Move' }).click()
-  const picker = page.getByRole('dialog', { name: 'Epic for 3 tickets' })
+  const picker = page.getByRole('dialog', { name: 'Parent for 3 tickets' })
   await picker.getByRole('option', { name: /Guarded multi-cloud provisioning/ }).click()
-  await expect(page.getByText('Moved 1 ticket to Guarded multi-cloud provisioning · 1 ticket skipped')).toBeVisible()
-  await expect(page.getByText('PHAROS-13 was skipped: a task cannot sit under an epic')).toBeVisible()
+  await expect(page.getByText('Moved 1 ticket to Guarded multi-cloud provisioning', { exact: true })).toBeVisible()
+  await expect(page.getByText('PHAROS-13 was changed elsewhere meanwhile and kept its newer version.')).toBeVisible()
+  expect(stale.parent_id).toBe('n-2')
+  expect(stale.updated_at).toBe('2026-09-23T13:00:00.000Z')
   expect(bulkCalls(calls).at(-1)!.body).toMatchObject({ parent_id: 'n-epic' })
 })
 

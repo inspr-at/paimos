@@ -20,11 +20,12 @@ import (
 // project row-level security or handler-level authorization confines to the
 // caller's visible projects (nodes, relations, events, knowledge, search,
 // views and approvals pinned to a project, live agent sessions),
-// workspace configuration every reader needs (kinds, the workspace logo that
-// /api/me links, read under tenant row-level security), or the caller's own
-// profile and preferences. Every other route without a project in its path is
-// authorized by the workspace binding alone, so a project-only principal never
-// reaches workspace-wide data such as members, quotes, CRM or hours.
+// workspace configuration every reader needs (kinds, work names and icons,
+// the workspace logo linked by /api/me, read under tenant row-level security),
+// or the caller's own profile and preferences. Every other route without a
+// project in its path is authorized by the workspace binding alone, so a
+// project-only principal never reaches workspace-wide data such as members,
+// quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/delivery/adoptions":                                   true,
 	"GET /api/chat-threads/{id}":                                    true,
@@ -69,6 +70,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/usage/model-estimates":              true,
 	"GET /api/settings/status-autopilot":          true,
+	"GET /api/settings/work-vocabulary":           true,
 	"GET /api/status-autopilot/changes":           true,
 	"GET /api/status-autopilot/proposals":         true,
 	"GET /api/projects":                           true,

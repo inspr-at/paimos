@@ -1,0 +1,120 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix21",
+  "recorded_at": "2026-10-05T04:23:45.074393+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "a6f940c00d72aa3a3378e83b82a7a0e4390cfc5a",
+  "review": "review-ci272d.out",
+  "summary": "Repaired the deletion and session-confirmation source harnesses with real workVocabulary helpers and an isolated default-vocabulary store fixture. Existing assertions remain unchanged. Classified all 107 missing owned web registrations: four pending-write/record/person/tenant safeguards are ESSENTIAL and 103 ordinary regressions are NIGHTLY. Added native registration/scheduling and protected-tier regressions; no product, workflow, tier-runner, API or migration changes.",
+  "root_cause": {
+    "hosted_run": 37260255892,
+    "attempt": 4,
+    "job": 111611337685,
+    "merge_sha": "3b32027942509867ee69b485413edc45870db0a7",
+    "failing_step": "Web unit checks (once)",
+    "failing_command": "node ../scripts/test-tiers/cli.mjs run web --unit --job web-unit",
+    "cause": "Five ESSENTIAL Vitest cases failed with Missing test dependency: ../../lib/workVocabulary in record-source.ts. TicketWorkspace now imports the naming helpers and store, but the two existing source harnesses supplied neither dependency. The runner correctly returned 1; no validator or measurement bug was found.",
+    "earlier_success": "The fail 0 output belongs to npm run ci:web:shard:test. Its shard check and the GATED-FULL unit cases succeeded; the overall web unit command failed.",
+    "hosted_counts": {
+      "ESSENTIAL": {
+        "selected": 191,
+        "passed": 186,
+        "failed": 5,
+        "notRun": 0
+      },
+      "GATED-FULL": {
+        "selected": 1425,
+        "passed": 1425,
+        "failed": 0,
+        "notRun": 0
+      }
+    }
+  },
+  "classification": {
+    "existing_rows_preserved": 7116,
+    "added": 107,
+    "ESSENTIAL": 4,
+    "NIGHTLY": 103,
+    "new_browser_rows": 7,
+    "new_unit_rows": 100,
+    "protected_files": [
+      "tests/parent-benefit-generation.unit.test.ts",
+      "tests/work-vocabulary-card.unit.test.ts"
+    ],
+    "native_registrations": "Fresh cli.mjs check web --strict passes without warnings across the complete inventory, including the 48 test files changed on the branch. Existing browser launch configuration/project identities and all previous tiers remain unchanged.",
+    "policy": "New ordinary registrations stay NIGHTLY and remain included for changed-area and nightly selection. No bulk ESSENTIAL promotion, demotion, skip or assertion relaxation."
+  },
+  "validation": {
+    "merge": {
+      "fetched_origin_main": "a3ca8c475",
+      "pr_base": "main",
+      "live_pr_mergeable": "MERGEABLE",
+      "merge_required": false
+    },
+    "affected_vitest": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "one_file_at_a_time": true,
+      "files": {
+        "record-ownership.unit.test.ts": 11,
+        "session-confirm.unit.test.ts": 4,
+        "parent-benefit-generation.unit.test.ts": 3,
+        "work-vocabulary-card.unit.test.ts": 1
+      }
+    },
+    "tier_regressions": {
+      "dependency_free_static_file_passed": 34,
+      "targeted_native_web_regression_passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "note": "Native web registration coverage lives in web/scripts/aeon-681-ci.test.mjs because those Node test modules import Vue; go-static installs no web dependencies. Only the new native regression was run locally; the existing full native browser/planner regressions were not rerun."
+    },
+    "native_tier_runner": {
+      "passed": 5,
+      "failed": 0,
+      "notRun": 0,
+      "exitCode": 0,
+      "full": false,
+      "note": "Executed the same run() implementation used by web-setup, selecting precisely the five cases that failed in hosted CI, one owning file at a time. This is targeted working-tree evidence, not a full hosted rerun."
+    },
+    "baseline": {
+      "base": "a6f940c00d72aa3a3378e83b82a7a0e4390cfc5a",
+      "original_unit_files": {
+        "failed": 5,
+        "reason": "Exact Missing test dependency: ../../lib/workVocabulary; the other ten record-ownership tests passed on the original HEAD before editing."
+      },
+      "new_classification_tests": {
+        "failed": 2,
+        "reason": [
+          "Strict native reconciliation rejects the missing done-gate registrations.",
+          "The protected parent-generation retry registration is absent instead of ESSENTIAL."
+        ],
+        "method": "Run the final regression source with unchanged assertions. A temporary Node module hook substitutes only the exact git-show a6f940c0 manifest dependency. No tracked source is replaced."
+      }
+    },
+    "ci_web_shard_check": "pass: npm run ci:web:shard:check; specs 78, shards 12, ungated 166",
+    "fresh_strict_inventory": "pass: node scripts/test-tiers/cli.mjs check web --strict; ESSENTIAL 259, GATED-FULL 2705, NIGHTLY 4259",
+    "git_diff_check": "pass",
+    "go": "No affected Go packages; baseline hosted Go shards, timing and static jobs succeeded. Go-only remote-test.sh is not applicable to these JavaScript/test-fixture changes and transfers a temporary Git ref, so it was not invoked under the direct no-push constraint.",
+    "remote_browser": {
+      "exit_code": 3,
+      "reason": "Approved scripts/playwright-remote.mjs refused before SSH or transfer: OPS-247 bootstrap and launcher remain pending. No browser launch or local browser fallback."
+    },
+    "full_suites": "No fresh full npm unit/build, just test, Playwright execution or hosted CI rerun is claimed. Coordinator must rerun hosted CI after its authorized push; this worker did not push."
+  },
+  "constraints": "Same worktree and branch only; no push, deployment, production access, new credentials, secret reads, other worktrees, subagents, model reviews, API/product/UI changes or migrations. Existing design and naming decisions retained.",
+  "logs_sha256": {
+    "native-classification-baseline.log": "4efc58dbb2282bc916597e8b7afc735d7fb0598510c0842eaf58f54a3af5f041",
+    "tiers-after.log": "42b5f760266b97842eb82881de064082d25c0ec4bd92a451db490f235330c1f3",
+    "record-after.log": "f58a7d7eaa5b186c627d17fb6511e74121dfe541fe32785b0c1f8cbcb76e6321",
+    "session-before.log": "f16f5d18f247377426978902e42a35203d6f9d9d5225a670cd05ded9023ef3de",
+    "native-classification-after.log": "5ea22332533f8b4535da3aca57abfb4e2483c4187c6d3d94ecce6a59dc2520c0",
+    "record-before.log": "15366ebeb0d1f4c5039a72d42936b419cecb1362ffe3927e2c7f0bdd06fb511b",
+    "vocabulary-card-after.log": "726809c0658c168c874e9880ca852a51aff4faa37611d7ce67e31c7b3122a77e",
+    "web-strict-after.log": "ab0e1e6936e3c757b8d31850bcb9ac9b5b0653ad090c2bcae8eb3bc05320da54",
+    "classification-baseline.log": "2df60544ab101c3b8505ec745e7f6bd3d251ba7751f18c02be81d97bc1115649",
+    "session-after.log": "8625b94744092e5fe9b0d9d879696cca2d58605c5af4edcb924e6bc948e81b9e",
+    "parent-benefit-after.log": "402639696875c755248119cdeff55e37995fdb6d219d6467242248f97a0a6737"
+  }
+}

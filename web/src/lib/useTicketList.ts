@@ -224,7 +224,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (epicsFor === within && epicsLoad) return epicsLoad
     epicsFor = within
     const request = epicsGeneration
-    epicsLoad = listNodes({ within, kind: ['epic'], sort: 'key', limit: 500 })
+    epicsLoad = listNodes({ within, kind: ['work', 'epic'], shape: ['parent'], sort: 'key', limit: 500 })
       .then(page => { if (epicsFor === within && request === epicsGeneration) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
       .catch(() => { if (request === epicsGeneration) epicsLoad = null })
     return epicsLoad
@@ -243,7 +243,8 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     }))
   }
 
-  function shiftFacet(from: string, to: string) {
+  function shiftFacet(from: string, to: string, parent = false) {
+    if (parent) return
     const state = facets.value.state
     if (!state) return
     if (state[from] !== undefined) state[from] = Math.max(0, state[from] - 1)
@@ -271,7 +272,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     }
     // Optimistic: the row shows the choice at once; the store's copy is the fallback.
     rowStore.optimistic(target.id, fields ? { state, fields } : { state })
-    shiftFacet(before.state, state)
+    shiftFacet(before.state, state, !!shown.estimate?.is_parent)
     const sent = rowStore.mark()
     try {
       const saved = await updateNode(target.id, fields ? { state, fields } : { state }, { ifUnmodifiedSince: before.updated_at })
@@ -290,10 +291,10 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
           const sent = rowStore.mark()
           const latest = await getNode(target.id)
           rowStore.adoptNode(latest, sent)
-          shiftFacet(state, latest.state)
+          shiftFacet(state, latest.state, !!shown.estimate?.is_parent)
           baseFields = latest.fields
         } catch {
-          shiftFacet(state, before.state)
+          shiftFacet(state, before.state, !!shown.estimate?.is_parent)
         }
         rowStore.reshow(target.id)
         toast(`${target.key} was changed elsewhere, so your status change was not saved. The latest version is shown.`, { tone: 'error', ...(listOptions.review ? { action: { label: 'Review', run: () => listOptions.review!(target) } } : {}) })
@@ -305,7 +306,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
         }
         return false
       }
-      shiftFacet(state, before.state)
+      shiftFacet(state, before.state, !!shown.estimate?.is_parent)
       // Gone meanwhile: the store learns it (a restore after the change was sent keeps it).
       if (e instanceof APIError && (e.status === 404 || e.status === 410)) rowStore.gone(target.id, sent)
       rowStore.reshow(target.id)
@@ -396,7 +397,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const kind = facets.value.kind
     if (kind) kind[item.kind_slug] = (kind[item.kind_slug] ?? 0) + 1
     const state = facets.value.state
-    if (state) state[item.state] = (state[item.state] ?? 0) + 1
+    if (state && !item.estimate?.is_parent) state[item.state] = (state[item.state] ?? 0) + 1
   }
   // Only a row the row store knows deleted leaves (a restore since keeps it).
   function removeRow(id: string) {
@@ -406,7 +407,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const kind = facets.value.kind
     if (kind?.[row.kind_slug]) kind[row.kind_slug]--
     const state = facets.value.state
-    if (state?.[row.state]) state[row.state]--
+    if (state?.[row.state] && !row.estimate?.is_parent) state[row.state]--
   }
 
   return { committedDelivery, rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, releaseNames, facetErrors, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }

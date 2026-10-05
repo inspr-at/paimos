@@ -16,6 +16,10 @@ type LiveOptions = Partial<Pick<LiveListOptions, 'autoApply' | 'me' | 'quiet' | 
 // Expansion is remembered per project for the session (memory, not device storage).
 const expandedByProject = new Map<string, Set<string>>()
 const LEVEL = 200
+const NODE_BUDGET = 5000
+const ANCESTOR_BUDGET = 2000
+const REQUEST_BATCH = 8
+const GAP_RETRIES = 3
 
 // The project Outline. Without search or filters and with closed work shown, levels
 // load lazily as they open. Otherwise the whole match set is known (it is the list's
@@ -41,8 +45,11 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   // Match mode: ancestors fetched to place matching rows.
   const ancestors = reactive(new Map<string, ListItem>())
   const resolving = ref(false)
+  const ancestorError = ref('')
   let generation = 0
+  let disposed = false
   let ancestorRun = 0
+  let ancestorLoading = false, ancestorPending = false
   const lazyRead = ref<ListRead | null>(null)
   const loadedOnce = ref(false)
   // Filter membership learned by live queries is committed with their rows.
@@ -79,20 +86,54 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   watch(() => list.rows.value, items => rememberOrder(items), { flush: 'sync', immediate: true })
   watch(() => list.reads?.value, read => { if (read?.kind === 'load') rememberOrder(matchNodes.value.values(), true) })
   watch(sortParam, () => rememberOrder(matchNodes.value.values(), true))
+  function pruneAncestors(root: string) {
+    // Keep the complete chains needed by current matches; detect corrupt loops.
+    const needed = new Set<string>()
+    for (const item of list.rows.value) {
+      let parent = live.layout(item).parent_id
+      const visited = new Set<string>()
+      while (parent && parent !== root) {
+        if (visited.has(parent)) { ancestorError.value = 'Outline is incomplete: an ancestor cycle was found.'; break }
+        visited.add(parent)
+        if (needed.has(parent)) break
+        needed.add(parent)
+        const row = ancestors.get(parent) ?? matchNodes.value.get(parent)
+        parent = row ? live.layout(row).parent_id : null
+      }
+    }
+    for (const id of ancestors.keys()) if (!needed.has(id)) ancestors.delete(id)
+  }
   async function resolveAncestors() {
     const root = projectId.value
-    if (!root || !active.value || !matchMode.value) return
+    if (disposed || !root || !active.value || !matchMode.value) return
+    if (ancestorLoading) { ancestorPending = true; return }
+    ancestorLoading = true; ancestorPending = false
     const request = ++ancestorRun
     resolving.value = true
     try {
       const all = await kinds()
-      for (let round = 0; round < 8; round++) {
-        const missing = missingAncestors(placedNodes.value, root)
-        if (!missing.length || request !== ancestorRun) break
-        const sent = rowStore.mark()
-        const fetched = await Promise.all(missing.map(id => getNode(id).catch(() => null)))
+      if (request !== ancestorRun || !active.value || !matchMode.value) return
+      ancestorError.value = ''
+      pruneAncestors(root)
+      if ([...ancestors.values()].some(row => row.kind_slug === 'missing')) ancestorError.value = 'Outline is incomplete: some ancestors could not be read.'
+      let reads = 0, gaps = 0
+      const attempted = new Set<string>()
+      for (;;) {
         if (request !== ancestorRun || !active.value || !matchMode.value) return
-        if (rowStore.gapSince(sent)) { round--; continue }
+        const missing = missingAncestors(placedNodes.value, root)
+        if (!missing.length) break
+        if (reads >= ANCESTOR_BUDGET || ancestors.size >= ANCESTOR_BUDGET) { ancestorError.value = 'Outline is incomplete: ancestor resource limit reached. Narrow the filters.'; break }
+        const batch = missing.slice(0, Math.min(REQUEST_BATCH, ANCESTOR_BUDGET - reads, ANCESTOR_BUDGET - ancestors.size))
+        if (batch.some(id => attempted.has(id))) { ancestorError.value = 'Outline is incomplete: an ancestor cycle could not be resolved.'; break }
+        const sent = rowStore.mark()
+        reads += batch.length
+        const fetched = await Promise.all(batch.map(id => getNode(id).catch(() => null)))
+        if (request !== ancestorRun || !active.value || !matchMode.value) return
+        if (rowStore.gapSince(sent)) {
+          if (++gaps >= GAP_RETRIES) { ancestorError.value = 'Outline is incomplete: live updates interrupted ancestor loading. Retry.'; break }
+          continue
+        }
+        for (const id of batch) attempted.add(id)
         for (const node of fetched) {
           if (!node) continue
           const kind = all.find(k => k.id === node.kind_id)
@@ -100,27 +141,24 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
           const item = asListItem(node, kind, null, null)
           const assignee = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
           if (assignee) item.assignee = { id: assignee, name: list.names.get(assignee) ?? 'Someone' }
-          // The row store's display object (the panel edits and moves that
-          // one); one the store knows deleted is not placed.
           const row = rowStore.adopt(item, sent, { full: false, show: true })
-          if (row) { rememberOrder([row]); ancestors.set(node.id, row) }
+          if (row) {
+            if (!ancestors.has(node.id) && ancestors.size >= ANCESTOR_BUDGET) { ancestorError.value = 'Outline is incomplete: ancestor resource limit reached. Narrow the filters.'; break }
+            rememberOrder([row]); ancestors.set(node.id, row)
+          }
         }
-        // Parents that cannot be read would loop forever; place their children at the top.
-        for (const id of missing) if (!ancestors.has(id)) ancestors.set(id, { id, key: '', title: '', parent_id: root, kind_slug: 'missing' } as unknown as ListItem)
-      }
-      // Keep only the chains needed by the current match set. Old parents
-      // must not survive a move as unrelated, dimmed roots.
-      const needed = new Set<string>()
-      for (const item of list.rows.value) {
-        let parent = live.layout(item).parent_id
-        for (let depth = 0; parent && parent !== root && depth < 8 && !needed.has(parent); depth++) {
-          needed.add(parent)
-          const row = ancestors.get(parent) ?? matchNodes.value.get(parent)
-          parent = row ? live.layout(row).parent_id : null
+        // Unreadable parents retain their children at the top, with an explicit warning.
+        for (const id of batch) if (!ancestors.has(id)) {
+          ancestorError.value = 'Outline is incomplete: some ancestors could not be read.'
+          ancestors.set(id, { id, key: '', title: '', parent_id: root, kind_slug: 'missing' } as unknown as ListItem)
         }
       }
-      for (const id of ancestors.keys()) if (!needed.has(id)) ancestors.delete(id)
-    } finally { if (request === ancestorRun) resolving.value = false }
+      pruneAncestors(root)
+    } catch (e) { if (request === ancestorRun) ancestorError.value = `Outline is incomplete: ${e instanceof Error ? e.message : 'ancestors could not be read'}` }
+    finally {
+      ancestorLoading = false; resolving.value = false
+      if (ancestorPending) void resolveAncestors()
+    }
   }
   watch([() => list.rows.value.length, () => list.loading.value, matchMode, active, projectId], () => {
     if (active.value && matchMode.value && !list.loading.value) void resolveAncestors()
@@ -130,16 +168,21 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   async function loadBlock(target: Ref<Block> | Block, params: Record<string, unknown>, more = false) {
     const block = 'value' in target ? target.value : target
     const request = generation
+    if (lazyNodes.size >= NODE_BUDGET) { block.error = 'Outline is incomplete: 5000 loaded items. Narrow the filters to load more.'; return }
     block.loading = true; block.error = ''
     try {
       // Keep the same level and cursor when a gap makes an in-flight page
       // untrustworthy. It may contain a deletion the stream never delivered.
+      // The server binds limit into the cursor. Inserts and child expansion
+      // consume retention capacity without changing this level's page size.
+      // Enforce NODE_BUDGET when adopting rows, independently of pagination.
       const query = { ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined }
-      let sent, page
+      let sent, page, gaps = 0
       do {
         sent = rowStore.mark()
         page = await listNodes(query as never)
         if (request !== generation) return
+        if (rowStore.gapSince(sent) && ++gaps >= GAP_RETRIES) throw new Error('Outline is incomplete: live updates interrupted loading. Retry.')
       } while (rowStore.gapSince(sent))
       // Rows are the row store's display objects (AEON-326): the panel and the
       // list show the same object, and a copy older than a deletion stays out.
@@ -147,6 +190,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       for (const item of page.items) {
         const row = rowStore.adopt(item, sent, { show: true })
         if (!row || live.layout(row).parent_id !== params.parent_id) continue
+        if (!lazyNodes.has(row.id) && lazyNodes.size >= NODE_BUDGET) { block.error = 'Outline is incomplete: 5000 loaded items. Narrow the filters.'; break }
         rememberOrder([row])
         lazyNodes.set(item.id, row)
         ids.push(item.id)
@@ -182,7 +226,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     if (!blocks.has(id)) blocks.set(id, { ids: [], cursor: null, loading: false, error: '' })
     const block = blocks.get(id)!
     if (block.loading || (!more && block.ids.length)) return
-    await loadBlock(block, { parent_id: id, kind: ['ticket', 'task', 'epic'] }, more)
+    await loadBlock(block, { parent_id: id, kind: ['work', 'ticket', 'task', 'epic'] }, more)
   }
   async function loadRoots() {
     const root = projectId.value
@@ -193,24 +237,30 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     lazyNodes.clear(); blocks.clear(); order.clear()
     epicBlock.value = { ids: [], cursor: null, loading: true, error: '' }
     looseBlock.value = { ids: [], cursor: null, loading: true, error: '' }
-    await Promise.all([
-      loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }),
-      loadBlock(looseBlock, { parent_id: root, kind: ['ticket', 'task'] }),
-    ])
+    await loadBlock(epicBlock, { parent_id: root, kind: ['work', 'epic', 'ticket', 'task'] })
+    looseBlock.value.loading = false
     if (request !== generation) return
-    while (request === generation && epicBlock.value.cursor && !epicBlock.value.error) await loadBlock(epicBlock, { parent_id: root, kind: ['epic'] }, true)
+    await restoreExpanded(request)
     if (request !== generation) return
-    // Reopen what was expanded before, level by level.
-    let frontier = [...expanded.value].filter(id => lazyNodes.has(id))
-    for (let depth = 0; depth < 6 && frontier.length; depth++) {
-      await Promise.all(frontier.map(id => loadChildren(id)))
-      if (request !== generation) return
-      frontier = [...expanded.value].filter(id => lazyNodes.has(id) && !blocks.has(id))
-    }
     lazyRead.value = { kind: 'load', sent, behind: [...lazyNodes.values()].filter(row => rowStore.newer(row.id, row.updated_at)).map(row => row.id) }
   }
   watch([active, matchMode, projectId, sortParam], () => { generation++; if (active.value && !matchMode.value) void loadRoots() }, { immediate: true })
-  function loadMoreRoot() { if (looseBlock.value.cursor && !looseBlock.value.loading) void loadBlock(looseBlock, { parent_id: projectId.value, kind: ['ticket', 'task'] }, true) }
+  async function restoreExpanded(request: number) {
+    // A later root page can contain another remembered branch. Restore only
+    // loaded branches, in bounded batches; no eager root-page drain.
+    for (;;) {
+      const frontier = [...expanded.value].filter(id => lazyNodes.has(id) && !blocks.has(id)).slice(0, REQUEST_BATCH)
+      if (!frontier.length || request !== generation || lazyNodes.size >= NODE_BUDGET) return
+      await Promise.all(frontier.map(id => loadChildren(id)))
+    }
+  }
+  async function loadMoreRoot() {
+    const root = projectId.value, block = epicBlock.value
+    if (!root || matchMode.value || !block.cursor || block.loading) return
+    const request = generation
+    await loadBlock(epicBlock, { parent_id: root, kind: ['work', 'epic', 'ticket', 'task'] }, true)
+    if (request === generation) await restoreExpanded(request)
+  }
 
   // ---------- Epic progress ----------
   const statsQueue: string[] = []
@@ -219,7 +269,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     while (statsRunning < 4 && statsQueue.length) {
       const id = statsQueue.shift()!
       statsRunning++
-      listNodes({ within: id, kind: ['ticket', 'task'], facets: ['state'], limit: 1 })
+      listNodes({ within: id, kind: ['work', 'ticket', 'task'], shape: ['leaf'], facets: ['state'], limit: 1 })
         .then(page => stats.set(id, epicStats(page.facets?.state ?? {}, s => statusMeta(s).closed, s => ['done', 'delivered', 'accepted'].includes(statusMeta(s).key), s => statusMeta(s).key === 'cancelled')))
         .catch(() => stats.delete(id))
         .finally(() => { statsRunning--; pumpStats() })
@@ -243,37 +293,42 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       else top.push(row)
     }
     top.sort(comparePlaced)
-    return { epics: top.filter(row => row.kind_slug === 'epic').map(row => row.id), loose: top.filter(row => row.kind_slug !== 'epic' && row.kind_slug !== 'missing').map(row => row.id) }
+    return { epics: top.filter(row => row.kind_slug !== 'missing').map(row => row.id), loose: [] }
   })
   function isExpanded(id: string) { return autoExpand.value ? !autoCollapsed.value.has(id) : expanded.value.has(id) }
   function hasChildren(id: string) {
     if (matchMode.value) return (matchChildren.value.get(id)?.length ?? 0) > 0
-    return (lazyNodes.get(id)?.children_count ?? 0) > 0 || (blocks.get(id)?.ids.length ?? 0) > 0
+    return (lazyNodes.get(id)?.work_children_count ?? lazyNodes.get(id)?.children_count ?? 0) > 0 || (blocks.get(id)?.ids.length ?? 0) > 0
   }
-  const entries = computed<OutlineEntry[]>(() => flattenOutline({
-    rootId: projectId.value ?? '',
-    epics: roots.value.epics,
-    loose: roots.value.loose,
-    looseHasMore: !matchMode.value && !!looseBlock.value.cursor,
-    looseLoading: looseBlock.value.loading,
-    node,
-    children: id => {
-      if (matchMode.value) return { ids: (matchChildren.value.get(id) ?? []).map(row => row.id), hasMore: false, loading: false }
-      const block = blocks.get(id)
-      return block ? { ids: block.ids, hasMore: !!block.cursor, loading: block.loading } : null
-    },
-    hasChildren,
-    expanded: isExpanded,
-    dimmed: id => matchMode.value && !matchIds.value.has(id),
-    stats: id => { const value = stats.get(id); return value && value !== 'loading' ? value : null },
-    noEpicCollapsed: noEpicCollapsed.value,
-    createUnder: createUnder.value,
-  }))
+  const entries = computed<OutlineEntry[]>(() => {
+    const tree = flattenOutline({
+      rootId: projectId.value ?? '',
+      epics: roots.value.epics,
+      loose: roots.value.loose,
+      looseHasMore: !matchMode.value && !!looseBlock.value.cursor,
+      looseLoading: looseBlock.value.loading,
+      node,
+      children: id => {
+        if (matchMode.value) return { ids: (matchChildren.value.get(id) ?? []).map(row => row.id), hasMore: false, loading: false }
+        const block = blocks.get(id)
+        return block ? { ids: block.ids, hasMore: !!block.cursor, loading: block.loading } : null
+      },
+      hasChildren,
+      expanded: isExpanded,
+      dimmed: id => matchMode.value && !matchIds.value.has(id),
+      stats: id => { const value = stats.get(id); return value && value !== 'loading' ? value : null },
+      noEpicCollapsed: noEpicCollapsed.value,
+      createUnder: createUnder.value,
+    })
+    if (tree.length) tree.unshift({ type: 'root', key: 'project-root', label: 'Project root', parentId: projectId.value ?? '' })
+    if (!matchMode.value && epicBlock.value.cursor) tree.push({ type: 'more', key: 'more-root', depth: 0, guides: [], parentId: projectId.value ?? '', loading: epicBlock.value.loading })
+    return tree
+  })
   const rows = computed(() => entries.value.flatMap(entry => entry.type === 'row' ? [entry.row] : []))
   // The first page shows once both blocks have their first rows, so epics never
   // arrive above tickets that are already on screen.
   const loading = computed(() => matchMode.value ? (list.loading.value || (resolving.value && !entries.value.length)) : (epicBlock.value.loading && !epicBlock.value.ids.length) || (looseBlock.value.loading && !looseBlock.value.ids.length))
-  const error = computed(() => matchMode.value ? '' : epicBlock.value.error || looseBlock.value.error)
+  const error = computed(() => matchMode.value ? ancestorError.value : epicBlock.value.error || looseBlock.value.error || [...blocks.values()].find(block => block.error)?.error || '')
 
   // ---------- Live rows, stable tree placement ----------
   // The list's causal batching, labels, editor pin and Show policy also own
@@ -281,6 +336,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   const liveRows = computed<ListItem[]>({
     get: () => [...(matchMode.value ? matchNodes.value : lazyNodes).values()].filter(row => row.kind_slug !== 'missing'),
     set(items) {
+      if (!matchMode.value && items.length > NODE_BUDGET) { epicBlock.value.error = 'Outline is incomplete: 5000 loaded items. Narrow the filters.'; items = items.slice(0, NODE_BUDGET) }
       // Release only structural sort changes. A field-only patch must keep
       // its original sort values even when Show applies other rows' updates.
       for (const row of items) {
@@ -298,13 +354,30 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
         for (const row of items) lazyNodes.set(row.id, row)
         const byParent = childMap(items.map(row => live.layout(row)), comparePlaced)
         const roots = byParent.get(projectId.value ?? '') ?? []
-        epicBlock.value.ids = roots.filter(row => row.kind_slug === 'epic').map(row => row.id)
-        looseBlock.value.ids = roots.filter(row => row.kind_slug !== 'epic').map(row => row.id)
+        epicBlock.value.ids = roots.map(row => row.id)
+        looseBlock.value.ids = []
         for (const [id, block] of blocks) block.ids = (byParent.get(id) ?? []).map(row => row.id)
       }
     },
   })
+  let liveReads = 0
+  const liveWaiters: (() => void)[] = []
   async function fetchLive(query: ListQuery, purpose: LiveReadPurpose) {
+    const run = generation
+    // Reconnect can refresh many expanded levels. Bound concurrency as well
+    // as each level's page and the total retained tree.
+    if (liveReads >= REQUEST_BATCH) await new Promise<void>(resolve => liveWaiters.push(resolve))
+    else liveReads++
+    try {
+      if (run !== generation) return { items: [], next_cursor: null }
+      return await readLive(query, purpose)
+    } finally {
+      const next = liveWaiters.shift()
+      if (next) next()
+      else liveReads--
+    }
+  }
+  async function readLive(query: ListQuery, purpose: LiveReadPurpose) {
     const run = generation, sent = rowStore.mark()
     const page = await (options.fetchList ?? listNodes)(query)
     if (!matchMode.value || run !== generation || purpose === 'presence') return page
@@ -312,7 +385,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     // Read them afresh on relevant events; no project-lifetime cache of values.
     const ids = query.ids ?? []
     const context = ids.filter(id => ancestors.has(id) && !list.rows.value.some(row => row.id === id) && !page.items.some(row => row.id === id))
-    const extra = context.length ? await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: context, limit: LEVEL }) : null
+    const extra = context.length ? await listNodes({ within: projectId.value!, kind: ['work', 'epic', 'ticket', 'task'], ids: context, limit: LEVEL }) : null
     if (run === generation && !rowStore.gapSince(sent)) {
       for (const id of ids) if (!rowStore.touchedSince(id, sent)) matched.set(id, page.items.some(row => row.id === id))
       for (const item of page.items) if (!rowStore.touchedSince(item.id, sent)) matched.set(item.id, true)
@@ -337,7 +410,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
       void resolveAncestors()
     }
     void refreshParentCounts()
-    for (const id of roots.value.epics) ensureStats(id, true)
+    for (const id of roots.value.epics) if (node(id)?.is_leaf === false || node(id)?.kind_slug === 'epic') ensureStats(id, true)
     options.applied?.()
   }
   async function refreshParentCounts() {
@@ -347,7 +420,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     for (let at = 0; at < ids.length; at += LEVEL) {
       const sent = rowStore.mark()
       try {
-        const page = await listNodes({ within: projectId.value!, kind: ['epic', 'ticket', 'task'], ids: ids.slice(at, at + LEVEL), limit: LEVEL })
+        const page = await listNodes({ within: projectId.value!, kind: ['work', 'epic', 'ticket', 'task'], ids: ids.slice(at, at + LEVEL), limit: LEVEL })
         if (run !== generation || rowStore.gapSince(sent)) return
         for (const item of page.items) rowStore.adopt(item, sent)
       } catch { /* The next event or resync refreshes projections again. */ }
@@ -366,20 +439,19 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     resyncQueries: () => matchMode.value
       ? [liveQuery()]
       : [
-        { parent_id: projectId.value!, kind: ['epic'], limit: LEVEL },
-        { parent_id: projectId.value!, kind: ['ticket', 'task'], limit: LEVEL },
-        ...[...blocks.keys()].map(id => ({ parent_id: id, kind: ['epic', 'ticket', 'task'], limit: LEVEL })),
+        { parent_id: projectId.value!, kind: ['work', 'epic', 'ticket', 'task'], limit: LEVEL },
+        ...[...blocks].map(([id, block]) => ({ parent_id: id, kind: ['work', 'epic', 'ticket', 'task'], limit: Math.max(1, Math.min(LEVEL, block.ids.length)) })),
       ],
     reload: () => { reload(); if (matchMode.value) void list.load?.() },
   })
-  watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) ensureStats(id) }, { immediate: true })
+  watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) if (node(id)?.is_leaf === false || node(id)?.kind_slug === 'epic') ensureStats(id) }, { immediate: true })
   function liveQuery() { return apiParams(projectId.value!, filters.value, { limit: LEVEL }) }
   // Placement changes only when Show releases the held layout (or after an
   // explicit local move); resolve the new chain then, never underneath a row.
   watch(() => [...placedNodes.value.values()].map(row => `${row.id}:${row.parent_id}`).join(','), () => {
     if (active.value && matchMode.value && !list.loading.value) void resolveAncestors()
   })
-  onScopeDispose(() => { generation++; ancestorRun++ })
+  onScopeDispose(() => { disposed = true; ancestorPending = false; generation++; ancestorRun++ })
 
   // ---------- Actions ----------
   function setExpanded(id: string, open: boolean) {
@@ -404,10 +476,14 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     }
     noEpicCollapsed.value = false
     let frontier = [...epicBlock.value.ids, ...looseBlock.value.ids].filter(id => hasChildren(id))
-    for (let depth = 0; depth < 6 && frontier.length; depth++) {
+    const visited = new Set<string>()
+    while (frontier.length && lazyNodes.size < NODE_BUDGET) {
+      frontier = frontier.filter(id => !visited.has(id)).slice(0, REQUEST_BATCH)
+      if (!frontier.length) break
+      for (const id of frontier) visited.add(id)
       const next = new Set(expanded.value); for (const id of frontier) next.add(id); expanded.value = next; persist()
       await Promise.all(frontier.map(id => loadChildren(id)))
-      frontier = frontier.flatMap(id => blocks.get(id)?.ids ?? []).filter(id => hasChildren(id) && !expanded.value.has(id))
+      frontier = [...lazyNodes.keys()].filter(id => hasChildren(id) && !visited.has(id))
     }
   }
   function collapseAll() {
@@ -417,8 +493,10 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   function parentOf(id: string) { return node(id)?.parent_id ?? null }
   function epicOf(id: string): string | null {
     let current = node(id)
-    for (let i = 0; current && i < 8; i++) {
-      if (current.kind_slug === 'epic') return current.id
+    const visited = new Set<string>()
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id)
+      if (current.is_leaf === false || current.kind_slug === 'epic') return current.id
       current = current.parent_id ? node(current.parent_id) : undefined
     }
     return null
@@ -432,17 +510,20 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     const row = rowStore.row(item.id) ?? rowStore.adopt(item, undefined, { full: false })
     if (!row) return
     order.delete(item.id); rememberOrder([row])
+    if (!lazyNodes.has(item.id) && lazyNodes.size >= NODE_BUDGET) { epicBlock.value.error = 'Outline is incomplete: 5000 loaded items. Narrow the filters.'; return }
     lazyNodes.set(item.id, row)
     const parent = row.parent_id ?? ''
-    const block = parent === projectId.value ? (row.kind_slug === 'epic' ? epicBlock.value : looseBlock.value) : blocks.get(parent)
+    const block = parent === projectId.value ? epicBlock.value : blocks.get(parent)
     if (block && !block.ids.includes(item.id)) block.ids = [item.id, ...block.ids]
     if (lazyNodes.has(parent)) rowStore.child(parent, item.id, true)
     refreshStatsFor(item.id)
+    void refreshParentCounts()
   }
   function detach(item: ListItem, fromParent: string | null) {
     const parent = fromParent ?? ''
     for (const block of [epicBlock.value, looseBlock.value, blocks.get(parent)]) if (block) block.ids = block.ids.filter(id => id !== item.id)
     if (lazyNodes.has(parent)) rowStore.child(parent, item.id, false)
+    void refreshParentCounts()
   }
   function relocate(item: ListItem, fromParent: string | null, fromEpic: string | null) {
     if (fromEpic) ensureStats(fromEpic, true)
@@ -464,7 +545,8 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   function reveal(id: string) {
     const chain: string[] = []
     let parent = parentOf(id)
-    for (let i = 0; parent && parent !== projectId.value && i < 8; i++) { chain.push(parent); parent = parentOf(parent) }
+    const visited = new Set<string>()
+    while (parent && parent !== projectId.value && !visited.has(parent)) { visited.add(parent); chain.push(parent); parent = parentOf(parent) }
     for (const ancestor of chain.reverse()) if (!isExpanded(ancestor)) setExpanded(ancestor, true)
   }
   function startCreateUnder(id: string | null) {
@@ -480,7 +562,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   return {
     matchMode, autoExpand, entries, rows, loading, error, node, isExpanded, hasChildren, noEpicCollapsed, createUnder,
     toggle, setExpanded, expandAll, collapseAll, loadChildren, loadMoreRoot, parentOf, epicOf, insert, relocate, remove, findByKey, reveal, startCreateUnder,
-    refreshStatsFor, hasMoreRoot: computed(() => !matchMode.value && !!looseBlock.value.cursor), loadingMoreRoot: computed(() => looseBlock.value.loading && !!looseBlock.value.ids.length),
+    refreshStatsFor, hasMoreRoot: computed(() => !matchMode.value && !!epicBlock.value.cursor), loadingMoreRoot: computed(() => epicBlock.value.loading && !!epicBlock.value.ids.length),
     reload, live, loadedRows: liveRows,
   }
 }

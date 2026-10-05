@@ -139,7 +139,15 @@ func (m *Module) settings(write bool, fn func(*http.Request, pgx.Tx, tenant.Prin
 			return
 		}
 		if write {
-			r.Body = http.MaxBytesReader(w, r.Body, MaxLogoBytes)
+			if err := httpapi.BufferRequestBody(w, r, MaxLogoBytes); err != nil {
+				var tooBig *http.MaxBytesError
+				if errors.As(err, &tooBig) {
+					writeFailure(w, failure{http.StatusRequestEntityTooLarge, codeLogoTooLarge, "the logo exceeds 256 KB"})
+				} else {
+					httpapi.WriteError(w, http.StatusBadRequest, "request body could not be read within limits")
+				}
+				return
+			}
 		}
 		var out any
 		err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {

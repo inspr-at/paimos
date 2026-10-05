@@ -41,6 +41,8 @@ import { useProjects } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
+import { useWorkVocabulary } from '../stores/workVocabulary'
+import { workNoun } from '../lib/workVocabulary'
 import { useReleases } from '../stores/releases'
 import { usePoller } from '../lib/usePolledData'
 import { queueable, queueHours } from '../lib/workQueue'
@@ -70,7 +72,7 @@ import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
-import { listNativeMemberships, openedMembershipMessage, type NativeReleaseView } from '../lib/releaseMembership'
+import { listNativeMemberships, openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../lib/releaseMembership'
 import { useJourney } from '../stores/journey'
 import { flowPillContext } from '../lib/flowPillContext'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
@@ -155,6 +157,7 @@ watch([projectId, () => project.value?.description], () => {
 })
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const queue = useWorkQueue(), releases = useReleases()
+const vocabulary = useWorkVocabulary()
 const queueAnchor = ref<HTMLElement | null>(null)
 const assigneeMenu = ref<{ row: ListItem; anchor: HTMLElement } | null>(null)
 const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
@@ -496,7 +499,7 @@ const displayRows = computed(() => {
 const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
 const groups = computed(() => {
   const facet = groupFacet(filters.value.group)
-  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout })
+  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout, workName: vocabulary.leaf.name })
 })
 // Keyboard order: every visible row once (a ticket under two labels is visited once).
 const sequence = computed(() => {
@@ -545,13 +548,13 @@ function options(dimension: Dimension) {
       const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : node.type
       counts[value] = (counts[value] ?? 0) + 1
     }
-    return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
+    return facetOptions(dimension, counts, filters.value[dimension], list.names, undefined, { workName: vocabulary.leaf.name }).filter(option => dimension !== 'type' || option.value !== 'task')
   }
-  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, releases: list.releaseNames.value })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, releases: list.releaseNames.value, workName: vocabulary.leaf.name })
   return dimension === 'status' && !releasesActive.value ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
-  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, releases: list.releaseNames.value })
+  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, releases: list.releaseNames.value, workName: vocabulary.leaf.name })
 }
 // What a menu needs before it opens: names, label counts or the project's epics.
 const facetLoading = ref(false)
@@ -808,7 +811,7 @@ const membershipIds = computed(() => {
   const seen = new Set<string>()
   const project = projectId.value
   const push = (row: { id: string; kind_slug: string; project?: { id: string } | null } | null | undefined) => {
-    if (!row || row.kind_slug === 'epic' || seen.has(row.id)) return
+    if (!row || seen.has(row.id)) return
     // A project change can render before the previous list is replaced.
     if (project && row.project?.id && row.project.id !== project) return
     seen.add(row.id)
@@ -1017,6 +1020,11 @@ function openEpic(epic: EpicRef) { openKey(epic.key) }
 // ---------- Create and remove ----------
 async function startCreate(under: ListItem | null = null) {
   if (releasesActive.value) { planningView.value?.planRelease(); return }
+  const project = projectId.value, person = session.identity?.principal.id, tenant = session.identity?.tenant.id
+  const revision = under?.updated_at
+  await vocabulary.load()
+  if (project !== projectId.value || person !== session.identity?.principal.id || tenant !== session.identity?.tenant.id || (under && outline.node(under.id)?.updated_at !== revision)) return
+  if (!vocabulary.loaded) { toast(vocabulary.error, { tone: 'error' }); return }
   if (fullView.value) collapse()
   if (under && outlineActive.value) {
     creating.value = false
@@ -1033,11 +1041,12 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
   const current = project.value
   if (!current) return false
   try {
-    const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
+    const catalog = await kinds()
+    const kind = catalog.find(candidate => candidate.slug === 'work') ?? catalog.find(candidate => candidate.slug === draft.kind || candidate.slug === 'ticket')
     if (!kind) throw new Error('this workspace has no such type')
     let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
-    if (needsBenefitPrompt({ kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
-      const text = await askDoneGate({ key: 'New ticket', title: draft.title, state: draft.state, fields })
+    if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
+      const text = await askDoneGate({ key: `New ${workNoun(vocabulary.leaf.name)}`, title: draft.title, state: draft.state, fields })
       if (!text) return false
       fields = completionFields(fields, text)
     }
@@ -1045,7 +1054,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
       kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
     })
-    const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+    const parent = draft.epic ? { ...draft.epic, kind_slug: kind.slug === 'work' ? 'work' : 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
     const created = asListItem(node, kind, parent, { id: current.id, key: current.key, title: current.title })
     list.insertRow(created)
     outline.insert(created)
@@ -1064,14 +1073,14 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
 }
 function childCreated(item: ListItem) { list.insertRow(item); outline.insert(item); void projects.load(true) }
 function childMoved(item: ListItem, fromParent: string | null) {
-  outline.relocate(item, fromParent, fromParent && outline.node(fromParent)?.kind_slug === 'epic' ? fromParent : null)
+  outline.relocate(item, fromParent, fromParent && (outline.node(fromParent)?.is_leaf === false || outline.node(fromParent)?.kind_slug === 'epic') ? fromParent : null)
 }
 function closeCreate() { creating.value = false; outline.startCreateUnder(null) }
 // Drag and drop in the Outline: the same guarded move as the workspace's "Move to another epic".
 async function moveRow(row: ListItem, epic: ListItem | null) {
   const current = project.value
   if (!current) return
-  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: epic.kind_slug } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
   if (await guardedMove(row, parent, childMoved) === 'ok') {
     if (epic) outline.setExpanded(epic.id, true)
     cursorId.value = row.id
@@ -1516,7 +1525,7 @@ async function chooseRelease(target: ReleaseTarget) {
   const rows = list.rows.value.filter(row => ids.includes(row.id))
   const tickets = ids.map(id => {
     const row = rows.find(item => item.id === id)
-    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug }
+    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug, isParent: releaseViewIsParent(nativeReleases.value.get(id)) }
   })
   bulkMenu.value = null
   const attempt = ++releaseAttempt
@@ -1534,7 +1543,7 @@ async function chooseRelease(target: ReleaseTarget) {
     }
     const joined = outcome.opened?.status === 'added'
       ? outcome.opened.count
-      : outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
+      : outcome.result?.walker.tickets.filter(ticket => (outcome.result?.leaf_node_ids ?? ids).includes(ticket.ticket_node_id) && ticket.included).length ?? 0
     if (!joined) {
       toast('Nothing was added to the release.')
       void refreshMemberships()
@@ -1694,7 +1703,7 @@ function keydown(event: KeyboardEvent) {
       else if (ticketKey.value) { event.preventDefault(); closePanel() }
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
-    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
+    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && (row?.is_leaf === false || row?.kind_slug === 'epic') ? row : null); break
     case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
     case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
@@ -1741,6 +1750,7 @@ onMounted(() => {
   scrollRoot.value = document.getElementById('main')
   void projects.load()
   document.addEventListener('pointerdown', dismissDescription)
+  void kinds().catch(() => { /* The server completion gate remains authoritative. */ })
   window.addEventListener('keydown', keydown)
   window.addEventListener('beforeunload', beforeUnload)
   phoneQuery.addEventListener('change', onPhone)
@@ -1947,7 +1957,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :facet-errors="list.facetErrors" :total="releasesActive ? planningSummary.total : total" :total-incomplete="releasesActive && planningSummary.incomplete" :view="releasesActive ? 'releases' : graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!releasesActive && !graphActive && canSaveView"
 

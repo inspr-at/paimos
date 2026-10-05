@@ -371,7 +371,7 @@ func TestUIClosedWorkflowCategoriesMatchOverlapAndOpenPrevious(t *testing.T) {
 				if _, err = tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}',$2::jsonb) WHERE slug=$1`, other, otherCatalog); err != nil {
 					return err
 				}
-				if _, err = tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}',$2::jsonb) WHERE slug=$1`, tc.kind, catalog); err != nil {
+				if _, err = tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}',$2::jsonb) WHERE slug=$1`, "work", catalog); err != nil {
 					return err
 				}
 				_, err = tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, first.NodeID, tc.state)

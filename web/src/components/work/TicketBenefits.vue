@@ -3,12 +3,13 @@
 import { computed, useId } from 'vue'
 import { benefitIssues, pillWords } from '../../lib/ticketBenefits'
 import AppIcon from '../AppIcon.vue'
+import ParentBenefitGeneration from './ParentBenefitGeneration.vue'
 
 // The plain-language user benefit (AEON-256): a 2–4 word pill and one or two
 // sentences, in English and German. Reading shows what is there, one line when
 // something is missing and, when the viewer may edit, the one action that fixes it.
-const props = defineProps<{ fields: Record<string, unknown>; editing?: boolean; disabled?: boolean; done?: boolean; editable?: boolean; notice?: string; invalidKey?: string }>()
-const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit: [] }>()
+const props = defineProps<{ fields: Record<string, unknown>; parent?: boolean; nodeId?: string; editing?: boolean; disabled?: boolean; done?: boolean; editable?: boolean; notice?: string; invalidKey?: string }>()
+const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit: []; generated: [] }>()
 const uid = useId()
 const issues = computed(() => benefitIssues(props.fields))
 const languages = [
@@ -18,7 +19,7 @@ const languages = [
 const text = (key: string) => typeof props.fields[key] === 'string' ? (props.fields[key] as string).trim() : ''
 const filled = computed(() => languages.filter(language => text(`pill_${language.key}`) || text(`benefit_${language.key}`)))
 const guidance = computed(() => {
-  if (!issues.value.length) return ''
+  if (props.parent || !issues.value.length) return ''
   return props.done
     ? 'This completed ticket has incomplete benefit fields. Completing it again needs both languages.'
     : 'Before Done: a 2–4 word pill and a plain benefit, in both languages.'
@@ -52,6 +53,7 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
     </template>
 
     <template v-else>
+      <ParentBenefitGeneration v-if="parent && nodeId" :node-id="nodeId" :editable="!!editable" @edit="emit('edit')" @generated="emit('generated')" />
       <dl v-if="filled.length" class="languages">
         <div v-for="language in filled" :key="language.key" :lang="language.key" class="language">
           <dt class="lang" :data-tip="language.label" :aria-label="language.label">{{ language.short }}</dt>
@@ -80,9 +82,9 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
 .lang { padding-top: 4px; font: 500 10px/1.5 var(--mono); letter-spacing: .12em; color: var(--ink-3); font-variant-ligatures: none; }
 .language dd { display: grid; justify-items: start; gap: 5px; min-width: 0; margin: 0; }
 .pill {
-  display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding: 0 10px; border-radius: 999px;
+  display: inline-flex; align-items: center; max-width: 100%; min-height: 24px; padding: 0 10px; border-radius: 999px;
   background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink);
-  font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 12.5px; font-weight: 600; white-space: normal; overflow-wrap: anywhere;
 }
 .benefit-text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .guidance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }

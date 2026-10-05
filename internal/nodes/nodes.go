@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/delivery"
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -26,8 +27,9 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
-	Recurrence *nodeRecurrence   `json:"recurrence,omitempty"`
-	QueueStale bool              `json:"queue_stale"`
+	Recurrence *nodeRecurrence `json:"recurrence,omitempty"`
+	QueueStale bool            `json:"queue_stale"`
+	*WorkShape
 	Queued     *workqueue.Queued `json:"queued,omitempty"`
 	HumanCheck *string           `json:"human_check"`
 	Estimate   *estimateView     `json:"estimate,omitempty"`
@@ -187,6 +189,8 @@ func (m *Module) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, error) {
+	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
+	defer cancel()
 	var node nodeJSON
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		loaded, err := loadNode(ctx, tx, id, false)
@@ -204,7 +208,10 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Recurrence = recurrences[id]
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
@@ -277,11 +284,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		fields, err := validateFields(schema, in.Fields)
-		if err == nil && (kind.Slug == "ticket" || kind.Slug == "task") {
+		if err == nil && (kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task") {
 			fields, err = humanCheckFields(p, fields, nil, nil, humanCheck, true)
 		}
-		if humanCheck != nil && kind.Slug != "ticket" && kind.Slug != "task" {
-			return badRequest("human_check is for tickets and tasks")
+		if humanCheck != nil && kind.Slug != "work" && kind.Slug != "ticket" && kind.Slug != "task" {
+			return badRequest("human_check is for work items, tickets and tasks")
 		}
 		if err == nil {
 			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
@@ -301,7 +308,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if err != nil {
 			return err
 		}
-		if issues := ticketbenefits.Transition(kind.Slug, "", state, fields); len(issues) > 0 {
+		issues, err := benefitTransition(ctx, tx, kindID, kind.Slug, "", state, fields)
+		if err != nil {
+			return err
+		}
+		if len(issues) > 0 {
 			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
 		if parentID != nil {
@@ -356,10 +367,10 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node = loaded
-		if kind.Slug == "ticket" {
+		if kind.Slug == "work" || kind.Slug == "ticket" {
 			node.Warnings = ticketbenefits.Issues(fields)
 		}
-		if p.Kind == tenant.Agent && (kind.Slug == "ticket" || kind.Slug == "task") {
+		if p.Kind == tenant.Agent && (kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task") {
 			var f map[string]any
 			_ = json.Unmarshal(fields, &f)
 			if f["estimate_hours"] == nil {
@@ -371,7 +382,10 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node.Estimate = views[loaded.ID]
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }
@@ -425,6 +439,11 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return badRequest("rename tags through /api/tags/{tagId}")
 			}
 		}
+		if _, statusWrite := raw["state"]; statusWrite {
+			if err := requireLeafStatusWrite(ctx, tx, id); err != nil {
+				return err
+			}
+		}
 		// Compare after SELECT FOR UPDATE, so competing patches cannot both
 		// consume the same timestamp. Advance even on equal clock readings.
 		if expected != nil && !current.UpdatedAt.Equal(*expected) {
@@ -441,7 +460,10 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return err
 			}
 			node.Estimate = views[id]
-			return loadQueueProjection(ctx, tx, &node)
+			if err := loadQueueProjection(ctx, tx, &node); err != nil {
+				return err
+			}
+			return enrichNodes(ctx, tx, []*nodeJSON{&node})
 		}
 		if hours, ok := raw["estimate_hours"]; ok {
 			if _, replaces := raw["fields"]; replaces {
@@ -528,8 +550,8 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		nextCheck := current.HumanCheck
 		rawCheck, checkChanged := raw["human_check"]
 		if checkChanged {
-			if kind.Slug != "ticket" && kind.Slug != "task" {
-				return badRequest("human_check is for tickets and tasks")
+			if kind.Slug != "work" && kind.Slug != "ticket" && kind.Slug != "task" {
+				return badRequest("human_check is for work items, tickets and tasks")
 			}
 			nextCheck, err = parseHumanCheck(rawCheck)
 			if err != nil {
@@ -537,7 +559,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			sets = append(sets, "human_check = "+add(nextCheck))
 		}
-		if kind.Slug == "ticket" || kind.Slug == "task" {
+		if kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task" {
 			nextFields, err = humanCheckFields(p, nextFields, current.Fields, current.HumanCheck, nextCheck, checkChanged)
 			if err != nil {
 				return err
@@ -546,14 +568,12 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		if _, fieldsChanged := raw["fields"]; fieldsChanged || checkChanged {
 			sets = append(sets, "fields = "+add(string(nextFields))+"::jsonb")
 		}
-		if ticketbenefits.Completed(nextState) && !ticketbenefits.Completed(current.State) {
-			kind, _, err := loadKind(ctx, tx, current.KindID)
-			if err != nil {
-				return err
-			}
-			if issues := ticketbenefits.Transition(kind.Slug, current.State, nextState, nextFields); len(issues) > 0 {
-				return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
-			}
+		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, nextFields)
+		if err != nil {
+			return err
+		}
+		if len(issues) > 0 {
+			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 		}
 		if _, hasState := raw["state"]; hasState && workqueue.Terminal(nextState) {
 			if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
@@ -579,7 +599,10 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		node.Estimate = views[id]
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, dbErr("update node", err)
 }
@@ -723,7 +746,10 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 			return err
 		}
 		node = loaded
-		return loadQueueProjection(ctx, tx, &node)
+		if err := loadQueueProjection(ctx, tx, &node); err != nil {
+			return err
+		}
+		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	})
 	return node, err
 }

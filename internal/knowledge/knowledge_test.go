@@ -150,7 +150,7 @@ func setup(t *testing.T) fixture {
 	}
 	f.project = node(tenants[0], "PRJ-1", "project", "Pharos", nil)
 	f.other = node(tenants[0], "PRJ-2", "project", "Glint", nil)
-	f.ticket = node(tenants[0], "PHAROS-7", "ticket", "Rotate the fleet keys", &f.project)
+	f.ticket = node(tenants[0], "PHAROS-7", "work", "Rotate the fleet keys", &f.project)
 	f.elsewhere = node(tenants[1], "PRJ-1", "project", "Theirs", nil)
 	f.handler = (&httpapi.Server{Pool: d.App, Modules: []httpapi.Module{New(d.App), events.New(d.App, events.WithUndoHandlers(UndoHandlers()))}}).Handler()
 	return f
@@ -441,7 +441,7 @@ func TestLinksAuthorAndImportedEntries(t *testing.T) {
 			runbook = &got.Links[i]
 		}
 	}
-	if ticket == nil || ticket.Type != "cites" || ticket.Direction != "out" || ticket.Node.Key != "PHAROS-7" || ticket.Node.Kind != "ticket" || ticket.Node.Slug != "" || *ticket.Node.ProjectID != f.project {
+	if ticket == nil || ticket.Type != "cites" || ticket.Direction != "out" || ticket.Node.Key != "PHAROS-7" || ticket.Node.Kind != "work" || ticket.Node.Slug != "" || *ticket.Node.ProjectID != f.project {
 		t.Fatalf("ticket link %+v", ticket)
 	}
 	if runbook == nil || runbook.Node.Type != "runbook" || runbook.Node.Slug != "rotate-keys" {

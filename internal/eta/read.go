@@ -13,6 +13,14 @@ import (
 
 // View is one ticket's estimate. Empty fields stay unset so clients omit them.
 type View struct {
+	LeafCount         int        `json:"leaf_count"`
+	EstimatedLeaves   int        `json:"estimated_leaves"`
+	ProgressBasis     string     `json:"progress_basis"`
+	OpenLeaves        int        `json:"open_leaves"`
+	ReadyLeaves       int        `json:"ready_leaves"`
+	LiveLeaves        int        `json:"live_leaves"`
+	ReadyPartial      bool       `json:"ready_partial"`
+	LivePartial       bool       `json:"live_partial"`
 	HasWorkingSession bool       `json:"has_working_session,omitempty"`
 	ReadyAt           *time.Time `json:"eta_ready_at,omitempty"`
 	LiveAt            *time.Time `json:"eta_live_at,omitempty"`
@@ -37,64 +45,89 @@ func (v View) Blank() bool {
 	return v.ReadyAt == nil && v.LiveAt == nil && v.Progress == nil && !v.HasWorkingSession && !v.Finished
 }
 
-const workingSessionSQL = `EXISTS(SELECT 1 FROM harness_sessions s
-	JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id=s.ticket_node_id AND n.project_id=s.project_id
-	WHERE s.ticket_node_id=u.id AND n.deleted_at IS NULL AND s.phase='working'
-	AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.role IN ('worker','coordinator'))`
-
 // CompletionJoin is the worker that left the ticket last, when nobody is on it any more,
 // as a LEFT JOIN LATERAL named alias over the ticket id expression idExpr. A finished
 // worker's estimate is not kept, so completion is read through aeon_node_completion,
-// the same projection used by the recursive epic roll-up.
+// the same projection used by the leaf aggregate.
 func CompletionJoin(idExpr, alias string) string {
 	return `LEFT JOIN LATERAL aeon_node_completion(` + idExpr + `) ` + alias + ` ON true`
 }
 
 // ProgressSQL is the one projection of a ticket's progress: the open sessions'
-// percent or recursive epic roll-up from aeon_node_eta_progress (etaAlias), or
+// percent or leaf roll-up from the ETA aggregate (etaAlias), or
 // 100 when the last worker finished (CompletionJoin as completionAlias). The
 // ticket list displays it and sorts by it, so the order is the number on screen.
 func ProgressSQL(etaAlias, completionAlias string) string {
 	return `CASE WHEN coalesce(` + completionAlias + `.finished, false) THEN 100 ELSE ` + etaAlias + `.progress_pct END`
 }
 
-var (
-	lastWorkerSQL   = CompletionJoin("u.id", "done")
-	estimateColumns = `e.eta_ready_at, e.eta_live_at, ` + ProgressSQL("e", "done") + `,
-		e.ready_reported_at, e.live_reported_at, e.ready_by, e.live_by, e.ready_stale, e.live_stale, ` + workingSessionSQL + `,
-		coalesce(done.finished, false), CASE WHEN done.finished THEN done.stopped_at END, CASE WHEN done.finished THEN done.by END`
-)
+const estimateColumns = `e.eta_ready_at,e.eta_live_at,e.progress_pct,
+ e.ready_reported_at,e.live_reported_at,e.ready_by,e.live_by,e.ready_stale,e.live_stale,e.has_working_session,
+ e.finished,e.finished_at,e.finished_by,e.leaf_count,e.estimated_leaves,e.progress_basis,e.open_leaves,e.ready_leaves,e.live_leaves`
 
-// Load reads estimates for the page. Ids with no report are absent.
-func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error) {
-	out := map[string]View{}
+// Aggregate is one scope's leaf totals and ETA, read in one traversal. Its
+// planned hours and author refer to the root, never to an arbitrary leaf.
+type Aggregate struct {
+	View
+	Hours          *float64
+	PlannedHours   *float64
+	IsParent       bool
+	EstimateByID   *string
+	EstimateByName *string
+}
+
+// AggregateReadTimeout also covers detail reads, which have no list middleware.
+const AggregateReadTimeout = 5 * time.Second
+
+func LoadAggregates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]Aggregate, error) {
+	ctx, cancel := context.WithTimeout(ctx, AggregateReadTimeout)
+	defer cancel()
+	out := map[string]Aggregate{}
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT u.id::text, `+estimateColumns+`
-		FROM unnest($1::uuid[]) AS u(id)
-		CROSS JOIN LATERAL aeon_node_eta_progress(u.id) e `+lastWorkerSQL, ids)
+	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+`,e.hours::float8,e.planned_hours::float8,e.is_parent,author.id::text,author.name
+ FROM aeon_work_aggregates($1::uuid[]) e
+ JOIN nodes n ON n.id=e.id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid
+ LEFT JOIN principals author ON author.tenant_id=n.tenant_id AND author.id=CASE
+ WHEN n.fields->>'estimate_by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+ THEN (n.fields->>'estimate_by')::uuid END`, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		view, err := scanView(rows, &id)
+		var a Aggregate
+		a.View, err = scanView(rows, &id, &a.Hours, &a.PlannedHours, &a.IsParent, &a.EstimateByID, &a.EstimateByName)
 		if err != nil {
 			return nil, err
 		}
-		if !view.Blank() {
-			out[id] = view
-		}
+		out[id] = a
 	}
 	return out, rows.Err()
 }
 
+// Load reads estimates for the page. Ids with no report are absent.
+func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error) {
+	aggregates, err := LoadAggregates(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]View{}
+	for id, a := range aggregates {
+		if !a.Blank() {
+			out[id] = a.View
+		}
+	}
+	return out, nil
+}
+
 // One reads a single node's estimate. A blank view means nothing is known.
 func One(ctx context.Context, tx pgx.Tx, id string) (View, error) {
-	rows, err := tx.Query(ctx, `SELECT $1::text, `+estimateColumns+`
-		FROM (SELECT $1::uuid AS id) u CROSS JOIN LATERAL aeon_node_eta_progress(u.id) e `+lastWorkerSQL, id)
+	ctx, cancel := context.WithTimeout(ctx, AggregateReadTimeout)
+	defer cancel()
+	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+` FROM aeon_work_aggregates(ARRAY[$1::uuid]) e`, id)
 	if err != nil {
 		return View{}, err
 	}
@@ -106,15 +139,18 @@ func One(ctx context.Context, tx pgx.Tx, id string) (View, error) {
 	return scanView(rows, &got)
 }
 
-func scanView(rows pgx.Rows, id *string) (View, error) {
+func scanView(rows pgx.Rows, id *string, extra ...any) (View, error) {
 	var view View
 	var progress *int
 	var readyBy, liveBy, finishedBy *string
-	err := rows.Scan(id, &view.ReadyAt, &view.LiveAt, &progress, &view.ReadyReportedAt, &view.LiveReportedAt, &readyBy, &liveBy, &view.ReadyStale, &view.LiveStale, &view.HasWorkingSession,
-		&view.Finished, &view.FinishedAt, &finishedBy)
+	dest := []any{id, &view.ReadyAt, &view.LiveAt, &progress, &view.ReadyReportedAt, &view.LiveReportedAt, &readyBy, &liveBy, &view.ReadyStale, &view.LiveStale, &view.HasWorkingSession,
+		&view.Finished, &view.FinishedAt, &finishedBy, &view.LeafCount, &view.EstimatedLeaves, &view.ProgressBasis, &view.OpenLeaves, &view.ReadyLeaves, &view.LiveLeaves}
+	err := rows.Scan(append(dest, extra...)...)
 	if err != nil {
 		return View{}, err
 	}
+	view.ReadyPartial = view.ReadyLeaves < view.OpenLeaves
+	view.LivePartial = view.LiveLeaves < view.OpenLeaves
 	view.Progress = progress
 	if view.Finished && finishedBy != nil {
 		view.FinishedBy = *finishedBy

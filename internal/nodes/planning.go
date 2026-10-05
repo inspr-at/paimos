@@ -26,12 +26,10 @@ import (
 // it, and, for callers who may see usage (harness.read on the row's project),
 // what those tokens cost at API list prices and what was actually paid.
 //
-// Spent covers the node's own sessions and those of its ticket and task
-// children and grandchildren that are not cancelled or archived: an epic rolls
-// up its open and done children, a ticket includes its tasks. Tokens are
-// input plus output; cached input is part of input. Estimated is
-// estimate_hours × the route's tokens per hour; an epic sums its open and done
-// ticket and task children.
+// Spent covers all historical sessions in the work subtree, each once per
+// scope, including former leaves and closed work. Tokens are input plus output;
+// cached input is part of input. Estimated is estimate_hours × the route's
+// tokens per hour; parents sum non-archived, non-cancelled leaves at any depth.
 const (
 	// Tokens per hour is the median over the last calibrationWindow finished
 	// tickets whose main session ran on the route, once calibrationMinimum
@@ -137,39 +135,21 @@ func planningStatesCTE() string {
 // planningOpenChild joins kind and state for child alias c: a ticket or task
 // that is not cancelled or archived.
 func planningOpenChild(c string) string {
-	return ` JOIN node_kinds ` + c + `k ON ` + c + `k.tenant_id=` + c + `.tenant_id AND ` + c + `k.id=` + c + `.kind_id AND ` + c + `k.slug IN ('ticket','task')
+	return ` JOIN node_kinds ` + c + `k ON ` + c + `k.tenant_id=` + c + `.tenant_id AND ` + c + `k.id=` + c + `.kind_id AND ` + c + `k.slug IN ('work','ticket','task')
     LEFT JOIN plan_states ` + c + `s ON ` + c + `s.kind_id=` + c + `.kind_id AND ` + c + `s.norm=` + workStateNormSQL(c+".state")
 }
 func planningOpenWhere(c string) string {
 	return c + `.deleted_at IS NULL AND ` + workCountBucketSQL(c+".state", c+"s") + ` NOT IN ('cancelled','archived')`
 }
 
-// planningSubtreeSQL lists (root, id) for each root in the relation roots
-// (one uuid column named root): the root, its open or done ticket and task
-// children, and theirs. Needs plan_states in scope.
+// planningSubtreeSQL lists each historical work node once per requested root.
+// The page flag is retained for the shared caller interface; scope traversal
+// applies the same rules to pages and aggregate sorts.
 func planningSubtreeSQL(roots string, page bool) string {
-	tenant := `current_setting('aeon.tenant_id')::uuid`
-	child := func(parent, alias string) string {
-		if !page {
-			// Whole-list sorts keep batch joins; listNodes disables nested loops for
-			// their usage read, so a per-parent fence would defeat that plan.
-			return ` JOIN nodes ` + alias + ` ON ` + alias + `.tenant_id=` + tenant + ` AND ` + alias + `.parent_id=` + parent
-		}
-		// Keep page lookups dependent on their selected parent. Filter live rows
-		// here so the partial parent index applies; its order also handles skewed
-		// parent estimates without rescanning the tenant's tickets per page root.
-		return ` CROSS JOIN LATERAL (
-   SELECT id,tenant_id,kind_id,state,deleted_at FROM nodes
-   WHERE tenant_id=` + tenant + ` AND parent_id=` + parent + ` AND deleted_at IS NULL
-   ORDER BY updated_at DESC OFFSET 0
-  ) ` + alias
-	}
-	return `SELECT r.root, r.root AS id FROM (` + roots + `) r
- UNION ALL SELECT r.root, c.id FROM (` + roots + `) r` + child("r.root", "c") + planningOpenChild("c") + `
- WHERE ` + planningOpenWhere("c") + `
- UNION ALL SELECT r.root, g.id FROM (` + roots + `) r` + child("r.root", "c") + planningOpenChild("c") +
-		child("c.id", "g") + planningOpenChild("g") + `
- WHERE ` + planningOpenWhere("c") + ` AND ` + planningOpenWhere("g")
+	// Keep historical spend even when a former leaf gains children or closes.
+	// The scope returns one (root,id) pair, so no session can be counted twice.
+	return `SELECT s.root,s.id FROM aeon_work_scope(ARRAY(SELECT root FROM (` + roots + `) requested)) s
+ WHERE s.kind_slug IN ('work','ticket','task','epic')`
 }
 
 // planningUsageFrom joins the sessions of subtree t (columns root, id) to
@@ -216,7 +196,7 @@ func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 	if err != nil {
 		return err
 	}
-	pl, err := newPlanningPlanner(ctx, tx, q.seen, seeds)
+	pl, err := newPlanningPlanner(ctx, tx, q.seen, seeds, true)
 	if err != nil {
 		return err
 	}
@@ -232,24 +212,27 @@ func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 // planningRates is the JSON the cost statements multiply. Sort and display
 // both read it, so an estimate is one product, not two.
 func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow) (json.RawMessage, error) {
-	pl, err := newPlanningPlanner(ctx, tx, seen, seeds)
+	pl, err := newPlanningPlanner(ctx, tx, seen, seeds, true)
 	if err != nil {
 		return nil, err
 	}
 	return pl.rates(ctx, tx)
 }
 
-func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow) (*planner, error) {
+func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow, estimates bool) (*planner, error) {
 	routes, err := resolvePlanRoutes(ctx, tx, seeds)
 	if err != nil {
 		return nil, err
 	}
-	samples, err := loadCalibrationSamples(ctx, tx, routes, seen.costVisible)
-	if err != nil {
-		return nil, err
+	var samples []calibrationSample
+	if estimates {
+		samples, err = loadCalibrationSamples(ctx, tx, routes, seen.costVisible)
+		if err != nil {
+			return nil, err
+		}
 	}
 	billing := map[string]planBilling{}
-	if len(routes) > 0 {
+	if estimates && len(routes) > 0 {
 		if billing, err = loadPlanBilling(ctx, tx, routes, seen); err != nil {
 			return nil, err
 		}
@@ -259,8 +242,10 @@ func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds
 		placements[seed.placementKey()] = seed
 	}
 	pl := &planner{placements: placements, routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
-	if err := pl.loadLearning(ctx, tx, seen.costVisible); err != nil {
-		return nil, err
+	if estimates {
+		if err := pl.loadLearning(ctx, tx, seen.costVisible); err != nil {
+			return nil, err
+		}
 	}
 	return pl, nil
 }
@@ -766,7 +751,7 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 		}
 	}
 	var e planEstimate
-	if self.kind == "epic" {
+	if self.kind == "parent" || self.kind == "epic" {
 		var counts planningChildren
 		e, counts = pl.epicEstimate(kids)
 		if counts.Total > 0 {
@@ -851,7 +836,7 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 	cost := seen.costVisible
 	var ids []string
 	for _, item := range items {
-		if item.KindSlug == "ticket" || item.KindSlug == "task" || item.KindSlug == "epic" {
+		if item.KindSlug == "work" || item.KindSlug == "ticket" || item.KindSlug == "task" || item.KindSlug == "epic" {
 			ids = append(ids, item.ID)
 		}
 	}
@@ -867,9 +852,18 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 	if err != nil {
 		return nil, err
 	}
-	models, running, err := loadPlanningModels(ctx, tx, ids)
-	if err != nil {
-		return nil, err
+	// Usage and model readers share the same session scope and visibility.
+	// With no sessions, there are no model identities or running counts to read.
+	models, running := map[string][]planningModel{}, map[string]int{}
+	if len(usage) > 0 {
+		models, running, err = loadPlanningModels(ctx, tx, ids)
+		if err != nil {
+			return nil, err
+		}
+	}
+	needsEstimates := false
+	for _, row := range rows {
+		needsEstimates = needsEstimates || row.hours != nil
 	}
 	visible := func(item listItem) bool { return item.Project != nil && cost(item.Project.ID) }
 	var pl *planner
@@ -877,7 +871,9 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		pl = shared[0]
 	}
 	if pl == nil {
-		pl, err = newPlanningPlanner(ctx, tx, seen, rows)
+		// With no sized leaves, calibration cannot contribute any displayed
+		// estimate. Still resolve routes and load historical usage normally.
+		pl, err = newPlanningPlanner(ctx, tx, seen, rows, needsEstimates)
 		if err != nil {
 			return nil, err
 		}
@@ -886,7 +882,7 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		money = map[string]planMicros{}
 		// Without usage or estimated hours there are no monetary values to
 		// compute. Still read routes, models and snapshots for the page.
-		if len(usage) > 0 || slices.ContainsFunc(rows, func(r planRow) bool { return r.hours != nil }) {
+		if len(usage) > 0 || needsEstimates {
 			money, err = loadPlanMicros(ctx, tx, ids, seen, pl)
 			if err != nil {
 				return nil, err
@@ -948,7 +944,7 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		pl, err = newPlanningPlanner(ctx, tx, seen, seeds)
+		pl, err = newPlanningPlanner(ctx, tx, seen, seeds, true)
 		if err != nil {
 			return nil, err
 		}
@@ -969,7 +965,7 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
         FROM nodes n
         JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
         WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
-            AND n.id = ANY($1::uuid[]) AND k.slug IN ('ticket','task','epic')
+            AND n.id = ANY($1::uuid[]) AND k.slug IN ('work','ticket','task','epic')
     )`+planningSortSQL("$2", "$3", "$4", true)+`
     SELECT id::text, `+usdMicrosTextSQL("list_spent_micros")+`, `+usdMicrosTextSQL("list_est_micros")+`, `+usdMicrosTextSQL("paid_spent_micros")+`, `+usdMicrosTextSQL("paid_est_micros")+`
     FROM planning_values`, ids, string(rates), seen.harnessAll, projects)
@@ -992,19 +988,21 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 	return out, rows.Err()
 }
 
-// loadPlanRows reads each row's placement and hours, including the open and
-// done ticket and task children of page epics. A nil viewer is the snapshot path.
+// loadPlanRows reads root placement and hours plus eligible leaf placements
+// at any depth. A nil viewer is the snapshot path.
 func loadPlanRows(ctx context.Context, tx pgx.Tx, ids []string, viewer *string) ([]planRow, error) {
 	hours := estimateHoursSQL("n.fields")
-	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`
-    SELECT n.id::text, '' AS parent, k.slug, `+hours+`::float8, `+planPlacementColumns("$2")+`
-    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`+assigneeJoin+`
-    WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL
+	rows, err := tx.Query(ctx, `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope($1::uuid[]))
+    SELECT n.id::text, '' AS parent, CASE WHEN NOT t.is_leaf THEN 'parent' ELSE k.slug END,
+    `+hours+`::float8, `+planPlacementColumns("$2")+`
+    FROM scope t JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=t.id
+    JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`+assigneeJoin+`
+    WHERE t.root=t.id
     UNION ALL
-    SELECT n.id::text, e.id::text, nk.slug, `+hours+`::float8, `+planPlacementColumns("$2")+`
-    FROM nodes e JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id AND ek.slug='epic'
-    JOIN nodes n ON n.tenant_id=e.tenant_id AND n.parent_id=e.id`+planningOpenChild("n")+assigneeJoin+`
-    WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ANY($1::uuid[]) AND `+planningOpenWhere("n"), ids, viewer)
+    SELECT n.id::text, t.root::text, k.slug, `+hours+`::float8, `+planPlacementColumns("$2")+`
+    FROM scope t JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=t.id
+    JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`+assigneeJoin+`
+    WHERE t.id<>t.root AND t.is_leaf AND t.bucket NOT IN ('cancelled','archived')`, ids, viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -1189,8 +1187,10 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
             LEFT JOIN plan_rates anyr ON anyr.placement = ''`
 	return `, ` + planningStatesCTE() + `, ` + planningPricesCTE() + `, plan_rates AS (
         SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(calibrated boolean, role text, placement text, project text, person text, kind text, bucket text, residency text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
+    ), plan_scope AS MATERIALIZED (
+        SELECT * FROM aeon_work_scope(ARRAY(SELECT f.id FROM filtered f WHERE f.kind_slug IN ('work','ticket','task','epic')))
     ), plan_sub AS MATERIALIZED (
-        ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`, pageUsage) + `
+        SELECT root,id FROM plan_scope WHERE kind_slug IN ('work','ticket','task','epic')
     ), plan_placements AS MATERIALIZED (
         SELECT n.id, ` + placementKeySQL("pk") + ` AS placement
         FROM (SELECT DISTINCT id FROM plan_sub) target
@@ -1240,15 +1240,16 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
         FROM plan_lines GROUP BY id
     ), plan_own AS MATERIALIZED (
         SELECT base.id, rated.calibrated,
-            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN round(rated.hours * rated.tokens_per_hour)::bigint END AS tokens,
-            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.list_per_hour`) + ` END AS list_micros,
-            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.paid_per_hour`) + ` END AS paid_micros
+            CASE WHEN base.is_leaf AND rated.hours IS NOT NULL THEN round(rated.hours * rated.tokens_per_hour)::bigint END AS tokens,
+            CASE WHEN base.is_leaf AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.list_per_hour`) + ` END AS list_micros,
+            CASE WHEN base.is_leaf AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.paid_per_hour`) + ` END AS paid_micros
         FROM (
-            SELECT f.id, f.kind_slug, ` + estimateHoursSQL("nd.fields") + ` AS hours, pp.placement
+            SELECT f.id, f.kind_slug, own.is_leaf, ` + estimateHoursSQL("nd.fields") + ` AS hours, pp.placement
             FROM filtered f
             JOIN nodes nd ON nd.tenant_id=current_setting('aeon.tenant_id')::uuid AND nd.id=f.id
             JOIN plan_placements pp ON pp.id=f.id
-            WHERE f.kind_slug IN ('ticket','task','epic')
+            JOIN plan_scope own ON own.root=f.id AND own.id=f.id
+            WHERE f.kind_slug IN ('work','ticket','task','epic')
         ) base
         JOIN LATERAL (
             SELECT ` + rateCols + ` FROM (SELECT base.hours, base.placement) raw` + rateJoin + `
@@ -1259,30 +1260,30 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
             ` + usdMicrosSQL(`sum(r.hours * r.list_per_hour) FILTER (WHERE r.calibrated AND r.hours IS NOT NULL AND r.list_per_hour IS NOT NULL)`) + ` AS list_micros,
             ` + usdMicrosSQL(`sum(r.hours * r.paid_per_hour) FILTER (WHERE r.calibrated AND r.hours IS NOT NULL AND r.paid_per_hour IS NOT NULL)`) + ` AS paid_micros
         FROM filtered e
-        JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=e.id AND c.deleted_at IS NULL
-        JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id AND ck.slug IN ('ticket','task')
-        LEFT JOIN plan_states cs ON cs.kind_id=c.kind_id AND cs.norm=` + workStateNormSQL("c.state") + `
+        JOIN plan_scope leaf ON leaf.root=e.id AND leaf.id<>e.id AND leaf.is_leaf
+        JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.id=leaf.id
         JOIN plan_placements pp ON pp.id=c.id
         JOIN LATERAL (
             SELECT ` + rateCols + `
             FROM (SELECT ` + estimateHoursSQL("c.fields") + ` AS hours, pp.placement) raw` + rateJoin + `
         ) r ON true
-        WHERE e.kind_slug='epic' AND ` + workCountBucketSQL("c.state", "cs") + ` NOT IN ('cancelled','archived')
+        WHERE leaf.bucket NOT IN ('cancelled','archived')
         GROUP BY e.id
     ), planning_values AS MATERIALIZED (
         SELECT f.id,
-            coalesce(u.tokens, CASE WHEN f.kind_slug='epic' THEN ch.tokens WHEN o.calibrated THEN o.tokens END) AS tokens,
+            coalesce(u.tokens, CASE WHEN NOT own.is_leaf THEN ch.tokens WHEN o.calibrated THEN o.tokens END) AS tokens,
             CASE WHEN ` + rowVisible + ` THEN u.list_micros END AS list_spent_micros,
-            CASE WHEN ` + rowVisible + ` THEN CASE WHEN f.kind_slug='epic' THEN ch.list_micros ELSE o.list_micros END END AS list_est_micros,
+            CASE WHEN ` + rowVisible + ` THEN CASE WHEN NOT own.is_leaf THEN ch.list_micros ELSE o.list_micros END END AS list_est_micros,
             CASE WHEN ` + rowVisible + ` THEN u.paid_micros END AS paid_spent_micros,
-            CASE WHEN ` + rowVisible + ` THEN CASE WHEN f.kind_slug='epic' THEN ch.paid_micros ELSE o.paid_micros END END AS paid_est_micros,
-            CASE WHEN ` + rowVisible + ` THEN coalesce(u.list_micros, CASE WHEN f.kind_slug='epic' THEN ch.list_micros WHEN o.calibrated THEN o.list_micros END) END AS list_micros,
-            CASE WHEN ` + rowVisible + ` THEN coalesce(u.paid_micros, CASE WHEN f.kind_slug='epic' THEN ch.paid_micros WHEN o.calibrated THEN o.paid_micros END) END AS paid_micros
+            CASE WHEN ` + rowVisible + ` THEN CASE WHEN NOT own.is_leaf THEN ch.paid_micros ELSE o.paid_micros END END AS paid_est_micros,
+            CASE WHEN ` + rowVisible + ` THEN coalesce(u.list_micros, CASE WHEN NOT own.is_leaf THEN ch.list_micros WHEN o.calibrated THEN o.list_micros END) END AS list_micros,
+            CASE WHEN ` + rowVisible + ` THEN coalesce(u.paid_micros, CASE WHEN NOT own.is_leaf THEN ch.paid_micros WHEN o.calibrated THEN o.paid_micros END) END AS paid_micros
         FROM filtered f
         LEFT JOIN plan_usage_agg u ON u.id=f.id
         LEFT JOIN plan_own o ON o.id=f.id
         LEFT JOIN plan_child_est ch ON ch.id=f.id
-        WHERE f.kind_slug IN ('ticket','task','epic')
+        JOIN plan_scope own ON own.root=f.id AND own.id=f.id
+        WHERE f.kind_slug IN ('work','ticket','task','epic')
     )`
 }
 
@@ -1296,6 +1297,9 @@ func calibrationSampleSQL() string {
         SELECT n.id, n.updated_at FROM nodes n` + planningOpenChild("n") + `
         WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
             AND ` + workCountBucketSQL("n.state", "ns") + `='done'
+            AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+             WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL
+              AND ck.slug IN ('work','ticket','task','epic'))
     ), vis AS (
         SELECT s.ticket_node_id AS ticket, s.id AS session, s.harness,
             coalesce(s.model,'') AS session_model,

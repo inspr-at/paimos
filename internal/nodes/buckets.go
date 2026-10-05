@@ -4,19 +4,18 @@ package nodes
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/fieldschema"
 	"github.com/inspr-at/paimos/internal/workstate"
 )
 
 // workStateSep matches the spaces and hyphens collapsed by workStateNormSQL.
-var workStateSep = regexp.MustCompile(`[[:space:]-]+`)
 
 // normaliseWorkState matches workStateNormSQL: trim, lowercase, and collapse
 // each run of spaces or hyphens to one underscore.
 func normaliseWorkState(state string) string {
-	return workStateSep.ReplaceAllString(strings.ToLower(strings.TrimSpace(state)), "_")
+	return fieldschema.NormaliseWorkState(state)
 }
 
 // Existing node queries and recurrence readers share the same SQL definitions.

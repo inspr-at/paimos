@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import { expect, test, type Page, type Route } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, type Call, type MockNode } from './work-fixtures'
 import { journeyWorld, mockJourney, PROJECT, type JourneyWorld } from './journey-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const shots = resolve('..', '.agent-shots')
 type Option = {
@@ -177,7 +178,7 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       walker.revision += 1
       const release = world.releases.find(item => item.id === releaseId)
       remember(ids, releaseId, release?.title ?? 'Release')
-      return route.fulfill({ json: { walker, event_id: 81 } })
+      return route.fulfill({ json: { walker, event_id: 81, leaf_node_ids: ids } })
     }
     if (path === `/api/projects/${PROJECT}/journey/actions` && method === 'POST' && (body.action === 'plan_next_release' || body.action === 'open_first_release') && Array.isArray(body.ticket_node_ids)) {
       record()
@@ -273,8 +274,8 @@ test('Plan adds three existing tickets in one go and Start build counts them', a
   for (const key of ['PHAROS-21', 'PHAROS-22', 'PHAROS-23']) {
     await dialog.getByRole('checkbox', { name: `Select ${key}` }).check()
   }
-  await dialog.getByRole('button', { name: 'Add 3 tickets' }).click()
-  await expect(page.locator('.toast').filter({ hasText: 'Added 3 tickets to release 2.' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add selected' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Added 3 leaves to release 2.' })).toBeVisible()
   await expect(page.locator('.j-count')).toContainText('5 in release')
   for (const key of ['PHAROS-21', 'PHAROS-22', 'PHAROS-23']) {
     await expect(page.getByRole('checkbox', { name: `${key} in the release` })).toBeChecked()
@@ -286,6 +287,70 @@ test('Plan adds three existing tickets in one go and Start build counts them', a
   expect(errors).toEqual([])
 })
 
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`existing parent picker counts leaves ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.addInitScript(value => {
+      const apply = () => { document.documentElement.dataset.theme = value }
+      if (document.documentElement) apply()
+      else document.addEventListener('DOMContentLoaded', apply, { once: true })
+    }, theme)
+    const errors = watchErrors(page)
+    await mockWork(page, fixtures())
+    const world = journeyWorld('plan')
+    await mockJourney(page, world)
+    const calls = await install(page, world)
+    const parent = { ...OPTIONS[0], ticket_node_id: 'parent', key: 'PHAROS-91', type: 'work', is_parent: true,
+      title: 'Wiederkehrende Sicherheitsprüfung und Veröffentlichung der abgestimmten Verbesserungen' }
+    const overlap = { ...OPTIONS[1], ticket_node_id: 'leaf-b', type: 'work' }
+    await page.route('**/ticket-options*', route => route.fulfill({ json: { expected_revision: 7, tickets: [parent, overlap] } }))
+    const writes: Record<string, unknown>[] = []
+    await page.route('**/releases/*/membership', async route => {
+      const body = route.request().postDataJSON()
+      writes.push(body)
+      if (theme === 'dark' && !body.confirm_move) return route.fulfill({ status: 409, json: { error: 'confirm_move required' } })
+      return route.fulfill({ json: { walker: world.walkers['r-2'], event_id: 81, leaf_node_ids: ['leaf-a', 'leaf-b', 'leaf-c', 'leaf-b'] } })
+    })
+    await page.goto('/p/PHAROS/journey')
+    await page.getByRole('button', { name: 'Add existing' }).click()
+    const picker = page.getByRole('dialog', { name: 'Add existing tickets' })
+    const list = picker.getByRole('listbox', { name: 'Existing tickets' })
+    const parentRow = list.getByRole('option').filter({ hasText: 'PHAROS-91' })
+    const leafRow = list.getByRole('option').filter({ hasText: overlap.key })
+    const add = picker.getByRole('button', { name: 'Add selected' })
+    await expect(parentRow).toBeVisible()
+    await expectStableControls({
+      controls: { add, cancel: picker.getByRole('button', { name: 'Cancel' }), search: picker.getByLabel('Find a ticket'),
+        status: picker.getByLabel('Status', { exact: true }), epic: picker.getByLabel('Epic', { exact: true }),
+        type: picker.getByLabel('Type', { exact: true }), list, parentRow, leafRow,
+        selectAll: picker.getByRole('button', { name: 'Select all 2' }), ...(width === 390 ? { frame: picker } : {}) },
+      scrollAreas: { picker, list },
+      interactions: [
+        { name: 'select parent', run: async () => { await parentRow.click(); await expect(parentRow).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'select overlapping leaf', run: async () => { await leafRow.click(); await expect(leafRow).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'remove overlapping leaf', run: async () => { await leafRow.click(); await expect(leafRow).toHaveAttribute('aria-selected', 'false') } },
+      ],
+    })
+    if (width !== 390) await leafRow.click()
+    const evidence = resolve('test-results/aeon-653-wn-fix8')
+    mkdirSync(evidence, { recursive: true })
+    await page.screenshot({ path: resolve(evidence, `existing-parent-picker-${width}-${theme}.png`), animations: 'disabled' })
+    await add.click()
+    if (theme === 'dark') {
+      const confirm = page.getByRole('dialog', { name: 'Move into this release?' })
+      await confirm.getByRole('button', { name: 'Move into Release 2' }).click()
+    }
+    await expect(picker).toHaveCount(0)
+    await expect(page.locator('.toast').filter({ hasText: 'Added 3 leaves to release 2.' })).toBeVisible()
+    expect(writes).toHaveLength(theme === 'dark' ? 2 : 1)
+    expect(writes.at(-1)).toMatchObject({ ticket_node_ids: width === 390 ? ['parent'] : ['parent', 'leaf-b'], confirm_move: theme === 'dark' })
+    await page.screenshot({ path: resolve(evidence, `existing-parent-added-${width}-${theme}.png`), animations: 'disabled' })
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+    expect(errors).toEqual([])
+  })
+}
+
 test('a ticket in another open release is moved only after confirmation', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
@@ -296,12 +361,12 @@ test('a ticket in another open release is moved only after confirmation', async 
   await page.getByRole('button', { name: 'Add existing' }).click()
   const dialog = page.getByRole('dialog', { name: 'Add existing tickets' })
   await dialog.getByRole('checkbox', { name: 'Select PHAROS-24' }).check()
-  await dialog.getByRole('button', { name: 'Add 1 ticket' }).click()
+  await dialog.getByRole('button', { name: 'Add selected' }).click()
   const confirm = page.getByRole('dialog', { name: 'Move PHAROS-24?' })
   await expect(confirm).toContainText('Release 9')
   await confirm.getByRole('button', { name: 'Leave them' }).click()
   expect(calls.filter(call => call.path.endsWith('/membership'))).toHaveLength(0)
-  await dialog.getByRole('button', { name: 'Add 1 ticket' }).click()
+  await dialog.getByRole('button', { name: 'Add selected' }).click()
   await confirm.getByRole('button', { name: 'Move into Release 2' }).click()
   await expect(page.getByRole('checkbox', { name: 'PHAROS-24 in the release' })).toBeChecked()
   const write = calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))
@@ -662,6 +727,40 @@ test('a replay does not invent a count when membership no longer matches', async
   expect(action).toHaveLength(2)
   expect(action[1].body).toEqual(action[0].body)
   expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
+})
+
+test('parent replay with a backlog leaf does not claim full placement', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures()
+  await mockWork(page, data)
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { loseCreate: true })
+  await page.route('**/api/projects/*/release-memberships*', async route => {
+    const ids = new URL(route.request().url()).searchParams.getAll('ticket_node_id')
+    await route.fulfill({ json: { tickets: ids.map(id => ({
+      ticket_node_id: id, is_parent: id === 'n-2', release_count: 1,
+      release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning',
+      leaf_node_ids: id === 'n-2' ? ['assigned', 'backlog'] : [id], assigned_leaf_count: 1,
+    })) } })
+  })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  const add = page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' })
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  advanceCurrentRelease(world)
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not all in one release' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
+  const actions = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(actions).toHaveLength(2)
+  expect(actions[1].body).toEqual(actions[0].body)
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
 })
 
 test('a delayed create on one project does not update the project opened meanwhile', async ({ page }) => {

@@ -16,10 +16,10 @@ import (
 
 func TestTaggerWritesSystemEvent(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-36", "ticket", "Keep the other fields", &f.project)
+	ticket := addNode(t, f, "DONE-36", "work", "Keep the other fields", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "low", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")
-	open := addNode(t, f, "OPEN-36", "ticket", "Incident on an open ticket", &f.project)
+	open := addNode(t, f, "OPEN-36", "work", "Incident on an open ticket", &f.project)
 	addComment(t, f, open, "The incident stayed on the open ticket.")
 
 	n, err := TagOnce(t.Context(), f.db.App)
@@ -101,11 +101,11 @@ func jsonField(t *testing.T, raw []byte, key string) []byte {
 
 func TestTaggerWithoutOutcomeTable(t *testing.T) {
 	f := setup(t)
-	recent := addNode(t, f, "DONE-1", "ticket", "Rotate the tokens", &f.project)
+	recent := addNode(t, f, "DONE-1", "work", "Rotate the tokens", &f.project)
 	closeAged(t, f, recent, "done", "1 hour")
-	stale := addNode(t, f, "DONE-2", "ticket", "Too old to nominate", &f.project)
+	stale := addNode(t, f, "DONE-2", "work", "Too old to nominate", &f.project)
 	closeAged(t, f, stale, "done", "48 hours")
-	open := addNode(t, f, "OPEN-1", "ticket", "Still open", &f.project)
+	open := addNode(t, f, "OPEN-1", "work", "Still open", &f.project)
 	task := addNode(t, f, "TASK-9", "task", "Closed task", &f.project)
 	closeAged(t, f, task, "done", "1 hour")
 
@@ -166,7 +166,7 @@ func TestTaggerWithoutOutcomeTable(t *testing.T) {
 
 func TestTaggerSingleRunner(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "DONE-3", "ticket", "Wait for the lock", &f.project)
+	ticket := addNode(t, f, "DONE-3", "work", "Wait for the lock", &f.project)
 	closeAged(t, f, ticket, "done", "1 hour")
 	conn, err := f.db.App.Acquire(t.Context())
 	if err != nil {
@@ -198,8 +198,8 @@ func TestTaggerBatchCursor(t *testing.T) {
 	previous := taggerBatch
 	taggerBatch = 1
 	t.Cleanup(func() { taggerBatch = previous })
-	older := addNode(t, f, "DONE-4", "ticket", "Older closed ticket", &f.project)
-	newer := addNode(t, f, "DONE-5", "ticket", "Newer closed ticket", &f.project)
+	older := addNode(t, f, "DONE-4", "work", "Older closed ticket", &f.project)
+	newer := addNode(t, f, "DONE-5", "work", "Newer closed ticket", &f.project)
 	closeAged(t, f, older, "done", "2 hours")
 	closeAged(t, f, newer, "done", "1 hour")
 	n, err := TagOnce(t.Context(), f.db.App)
@@ -214,7 +214,7 @@ func TestTaggerBatchCursor(t *testing.T) {
 
 func TestTaggerOutcomeVerdicts(t *testing.T) {
 	f := setup(t)
-	ticket := addNode(t, f, "REV-1", "ticket", "Review the rotation", &f.project)
+	ticket := addNode(t, f, "REV-1", "work", "Review the rotation", &f.project)
 	insertOutcome(t, f, f.project, ticket, `{"verdict":"pass","summary":"The rotation held"}`, "")
 	verdict := addComment(t, f, ticket, "VERDICT pass in the thread.")
 	incident := addComment(t, f, ticket, "The incident page is the source.")

@@ -17,7 +17,7 @@ var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 var slugRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func Bounds(v url.Values) error {
-	for _, key := range []string{"kind", "state", "work_state", "priority", "assignee", "tag", "cost_unit", "human_check", "epic", "ships_in", "hide_state"} {
+	for _, key := range []string{"shape", "depth", "kind", "state", "work_state", "priority", "assignee", "tag", "cost_unit", "human_check", "epic", "ships_in", "hide_state"} {
 		count, size := 0, 0
 		for _, raw := range v[key] {
 			count += strings.Count(raw, ",") + 1

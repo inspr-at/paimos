@@ -3,8 +3,11 @@
 package releases
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -13,10 +16,22 @@ import (
 )
 
 type nativeMembership struct {
-	TicketID     string  `json:"ticket_node_id"`
-	ReleaseID    *string `json:"release_node_id"`
-	ReleaseTitle *string `json:"release_title"`
-	ReleaseState *string `json:"release_state"`
+	LeafIDs         []string        `json:"leaf_node_ids"`
+	AssignedLeaves  int             `json:"assigned_leaf_count"`
+	TicketID        string          `json:"ticket_node_id"`
+	ReleaseID       *string         `json:"release_node_id"`
+	ReleaseTitle    *string         `json:"release_title"`
+	ReleaseState    *string         `json:"release_state"`
+	IsParent        bool            `json:"is_parent"`
+	ReleaseCount    int             `json:"release_count"`
+	Releases        []nativeRelease `json:"releases"`
+	InheritanceNote *string         `json:"inheritance_note"`
+}
+
+type nativeRelease struct {
+	ReleaseID string `json:"release_node_id"`
+	Title     string `json:"release_title"`
+	State     string `json:"release_state"`
 }
 
 type nativeMemberships struct {
@@ -27,6 +42,9 @@ type nativeMemberships struct {
 // interpreting imported node fields. It is bounded by the displayed ticket IDs
 // and also works before a project has initialized its journey.
 func (m *module) readMemberships(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := projectPrincipal(w, r, false)
 	if !ok {
 		return
@@ -57,20 +75,32 @@ func (m *module) readMemberships(w http.ResponseWriter, r *http.Request) {
  WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project'`, project).Scan(&one); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT n.id::text,live.release_node_id::text,live.title,live.state
- FROM unnest($2::uuid[]) WITH ORDINALITY AS requested(id,ordinal)
- JOIN nodes n ON n.id=requested.id AND n.project_id=$1 AND n.deleted_at IS NULL
- JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug IN ('ticket','task')
- LEFT JOIN journey_tickets t ON t.tenant_id=n.tenant_id AND t.project_node_id=n.project_id AND t.ticket_node_id=n.id
- LEFT JOIN `+delivery.Effective+` placed ON placed.tenant_id=n.tenant_id AND placed.item_node_id=n.id
- LEFT JOIN project_delivery mode ON mode.tenant_id=n.tenant_id AND mode.project_node_id=n.project_id
- LEFT JOIN (
-   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state,rn.title
-   FROM journey_releases r JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
+		rows, err := tx.Query(r.Context(), `WITH scope AS MATERIALIZED (
+ SELECT * FROM aeon_work_release_scope($2::uuid[]) WHERE project_id=$1
+), assigned AS MATERIALIZED (
+ SELECT s.root,s.id,r.release_node_id::text,rn.title AS release_title,r.state AS release_state
+ FROM scope s
+ LEFT JOIN project_delivery mode ON mode.tenant_id=current_setting('aeon.tenant_id')::uuid AND mode.project_node_id=$1
+ LEFT JOIN journey_tickets t ON t.ticket_node_id=s.id AND t.project_node_id=$1 AND t.tenant_id=current_setting('aeon.tenant_id')::uuid
+ LEFT JOIN `+delivery.Effective+` placed ON placed.tenant_id=current_setting('aeon.tenant_id')::uuid AND placed.item_node_id=s.id
+ JOIN (
+   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state FROM journey_releases r
    WHERE NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.tenant_id=r.tenant_id AND d.project_node_id=r.project_node_id)
    UNION ALL
-   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state,rn.title FROM project_releases r JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
- ) live ON live.tenant_id=n.tenant_id AND live.project_node_id=n.project_id AND live.release_node_id=CASE WHEN mode.project_node_id IS NULL THEN t.release_node_id ELSE placed.release_node_id END
+   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state FROM project_releases r
+ ) r ON r.tenant_id=current_setting('aeon.tenant_id')::uuid AND r.project_node_id=$1
+ AND r.release_node_id=CASE WHEN mode.project_node_id IS NULL THEN t.release_node_id ELSE placed.release_node_id END
+ JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
+ WHERE s.is_leaf
+) SELECT n.id::text,NOT root.is_leaf,n.fields->>'release_inheritance_note',
+ ARRAY(SELECT s.id::text FROM scope s WHERE s.root=n.id AND s.is_leaf ORDER BY s.id LIMIT 1001),
+ (SELECT count(*) FROM assigned a WHERE a.root=n.id),
+ coalesce((SELECT jsonb_agg(to_jsonb(live) ORDER BY live.release_node_id) FROM (
+  SELECT DISTINCT a.release_node_id,a.release_title,a.release_state FROM assigned a WHERE a.root=n.id
+ ) live),'[]'::jsonb)
+ FROM unnest($2::uuid[]) WITH ORDINALITY AS requested(id,ordinal)
+ JOIN nodes n ON n.id=requested.id AND n.project_id=$1 AND n.deleted_at IS NULL
+ JOIN scope root ON root.root=n.id AND root.id=n.id AND root.kind_slug IN ('work','ticket','task')
  ORDER BY requested.ordinal`, project, ids)
 		if err != nil {
 			return err
@@ -78,8 +108,25 @@ func (m *module) readMemberships(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 		for rows.Next() {
 			var item nativeMembership
-			if err := rows.Scan(&item.TicketID, &item.ReleaseID, &item.ReleaseTitle, &item.ReleaseState); err != nil {
+			var raw []byte
+			if err := rows.Scan(&item.TicketID, &item.IsParent, &item.InheritanceNote, &item.LeafIDs, &item.AssignedLeaves, &raw); err != nil {
 				return err
+			}
+			if err := json.Unmarshal(raw, &item.Releases); err != nil {
+				return err
+			}
+			if len(item.LeafIDs) > 1000 {
+				return fail(409, "release summary exceeds 1000 leaves")
+			}
+			item.ReleaseCount = len(item.Releases)
+			if item.ReleaseCount > 1000 {
+				return fail(409, "release summary exceeds 1000 releases")
+			}
+			if item.ReleaseCount == 1 {
+				one := item.Releases[0]
+				item.ReleaseID = &one.ReleaseID
+				item.ReleaseTitle = &one.Title
+				item.ReleaseState = &one.State
 			}
 			out.Tickets = append(out.Tickets, item)
 		}

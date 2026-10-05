@@ -49,7 +49,7 @@ func (f *fixture) ticket(t *testing.T, state, priority string, fields map[string
 	var id string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,fields)
- SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Work',$2,$3 FROM node_kinds k WHERE k.slug='ticket' RETURNING id::text`, f.person.TenantID, state, raw).Scan(&id)
+ SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Work',$2,$3 FROM node_kinds k WHERE k.slug='work' RETURNING id::text`, f.person.TenantID, state, raw).Scan(&id)
 	})
 	return id
 }
@@ -517,6 +517,16 @@ func TestStaleQueueAfterNodeMutation(t *testing.T) {
 				fields["assignee"] = f.person.ID
 			}
 			id := f.ticket(t, "in_progress", "high", fields)
+			if change == "convert" {
+				// A tenant-defined legacy kind converts into canonical work.
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema) VALUES($1,'task','Task','TSK','task','{"type":"object","issue_family":true}')`, f.person.TenantID); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE slug='task') WHERE id=$1`, id)
+					return err
+				})
+			}
 			if change == "unassign" || change == "bulk_unassign" {
 				var ready struct{ Queueable, Stale bool }
 				f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
@@ -552,7 +562,7 @@ func TestStaleQueueAfterNodeMutation(t *testing.T) {
 			case "move":
 				method, path, patch = "POST", path+"/move", map[string]any{"parent_id": nil}
 			case "convert":
-				method, path, patch = "POST", path+"/convert", map[string]any{"to_kind": "task"}
+				method, path, patch = "POST", path+"/convert", map[string]any{"to_kind": "work"}
 			case "create":
 				method, path, status = "POST", "/api/nodes", 201
 				patch = map[string]any{"kind_id": kindID, "title": "New idle work", "state": "in_progress", "fields": map[string]any{"estimate_hours": 2, "acceptance_criteria": "- [ ] tests pass"}}

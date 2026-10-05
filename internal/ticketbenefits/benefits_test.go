@@ -40,7 +40,7 @@ func TestCompletionRequirements(t *testing.T) {
 	for _, tc := range []struct {
 		k, b, a string
 		want    int
-	}{{"ticket", "open", "done", 4}, {"ticket", "done", "done", 0}, {"ticket", "done", "open", 0}, {"task", "open", "done", 0}, {"ticket", "", "done", 4}} {
+	}{{"work", "open", "done", 4}, {"work", "done", "done", 0}, {"work", "", "done", 4}, {"ticket", "open", "done", 4}, {"ticket", "done", "done", 0}, {"ticket", "done", "open", 0}, {"task", "open", "done", 0}, {"ticket", "", "done", 4}} {
 		if got := Transition(tc.k, tc.b, tc.a, json.RawMessage(`{}`)); len(got) != tc.want {
 			t.Fatalf("%+v: %v", tc, got)
 		}
@@ -71,6 +71,17 @@ func TestCompletionTransitions(t *testing.T) {
 	for _, after := range other {
 		if Completed(after) || len(Transition("ticket", "open", after, json.RawMessage(`{}`))) != 0 {
 			t.Fatalf("%s must not imply successful completion", after)
+		}
+	}
+}
+
+func TestUnifiedWorkLeavesKeepCompletionRequirements(t *testing.T) {
+	for _, state := range []string{"done", "accepted", "delivered"} {
+		if len(Transition("work", "open", state, json.RawMessage(`{}`))) != 4 {
+			t.Fatal("work leaf gate missing", state)
+		}
+		if len(Transition("work", "done", state, json.RawMessage(`{}`))) != 0 {
+			t.Fatal("historical completed work blocked", state)
 		}
 	}
 }

@@ -100,8 +100,9 @@ func applyClassicRelation(ctx context.Context, tx pgx.Tx, tenantID, actor string
 }
 
 type liveNode struct {
-	Kind    string
-	Deleted bool
+	Kind        string
+	ClassicType string
+	Deleted     bool
 }
 
 func lookupNode(ctx context.Context, tx pgx.Tx, tenantID, id string) (liveNode, error) {
@@ -109,7 +110,11 @@ func lookupNode(ctx context.Context, tx pgx.Tx, tenantID, id string) (liveNode, 
 		return liveNode{}, nil
 	}
 	var n liveNode
-	err := tx.QueryRow(ctx, `SELECT k.slug, n.deleted_at IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND n.id=$2`, tenantID, id).Scan(&n.Kind, &n.Deleted)
+	err := tx.QueryRow(ctx, `SELECT k.slug,coalesce(n.fields->'classic'->>'type',
+ (SELECT e.after->'fields'->'classic'->>'type' FROM events e
+  WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type IN ('import.node_created','import.node_updated')
+  ORDER BY e.id DESC LIMIT 1),''),n.deleted_at IS NOT NULL
+ FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND n.id=$2`, tenantID, id).Scan(&n.Kind, &n.ClassicType, &n.Deleted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return liveNode{}, nil
 	}
@@ -174,7 +179,11 @@ func applyReleaseMembership(ctx context.Context, tx pgx.Tx, tenantID, actor stri
 	}
 	wrote += releaseWrote
 	linked := false
-	if memberID != "" && member.Kind == "ticket" && !member.Deleted && memberID != releaseID {
+	// Preserve the classic journey projection's ticket membership semantics;
+	// the unified native kind does not erase source-type provenance. Parent
+	// placement and current-leaf release membership belong to AEON-652.
+	journeyTicket := member.Kind == "ticket" || member.Kind == "work" && member.ClassicType == "ticket"
+	if memberID != "" && journeyTicket && !member.Deleted && memberID != releaseID {
 		ticketWrote, err := linkTicketRelease(ctx, tx, tenantID, projectID, memberID, releaseID)
 		if err != nil {
 			return 0, err

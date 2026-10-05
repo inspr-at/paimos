@@ -8,7 +8,7 @@ export interface RecurrenceTrigger {
 }
 export interface RecurrenceTemplate {
   name?: string; title: string; description: string; acceptance_criteria: string[]; estimate_hours: number
-  priority: string; tags: string[]; type: 'ticket' | 'task'
+  priority: string; tags: string[]; type: 'work' | 'ticket' | 'task' | 'epic'
 }
 export interface RecurrenceInput {
   project_id: string; parent_id: string; template: RecurrenceTemplate; trigger: RecurrenceTrigger
@@ -60,9 +60,10 @@ export function criteriaText(value: unknown): string {
 }
 export function parseCriteria(value: string): string[] { return value.split('\n').map(line => line.replace(/^\s*[-*]\s*(?:\[[ xX]\]\s*)?/, '').trim()).filter(Boolean) }
 export function recurrenceEstimate(raw: string): number | null { return parseEstimate(raw.toLowerCase().replace(/\s+/g, '').replace(/minutes?|mins?$/, 'm').replace(/hours?|hrs?$/, 'h')) }
+export const recurrenceSourceIsParent = (source?: ListItem | null) => source?.kind_slug === 'epic' || source?.kind_slug === 'work' && (source.is_leaf === false || (source.work_children_count ?? 0) > 0)
 export function templateFrom(source?: ListItem | null): RecurrenceTemplate {
   const fields = source?.fields ?? {}
-  return { name: source?.title.slice(0, 80) ?? '', title: source ? `${source.title} · {{date}}` : '', description: source?.body ?? '', acceptance_criteria: parseCriteria(criteriaText(fields.acceptance_criteria)), estimate_hours: source?.estimate?.hours ?? (typeof fields.estimate_hours === 'number' ? fields.estimate_hours : 0), priority: source?.priority === 'none' ? 'medium' : source?.priority || 'medium', type: source?.kind_slug === 'task' ? 'task' : 'ticket', tags: Array.isArray(fields.tags) ? fields.tags.flatMap(tag => typeof tag === 'object' && tag && 'id' in tag && typeof tag.id === 'string' && /^[0-9a-f-]{36}$/i.test(tag.id) ? [tag.id] : []) : [] }
+  return { name: source?.title.slice(0, 80) ?? '', title: source ? `${source.title} · {{date}}` : '', description: source?.body ?? '', acceptance_criteria: parseCriteria(criteriaText(fields.acceptance_criteria)), estimate_hours: source?.estimate?.hours ?? (typeof fields.estimate_hours === 'number' ? fields.estimate_hours : 0), priority: source?.priority === 'none' ? 'medium' : source?.priority || 'medium', type: 'work', tags: Array.isArray(fields.tags) ? fields.tags.flatMap(tag => typeof tag === 'object' && tag && 'id' in tag && typeof tag.id === 'string' && /^[0-9a-f-]{36}$/i.test(tag.id) ? [tag.id] : []) : [] }
 }
 export function templateProblems(input: RecurrenceInput, estimate: string): string[] {
   const t = input.template, problems: string[] = [], bytes = (s: string) => new TextEncoder().encode(s).length
