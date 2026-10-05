@@ -3914,7 +3914,16 @@
     {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/deliveryvote","name":"TestMigratedWorkRetainsDeliveryRatingsAndVisibility","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/escalation","name":"TestDistinctFailureEvidence","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/escalation","name":"TestCICheckIdentityAndBounds","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationAreaPolicy","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationUnknownAdmissionWaits","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationOutcomeReplayAndSingleQuestion","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationPayloadValidation","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationRouteGrantsAndLocks","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationRetryBudgetExitAndRollback","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestEscalatedClaimRequiresFreshMeasuredRoom","tier":"ESSENTIAL"}
   ],
   "timingWeights": {
     "runId": "37341114152",
