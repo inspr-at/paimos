@@ -149,6 +149,10 @@ var RoutePermissions = map[string]string{
 	"POST /api/queue/{nodeId}/undo":                                           "nodes.read", // Handler rechecks queue write permission and receipt ownership in the mutation transaction.
 	"GET /api/queue":                                                          "nodes.read",
 	"POST /api/queue":                                                         "nodes.read",
+	"POST /api/queue/{nodeId}/snapshots":                                      "nodes.read",
+	"GET /api/queue-snapshots/{snapshotId}":                                   "nodes.read",
+	"POST /api/queue-snapshots/{snapshotId}/apply":                            "nodes.read",
+	"DELETE /api/queue-snapshots/{snapshotId}":                                "nodes.read",
 	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
 	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
 	"POST /api/queue/reset":                                                   "nodes.read",

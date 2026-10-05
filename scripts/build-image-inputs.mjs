@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -29,6 +29,36 @@ export function buildInputs(cwd = root, values = process.env, run = command) {
   const stamp = epoch(values.SOURCE_DATE_EPOCH ?? run('git', ['log', '-1', '--format=%ct'], cwd, {}, true));
   return { platform: `linux/${arch}`, version, source_date_epoch: stamp };
 }
+// The go command never re-verifies a build-cache entry, and the caches that
+// actions/setup-go restores are also written by CI jobs on the self-hosted
+// pool. A shipped binary therefore compiles cold: in GitHub Actions the caller
+// must pass GOCACHE and GOMODCACHE inside RUNNER_TEMP (empty at job start,
+// never a cache-restore target) and GOCACHE must still be empty. Local runs
+// keep whatever caches they have.
+export function goCaches(values = process.env) {
+  const hosted = values.GITHUB_ACTIONS === 'true';
+  const caches = {};
+  for (const name of ['GOCACHE', 'GOMODCACHE']) {
+    const value = values[name];
+    if (!value) {
+      if (hosted) throw new Error(`${name} must be a directory inside RUNNER_TEMP for a shipped build`);
+      continue;
+    }
+    if (!isAbsolute(value)) throw new Error(`${name} must be an absolute path`);
+    if (hosted) {
+      const temp = values.RUNNER_TEMP, inside = temp && isAbsolute(temp) ? relative(resolve(temp), resolve(value)) : '';
+      if (!inside || inside === '..' || inside.startsWith('../') || isAbsolute(inside)) throw new Error(`${name} must be a directory inside RUNNER_TEMP for a shipped build`);
+    }
+    caches[name] = resolve(value);
+  }
+  if (caches.GOCACHE && caches.GOCACHE === caches.GOMODCACHE) throw new Error('GOCACHE and GOMODCACHE must differ');
+  if (hosted) {
+    let entries = [];
+    try { entries = readdirSync(caches.GOCACHE); } catch (error) { if (error.code !== 'ENOENT') throw new Error('GOCACHE is not a usable directory'); }
+    if (entries.length) throw new Error('GOCACHE is not empty; a shipped binary needs a cold build cache');
+  }
+  return caches;
+}
 export function filesIn(directory, prefix = '') {
   return readdirSync(directory).sort().flatMap(name => {
     const path = join(directory, name), relative = prefix + name;
@@ -42,12 +72,19 @@ export function webBuild(cwd = root, run = command) {
   // Work from the full repository: shared JSON imports retain their relative
   // paths. npm ci cleans dependencies, Vite clears dist, and clean snapshots
   // also discard incremental tsc state.
+  // Unlike the Go build cache, the restored npm cache may stay: it holds only
+  // downloaded tarballs, package-lock.json pins a sha512 for each of them and
+  // npm ci checks that hash whether the bytes come from the cache or the
+  // registry. Altered cache content fails the install instead of shipping.
+  // The prebuild test below requires that integrity on every locked package.
   run('node', ['--test', 'scripts/docker-web-inputs.test.mjs'], cwd);
   run('npm', ['ci', '--no-audit', '--no-fund'], join(cwd, 'web'));
   run('npm', ['run', 'build'], join(cwd, 'web'));
 }
 export function compile(cwd = root, values = process.env, run = command) {
   const inputs = buildInputs(cwd, values, run);
+  // Before any work: a used build cache must stop the build, not be noticed late.
+  const go = { ...goCaches(values), GOTOOLCHAIN: 'local', GOFLAGS: '-mod=readonly', GOWORK: 'off' };
   const stamp = inputs.source_date_epoch;
   const history = readFileSync(join(cwd, 'internal/releasehistory/data/history.json'));
   webBuild(cwd, run);
@@ -56,9 +93,14 @@ export function compile(cwd = root, values = process.env, run = command) {
   for (const file of web) utimesSync(file.path, stamp, stamp);
   const out = join(cwd, 'dist/image-input');
   mkdirSync(out, { recursive: true });
+  // Downloads are checked against go.sum; verify then re-hashes every module
+  // zip and extracted tree, and the build compares both with go.sum again.
+  // An empty module cache gives verify nothing to check, hence the download.
+  run('go', ['mod', 'download'], cwd, go);
+  run('go', ['mod', 'verify'], cwd, go);
   run('go', ['build', '-trimpath', '-buildvcs=false', '-tags', 'webembed', '-ldflags',
     `-X github.com/inspr-at/paimos/internal/version.Version=${inputs.version}`, '-o', join(out, 'paimos'), './cmd/aeon'],
-  cwd, { CGO_ENABLED: '0', GOOS: 'linux', GOARCH: inputs.platform.split('/')[1], GOAMD64: 'v1', GOARM64: 'v8.0', GOTOOLCHAIN: 'local', GOFLAGS: '', GOWORK: 'off', SOURCE_DATE_EPOCH: String(stamp) });
+  cwd, { ...go, CGO_ENABLED: '0', GOOS: 'linux', GOARCH: inputs.platform.split('/')[1], GOAMD64: 'v1', GOARM64: 'v8.0', SOURCE_DATE_EPOCH: String(stamp) });
   const binary = readFileSync(join(out, 'paimos'));
   if (binary.length < 64 || !binary.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) throw new Error('image binary is not ELF');
   chmodSync(join(out, 'paimos'), 0o755);

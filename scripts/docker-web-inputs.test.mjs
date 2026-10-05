@@ -17,6 +17,12 @@ function importSpecifiers(source) {
     .map(match => match[1]);
 }
 
+function lockedPackageProblem(entry) {
+  if (entry.link || entry.inBundle || !/^https:\/\/registry\.npmjs\.org\//.test(entry.resolved ?? '')) return 'not a registry tarball';
+  if (!/^sha512-[A-Za-z0-9+/]+=*$/.test(entry.integrity ?? '')) return 'missing sha512 integrity';
+  return null;
+}
+
 function externalImports(directory = join(web, 'src')) {
   const targets = new Set();
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -65,6 +71,28 @@ test('assembly Dockerfile only copies prebuilt production artifacts into the fro
     assert.ok(runtime.includes(pin));
     assert.ok(dockerfile.includes(pin), 'quote evidence pin annotation drifted');
   }
+  // Every build prepares the closure from these two instructions alone: no
+  // build argument or variable may make its bytes depend on anything else.
+  const instructions = runtime.replaceAll('\\\n', ' ').split('\n').filter(line => line && !line.startsWith('#'));
+  assert.equal(instructions.length, 2);
+  assert.match(instructions[0], /^FROM alpine:3\.24@sha256:[a-f0-9]{64}$/);
+  assert.match(instructions[1], /^RUN apk add --no-cache [^$]+$/);
+});
+
+// The release keeps the restored npm cache only because npm ci verifies every
+// tarball against the lockfile. A locked package without a hash would be
+// installed from the cache unverified.
+test('every locked web dependency is a registry tarball with a sha512 integrity', () => {
+  const lock = JSON.parse(readFileSync(join(web, 'package-lock.json'), 'utf8'));
+  assert.equal(lock.lockfileVersion, 3);
+  const packages = Object.entries(lock.packages).filter(([name]) => name !== '');
+  assert.ok(packages.length > 0);
+  for (const [name, entry] of packages) assert.equal(lockedPackageProblem(entry), null, name);
+  assert.equal(lockedPackageProblem({ resolved: 'https://registry.npmjs.org/a/-/a-1.0.0.tgz' }), 'missing sha512 integrity');
+  assert.equal(lockedPackageProblem({ resolved: 'https://registry.npmjs.org/a/-/a-1.0.0.tgz', integrity: 'sha1-AAAA' }), 'missing sha512 integrity');
+  assert.equal(lockedPackageProblem({ resolved: 'git+https://example.invalid/a.git', integrity: 'sha512-AAAA' }), 'not a registry tarball');
+  assert.equal(lockedPackageProblem({ link: true, resolved: '../a' }), 'not a registry tarball');
+  assert.equal(lockedPackageProblem({ inBundle: true }), 'not a registry tarball');
 });
 
 test('assembly recipes leave single-platform result selection to the native Buildx target', () => {
